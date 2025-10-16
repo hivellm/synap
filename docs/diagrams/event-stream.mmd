@@ -1,0 +1,119 @@
+```mermaid
+graph TB
+    subgraph "Publishers"
+        P1[Client Alice]
+        P2[Client Bob]
+        P3[Client Carol]
+    end
+    
+    subgraph "Synap Event Stream"
+        Room[Room: chat-room-1]
+        
+        subgraph "Ring Buffer"
+            E1[Event offset: 38]
+            E2[Event offset: 39]
+            E3[Event offset: 40]
+            E4[Event offset: 41]
+            E5[Event offset: 42]
+            Dots[...]
+        end
+        
+        Subs[Subscribers Set]
+    end
+    
+    subgraph "Subscribers"
+        S1[Subscriber 1<br/>offset: 42]
+        S2[Subscriber 2<br/>offset: 42]
+        S3[Subscriber 3<br/>offset: 38<br/>new/replaying]
+    end
+    
+    P1 -->|PUBLISH message| Room
+    P2 -->|PUBLISH join| Room
+    P3 -->|PUBLISH message| Room
+    
+    Room --> E1
+    E1 --> E2
+    E2 --> E3
+    E3 --> E4
+    E4 --> E5
+    E5 --> Dots
+    
+    Room --> Subs
+    
+    Subs -.->|Real-time push| S1
+    Subs -.->|Real-time push| S2
+    Subs -.->|History + Real-time| S3
+    
+    E1 -.->|Replay| S3
+    E2 -.->|Replay| S3
+    E3 -.->|Replay| S3
+    E4 -.->|Replay| S3
+    E5 -.->|Replay| S3
+    
+    style Room fill:#e1f5ff
+    style E1 fill:#f0f0f0
+    style E2 fill:#f0f0f0
+    style E3 fill:#f0f0f0
+    style E4 fill:#f0f0f0
+    style E5 fill:#f0f0f0
+    style S1 fill:#ccffcc
+    style S2 fill:#ccffcc
+    style S3 fill:#ffffcc
+```
+
+```mermaid
+sequenceDiagram
+    participant Alice
+    participant Synap
+    participant RingBuffer
+    participant Bob
+    participant Carol
+    
+    Note over Alice,Carol: Alice and Bob already subscribed
+    Alice->>Synap: SUBSCRIBE chat-room-1
+    Synap->>Alice: ACK subscribed
+    
+    Bob->>Synap: SUBSCRIBE chat-room-1
+    Synap->>Bob: ACK subscribed
+    
+    Note over Alice,Carol: Alice publishes message
+    Alice->>Synap: PUBLISH "Hello everyone!"
+    Synap->>RingBuffer: Append event (offset: 42)
+    
+    par Broadcast to all subscribers
+        Synap-->>Alice: Event(offset: 42, message)
+        Synap-->>Bob: Event(offset: 42, message)
+    end
+    
+    Note over Alice,Carol: Bob replies
+    Bob->>Synap: PUBLISH "Hi Alice!"
+    Synap->>RingBuffer: Append event (offset: 43)
+    
+    par Broadcast
+        Synap-->>Alice: Event(offset: 43, message)
+        Synap-->>Bob: Event(offset: 43, message)
+    end
+    
+    Note over Carol: Carol joins and requests history
+    Carol->>Synap: SUBSCRIBE chat-room-1<br/>(from_offset: -10, replay: true)
+    Synap->>Carol: ACK subscribed
+    
+    loop Replay last 10 events
+        RingBuffer-->>Synap: Events 33-42
+        Synap-->>Carol: Event(offset: 33, message)
+        Synap-->>Carol: Event(offset: 34, message)
+        Synap-->>Carol: ...
+        Synap-->>Carol: Event(offset: 42, message)
+    end
+    
+    Note over Alice,Carol: New message after Carol joined
+    Alice->>Synap: PUBLISH "Welcome Carol!"
+    Synap->>RingBuffer: Append event (offset: 44)
+    
+    par Broadcast to all
+        Synap-->>Alice: Event(offset: 44, message)
+        Synap-->>Bob: Event(offset: 44, message)
+        Synap-->>Carol: Event(offset: 44, message)
+    end
+```
+

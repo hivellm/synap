@@ -1,0 +1,106 @@
+```mermaid
+sequenceDiagram
+    participant Client
+    participant HTTP as HTTP Handler
+    participant Router as Command Router
+    participant KV as Key-Value Store
+    participant Queue as Queue System
+    participant RepLog as Replication Log
+    participant Replica
+    
+    Note over Client,Replica: Key-Value Operation Flow
+    
+    Client->>HTTP: POST /api/v1/command<br/>{command: "kv.set", payload: {key, value}}
+    HTTP->>HTTP: Parse JSON envelope
+    HTTP->>Router: Route "kv.set"
+    
+    Router->>KV: set(key, value, ttl)
+    KV->>KV: Insert into Radix Tree
+    KV->>RepLog: Append operation
+    KV->>Router: Success
+    
+    RepLog-->>Replica: Stream log entry
+    Replica->>Replica: Apply operation
+    Replica-->>RepLog: ACK
+    
+    Router->>HTTP: SetResult
+    HTTP->>Client: HTTP 200 OK<br/>{status: "success", payload: {...}}
+    
+    Note over Client,Replica: Queue Operation Flow
+    
+    Client->>HTTP: POST /api/v1/command<br/>{command: "queue.publish"}
+    HTTP->>Router: Route "queue.publish"
+    Router->>Queue: publish(queue, message, priority)
+    Queue->>Queue: Add to VecDeque
+    Queue->>RepLog: Append operation
+    Queue->>Router: PublishResult
+    
+    RepLog-->>Replica: Stream log entry
+    Replica->>Replica: Apply to local queue
+    
+    Router->>HTTP: Result
+    HTTP->>Client: HTTP 200 OK<br/>{message_id, position}
+    
+    Note over Client,Replica: Queue Consume & ACK Flow
+    
+    Client->>HTTP: POST /api/v1/command<br/>{command: "queue.consume"}
+    HTTP->>Router: Route "queue.consume"
+    Router->>Queue: consume(queue, timeout)
+    
+    alt Message available
+        Queue->>Queue: Pop from VecDeque
+        Queue->>Queue: Add to pending HashMap
+        Queue->>Router: QueueMessage
+        Router->>HTTP: Message
+        HTTP->>Client: HTTP 200 OK<br/>{message_id, message, ...}
+        
+        Client->>Client: Process message
+        
+        Client->>HTTP: POST /api/v1/command<br/>{command: "queue.ack"}
+        HTTP->>Router: Route "queue.ack"
+        Router->>Queue: ack(queue, message_id)
+        Queue->>Queue: Remove from pending
+        Queue->>RepLog: Append ACK operation
+        Queue->>Router: Success
+        
+        RepLog-->>Replica: Stream ACK
+        Replica->>Replica: Remove from pending
+        
+        Router->>HTTP: Result
+        HTTP->>Client: HTTP 200 OK
+    else No message (timeout)
+        Queue->>Router: None
+        Router->>HTTP: No message
+        HTTP->>Client: HTTP 200 OK<br/>{message: null}
+    end
+    
+    Note over Client,Replica: Event Stream Flow (WebSocket)
+    
+    Client->>HTTP: GET /api/v1/ws<br/>Upgrade: websocket
+    HTTP->>Client: HTTP 101 Switching Protocols
+    
+    Client->>Router: {command: "stream.subscribe", room}
+    Router->>Stream: subscribe(room, subscriber_id)
+    Stream->>Stream: Add to subscribers set
+    Stream->>Stream: Get history if requested
+    Stream->>Client: Historical events
+    Stream->>Client: ACK subscribed
+    
+    Note over Client: Alice publishes event
+    Client->>Router: {command: "stream.publish", room, event}
+    Router->>Stream: publish(room, event_type, data)
+    Stream->>Stream: Append to ring buffer<br/>increment offset
+    Stream->>RepLog: Append operation
+    
+    par Broadcast to all subscribers
+        Stream-->>Client: Event(offset: 42)
+        Stream-->>Client: Event(offset: 42)
+    end
+    
+    RepLog-->>Replica: Stream event
+    Replica->>Replica: Append to local ring buffer
+    
+    Stream->>Router: PublishResult
+    Router->>Client: {event_id, offset, subscribers_notified}
+```
+

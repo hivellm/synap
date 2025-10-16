@@ -1,0 +1,74 @@
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Master
+    participant RepLog as Replication Log
+    participant R1 as Replica 1
+    participant R2 as Replica 2
+    
+    Note over R1,R2: Initial Connection
+    R1->>Master: HELLO (replica-1, v1.0)
+    Master->>R1: HELLO_ACK (offset: 12345)
+    R1->>Master: SYNC (from_offset: 12345)
+    Master->>R1: SYNC_START
+    
+    R2->>Master: HELLO (replica-2, v1.0)
+    Master->>R2: HELLO_ACK (offset: 12345)
+    R2->>Master: SYNC (from_offset: 12345)
+    Master->>R2: SYNC_START
+    
+    Note over Client,R2: Write Operation
+    Client->>Master: SET user:1 = "Alice"
+    Master->>Master: Execute SET locally
+    Master->>RepLog: Append LogEntry(offset: 12346)
+    Master->>Client: OK
+    
+    Note over Master,R2: Replication Streaming
+    RepLog-->>R1: LogEntry(12346, SET user:1)
+    R1->>R1: Apply SET locally
+    R1-->>Master: ACK (offset: 12346)
+    
+    RepLog-->>R2: LogEntry(12346, SET user:1)
+    R2->>R2: Apply SET locally
+    R2-->>Master: ACK (offset: 12346)
+    
+    Note over Client,R2: Read from Replica
+    Client->>R1: GET user:1
+    R1->>Client: "Alice" (consistent)
+    
+    Note over Client,R2: Multiple Operations
+    Client->>Master: SET user:2 = "Bob"
+    Master->>RepLog: Append LogEntry(12347)
+    Master->>Client: OK
+    
+    Client->>Master: DEL user:1
+    Master->>RepLog: Append LogEntry(12348)
+    Master->>Client: OK
+    
+    Note over RepLog,R2: Batch Replication
+    RepLog-->>R1: Batch [12347, 12348]
+    R1->>R1: Apply both operations
+    R1-->>Master: ACK (offset: 12348)
+    
+    RepLog-->>R2: Batch [12347, 12348]
+    R2->>R2: Apply both operations
+    R2-->>Master: ACK (offset: 12348)
+    
+    Note over R1,Master: Network Partition
+    R1-xMaster: Connection lost
+    Client->>Master: SET user:3 = "Carol"
+    Master->>RepLog: Append LogEntry(12349)
+    RepLog-->>R2: LogEntry(12349)
+    RepLog-xR1: Cannot reach
+    
+    Note over R1,Master: Reconnection
+    R1->>Master: HELLO (replica-1)
+    Master->>R1: HELLO_ACK (offset: 12349)
+    R1->>Master: SYNC (from_offset: 12348)
+    RepLog-->>R1: LogEntry(12349)
+    R1->>R1: Apply missed operation
+    R1-->>Master: ACK (offset: 12349)
+    
+    Note over Master,R2: All replicas in sync
+```
+

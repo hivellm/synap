@@ -1,0 +1,75 @@
+```mermaid
+graph TB
+    subgraph "Client Layer"
+        TSClient[TypeScript SDK]
+        PyClient[Python SDK]
+        RustClient[Rust SDK]
+        HTTPClient[HTTP/curl]
+    end
+    
+    subgraph "Protocol Layer"
+        StreamHTTP[StreamableHTTP Handler]
+        WSHandler[WebSocket Handler]
+        Router[Command Router]
+    end
+    
+    subgraph "Core Components"
+        KV[Key-Value Store<br/>Radix Tree]
+        Queue[Queue System<br/>FIFO + ACK]
+        Stream[Event Stream<br/>Room-based]
+        PubSub[Pub/Sub Router<br/>Topic-based]
+    end
+    
+    subgraph "Replication Layer"
+        Master[Master Node<br/>Write]
+        Replica1[Replica 1<br/>Read]
+        Replica2[Replica 2<br/>Read]
+        RepLog[Replication Log<br/>Append-Only]
+    end
+    
+    subgraph "Storage"
+        Memory[(In-Memory<br/>Storage)]
+    end
+    
+    TSClient -->|HTTP/WS| StreamHTTP
+    PyClient -->|HTTP/WS| StreamHTTP
+    RustClient -->|HTTP/WS| StreamHTTP
+    HTTPClient -->|HTTP| StreamHTTP
+    
+    StreamHTTP --> Router
+    WSHandler --> Router
+    
+    Router -->|kv.*| KV
+    Router -->|queue.*| Queue
+    Router -->|stream.*| Stream
+    Router -->|pubsub.*| PubSub
+    
+    KV --> Memory
+    Queue --> Memory
+    Stream --> Memory
+    PubSub --> Memory
+    
+    KV -->|Write ops| RepLog
+    Queue -->|Write ops| RepLog
+    Stream -->|Write ops| RepLog
+    PubSub -->|Publish ops| RepLog
+    
+    RepLog -->|Stream| Replica1
+    RepLog -->|Stream| Replica2
+    
+    Master -.->|Contains| KV
+    Master -.->|Contains| Queue
+    Replica1 -.->|Contains| KV
+    Replica1 -.->|Contains| Queue
+    Replica2 -.->|Contains| KV
+    Replica2 -.->|Contains| Queue
+    
+    style KV fill:#e1f5ff
+    style Queue fill:#ffe1f5
+    style Stream fill:#f5ffe1
+    style PubSub fill:#fff5e1
+    style Master fill:#ffcccc
+    style Replica1 fill:#ccffcc
+    style Replica2 fill:#ccffcc
+```
+
