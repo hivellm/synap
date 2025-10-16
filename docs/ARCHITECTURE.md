@@ -251,16 +251,26 @@ Synap uses Tokio's multi-threaded runtime with the following architecture:
 - **Data Structure**: Radix tree (memory-efficient prefix sharing)
 - **Eviction**: LRU for TTL-expired keys
 - **Capacity**: Configurable max memory with eviction policies
+- **Compression**: LZ4/Zstd for payload compression
+- **Hot Cache**: L1/L2 cache for frequently accessed data
 
 ### Queue System
 - **Buffer**: Bounded channels with backpressure
 - **Pending Messages**: HashMap for tracking unacknowledged messages
 - **Dead Letters**: Separate queue for failed messages
+- **Compression**: Compressed message payloads
 
 ### Event Streams
 - **Ring Buffer**: Fixed-size circular buffer per room
 - **Retention**: Time-based (hours/days) or count-based
 - **Compaction**: Remove old events automatically
+- **Compression**: Compressed event data
+
+### Compression & Cache System
+- **L1 Cache (Hot)**: Decompressed payloads for hot data (10% memory)
+- **L2 Cache (Warm)**: Compressed payloads for warm data (20% memory)
+- **Algorithms**: LZ4 (speed), Zstd (ratio)
+- **Adaptive**: Auto-adjust based on access patterns
 
 ## Replication Architecture
 
@@ -659,6 +669,9 @@ synap/
 
 ### Latency
 - **Key-Value GET**: 0.1-0.5ms (in-memory lookup)
+  - L1 Cache Hit: < 0.1ms (decompressed)
+  - L2 Cache Hit: ~0.3ms (needs decompression)
+  - Cold Read: 0.5-1ms (full lookup + decompression)
 - **Key-Value SET**: 0.5-1ms (with replication)
 - **Queue Operations**: 1-2ms (with acknowledgment)
 - **Event Broadcast**: 0.5-1ms (per subscriber)
@@ -675,6 +688,13 @@ synap/
 - **Queue Memory**: O(n) where n = pending messages
 - **Event Stream**: Fixed ring buffer size per room
 - **Replication Log**: Bounded by retention policy
+- **Compression**: 2-3x space savings with LZ4, 3-5x with Zstd
+- **Cache System**: 30% of memory (10% L1 + 20% L2)
+
+### CPU Efficiency
+- **Compression Overhead**: ~3-5% CPU with LZ4
+- **Cache Hit Rate**: >80% L1, >90% L2 (typical)
+- **CPU Savings**: ~80% reduction in decompression overhead with cache
 
 ## Scalability Limits
 
@@ -732,5 +752,6 @@ synap/
 - [Replication Spec](specs/REPLICATION.md) - Replication protocol details
 - [MCP Integration](protocol/MCP_INTEGRATION.md) - Model Context Protocol support
 - [UMICP Integration](protocol/UMICP_INTEGRATION.md) - UMICP protocol support
+- [Compression & Cache](COMPRESSION_AND_CACHE.md) - Smart compression and caching system
 - [Performance Guide](PERFORMANCE.md) - Performance tuning and benchmarks
 

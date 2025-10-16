@@ -31,6 +31,11 @@
 - **[REST API Reference](api/REST_API.md)** - HTTP endpoints
 - **[Protocol Messages](api/PROTOCOL_MESSAGES.md)** - Message formats
 
+### Performance & Optimization
+- **[Compression & Cache](COMPRESSION_AND_CACHE.md)** - Smart compression and hot data caching
+- **[Performance](PERFORMANCE.md)** - Benchmarks and targets
+- **[Optimization](OPTIMIZATION.md)** - Optimization strategies
+
 ## Client SDKs
 
 - **[TypeScript SDK](sdks/TYPESCRIPT.md)** - Node.js and browser support
@@ -56,7 +61,18 @@
 - **[Performance](PERFORMANCE.md)** - Performance targets and benchmarks
 - **[Optimization](OPTIMIZATION.md)** - Optimization strategies
 - **[Deployment](DEPLOYMENT.md)** - Deployment guide
+- **[Packaging & Distribution](PACKAGING_AND_DISTRIBUTION.md)** - Build installers for all platforms
 - **[Configuration](CONFIGURATION.md)** - Configuration reference
+
+## User Interface
+
+- **[GUI Dashboard](GUI_DASHBOARD.md)** - Electron-based desktop application (planned)
+
+## Project Planning
+
+- **[Roadmap](ROADMAP.md)** - Development roadmap and release timeline
+- **[Project DAG](PROJECT_DAG.md)** - Component dependencies and critical path
+- **[Contributing](../CONTRIBUTING.md)** - Contribution guidelines
 
 ## By Use Case
 
@@ -166,9 +182,12 @@ cargo add synap-client
 | SDKs | 3 | ✅ Complete | 2025-10-15 |
 | Examples | 4 | ✅ Complete | 2025-10-15 |
 | Diagrams | 4 | ✅ Complete | 2025-10-15 |
-| Operations | 4 | ✅ Complete | 2025-10-15 |
+| Operations | 5 | ✅ Complete | 2025-10-16 |
+| User Interface | 1 | ✅ Complete | 2025-10-16 |
+| Project Planning | 2 | ✅ Complete | 2025-10-16 |
+| Build Scripts | 4 | ✅ Complete | 2025-10-16 |
 
-**Total Documentation**: 23 files, ~18,000 lines
+**Total Documentation**: 28 files, ~23,400 lines
 
 ### Key Additions
 - ✅ **Persistence System**: WAL + Snapshot specification added
@@ -177,6 +196,13 @@ cargo add synap-client
 - ✅ **Durability Modes**: Multiple persistence configurations
 - ✅ **MCP Integration**: Model Context Protocol support for AI tools
 - ✅ **UMICP Integration**: Universal Matrix Inter-Communication Protocol
+- ✅ **Compression System**: LZ4/Zstd dual compression strategy
+- ✅ **Cache System**: L1/L2 tiered hot data caching
+- ✅ **Packaging System**: MSI (Windows), DEB (Linux), Homebrew (macOS)
+- ✅ **Build Scripts**: Automated build scripts for all platforms
+- ✅ **GUI Dashboard**: Electron-based desktop application specification
+- ✅ **Roadmap**: 5-phase development plan with milestones
+- ✅ **Project DAG**: Component dependencies and critical path analysis
 
 ## Contributing
 
