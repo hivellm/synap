@@ -117,19 +117,24 @@ Implementação completa de otimizações de nível Redis com resultados excepci
   - Not currently integrated (RadixTrie TrieKey compatibility issue)
   - Future: Custom TrieKey implementation could enable it
 
-#### Persistence Integration ✅ NEW
-- **Server Integration**: PersistenceLayer integrated with AppState
-  - Automatic WAL logging in kv_set handler
-  - Automatic WAL logging in kv_delete handler
-  - Non-blocking operation (errors logged but don't fail requests)
+#### Persistence Integration ✅ COMPLETE
+- **Full WAL Integration**: All mutating operations logged to AsyncWAL
+  - REST API: kv_set, kv_delete
+  - StreamableHTTP: kv.set, kv.del, kv.incr, kv.decr, kv.mset, kv.mdel
+  - Non-blocking append with group commit (3-5x throughput)
+  - Errors logged but don't fail requests
+- **Manual Snapshot Endpoint**: POST /snapshot
+  - Trigger on-demand snapshot creation
+  - Returns success/failure status
+  - Only available when persistence enabled
 - **Automatic Recovery**: Recovery runs on server startup
   - Loads latest snapshot + replays WAL
   - Falls back to fresh start if recovery fails
   - WAL offset tracking for incremental recovery
 - **End-to-End Tests** (3/3): Full persistence workflow validated
   - PersistenceLayer initialization
-  - WAL logging operations
-  - Handler integration simulation
+  - WAL logging operations  
+  - Handler integration with persistence
 
 ### Testing & Validation
 
