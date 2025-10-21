@@ -14,7 +14,14 @@ All notable changes to the Synap TypeScript SDK will be documented in this file.
 - Fixed `mget()` to convert array response to object keyed by original keys
 
 ### Added
-- Full test coverage for all KV operations (23 tests passing)
+- **Full Queue System Support**: All queue operations now working via StreamableHTTP protocol
+  - `createQueue()`, `deleteQueue()`, `listQueues()`
+  - `publish()`, `consume()`, `publishString()`, `publishJSON()`, `consumeString()`, `consumeJSON()`
+  - `ack()`, `nack()`
+  - `stats()`, `purge()`
+  - Priority-based message delivery
+  - Message retry mechanism with configurable retries
+- Full test coverage: **35 tests passing** (KV: 23, Queue: 12)
 
 ## [0.2.0-beta.1] - 2025-10-21
 

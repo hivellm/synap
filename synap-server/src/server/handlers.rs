@@ -406,33 +406,42 @@ pub async fn command_handler(
         request.command, request.request_id
     );
 
-    let response = handle_command(state.kv_store, request).await?;
+    let response = handle_command(state, request).await?;
     Ok(Json(response))
 }
 
 /// Handle individual commands
-async fn handle_command(store: Arc<KVStore>, request: Request) -> Result<Response, SynapError> {
+async fn handle_command(state: AppState, request: Request) -> Result<Response, SynapError> {
     let request_id = request.request_id.clone();
 
     let result = match request.command.as_str() {
-        "kv.set" => handle_kv_set_cmd(store, &request).await,
-        "kv.get" => handle_kv_get_cmd(store, &request).await,
-        "kv.del" => handle_kv_del_cmd(store, &request).await,
-        "kv.exists" => handle_kv_exists_cmd(store, &request).await,
-        "kv.incr" => handle_kv_incr_cmd(store, &request).await,
-        "kv.decr" => handle_kv_decr_cmd(store, &request).await,
-        "kv.mset" => handle_kv_mset_cmd(store, &request).await,
-        "kv.mget" => handle_kv_mget_cmd(store, &request).await,
-        "kv.mdel" => handle_kv_mdel_cmd(store, &request).await,
-        "kv.scan" => handle_kv_scan_cmd(store, &request).await,
-        "kv.keys" => handle_kv_keys_cmd(store, &request).await,
-        "kv.dbsize" => handle_kv_dbsize_cmd(store, &request).await,
-        "kv.flushdb" => handle_kv_flushdb_cmd(store, &request).await,
-        "kv.flushall" => handle_kv_flushall_cmd(store, &request).await,
-        "kv.expire" => handle_kv_expire_cmd(store, &request).await,
-        "kv.ttl" => handle_kv_ttl_cmd(store, &request).await,
-        "kv.persist" => handle_kv_persist_cmd(store, &request).await,
-        "kv.stats" => handle_kv_stats_cmd(store, &request).await,
+        "kv.set" => handle_kv_set_cmd(state.kv_store.clone(), &request).await,
+        "kv.get" => handle_kv_get_cmd(state.kv_store.clone(), &request).await,
+        "kv.del" => handle_kv_del_cmd(state.kv_store.clone(), &request).await,
+        "kv.exists" => handle_kv_exists_cmd(state.kv_store.clone(), &request).await,
+        "kv.incr" => handle_kv_incr_cmd(state.kv_store.clone(), &request).await,
+        "kv.decr" => handle_kv_decr_cmd(state.kv_store.clone(), &request).await,
+        "kv.mset" => handle_kv_mset_cmd(state.kv_store.clone(), &request).await,
+        "kv.mget" => handle_kv_mget_cmd(state.kv_store.clone(), &request).await,
+        "kv.mdel" => handle_kv_mdel_cmd(state.kv_store.clone(), &request).await,
+        "kv.scan" => handle_kv_scan_cmd(state.kv_store.clone(), &request).await,
+        "kv.keys" => handle_kv_keys_cmd(state.kv_store.clone(), &request).await,
+        "kv.dbsize" => handle_kv_dbsize_cmd(state.kv_store.clone(), &request).await,
+        "kv.flushdb" => handle_kv_flushdb_cmd(state.kv_store.clone(), &request).await,
+        "kv.flushall" => handle_kv_flushall_cmd(state.kv_store.clone(), &request).await,
+        "kv.expire" => handle_kv_expire_cmd(state.kv_store.clone(), &request).await,
+        "kv.ttl" => handle_kv_ttl_cmd(state.kv_store.clone(), &request).await,
+        "kv.persist" => handle_kv_persist_cmd(state.kv_store.clone(), &request).await,
+        "kv.stats" => handle_kv_stats_cmd(state.kv_store.clone(), &request).await,
+        "queue.create" => handle_queue_create_cmd(&state, &request).await,
+        "queue.delete" => handle_queue_delete_cmd(&state, &request).await,
+        "queue.publish" => handle_queue_publish_cmd(&state, &request).await,
+        "queue.consume" => handle_queue_consume_cmd(&state, &request).await,
+        "queue.ack" => handle_queue_ack_cmd(&state, &request).await,
+        "queue.nack" => handle_queue_nack_cmd(&state, &request).await,
+        "queue.list" => handle_queue_list_cmd(&state, &request).await,
+        "queue.stats" => handle_queue_stats_cmd(&state, &request).await,
+        "queue.purge" => handle_queue_purge_cmd(&state, &request).await,
         _ => Err(SynapError::UnknownCommand(request.command.clone())),
     };
 
@@ -771,4 +780,243 @@ async fn handle_kv_persist_cmd(
 
     let result = store.persist(key).await?;
     Ok(serde_json::json!({ "result": result }))
+}
+
+// ==================== Queue Command Handlers ====================
+
+async fn handle_queue_create_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let name = request
+        .payload
+        .get("name")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'name' field".to_string()))?;
+
+    let config = request.payload.get("config").and_then(|v| {
+        let max_depth = v.get("max_depth").and_then(|d| d.as_u64()).map(|d| d as usize);
+        let ack_deadline_secs = v.get("ack_deadline_secs").and_then(|d| d.as_u64());
+        let default_max_retries = v.get("default_max_retries").and_then(|d| d.as_u64()).map(|d| d as u32);
+        let default_priority = v.get("default_priority").and_then(|d| d.as_u64()).map(|d| d as u8);
+
+        if max_depth.is_some() || ack_deadline_secs.is_some() || default_max_retries.is_some() || default_priority.is_some() {
+            Some(crate::core::QueueConfig {
+                max_depth: max_depth.unwrap_or(100_000),
+                ack_deadline_secs: ack_deadline_secs.unwrap_or(30),
+                default_max_retries: default_max_retries.unwrap_or(3),
+                default_priority: default_priority.unwrap_or(5),
+            })
+        } else {
+            None
+        }
+    });
+
+    queue_manager.create_queue(name, config).await?;
+    Ok(serde_json::json!({ "success": true }))
+}
+
+async fn handle_queue_delete_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let name = request
+        .payload
+        .get("queue")
+        .or_else(|| request.payload.get("name"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'queue' or 'name' field".to_string()))?;
+
+    let deleted = queue_manager.delete_queue(name).await?;
+    Ok(serde_json::json!({ "deleted": deleted }))
+}
+
+async fn handle_queue_publish_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let queue = request
+        .payload
+        .get("queue")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'queue' field".to_string()))?;
+
+    let payload_arr = request
+        .payload
+        .get("payload")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'payload' field".to_string()))?;
+
+    let payload_bytes: Vec<u8> = payload_arr
+        .iter()
+        .filter_map(|v| v.as_u64().map(|n| n as u8))
+        .collect();
+
+    let priority = request.payload.get("priority").and_then(|v| v.as_u64()).map(|p| p as u8);
+    let max_retries = request.payload.get("max_retries").and_then(|v| v.as_u64()).map(|r| r as u32);
+    // Note: headers are ignored for now - not supported by the queue manager
+    // let headers = request.payload.get("headers")...
+
+    let message_id = queue_manager.publish(queue, payload_bytes, priority, max_retries).await?;
+    Ok(serde_json::json!({ "message_id": message_id }))
+}
+
+async fn handle_queue_consume_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let queue = request
+        .payload
+        .get("queue")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'queue' field".to_string()))?;
+
+    let consumer_id = request
+        .payload
+        .get("consumer_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'consumer_id' field".to_string()))?;
+
+    let message = queue_manager.consume(queue, consumer_id).await?;
+
+    if let Some(msg) = message {
+        Ok(serde_json::json!({
+            "message": {
+                "id": msg.id,
+                "payload": msg.payload,
+                "priority": msg.priority,
+                "retry_count": msg.retry_count,
+                "headers": msg.headers,
+            }
+        }))
+    } else {
+        Ok(serde_json::json!({ "message": null }))
+    }
+}
+
+async fn handle_queue_ack_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let queue = request
+        .payload
+        .get("queue")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'queue' field".to_string()))?;
+
+    let message_id = request
+        .payload
+        .get("message_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'message_id' field".to_string()))?;
+
+    queue_manager.ack(queue, message_id).await?;
+    Ok(serde_json::json!({ "success": true }))
+}
+
+async fn handle_queue_nack_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let queue = request
+        .payload
+        .get("queue")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'queue' field".to_string()))?;
+
+    let message_id = request
+        .payload
+        .get("message_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'message_id' field".to_string()))?;
+
+    let requeue = request
+        .payload
+        .get("requeue")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    queue_manager.nack(queue, message_id, requeue).await?;
+    Ok(serde_json::json!({ "success": true }))
+}
+
+async fn handle_queue_list_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let queues = queue_manager.list_queues().await?;
+    Ok(serde_json::json!({ "queues": queues }))
+}
+
+async fn handle_queue_stats_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let queue = request
+        .payload
+        .get("queue")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'queue' field".to_string()))?;
+
+    let stats = queue_manager.stats(queue).await?;
+    Ok(serde_json::to_value(stats).map_err(|e| SynapError::SerializationError(e.to_string()))?)
+}
+
+async fn handle_queue_purge_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let queue = request
+        .payload
+        .get("queue")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'queue' field".to_string()))?;
+
+    let count = queue_manager.purge(queue).await?;
+    Ok(serde_json::json!({ "purged": count }))
 }
