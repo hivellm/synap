@@ -171,6 +171,12 @@ async fn handle_command(store: Arc<KVStore>, request: Request) -> Result<Respons
         "kv.mget" => handle_kv_mget_cmd(store, &request).await,
         "kv.mdel" => handle_kv_mdel_cmd(store, &request).await,
         "kv.scan" => handle_kv_scan_cmd(store, &request).await,
+        "kv.keys" => handle_kv_keys_cmd(store, &request).await,
+        "kv.dbsize" => handle_kv_dbsize_cmd(store, &request).await,
+        "kv.flushdb" => handle_kv_flushdb_cmd(store, &request).await,
+        "kv.flushall" => handle_kv_flushall_cmd(store, &request).await,
+        "kv.expire" => handle_kv_expire_cmd(store, &request).await,
+        "kv.persist" => handle_kv_persist_cmd(store, &request).await,
         "kv.stats" => handle_kv_stats_cmd(store, &request).await,
         _ => Err(SynapError::UnknownCommand(request.command.clone())),
     };
@@ -430,4 +436,70 @@ async fn handle_kv_stats_cmd(
         },
         "hit_rate": stats.hit_rate()
     }))
+}
+
+async fn handle_kv_keys_cmd(
+    store: Arc<KVStore>,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let keys = store.keys().await?;
+    Ok(serde_json::json!({ "keys": keys, "count": keys.len() }))
+}
+
+async fn handle_kv_dbsize_cmd(
+    store: Arc<KVStore>,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let size = store.dbsize().await?;
+    Ok(serde_json::json!({ "size": size }))
+}
+
+async fn handle_kv_flushdb_cmd(
+    store: Arc<KVStore>,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let count = store.flushdb().await?;
+    Ok(serde_json::json!({ "flushed": count }))
+}
+
+async fn handle_kv_flushall_cmd(
+    store: Arc<KVStore>,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let count = store.flushall().await?;
+    Ok(serde_json::json!({ "flushed": count }))
+}
+
+async fn handle_kv_expire_cmd(
+    store: Arc<KVStore>,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let ttl = request
+        .payload
+        .get("ttl")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'ttl' field".to_string()))?;
+
+    let result = store.expire(key, ttl).await?;
+    Ok(serde_json::json!({ "result": result }))
+}
+
+async fn handle_kv_persist_cmd(
+    store: Arc<KVStore>,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let result = store.persist(key).await?;
+    Ok(serde_json::json!({ "result": result }))
 }

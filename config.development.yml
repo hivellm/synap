@@ -1,0 +1,26 @@
+# Synap Development Configuration
+# Optimized for local development with verbose logging
+
+server:
+  host: "127.0.0.1"
+  port: 15500
+  websocket_enabled: false
+
+kv_store:
+  max_memory_mb: 512  # Lower memory for development
+  eviction_policy: "lru"
+  ttl_cleanup_interval_ms: 100
+
+logging:
+  level: "debug"  # Verbose logging for development
+  format: "pretty"  # Human-readable output
+
+protocols:
+  streamable_http:
+    enabled: true
+    path: "/api/v1/command"
+  
+  rest:
+    enabled: true
+    prefix: "/kv"
+

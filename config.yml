@@ -1,23 +1,197 @@
+# Synap Server Configuration
+# Similar to redis.conf pattern
+
+# ============================================================================
+# NETWORK
+# ============================================================================
+
 server:
+  # By default Synap listens for connections from all the network interfaces
+  # available on the server. Use "bind" to listen on specific interfaces.
+  # Examples:
+  # bind 127.0.0.1    # listens on loopback only (localhost)
+  # bind 0.0.0.0      # listens on all interfaces
   host: "0.0.0.0"
+  
+  # Accept connections on the specified port, default is 15500.
+  # If port 0 is specified Synap will not listen on a TCP socket.
   port: 15500
+  
+  # Enable WebSocket support for real-time subscriptions
+  # (Planned for Phase 2)
   websocket_enabled: false
 
+# ============================================================================
+# MEMORY MANAGEMENT
+# ============================================================================
+
 kv_store:
-  max_memory_mb: 4096
+  # Set a memory usage limit to the specified amount of bytes.
+  # When the memory limit is reached Synap will try to remove keys
+  # according to the eviction policy selected (see maxmemory-policy).
+  #
+  # If Synap can't remove keys according to the policy, or if the policy is
+  # set to 'noeviction', Synap will start to reply with errors to commands
+  # that would use more memory, like SET, INCR, etc.
+  #
+  # WARNING: maxmemory can be a good idea if you're using Synap as an LRU
+  # or LFU cache, or to set a hard memory limit (using 'noeviction' policy).
+  #
+  # Redis-style memory specifications supported (future):
+  # 1k  => 1000 bytes
+  # 1kb => 1024 bytes
+  # 1m  => 1000000 bytes
+  # 1mb => 1024*1024 bytes
+  # 1g  => 1000000000 bytes
+  # 1gb => 1024*1024*1024 bytes
+  #
+  # units are case insensitive: 1GB 1Gb 1gB are all the same.
+  max_memory_mb: 4096  # 4GB default
+  
+  # MAXMEMORY POLICY: how Synap will select what to remove when maxmemory
+  # is reached. You can select one from the following behaviors:
+  #
+  # lru      -> Evict least recently used keys (recommended for cache)
+  # lfu      -> Evict least frequently used keys
+  # ttl      -> Evict keys with shortest time-to-live first
+  # none     -> Don't evict anything, just return an error on write operations
+  #
+  # LRU means Least Recently Used
+  # LFU means Least Frequently Used
+  #
+  # Both LRU, LFU and TTL are implemented using approximated algorithms.
+  #
+  # The default is: lru
   eviction_policy: "lru"
+  
+  # TTL cleanup runs in background to remove expired keys.
+  # Lower interval = more CPU usage but faster cleanup
+  # Higher interval = less CPU usage but slower cleanup
+  # Default: 100ms (same as Redis default of 10 times per second)
   ttl_cleanup_interval_ms: 100
 
+# ============================================================================
+# LOGGING
+# ============================================================================
+
 logging:
+  # Specify the server verbosity level.
+  # This can be one of:
+  # trace (very verbose, for debugging)
+  # debug (a lot of information, useful for development/testing)
+  # info  (moderately verbose, what you want in production probably)
+  # warn  (only very important / critical messages are logged)
+  # error (only errors are logged)
+  #
+  # Default: info
   level: "info"
+  
+  # Log format: "json" or "pretty"
+  # json: Machine-readable structured logs (recommended for production)
+  # pretty: Human-readable colored output (good for development)
   format: "json"
 
+# ============================================================================
+# PROTOCOLS
+# ============================================================================
+
 protocols:
+  # StreamableHTTP Protocol
+  # Modern HTTP-based protocol with command routing and streaming support
   streamable_http:
     enabled: true
     path: "/api/v1/command"
   
+  # REST API
+  # Traditional REST endpoints for simple HTTP clients
   rest:
     enabled: true
     prefix: "/kv"
+  
+  # MCP (Model Context Protocol) - Planned for Phase 3
+  # Integration with AI tools and agents
+  # mcp:
+  #   enabled: false
+  #   port: 15501
+  
+  # UMICP (Universal Matrix Inter-Communication Protocol) - Planned for Phase 3
+  # High-performance matrix and vector operations
+  # umicp:
+  #   enabled: false
+  #   websocket_path: "/umicp"
+  
+  # Raw TCP Socket - Planned for Phase 3
+  # High-performance binary protocol
+  # tcp:
+  #   enabled: false
+  #   port: 15502
+
+# ============================================================================
+# REPLICATION (Planned for Phase 3)
+# ============================================================================
+
+# Master-Slave replication
+# replication:
+#   # Replication mode: "master" or "replica"
+#   mode: "master"
+#   
+#   # If this instance is a replica, specify master address
+#   # master_host: "127.0.0.1"
+#   # master_port: 15500
+#   
+#   # Sync interval in milliseconds
+#   sync_interval_ms: 100
+
+# ============================================================================
+# PERSISTENCE (Planned for Phase 2)
+# ============================================================================
+
+# Optional persistence using Write-Ahead Log and Snapshots
+# persistence:
+#   enabled: false
+#   
+#   # Write-Ahead Log (WAL) settings
+#   wal:
+#     enabled: true
+#     path: "./data/wal"
+#     fsync_mode: "periodic"  # always, periodic, or no
+#     fsync_interval_ms: 1000
+#   
+#   # Snapshot settings
+#   snapshot:
+#     enabled: true
+#     path: "./data/snapshots"
+#     interval_secs: 300  # Every 5 minutes
+
+# ============================================================================
+# SECURITY (Planned for Phase 4)
+# ============================================================================
+
+# Authentication and authorization
+# security:
+#   # Require password authentication
+#   require_auth: false
+#   password: ""
+#   
+#   # API keys for programmatic access
+#   api_keys:
+#     enabled: false
+#     keys: []
+#   
+#   # TLS/SSL encryption
+#   tls:
+#     enabled: false
+#     cert_path: ""
+#     key_path: ""
+
+# ============================================================================
+# ADVANCED
+# ============================================================================
+
+# Performance and resource limits
+# limits:
+#   max_clients: 10000
+#   timeout: 0  # Close connection after N seconds of idleness (0 = no timeout)
+#   tcp_keepalive: 300
+#   tcp_backlog: 511
 

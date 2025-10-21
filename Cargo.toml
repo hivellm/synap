@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["synap-server"]
+members = ["synap-server", "synap-cli"]
 
 [workspace.package]
 version = "0.1.0-alpha"
@@ -22,6 +22,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "1.0"
 anyhow = "1.0"
 tower-http = { version = "0.5", features = ["trace", "cors"] }
+serde_yaml = "0.9"
+uuid = { version = "1.6", features = ["v4", "serde"] }
 
 [profile.release]
 opt-level = 3

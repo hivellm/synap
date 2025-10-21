@@ -56,6 +56,39 @@ Only these 3 files are allowed in the project root:
 
 See `.cursorrules` for complete coding standards.
 
+## Dependencies Management
+
+**CRITICAL**: Always verify latest versions before adding dependencies.
+
+### Before Adding Any Dependency
+
+1. **Check Context7 for latest version**:
+   - Use MCP Context7 tool: `mcp_context7_get-library-docs`
+   - Search for the crate/library documentation
+   - Verify the latest stable version
+   - Review breaking changes and migration guides
+
+2. **Example Workflow**:
+   ```
+   Adding tokio → Check /tokio-rs/tokio on Context7
+   Adding axum → Check /tokio-rs/axum on Context7
+   Adding serde → Check latest stable version
+   ```
+
+3. **Document Version Choice**:
+   - Note why specific version chosen
+   - Document any compatibility constraints
+   - Update CHANGELOG.md with new dependencies
+
+### Dependency Guidelines
+
+- ✅ Use latest stable versions from Context7
+- ✅ Check for security advisories
+- ✅ Prefer well-maintained crates (active development)
+- ✅ Minimize dependency count
+- ❌ Don't use outdated versions without justification
+- ❌ Don't add dependencies without checking Context7 first
+
 ---
 
 # Vectorizer Instructions

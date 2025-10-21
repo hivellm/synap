@@ -1,0 +1,56 @@
+# Synap Server Configuration Example
+# Copy this file to config.yml and adjust as needed
+
+# ============================================================================
+# NETWORK
+# ============================================================================
+
+server:
+  host: "0.0.0.0"
+  port: 15500
+  websocket_enabled: false
+
+# ============================================================================
+# MEMORY MANAGEMENT (Redis-compatible)
+# ============================================================================
+
+kv_store:
+  # Memory limit (Redis maxmemory equivalent)
+  # Common values:
+  #   256   -> 256MB (small cache)
+  #   1024  -> 1GB (medium cache)
+  #   4096  -> 4GB (large cache)
+  #   8192  -> 8GB (very large cache)
+  max_memory_mb: 4096
+  
+  # Eviction policy (Redis maxmemory-policy equivalent)
+  # Options: lru, lfu, ttl, none
+  eviction_policy: "lru"
+  
+  # TTL cleanup frequency
+  ttl_cleanup_interval_ms: 100
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+
+logging:
+  # Log level: trace, debug, info, warn, error
+  level: "info"
+  
+  # Log format: json, pretty
+  format: "json"
+
+# ============================================================================
+# PROTOCOLS
+# ============================================================================
+
+protocols:
+  streamable_http:
+    enabled: true
+    path: "/api/v1/command"
+  
+  rest:
+    enabled: true
+    prefix: "/kv"
+

@@ -37,25 +37,20 @@ fn bench_kv_get(c: &mut Criterion) {
 
 fn bench_kv_delete(c: &mut Criterion) {
     let rt = tokio::runtime::Runtime::new().unwrap();
+    let store = Arc::new(KVStore::new(KVConfig::default()));
 
     c.bench_function("kv_delete", |b| {
-        b.to_async(&rt).iter_batched(
-            || {
-                let store = Arc::new(KVStore::new(KVConfig::default()));
-                rt.block_on(async {
-                    store
-                        .set("test_key", b"test_value".to_vec(), None)
-                        .await
-                        .unwrap();
-                });
-                store
-            },
-            |store| async move {
-                let key = black_box("test_key");
-                store.delete(key).await.unwrap();
-            },
-            criterion::BatchSize::SmallInput,
-        );
+        b.to_async(&rt).iter(|| async {
+            // Setup: insert key
+            store
+                .set("test_key", b"test_value".to_vec(), None)
+                .await
+                .unwrap();
+
+            // Benchmark: delete
+            let key = black_box("test_key");
+            store.delete(key).await.unwrap();
+        });
     });
 }
 

@@ -3,7 +3,7 @@ use super::types::{KVConfig, KVStats, StoredValue};
 use parking_lot::RwLock;
 use radix_trie::{Trie, TrieCommon};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 /// Key-Value store using radix trie for memory-efficient storage
@@ -269,6 +269,71 @@ impl KVStore {
     fn estimate_entry_size(&self, key: &str, value: &StoredValue) -> usize {
         key.len() + value.data.len() + std::mem::size_of::<StoredValue>()
     }
+
+    /// Get all keys (no limit)
+    pub async fn keys(&self) -> Result<Vec<String>> {
+        let data = self.data.read();
+        Ok(data.keys().map(|k| k.to_string()).collect())
+    }
+
+    /// Get number of keys
+    pub async fn dbsize(&self) -> Result<usize> {
+        Ok(self.stats.read().total_keys)
+    }
+
+    /// Flush all keys from database
+    pub async fn flushdb(&self) -> Result<usize> {
+        debug!("FLUSHDB");
+
+        let mut data = self.data.write();
+        let mut stats = self.stats.write();
+
+        let count = stats.total_keys;
+
+        // Collect all keys and remove them
+        let all_keys: Vec<String> = data.keys().map(|k| k.to_string()).collect();
+        for key in all_keys {
+            data.remove(&key);
+        }
+
+        stats.total_keys = 0;
+        stats.total_memory_bytes = 0;
+
+        Ok(count)
+    }
+
+    /// Flush all databases (alias for flushdb in single-db mode)
+    pub async fn flushall(&self) -> Result<usize> {
+        self.flushdb().await
+    }
+
+    /// Set expiration time
+    pub async fn expire(&self, key: &str, ttl_secs: u64) -> Result<bool> {
+        debug!("EXPIRE key={}, ttl={}", key, ttl_secs);
+
+        let mut data = self.data.write();
+
+        if let Some(value) = data.get_mut(key) {
+            value.ttl = Some(Instant::now() + Duration::from_secs(ttl_secs));
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Remove expiration from key
+    pub async fn persist(&self, key: &str) -> Result<bool> {
+        debug!("PERSIST key={}", key);
+
+        let mut data = self.data.write();
+
+        if let Some(value) = data.get_mut(key) {
+            value.ttl = None;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -430,5 +495,70 @@ mod tests {
         assert_eq!(stats.hits, 1);
         assert_eq!(stats.misses, 1);
         assert_eq!(stats.total_keys, 1);
+    }
+
+    #[tokio::test]
+    async fn test_keys() {
+        let store = KVStore::new(KVConfig::default());
+
+        store.set("key1", b"value1".to_vec(), None).await.unwrap();
+        store.set("key2", b"value2".to_vec(), None).await.unwrap();
+        store.set("key3", b"value3".to_vec(), None).await.unwrap();
+
+        let keys = store.keys().await.unwrap();
+        assert_eq!(keys.len(), 3);
+        assert!(keys.contains(&"key1".to_string()));
+        assert!(keys.contains(&"key2".to_string()));
+        assert!(keys.contains(&"key3".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_dbsize() {
+        let store = KVStore::new(KVConfig::default());
+
+        assert_eq!(store.dbsize().await.unwrap(), 0);
+
+        store.set("key1", b"value1".to_vec(), None).await.unwrap();
+        assert_eq!(store.dbsize().await.unwrap(), 1);
+
+        store.set("key2", b"value2".to_vec(), None).await.unwrap();
+        assert_eq!(store.dbsize().await.unwrap(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_flushdb() {
+        let store = KVStore::new(KVConfig::default());
+
+        store.set("key1", b"value1".to_vec(), None).await.unwrap();
+        store.set("key2", b"value2".to_vec(), None).await.unwrap();
+        store.set("key3", b"value3".to_vec(), None).await.unwrap();
+
+        assert_eq!(store.dbsize().await.unwrap(), 3);
+
+        let flushed = store.flushdb().await.unwrap();
+        assert_eq!(flushed, 3);
+        assert_eq!(store.dbsize().await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_expire_and_persist() {
+        let store = KVStore::new(KVConfig::default());
+
+        store.set("key1", b"value1".to_vec(), None).await.unwrap();
+
+        // Set expiration
+        let result = store.expire("key1", 60).await.unwrap();
+        assert!(result);
+
+        let ttl = store.ttl("key1").await.unwrap();
+        assert!(ttl.is_some());
+        assert!(ttl.unwrap() > 0 && ttl.unwrap() <= 60);
+
+        // Remove expiration
+        let result = store.persist("key1").await.unwrap();
+        assert!(result);
+
+        let ttl = store.ttl("key1").await.unwrap();
+        assert!(ttl.is_none());
     }
 }
