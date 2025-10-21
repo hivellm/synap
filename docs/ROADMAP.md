@@ -105,8 +105,9 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 - [x] Background deadline checker
 - [x] Concurrency tests (5 comprehensive tests)
 - [x] Zero-duplicate guarantee
-- [ ] Queue persistence (planned Phase 2 Week 10-12)
-- [ ] Queue benchmarks (to be added)
+- [x] Queue persistence (RabbitMQ-style) ✅ COMPLETE
+- [x] Queue benchmarks ✅ COMPLETE
+- [x] Queue recovery from WAL ✅ COMPLETE
 
 #### Week 4-6: Event Streams ✅ COMPLETE
 - [x] Ring buffer implementation
@@ -115,7 +116,9 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 - [x] Offset-based consumption
 - [x] Stream compaction
 - [x] Subscriber management
-- [ ] Stream benchmarks (to be added)
+- [x] Stream benchmarks ✅ COMPLETE
+- [x] Stream persistence (Kafka-style) ✅ COMPLETE
+- [x] Stream recovery from logs ✅ COMPLETE
 
 #### Week 7-9: Pub/Sub System ✅ COMPLETE
 - [x] Topic routing
@@ -123,15 +126,18 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 - [x] Fan-out messaging
 - [x] Topic hierarchies
 - [x] Subscription filtering
-- [ ] Pub/Sub benchmarks (to be added)
+- [x] Pub/Sub benchmarks ✅ COMPLETE
 
 #### Week 10-12: Persistence Layer ✅ COMPLETE
 - [x] Write-Ahead Log (WAL)
+- [x] AsyncWAL with group commit
+- [x] OptimizedWAL (Redis-style batching) ✅ NEW
 - [x] Snapshot system
 - [x] Recovery procedures
-- [x] Configurable fsync modes
-- [ ] Persistence benchmarks
-- [ ] Beta release
+- [x] Configurable fsync modes (Always, Periodic, Never)
+- [x] Persistence benchmarks ✅ COMPLETE
+- [x] Queue persistence (RabbitMQ-style) ✅ NEW
+- [x] Stream persistence (Kafka-style) ✅ NEW
 
 #### TypeScript SDK ✅ COMPLETE
 - [x] **StreamableHTTP Client** (full protocol implementation)
