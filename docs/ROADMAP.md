@@ -125,11 +125,11 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 - [ ] Subscription filtering
 - [ ] Pub/Sub benchmarks
 
-#### Week 10-12: Persistence Layer
-- [ ] Write-Ahead Log (WAL)
-- [ ] Snapshot system
-- [ ] Recovery procedures
-- [ ] Configurable fsync modes
+#### Week 10-12: Persistence Layer ✅ COMPLETE
+- [x] Write-Ahead Log (WAL)
+- [x] Snapshot system
+- [x] Recovery procedures
+- [x] Configurable fsync modes
 - [ ] Persistence benchmarks
 - [ ] Beta release
 
@@ -176,9 +176,9 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 ### Deliverables
 - ✅ Complete queue system
 - ✅ SDKs (TypeScript)
+- ✅ Persistence layer (WAL + Snapshots)
 - 🔄 Event streaming (in progress)
 - 🔵 Pub/Sub messaging (planned)
-- 🔵 Persistence layer (planned)
 - 🔵 Python SDK (planned)
 
 ### Success Criteria
@@ -364,7 +364,7 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 | Atomic ops | Phase 1 | 🔵 Planned |
 | Batch ops | Phase 1 | 🔵 Planned |
 | Prefix search | Phase 1 | 🔵 Planned |
-| Persistence | Phase 2 | 🔵 Planned |
+| Persistence | Phase 2 | ✅ Complete |
 | Replication | Phase 3 | 🔵 Planned |
 | Compression | Phase 3 | 🔵 Planned |
 
