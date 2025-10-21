@@ -129,7 +129,7 @@ async fn main() -> Result<()> {
     }
 
     // Create persistence layer if enabled
-    let _persistence = if config.persistence.enabled {
+    let persistence = if config.persistence.enabled {
         match PersistenceLayer::new(config.persistence.clone()).await {
             Ok(layer) => {
                 let layer = Arc::new(layer);
@@ -152,10 +152,11 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Create application state
+    // Create application state with persistence
     let app_state = AppState {
         kv_store,
         queue_manager,
+        persistence,
     };
 
     // Create router with rate limiting

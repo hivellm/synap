@@ -14,6 +14,7 @@ use tracing::{debug, error};
 pub struct AppState {
     pub kv_store: Arc<KVStore>,
     pub queue_manager: Option<Arc<QueueManager>>,
+    pub persistence: Option<Arc<crate::persistence::PersistenceLayer>>,
 }
 
 // Request/Response types for REST API
@@ -121,7 +122,16 @@ pub async fn kv_set(
     let value_bytes = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
-    state.kv_store.set(&req.key, value_bytes, req.ttl).await?;
+    // Set in KV store
+    state.kv_store.set(&req.key, value_bytes.clone(), req.ttl).await?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        if let Err(e) = persistence.log_kv_set(req.key.clone(), value_bytes, req.ttl).await {
+            error!("Failed to log KV SET to WAL: {}", e);
+            // Don't fail the request, data is already in memory
+        }
+    }
 
     Ok(Json(SetResponse {
         success: true,
@@ -166,6 +176,15 @@ pub async fn kv_delete(
     debug!("REST DELETE key={}", key);
 
     let deleted = state.kv_store.delete(&key).await?;
+
+    // Log to WAL if persistence is enabled
+    if deleted {
+        if let Some(ref persistence) = state.persistence {
+            if let Err(e) = persistence.log_kv_del(vec![key.clone()]).await {
+                error!("Failed to log KV DELETE to WAL: {}", e);
+            }
+        }
+    }
 
     Ok(Json(DeleteResponse { deleted, key }))
 }
@@ -240,6 +259,10 @@ pub async fn queue_publish(
     let message_id = queue_manager
         .publish(&queue_name, req.payload, req.priority, req.max_retries)
         .await?;
+
+    // Note: Queue persistence will be integrated in a future update
+    // For now, queue operations are not persisted to WAL
+    // TODO: Add persistence.log_queue_publish() when queue persistence is ready
 
     Ok(Json(PublishResponse { message_id }))
 }
