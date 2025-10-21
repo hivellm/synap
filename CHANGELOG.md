@@ -136,21 +136,20 @@ Implementação completa com resultados excepcionais:
   - Configurable retention time (default: 1 hour)
   - Background task compacts old messages
   - Configurable compaction interval (default: 60s)
-- **6 REST API Endpoints + 6 StreamableHTTP Commands**:
+- **Protocol Support**:
+  - **WebSocket** (`/stream/:room/ws/:subscriber_id?from_offset=0`) - **Real-time push** with auto-advance
+  - **REST + StreamableHTTP** - For polling and management
+- **API Endpoints**:
+  - GET `/stream/:room/ws/:subscriber_id` - **WebSocket** (real-time push, 100ms polling)
   - POST `/stream/:room` | `stream.create` - Create room
   - POST `/stream/:room/publish` | `stream.publish` - Publish event
-  - GET `/stream/:room/consume/:subscriber_id` | `stream.consume` - Consume (offset + limit params)
+  - GET `/stream/:room/consume/:subscriber_id` | `stream.consume` - Consume (offset + limit)
   - GET `/stream/:room/stats` | `stream.stats` - Room statistics
   - DELETE `/stream/:room` | `stream.delete` - Delete room
   - GET `/stream/list` | `stream.list` - List all rooms
 - **17 Comprehensive Tests** (100% passing):
   - 5 REST API tests (room creation, publish, consume, overflow, multi-subscriber)
   - 12 StreamableHTTP tests (all operations, offset tracking, limits, errors)
-  - Room creation and management
-  - Publish and consume operations
-  - Offset tracking and history
-  - Ring buffer overflow handling
-  - Multiple subscribers per room
 
 #### Persistence Integration ✅ COMPLETE
 - **Full WAL Integration**: All mutating operations logged to AsyncWAL
@@ -252,9 +251,10 @@ Implementação completa com resultados excepcionais:
   - Statistics and topic info endpoints
   - Error handling (missing topics, empty topics, not found)
   
-- **Comparison with Event Streams**:
-  - Pub/Sub: No persistence, wildcards, lower latency, notifications
-  - Streams: Ring buffer, history replay, offset-based, guaranteed ordering
+- **Comparison with Event Streams & Queue**:
+  - **Pub/Sub**: No persistence, wildcards, instant push, fire-and-forget
+  - **Streams**: Ring buffer, history replay, offset-based, 100ms latency
+  - **Queue**: Reliable delivery, ACK/NACK, retries, DLQ, at-least-once
 
 ### Added - Phase 2 Features (Q4 2025)
 
@@ -310,16 +310,21 @@ Implementação completa com resultados excepcionais:
   - Background deadline checker (1s interval)
   - Pending message tracking
 
-- **9 REST API Endpoints**
-  - POST `/queue/:name` - Create queue with custom config
-  - POST `/queue/:name/publish` - Publish messages
-  - GET `/queue/:name/consume/:consumer_id` - Consume messages
-  - POST `/queue/:name/ack` - Acknowledge processing
-  - POST `/queue/:name/nack` - Negative acknowledge (retry/DLQ)
-  - GET `/queue/:name/stats` - Queue statistics
-  - POST `/queue/:name/purge` - Clear all messages
-  - DELETE `/queue/:name` - Delete queue
-  - GET `/queue/list` - List all queues
+- **Protocol Support**:
+  - **WebSocket** (`/queue/:name/ws/:consumer_id`) - Continuous consume with bidirectional ACK/NACK
+  - **REST + StreamableHTTP** - For publishing and management
+
+- **API Endpoints**:
+  - GET `/queue/:name/ws/:consumer_id` - **WebSocket** (continuous consume, send ACK/NACK commands)
+  - POST `/queue/:name` | `queue.create` - Create queue
+  - POST `/queue/:name/publish` | `queue.publish` - Publish message
+  - GET `/queue/:name/consume/:consumer_id` | `queue.consume` - One-time consume
+  - POST `/queue/:name/ack` | `queue.ack` - Acknowledge
+  - POST `/queue/:name/nack` | `queue.nack` - Negative acknowledge
+  - GET `/queue/:name/stats` | `queue.stats` - Statistics
+  - POST `/queue/:name/purge` | `queue.purge` - Clear queue
+  - DELETE `/queue/:name` | `queue.delete` - Delete queue
+  - GET `/queue/list` | `queue.list` - List queues
 
 - **Concurrency Protection (Zero Duplicates)**
   - Thread-safe RwLock implementation

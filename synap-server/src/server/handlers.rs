@@ -1294,6 +1294,309 @@ async fn handle_queue_purge_cmd(
 // Pub/Sub WebSocket Handler
 // ============================================================================
 
+// ============================================================================
+// KV Store WebSocket Handler
+// ============================================================================
+
+/// WebSocket handler for KV WATCH (real-time key change notifications)
+/// GET /kv/ws?keys=key1,key2,prefix:*
+pub async fn kv_websocket(
+    State(state): State<AppState>,
+    _ws: WebSocketUpgrade,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> AxumResponse {
+    // Parse keys from query params
+    let keys_str = params.get("keys").cloned().unwrap_or_default();
+    let keys: Vec<String> = keys_str
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
+    if keys.is_empty() {
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            "At least one key required in query param: ?keys=key1,key2",
+        )
+            .into_response();
+    }
+
+    info!("KV WebSocket WATCH connection for keys: {:?}", keys);
+    
+    // Note: Full implementation would require KVStore to support change notifications
+    // For now, return not implemented
+    (
+        axum::http::StatusCode::NOT_IMPLEMENTED,
+        "KV WebSocket WATCH not yet implemented - use polling for now",
+    )
+        .into_response()
+}
+
+// ============================================================================
+// Queue WebSocket Handler
+// ============================================================================
+
+/// WebSocket handler for Queue continuous consume (real-time message delivery)
+/// GET /queue/:name/ws/:consumer_id
+pub async fn queue_websocket(
+    State(state): State<AppState>,
+    Path((queue_name, consumer_id)): Path<(String, String)>,
+    ws: WebSocketUpgrade,
+) -> AxumResponse {
+    let queue_manager = match state.queue_manager.as_ref() {
+        Some(qm) => qm.clone(),
+        None => {
+            return (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "Queue system disabled",
+            )
+                .into_response();
+        }
+    };
+
+    info!("Queue WebSocket connection: queue={}, consumer={}", queue_name, consumer_id);
+
+    ws.on_upgrade(move |socket| handle_queue_socket(socket, queue_manager, queue_name, consumer_id))
+}
+
+/// Handle Queue WebSocket connection
+async fn handle_queue_socket(
+    socket: WebSocket,
+    queue_manager: Arc<crate::core::QueueManager>,
+    queue_name: String,
+    consumer_id: String,
+) {
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+
+    // Send welcome message
+    let welcome = json!({
+        "type": "connected",
+        "queue": queue_name,
+        "consumer_id": consumer_id
+    });
+    
+    if ws_sender.send(axum::extract::ws::Message::Text(welcome.to_string())).await.is_err() {
+        warn!("Failed to send welcome to consumer: {}", consumer_id);
+        return;
+    }
+
+    loop {
+        tokio::select! {
+            // Try to consume a message (non-blocking with timeout)
+            _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                match queue_manager.consume(&queue_name, &consumer_id).await {
+                    Ok(Some(msg)) => {
+                        let msg_json = json!({
+                            "type": "message",
+                            "message_id": msg.id,
+                            "payload": (*msg.payload).clone(),  // Clone Vec<u8> from Arc
+                            "priority": msg.priority,
+                            "retry_count": msg.retry_count,
+                            "created_at": msg.created_at,
+                            "headers": msg.headers
+                        });
+
+                        if ws_sender.send(axum::extract::ws::Message::Text(msg_json.to_string())).await.is_err() {
+                            warn!("Failed to send message to consumer: {}", consumer_id);
+                            break;
+                        }
+                    }
+                    Ok(None) => {
+                        // No messages available, continue waiting
+                    }
+                    Err(e) => {
+                        error!("Queue consume error: {}", e);
+                        let _ = ws_sender.send(axum::extract::ws::Message::Text(
+                            json!({"type": "error", "error": e.to_string()}).to_string()
+                        )).await;
+                        break;
+                    }
+                }
+            }
+
+            // Handle incoming WebSocket messages (ACK/NACK commands)
+            Some(msg) = ws_receiver.next() => {
+                match msg {
+                    Ok(axum::extract::ws::Message::Text(text)) => {
+                        if let Ok(cmd) = serde_json::from_str::<serde_json::Value>(&text) {
+                            match cmd["command"].as_str() {
+                                Some("ack") => {
+                                    if let Some(msg_id) = cmd["message_id"].as_str() {
+                                        if let Err(e) = queue_manager.ack(&queue_name, msg_id).await {
+                                            error!("ACK error: {}", e);
+                                        }
+                                    }
+                                }
+                                Some("nack") => {
+                                    if let Some(msg_id) = cmd["message_id"].as_str() {
+                                        let requeue = cmd["requeue"].as_bool().unwrap_or(true);
+                                        if let Err(e) = queue_manager.nack(&queue_name, msg_id, requeue).await {
+                                            error!("NACK error: {}", e);
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    warn!("Unknown command: {:?}", cmd["command"]);
+                                }
+                            }
+                        }
+                    }
+                    Ok(axum::extract::ws::Message::Close(_)) => {
+                        info!("Queue consumer {} closed connection", consumer_id);
+                        break;
+                    }
+                    Ok(axum::extract::ws::Message::Ping(data)) => {
+                        if ws_sender.send(axum::extract::ws::Message::Pong(data)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        warn!("WebSocket error for consumer {}: {}", consumer_id, e);
+                        break;
+                    }
+                }
+            }
+
+            else => {
+                break;
+            }
+        }
+    }
+
+    info!("Queue consumer {} disconnected", consumer_id);
+}
+
+// ============================================================================
+// Event Streams WebSocket Handler
+// ============================================================================
+
+/// WebSocket handler for Event Streams (real-time event push)
+/// GET /stream/:room/ws/:subscriber_id?from_offset=0
+pub async fn stream_websocket(
+    State(state): State<AppState>,
+    Path((room_name, subscriber_id)): Path<(String, String)>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    ws: WebSocketUpgrade,
+) -> AxumResponse {
+    let stream_manager = match state.stream_manager.as_ref() {
+        Some(sm) => sm.clone(),
+        None => {
+            return (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "Stream system disabled",
+            )
+                .into_response();
+        }
+    };
+
+    let from_offset = params
+        .get("from_offset")
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(0);
+
+    info!(
+        "Stream WebSocket connection: room={}, subscriber={}, from_offset={}",
+        room_name, subscriber_id, from_offset
+    );
+
+    ws.on_upgrade(move |socket| {
+        handle_stream_socket(socket, stream_manager, room_name, subscriber_id, from_offset)
+    })
+}
+
+/// Handle Event Stream WebSocket connection
+async fn handle_stream_socket(
+    socket: WebSocket,
+    stream_manager: Arc<crate::core::StreamManager>,
+    room_name: String,
+    subscriber_id: String,
+    mut current_offset: u64,
+) {
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+
+    // Send welcome message
+    let welcome = json!({
+        "type": "connected",
+        "room": room_name,
+        "subscriber_id": subscriber_id,
+        "from_offset": current_offset
+    });
+    
+    if ws_sender.send(axum::extract::ws::Message::Text(welcome.to_string())).await.is_err() {
+        warn!("Failed to send welcome to stream subscriber: {}", subscriber_id);
+        return;
+    }
+
+    loop {
+        tokio::select! {
+            // Poll for new events (100ms interval)
+            _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                match stream_manager.consume(&room_name, &subscriber_id, current_offset, 100).await {
+                    Ok(events) => {
+                        if !events.is_empty() {
+                            for event in &events {
+                                let event_json = json!({
+                                    "type": "event",
+                                    "offset": event.offset,
+                                    "event": event.event,
+                                    "data": event.data,
+                                    "timestamp": event.timestamp
+                                });
+
+                                if ws_sender.send(axum::extract::ws::Message::Text(event_json.to_string())).await.is_err() {
+                                    warn!("Failed to send event to subscriber: {}", subscriber_id);
+                                    return;
+                                }
+                            }
+
+                            // Update offset to next expected event
+                            current_offset = events.last().unwrap().offset + 1;
+                        }
+                    }
+                    Err(e) => {
+                        error!("Stream consume error: {}", e);
+                        let _ = ws_sender.send(axum::extract::ws::Message::Text(
+                            json!({"type": "error", "error": e}).to_string()
+                        )).await;
+                        break;
+                    }
+                }
+            }
+
+            // Handle incoming WebSocket messages (control messages)
+            Some(msg) = ws_receiver.next() => {
+                match msg {
+                    Ok(axum::extract::ws::Message::Close(_)) => {
+                        info!("Stream subscriber {} closed connection", subscriber_id);
+                        break;
+                    }
+                    Ok(axum::extract::ws::Message::Ping(data)) => {
+                        if ws_sender.send(axum::extract::ws::Message::Pong(data)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(e) => {
+                        warn!("WebSocket error for stream subscriber {}: {}", subscriber_id, e);
+                        break;
+                    }
+                }
+            }
+
+            else => {
+                break;
+            }
+        }
+    }
+
+    info!("Stream subscriber {} disconnected from room {}", subscriber_id, room_name);
+}
+
+// ============================================================================
+// Pub/Sub WebSocket Handler
+// ============================================================================
+
 /// WebSocket handler for Pub/Sub subscriptions
 /// GET /pubsub/ws?topics=topic1,topic2,*.wildcard
 pub async fn pubsub_websocket(
