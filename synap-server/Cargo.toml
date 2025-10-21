@@ -34,6 +34,7 @@ rand.workspace = true
 bincode = "1.3"
 crc32fast = "1.4"
 compact_str.workspace = true
+rmcp = { version = "0.8.2", features = ["server"] }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }
