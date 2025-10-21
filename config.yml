@@ -185,6 +185,26 @@ protocols:
 #     key_path: ""
 
 # ============================================================================
+# COMPRESSION (Phase 3 - Not yet active)
+# ============================================================================
+
+# Payload compression to save memory and bandwidth
+# compression:
+#   # Enable compression globally
+#   enabled: false
+#   
+#   # Default algorithm: lz4 (fast) or zstd (better ratio)
+#   default_algorithm: "lz4"
+#   
+#   # Minimum payload size to compress (bytes)
+#   # Don't compress payloads smaller than this (overhead not worth it)
+#   min_payload_size: 1024  # 1KB
+#   
+#   # Zstd-specific settings
+#   zstd:
+#     level: 3  # Compression level (1-22, 3 = balanced)
+
+# ============================================================================
 # ADVANCED
 # ============================================================================
 

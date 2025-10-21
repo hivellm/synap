@@ -24,6 +24,8 @@ anyhow = "1.0"
 tower-http = { version = "0.5", features = ["trace", "cors"] }
 serde_yaml = "0.9"
 uuid = { version = "1.6", features = ["v4", "serde"] }
+lz4 = "1.24"
+zstd = "0.13"
 
 [profile.release]
 opt-level = 3

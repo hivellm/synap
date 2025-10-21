@@ -46,6 +46,40 @@ Only these 3 files are allowed in the project root:
 
 **When creating documentation**, always place it in the appropriate `/docs` subdirectory.
 
+## Feature Specifications
+
+**CRITICAL**: All feature specifications are in `/docs` directory.
+
+### Implementation Workflow
+
+1. **Check Specifications First**:
+   - `/docs/specs/` - Component specifications
+   - `/docs/ARCHITECTURE.md` - System architecture
+   - `/docs/ROADMAP.md` - Implementation timeline
+   - `/docs/PROJECT_DAG.md` - Component dependencies
+
+2. **Update ROADMAP as You Implement**:
+   - Mark features as complete when done
+   - Update status indicators
+   - Track progress through phases
+   - Keep timeline current
+
+3. **Follow Spec-Driven Development**:
+   - Read spec before implementing
+   - Follow specified interfaces and patterns
+   - Update spec if design changes during implementation
+   - Document deviations with justification
+
+### Example Implementation Flow
+
+```
+1. Read /docs/specs/KEY_VALUE_STORE.md
+2. Implement feature following spec
+3. Write tests based on spec requirements
+4. Update /docs/ROADMAP.md progress markers
+5. Commit with reference to spec
+```
+
 ## Code Quality
 
 - **Rust Edition**: 2024 (nightly 1.85+)

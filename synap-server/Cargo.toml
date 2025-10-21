@@ -23,6 +23,8 @@ tower = "0.4"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 serde_yaml = "0.9"
 clap = { version = "4.5", features = ["derive"] }
+lz4.workspace = true
+zstd.workspace = true
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }
