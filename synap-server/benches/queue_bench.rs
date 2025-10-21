@@ -14,19 +14,29 @@ fn bench_queue_memory(c: &mut Criterion) {
             message_size,
             |b, &size| {
                 let rt = Runtime::new().unwrap();
-                let manager = QueueManager::new(QueueConfig::default());
                 
-                rt.block_on(async {
-                    manager.create_queue("test_queue", None).await.unwrap();
-                });
-                
-                b.to_async(&rt).iter(|| async {
-                    let payload = vec![0u8; size];
-                    manager
-                        .publish("test_queue", black_box(payload), None, None)
-                        .await
-                        .unwrap();
-                });
+                b.iter_batched(
+                    || {
+                        // Setup: Fresh queue manager for each batch
+                        let mut config = QueueConfig::default();
+                        config.max_depth = 100000; // Allow large queue
+                        let manager = QueueManager::new(config);
+                        rt.block_on(async {
+                            manager.create_queue("test_queue", None).await.unwrap();
+                        });
+                        manager
+                    },
+                    |manager| {
+                        rt.block_on(async {
+                            let payload = vec![0u8; size];
+                            manager
+                                .publish("test_queue", black_box(payload), None, None)
+                                .await
+                                .unwrap();
+                        })
+                    },
+                    criterion::BatchSize::SmallInput,
+                );
             },
         );
     }
@@ -44,7 +54,9 @@ fn bench_concurrent_queue(c: &mut Criterion) {
             num_consumers,
             |b, &num_consumers| {
                 let rt = Runtime::new().unwrap();
-                let manager = QueueManager::new(QueueConfig::default());
+                let mut config = QueueConfig::default();
+                config.max_depth = 100000; // Allow large queue
+                let manager = QueueManager::new(config);
                 
                 rt.block_on(async {
                     manager.create_queue("concurrent_queue", None).await.unwrap();
@@ -115,7 +127,9 @@ fn bench_priority_queue(c: &mut Criterion) {
             num_messages,
             |b, &num_messages| {
                 let rt = Runtime::new().unwrap();
-                let manager = QueueManager::new(QueueConfig::default());
+                let mut config = QueueConfig::default();
+                config.max_depth = 100000; // Allow large queue
+                let manager = QueueManager::new(config);
                 
                 rt.block_on(async {
                     manager.create_queue("priority_queue", None).await.unwrap();
@@ -140,7 +154,9 @@ fn bench_priority_queue(c: &mut Criterion) {
             num_messages,
             |b, &num_messages| {
                 let rt = Runtime::new().unwrap();
-                let manager = QueueManager::new(QueueConfig::default());
+                let mut config = QueueConfig::default();
+                config.max_depth = 100000; // Allow large queue
+                let manager = QueueManager::new(config);
                 
                 rt.block_on(async {
                     manager.create_queue("priority_queue", None).await.unwrap();
@@ -176,7 +192,9 @@ fn bench_pending_messages(c: &mut Criterion) {
     
     group.bench_function("ack_throughput", |b| {
         let rt = Runtime::new().unwrap();
-        let manager = QueueManager::new(QueueConfig::default());
+        let mut config = QueueConfig::default();
+        config.max_depth = 100000; // Allow large queue
+        let manager = QueueManager::new(config);
         
         rt.block_on(async {
             manager.create_queue("ack_queue", None).await.unwrap();
@@ -209,7 +227,9 @@ fn bench_pending_messages(c: &mut Criterion) {
     
     group.bench_function("nack_requeue", |b| {
         let rt = Runtime::new().unwrap();
-        let manager = QueueManager::new(QueueConfig::default());
+        let mut config = QueueConfig::default();
+        config.max_depth = 100000; // Allow large queue
+        let manager = QueueManager::new(config);
         
         rt.block_on(async {
             manager.create_queue("nack_queue", None).await.unwrap();
