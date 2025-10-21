@@ -29,6 +29,8 @@ pub fn create_router(
         .route("/kv/get/:key", get(handlers::kv_get))
         .route("/kv/del/:key", delete(handlers::kv_delete))
         .route("/kv/stats", get(handlers::kv_stats))
+        // Persistence endpoints
+        .route("/snapshot", post(handlers::trigger_snapshot))
         // Queue REST API endpoints
         .route("/queue/:name", post(handlers::queue_create))
         .route("/queue/:name/publish", post(handlers::queue_publish))

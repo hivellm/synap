@@ -189,6 +189,29 @@ pub async fn kv_delete(
     Ok(Json(DeleteResponse { deleted, key }))
 }
 
+/// SNAPSHOT endpoint - manually trigger a snapshot
+pub async fn trigger_snapshot(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST SNAPSHOT TRIGGER");
+
+    if let Some(ref persistence) = state.persistence {
+        persistence
+            .maybe_snapshot(&state.kv_store, state.queue_manager.as_deref())
+            .await
+            .map_err(|e| SynapError::InternalError(format!("Snapshot failed: {}", e)))?;
+
+        Ok(Json(serde_json::json!({
+            "success": true,
+            "message": "Snapshot triggered successfully"
+        })))
+    } else {
+        Err(SynapError::InvalidRequest(
+            "Persistence is disabled".to_string(),
+        ))
+    }
+}
+
 /// STATS endpoint - get store statistics
 pub async fn kv_stats(State(state): State<AppState>) -> Result<Json<StatsResponse>, SynapError> {
     debug!("REST STATS");
@@ -438,15 +461,15 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
     let request_id = request.request_id.clone();
 
     let result = match request.command.as_str() {
-        "kv.set" => handle_kv_set_cmd(state.kv_store.clone(), &request).await,
+        "kv.set" => handle_kv_set_cmd(&state, &request).await,
         "kv.get" => handle_kv_get_cmd(state.kv_store.clone(), &request).await,
-        "kv.del" => handle_kv_del_cmd(state.kv_store.clone(), &request).await,
+        "kv.del" => handle_kv_del_cmd(&state, &request).await,
         "kv.exists" => handle_kv_exists_cmd(state.kv_store.clone(), &request).await,
-        "kv.incr" => handle_kv_incr_cmd(state.kv_store.clone(), &request).await,
-        "kv.decr" => handle_kv_decr_cmd(state.kv_store.clone(), &request).await,
-        "kv.mset" => handle_kv_mset_cmd(state.kv_store.clone(), &request).await,
+        "kv.incr" => handle_kv_incr_cmd(&state, &request).await,
+        "kv.decr" => handle_kv_decr_cmd(&state, &request).await,
+        "kv.mset" => handle_kv_mset_cmd(&state, &request).await,
         "kv.mget" => handle_kv_mget_cmd(state.kv_store.clone(), &request).await,
-        "kv.mdel" => handle_kv_mdel_cmd(state.kv_store.clone(), &request).await,
+        "kv.mdel" => handle_kv_mdel_cmd(&state, &request).await,
         "kv.scan" => handle_kv_scan_cmd(state.kv_store.clone(), &request).await,
         "kv.keys" => handle_kv_keys_cmd(state.kv_store.clone(), &request).await,
         "kv.dbsize" => handle_kv_dbsize_cmd(state.kv_store.clone(), &request).await,
@@ -488,7 +511,7 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
 }
 
 async fn handle_kv_set_cmd(
-    store: Arc<KVStore>,
+    state: &AppState,
     request: &Request,
 ) -> Result<serde_json::Value, SynapError> {
     let key = request
@@ -507,7 +530,12 @@ async fn handle_kv_set_cmd(
     let value_bytes =
         serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
-    store.set(key, value_bytes, ttl).await?;
+    state.kv_store.set(key, value_bytes.clone(), ttl).await?;
+
+    // Log to WAL
+    if let Some(ref persistence) = state.persistence {
+        let _ = persistence.log_kv_set(key.to_string(), value_bytes, ttl).await;
+    }
 
     Ok(serde_json::json!({ "success": true }))
 }
@@ -541,7 +569,7 @@ async fn handle_kv_get_cmd(
 }
 
 async fn handle_kv_del_cmd(
-    store: Arc<KVStore>,
+    state: &AppState,
     request: &Request,
 ) -> Result<serde_json::Value, SynapError> {
     let key = request
@@ -550,7 +578,14 @@ async fn handle_kv_del_cmd(
         .and_then(|v| v.as_str())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
 
-    let deleted = store.delete(key).await?;
+    let deleted = state.kv_store.delete(key).await?;
+
+    // Log to WAL if deleted
+    if deleted {
+        if let Some(ref persistence) = state.persistence {
+            let _ = persistence.log_kv_del(vec![key.to_string()]).await;
+        }
+    }
 
     Ok(serde_json::json!({ "deleted": deleted }))
 }
@@ -571,7 +606,7 @@ async fn handle_kv_exists_cmd(
 }
 
 async fn handle_kv_incr_cmd(
-    store: Arc<KVStore>,
+    state: &AppState,
     request: &Request,
 ) -> Result<serde_json::Value, SynapError> {
     let key = request
@@ -586,13 +621,18 @@ async fn handle_kv_incr_cmd(
         .and_then(|v| v.as_i64())
         .unwrap_or(1);
 
-    let value = store.incr(key, amount).await?;
+    let value = state.kv_store.incr(key, amount).await?;
+
+    // Log final value to WAL (INCR is a SET operation)
+    if let Some(ref persistence) = state.persistence {
+        let _ = persistence.log_kv_set(key.to_string(), value.to_string().into_bytes(), None).await;
+    }
 
     Ok(serde_json::json!({ "value": value }))
 }
 
 async fn handle_kv_decr_cmd(
-    store: Arc<KVStore>,
+    state: &AppState,
     request: &Request,
 ) -> Result<serde_json::Value, SynapError> {
     let key = request
@@ -607,13 +647,18 @@ async fn handle_kv_decr_cmd(
         .and_then(|v| v.as_i64())
         .unwrap_or(1);
 
-    let value = store.decr(key, amount).await?;
+    let value = state.kv_store.decr(key, amount).await?;
+
+    // Log final value to WAL (DECR is a SET operation)
+    if let Some(ref persistence) = state.persistence {
+        let _ = persistence.log_kv_set(key.to_string(), value.to_string().into_bytes(), None).await;
+    }
 
     Ok(serde_json::json!({ "value": value }))
 }
 
 async fn handle_kv_mset_cmd(
-    store: Arc<KVStore>,
+    state: &AppState,
     request: &Request,
 ) -> Result<serde_json::Value, SynapError> {
     let pairs_val = request
@@ -642,7 +687,14 @@ async fn handle_kv_mset_cmd(
         pairs.push((key.to_string(), value_bytes));
     }
 
-    store.mset(pairs).await?;
+    state.kv_store.mset(pairs.clone()).await?;
+
+    // Log each SET to WAL
+    if let Some(ref persistence) = state.persistence {
+        for (key, value) in pairs {
+            let _ = persistence.log_kv_set(key, value, None).await;
+        }
+    }
 
     Ok(serde_json::json!({ "success": true }))
 }
@@ -670,7 +722,7 @@ async fn handle_kv_mget_cmd(
 }
 
 async fn handle_kv_mdel_cmd(
-    store: Arc<KVStore>,
+    state: &AppState,
     request: &Request,
 ) -> Result<serde_json::Value, SynapError> {
     let keys_val = request
@@ -681,7 +733,14 @@ async fn handle_kv_mdel_cmd(
     let keys: Vec<String> = serde_json::from_value(keys_val.clone())
         .map_err(|e| SynapError::InvalidRequest(format!("Invalid keys array: {}", e)))?;
 
-    let count = store.mdel(&keys).await?;
+    let count = state.kv_store.mdel(&keys).await?;
+
+    // Log deletions to WAL
+    if count > 0 {
+        if let Some(ref persistence) = state.persistence {
+            let _ = persistence.log_kv_del(keys).await;
+        }
+    }
 
     Ok(serde_json::json!({ "deleted": count }))
 }
