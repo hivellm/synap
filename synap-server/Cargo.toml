@@ -58,3 +58,15 @@ harness = false
 name = "hybrid_bench"
 harness = false
 
+[[bench]]
+name = "stream_bench"
+harness = false
+
+[[bench]]
+name = "pubsub_bench"
+harness = false
+
+[[bench]]
+name = "compression_bench"
+harness = false
+
