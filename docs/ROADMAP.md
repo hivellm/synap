@@ -133,6 +133,20 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 - [ ] Persistence benchmarks
 - [ ] Beta release
 
+#### TypeScript SDK ✅ COMPLETE
+- [x] **StreamableHTTP Client** (full protocol implementation)
+- [x] **KV Store Module** (15+ operations: GET, SET, MSET, SCAN, etc.)
+- [x] **Queue Module** (publish, consume, ACK/NACK, priority)
+- [x] **Authentication Support** (Basic Auth + API Keys)
+- [x] **Full TypeScript Types** (100% type-safe)
+- [x] **Error Handling** (SynapError, NetworkError, TimeoutError)
+- [x] **ESM + CJS** (dual package format)
+- [x] **Zero Dependencies** (only uuid runtime dep)
+- [x] **Browser Compatible** (ES2022+, Fetch API)
+- [x] **Vitest Tests** (KV + Queue + Client tests)
+- [x] **Examples** (basic usage + queue worker)
+- [x] **Complete Documentation** (README + API + examples)
+
 #### Additional Completed Features (Queue System)
 - [x] **9 REST API Endpoints**:
   - POST `/queue/:name` - Create queue
@@ -161,10 +175,11 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 
 ### Deliverables
 - ✅ Complete queue system
-- ✅ Event streaming
-- ✅ Pub/Sub messaging
-- ✅ Persistence layer
-- ✅ SDKs (TypeScript, Python)
+- ✅ SDKs (TypeScript)
+- 🔄 Event streaming (in progress)
+- 🔵 Pub/Sub messaging (planned)
+- 🔵 Persistence layer (planned)
+- 🔵 Python SDK (planned)
 
 ### Success Criteria
 - [ ] 50K queue msgs/sec

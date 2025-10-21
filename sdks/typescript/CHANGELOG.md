@@ -1,0 +1,106 @@
+# Changelog - @synap/client
+
+All notable changes to the Synap TypeScript SDK will be documented in this file.
+
+## [0.2.0-beta.1] - 2025-10-21
+
+### Added
+
+#### Core Features
+- **StreamableHTTP Client** - Full protocol implementation
+- **Key-Value Store** - Complete KV operations
+  - GET, SET, DELETE, EXISTS
+  - INCR, DECR (atomic operations)
+  - MSET, MGET, MDEL (batch operations)
+  - SCAN, KEYS (discovery)
+  - EXPIRE, TTL, PERSIST (expiration management)
+  - FLUSHDB, FLUSHALL, DBSIZE
+  - Full statistics support
+
+#### Queue System
+- **Message Queue Client** - Production-ready queue operations
+  - createQueue with custom configuration
+  - publish/publishString/publishJSON
+  - consume/consumeString/consumeJSON  
+  - ACK/NACK support
+  - Priority messaging (0-9)
+  - Retry logic with Dead Letter Queue
+  - Queue statistics
+  - List, purge, delete operations
+
+#### Authentication
+- **Basic Auth** - Username/password authentication
+- **API Key Auth** - Bearer token support
+- Automatic header injection
+
+#### Developer Experience
+- **Full TypeScript** support with complete type definitions
+- **ESM + CJS** dual package
+- **Zero dependencies** (except uuid)
+- **Error classes** (SynapError, NetworkError, ServerError, TimeoutError)
+- **Debug mode** for request/response logging
+- **Gzip compression** support (automatic)
+- **Browser compatible** (ES2022+)
+
+#### Testing
+- Vitest test framework
+- Coverage reporting
+- Example tests for KV and Queue modules
+
+#### Documentation
+- Complete README with examples
+- API reference
+- Queue worker example
+- TypeScript usage examples
+
+### Technical Details
+
+**Dependencies**:
+- uuid: ^10.0.0 (only runtime dependency)
+
+**Dev Dependencies**:
+- TypeScript 5.7+
+- Vitest 2.1+ (testing)
+- tsup 8.3+ (bundler)
+- ESLint + Prettier (code quality)
+
+**Node.js**: 18+ required  
+**TypeScript**: 5.0+ recommended
+
+### Protocol
+
+Uses **StreamableHTTP** protocol:
+- Request/Response envelope pattern
+- UUID request tracking
+- JSON payload serialization
+- Gzip compression support
+
+### Package Format
+
+- **CJS**: CommonJS for Node.js require()
+- **ESM**: ES Modules for import/export
+- **Types**: Full .d.ts type definitions
+- **Source maps**: Available for debugging
+
+---
+
+## Future Releases
+
+### [0.3.0] - Planned
+- Event Streams support
+- Pub/Sub operations
+- WebSocket client
+- Connection pooling
+- Retry strategies
+- Request interceptors
+
+### [1.0.0] - Planned
+- Production hardening
+- Performance optimizations
+- Complete test suite
+- Advanced features
+
+---
+
+[0.2.0-beta.1]: https://github.com/hivellm/synap/releases/tag/typescript-v0.2.0-beta.1
+
