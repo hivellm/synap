@@ -348,7 +348,6 @@ use std::collections::HashMap;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::StreamConfig;
 
     #[tokio::test]
     async fn test_stream_persistence_append() {

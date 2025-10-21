@@ -71,6 +71,10 @@ name = "compression_bench"
 harness = false
 
 [[bench]]
+name = "replication_bench"
+harness = false
+
+[[bench]]
 name = "kv_persistence_bench"
 harness = false
 

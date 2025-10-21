@@ -407,7 +407,6 @@ impl OptimizedWAL {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicU64;
 
     #[tokio::test]
     async fn test_optimized_wal_batching() {

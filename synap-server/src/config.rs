@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::core::{EvictionPolicy, KVConfig, QueueConfig};
 use crate::persistence::PersistenceConfig;
+use crate::replication::ReplicationConfig;
 
 /// Main server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,6 +17,8 @@ pub struct ServerConfig {
     pub rate_limit: RateLimitConfig,
     #[serde(default)]
     pub persistence: PersistenceConfig,
+    #[serde(default)]
+    pub replication: ReplicationConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +118,7 @@ impl Default for ServerConfig {
                 burst_size: 100,
             },
             persistence: PersistenceConfig::default(),
+            replication: ReplicationConfig::default(),
         }
     }
 }

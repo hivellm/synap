@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::{KVConfig, KVStore, QueueConfig, QueueManager};
+use crate::core::{KVConfig, KVStore, QueueConfig};
 
 #[tokio::test]
 async fn test_wal_append_and_replay() {

@@ -3,6 +3,7 @@ use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use synap_server::persistence::{PersistenceLayer, recover};
+use synap_server::replication::{MasterNode, NodeRole, ReplicaNode, ReplicationConfig};
 use synap_server::{
     AppState, KVStore, PubSubRouter, QueueManager, ServerConfig, StreamConfig, StreamManager,
     create_router,
@@ -24,6 +25,22 @@ struct Args {
     /// Server port
     #[arg(long)]
     port: Option<u16>,
+
+    /// Replication role: master, replica, or standalone
+    #[arg(long, value_parser = ["master", "replica", "standalone"])]
+    role: Option<String>,
+
+    /// Master address for replica nodes (e.g., "127.0.0.1:5500")
+    #[arg(long)]
+    master_address: Option<String>,
+
+    /// Listen address for replica connections (master only)
+    #[arg(long)]
+    replica_listen: Option<String>,
+
+    /// Enable auto-reconnect on replica disconnect
+    #[arg(long, default_value_t = true)]
+    auto_reconnect: bool,
 }
 
 #[tokio::main]
@@ -44,6 +61,26 @@ async fn main() -> Result<()> {
     }
     if let Some(port) = args.port {
         config.server.port = port;
+    }
+
+    // Configure replication from CLI args
+    if let Some(role_str) = &args.role {
+        config.replication.enabled = role_str != "standalone";
+        config.replication.role = match role_str.as_str() {
+            "master" => NodeRole::Master,
+            "replica" => NodeRole::Replica,
+            _ => NodeRole::Standalone,
+        };
+
+        if let Some(master_addr) = &args.master_address {
+            config.replication.master_address = master_addr.parse().ok();
+        }
+
+        if let Some(replica_listen) = &args.replica_listen {
+            config.replication.replica_listen_address = replica_listen.parse().ok();
+        }
+
+        config.replication.auto_reconnect = args.auto_reconnect;
     }
 
     // Initialize tracing based on config

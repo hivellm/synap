@@ -160,7 +160,6 @@ impl AuthMiddleware {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{Action, Permission};
     use super::*;
 
     #[test]

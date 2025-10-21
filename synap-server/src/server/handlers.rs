@@ -1,4 +1,4 @@
-use crate::core::{KVStore, Message, MessageSender, QueueManager, SynapError};
+use crate::core::{KVStore, Message, QueueManager, SynapError};
 use crate::protocol::{Request, Response};
 use axum::{
     Json,

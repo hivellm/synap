@@ -1,4 +1,4 @@
-use super::types::{Operation, PersistenceError, Result, WALConfig};
+use super::types::{Operation, Result, WALConfig};
 use super::wal_optimized::OptimizedWAL;
 use crate::core::queue::{QueueManager, QueueMessage};
 use std::collections::HashMap;

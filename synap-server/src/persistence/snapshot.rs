@@ -159,7 +159,7 @@ impl SnapshotManager {
         let latest = &snapshots[snapshots.len() - 1];
         info!("Loading snapshot from {:?}", latest);
 
-        let mut file = File::open(latest).await?;
+        let file = File::open(latest).await?;
         let mut reader = BufReader::new(file);
 
         // Read header: magic (8 bytes) + version (1 byte)

@@ -4,6 +4,7 @@ pub mod config;
 pub mod core;
 pub mod persistence;
 pub mod protocol;
+pub mod replication;
 pub mod server;
 
 // Re-export commonly used types
@@ -19,4 +20,7 @@ pub use core::{
     TopicInfo,
 };
 pub use protocol::{Request, Response};
+pub use replication::{
+    MasterNode, NodeRole, ReplicaNode, ReplicationConfig, ReplicationLog, ReplicationStats,
+};
 pub use server::{AppState, create_router, get_mcp_tools, handle_mcp_tool};
