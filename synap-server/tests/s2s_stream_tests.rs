@@ -309,7 +309,7 @@ async fn test_stream_stats_command() {
     .await;
 
     assert_eq!(res["success"], true);
-    assert_eq!(res["payload"]["room"], "stats_room");
+    assert_eq!(res["payload"]["name"], "stats_room");  // RoomStats has "name" field
     assert!(res["payload"]["message_count"].as_u64().unwrap() >= 3);
 }
 

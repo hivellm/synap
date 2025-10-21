@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎉 Phase 2 Complete - Performance + Persistence + Event Streams ✅
 
-**Status**: Production Ready | **Tests**: 246/248 (99.19%) | **Features**: KV + Queue + Streams + Pub/Sub + Persistence
+**Status**: Production Ready | **Tests**: 258/260 (99.23%) | **Features**: KV + Queue + Streams + Pub/Sub + Persistence
 
 #### Executive Summary
 Implementação completa com resultados excepcionais:
@@ -18,7 +18,7 @@ Implementação completa com resultados excepcionais:
 - **Event Streams**: Sistema completo com ring buffer e offset-based consumption
 - **Pub/Sub System**: Topic-based messaging com wildcard subscriptions (* e #)
 - **Queue System**: Zero-duplicate guarantee com 581K msgs/s
-- **Tests**: 99.19% coverage (246/248 passing)
+- **Tests**: 99.23% coverage (258/260 passing)
 
 ### Added - Redis-Level Performance Optimizations ✅ COMPLETE
 
@@ -136,14 +136,16 @@ Implementação completa com resultados excepcionais:
   - Configurable retention time (default: 1 hour)
   - Background task compacts old messages
   - Configurable compaction interval (default: 60s)
-- **6 REST API Endpoints**:
-  - POST /stream/:room - Create room
-  - POST /stream/:room/publish - Publish event
-  - GET /stream/:room/consume/:subscriber_id - Consume (offset + limit params)
-  - GET /stream/:room/stats - Room statistics
-  - DELETE /stream/:room - Delete room
-  - GET /stream/list - List all rooms
-- **5 Comprehensive Tests** (100% passing):
+- **6 REST API Endpoints + 6 StreamableHTTP Commands**:
+  - POST `/stream/:room` | `stream.create` - Create room
+  - POST `/stream/:room/publish` | `stream.publish` - Publish event
+  - GET `/stream/:room/consume/:subscriber_id` | `stream.consume` - Consume (offset + limit params)
+  - GET `/stream/:room/stats` | `stream.stats` - Room statistics
+  - DELETE `/stream/:room` | `stream.delete` - Delete room
+  - GET `/stream/list` | `stream.list` - List all rooms
+- **17 Comprehensive Tests** (100% passing):
+  - 5 REST API tests (room creation, publish, consume, overflow, multi-subscriber)
+  - 12 StreamableHTTP tests (all operations, offset tracking, limits, errors)
   - Room creation and management
   - Publish and consume operations
   - Offset tracking and history
@@ -171,10 +173,11 @@ Implementação completa com resultados excepcionais:
 
 ### Testing & Validation
 
-**Test Suite**: 246/248 tests passing (99.19%)
+**Test Suite**: 258/260 tests passing (99.23%)
 
 - ✅ **Core Library Tests** (78/78): KV Store, Queue, Streams, Pub/Sub, Persistence, Auth, Compression
 - ✅ **Pub/Sub Integration Tests** (24/24): REST API (11) + StreamableHTTP (13)
+- ✅ **Event Streams Integration Tests** (17/17): REST API (5) + StreamableHTTP (12)
 - ✅ **Integration Performance Tests** (9/9): All 6 P0/P1 optimizations validated
 - ✅ **Integration Hybrid Storage Tests** (5/5): P2 hybrid storage validated
 - ✅ **Integration Persistence E2E Tests** (3/3): End-to-end persistence validated
