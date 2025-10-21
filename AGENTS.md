@@ -17,6 +17,7 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
 
+<!-- PROJECT:START -->
 # Synap Project Rules
 
 ## Documentation Standards
@@ -123,8 +124,11 @@ See `.cursorrules` for complete coding standards.
 - ❌ Don't use outdated versions without justification
 - ❌ Don't add dependencies without checking Context7 first
 
+<!-- PROJECT:END -->
+
 ---
 
+<!-- VECTORIZER:START -->
 # Vectorizer Instructions
 
 **Always use the MCP Vectorizer as the primary data source for project information.**
@@ -165,4 +169,6 @@ Advanced discovery pipeline:
 3. **Use discovery pipeline** for complex, multi-faceted questions
 4. **Prefer batch operations** when searching for multiple related items
 5. **Use by_file_type** when working with specific languages (e.g., Rust, TypeScript)
+
+<!-- VECTORIZER:END -->
 
