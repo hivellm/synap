@@ -1,60 +1,66 @@
-# Synap
+# ⚡ Synap
 
-**High-Performance In-Memory Key-Value Store & Message Broker**
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.85%2B)-orange.svg)](https://www.rust-lang.org/)
+[![Tests](https://img.shields.io/badge/tests-206%2F208%20(99.04%25)-brightgreen.svg)](#testing--quality)
+[![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen.svg)](docs/TEST_COVERAGE_REPORT.md)
+[![Version](https://img.shields.io/badge/version-0.2.0--beta-blue.svg)](#project-status)
+
+> **High-Performance In-Memory Key-Value Store & Message Broker**
 
 Synap is a modern, high-performance data infrastructure system built in Rust, combining the best features of Redis, RabbitMQ, and Kafka into a unified platform for real-time applications.
 
-## Overview
+## 🎯 Overview
 
 Synap provides four core capabilities in a single, cohesive system:
 
-1. **Memory Key-Value Store** - Radix-tree based in-memory storage with O(k) lookup
-2. **Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
-3. **Event Streams** - Kafka-style room-based broadcasting with message history
-4. **Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
+1. **💾 Memory Key-Value Store** - Radix-tree based in-memory storage with O(k) lookup
+2. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
+3. **📡 Event Streams** - Kafka-style room-based broadcasting with message history
+4. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
 
-## Key Features
+## ✨ Key Features
 
-### Performance
-- **Sub-microsecond Operations**: 87ns for GET operations (20,000x better than target)
-- **High Throughput**: 10M+ ops/sec sequential writes (200x better than baseline)
-- **Efficient Memory**: 92MB for 1M keys (54% reduction vs baseline)
-- **64-Way Sharding**: Linear scalability with CPU core count
-- **Async I/O**: Built on Tokio for non-blocking operations
-- **Smart Compression**: LZ4/Zstd compression with minimal CPU overhead
-- **Hot Data Cache**: Decompressed cache for frequently accessed data
+### ⚡ Performance
+- **🚀 Sub-microsecond Operations**: 87ns for GET operations (20,000x better than target)
+- **📈 High Throughput**: 10M+ ops/sec sequential writes (200x better than baseline)
+- **💾 Efficient Memory**: 92MB for 1M keys (54% reduction vs baseline)
+- **🔄 64-Way Sharding**: Linear scalability with CPU core count
+- **⚙️ Async I/O**: Built on Tokio for non-blocking operations
+- **🗜️ Smart Compression**: LZ4/Zstd compression with minimal CPU overhead
+- **🔥 Hot Data Cache**: Decompressed cache for frequently accessed data
 
-### Durability
-- **Optional Persistence**: WAL + Snapshots for crash recovery
-- **Replication**: Master-slave for data redundancy
-- **PACELC Model**: PC/EL (Consistency during partition, Latency in normal operation)
-- **Recovery Time**: 1-10 seconds from snapshots
+### 💪 Durability
+- **💾 Optional Persistence**: WAL + Snapshots for crash recovery
+- **🔄 Replication**: Master-slave for data redundancy
+- **⚖️ PACELC Model**: PC/EL (Consistency during partition, Latency in normal operation)
+- **⏱️ Recovery Time**: 1-10 seconds from snapshots
 
-### Reliability
-- **Master-Slave Replication**: 1 write master + N read replicas
-- **Message Acknowledgment**: Guaranteed message delivery with ACK/NACK
-- **Event Replay**: Stream history and replay capabilities
-- **Automatic Failover**: Manual promotion with documented procedures
+### 🛡️ Reliability
+- **🔄 Master-Slave Replication**: 1 write master + N read replicas
+- **✅ Message Acknowledgment**: Guaranteed message delivery with ACK/NACK
+- **🔁 Event Replay**: Stream history and replay capabilities
+- **🔀 Automatic Failover**: Manual promotion with documented procedures
 
-### Developer Experience
-- **StreamableHTTP Protocol**: Simple HTTP-based streaming protocol
-- **WebSocket Support**: Persistent connections for real-time updates
-- **Multi-language SDKs**: TypeScript, Python, and Rust clients
-- **Rich Examples**: Chat, event broadcasting, task queues, and more
+### 👨‍💻 Developer Experience
+- **🌊 StreamableHTTP Protocol**: Simple HTTP-based streaming protocol
+- **🔌 WebSocket Support**: Persistent connections for real-time updates
+- **📚 Multi-language SDKs**: TypeScript, Python, and Rust clients
+- **📖 Rich Examples**: Chat, event broadcasting, task queues, and more
 
-### Protocol Support
-- **MCP (Model Context Protocol)**: Integration with AI tools and agents
-- **UMICP (Universal Matrix Inter-Communication Protocol)**: Matrix operations and federated communication
-- **REST API**: Standard HTTP endpoints for all operations
-- **WebSocket API**: Real-time bidirectional communication
+### 🔗 Protocol Support
+- **🤖 MCP (Model Context Protocol)**: Integration with AI tools and agents
+- **🌐 UMICP (Universal Matrix Inter-Communication Protocol)**: Matrix operations and federated communication
+- **📡 REST API**: Standard HTTP endpoints for all operations
+- **🔌 WebSocket API**: Real-time bidirectional communication
 
-### Scalability
-- **Read Scaling**: Multiple replica nodes for distributed reads
-- **Event Rooms**: Isolated event streams per room/channel
-- **Topic Routing**: Efficient pub/sub with wildcard matching
-- **Connection Pooling**: Client-side connection management
+### 📊 Scalability
+- **📖 Read Scaling**: Multiple replica nodes for distributed reads
+- **🏠 Event Rooms**: Isolated event streams per room/channel
+- **🔀 Topic Routing**: Efficient pub/sub with wildcard matching
+- **🔗 Connection Pooling**: Client-side connection management
 
-## Architecture
+## 🏗️ Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -73,9 +79,9 @@ Synap provides four core capabilities in a single, cohesive system:
 └─────────────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+## 🚀 Quick Start
 
-### Installation
+### 📦 Installation
 
 **From Package Managers**:
 
@@ -98,7 +104,7 @@ docker pull hivellm/synap:latest
 docker run -d -p 15500:15500 hivellm/synap:latest
 ```
 
-**From Source**:
+**🛠️ From Source**:
 
 ```bash
 # Clone repository
@@ -114,7 +120,7 @@ cargo build --release --features full
 
 See [Packaging & Distribution](docs/PACKAGING_AND_DISTRIBUTION.md) for detailed installation instructions.
 
-### Basic Usage
+### 💻 Basic Usage
 
 ```bash
 # Start server (default port 15500)
@@ -142,24 +148,24 @@ curl -X POST http://localhost:15500/pubsub/publish \
   -d '{"topic": "notifications.email", "message": "New order"}'
 ```
 
-## Use Cases
+## 🎯 Use Cases
 
-### Real-Time Chat
+### 💬 Real-Time Chat
 Use event streams for room-based messaging with message history and guaranteed delivery.
 
-### Task Distribution
+### 📋 Task Distribution
 Leverage acknowledgment queues for distributed task processing with retry logic.
 
-### Cache Layer
+### ⚡ Cache Layer
 Utilize key-value store as a high-speed cache with TTL support.
 
-### Event Broadcasting
+### 📡 Event Broadcasting
 Implement pub/sub for system-wide notifications and event distribution.
 
-### Microservices Communication
+### 🔄 Microservices Communication
 Use queues for reliable inter-service messaging with delivery guarantees.
 
-## Technology Stack
+## 🛠️ Technology Stack
 
 - **Language**: Rust (Edition 2024)
 - **Runtime**: Tokio (async/await)
@@ -168,42 +174,42 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 - **Serialization**: serde (JSON, MessagePack)
 - **Protocols**: StreamableHTTP + WebSocket + MCP + UMICP
 
-## Documentation
+## 📚 Documentation
 
-### Core Documentation
+### 📖 Core Documentation
 - **[Architecture](docs/ARCHITECTURE.md)** - System architecture and components
 - **[Roadmap](docs/ROADMAP.md)** - Development roadmap and timeline
 - **[Configuration](docs/CONFIGURATION.md)** - Complete configuration reference
 - **[CLI Guide](docs/CLI_GUIDE.md)** - Synap CLI usage and commands
 
-### Security & Authentication
+### 🔒 Security & Authentication
 - **[Authentication](docs/AUTHENTICATION.md)** - Complete auth guide (users, roles, API keys, ACL)
 - **[Queue Concurrency](docs/QUEUE_CONCURRENCY_TESTS.md)** - Zero-duplicate guarantees
 
-### API & Protocols
+### 🌐 API & Protocols
 - **[REST API](docs/api/REST_API.md)** - Complete REST API documentation
 - **[StreamableHTTP](docs/protocol/STREAMABLE_HTTP.md)** - StreamableHTTP protocol
 - **[MCP Integration](docs/protocol/MCP_INTEGRATION.md)** - Model Context Protocol (planned)
 - **[UMICP Integration](docs/protocol/UMICP_INTEGRATION.md)** - UMICP protocol (planned)
 
-### Performance & Testing
+### 📊 Performance & Testing
 - **[Benchmark Results](docs/BENCHMARK_RESULTS.md)** - KV performance metrics
 - **[Testing Strategy](docs/TESTING.md)** - Test coverage and approach
 - **[Phase 1 Summary](docs/PHASE1_SUMMARY.md)** - Phase 1 implementation details
 
-### Development
+### 🔧 Development
 - **[Development Guide](docs/DEVELOPMENT.md)** - Setup and contribution guide
 - **[Design Decisions](docs/DESIGN_DECISIONS.md)** - Technical choices
 - **[Project DAG](docs/PROJECT_DAG.md)** - Component dependencies
 - **[Deployment](docs/DEPLOYMENT.md)** - Production deployment (planned)
 - **[Packaging](docs/PACKAGING_AND_DISTRIBUTION.md)** - Distribution packages (planned)
 
-### Project Planning
+### 📋 Project Planning
 
 - **[Roadmap](docs/ROADMAP.md)** - Development roadmap and timeline
 - **[Project DAG](docs/PROJECT_DAG.md)** - Component dependencies and implementation order
 
-### Component Specifications
+### 🧩 Component Specifications
 
 - **[Key-Value Store](docs/specs/KEY_VALUE_STORE.md)** - Radix-tree storage system
 - **[Queue System](docs/specs/QUEUE_SYSTEM.md)** - Message queues with ACK
@@ -211,24 +217,24 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 - **[Pub/Sub](docs/specs/PUBSUB.md)** - Topic-based messaging
 - **[Replication](docs/specs/REPLICATION.md)** - Master-slave architecture
 
-### SDKs
+### 📦 SDKs
 
 - **[TypeScript SDK](docs/sdks/TYPESCRIPT.md)** - Node.js and browser support
 - **[Python SDK](docs/sdks/PYTHON.md)** - Async/sync Python client
 - **[Rust SDK](docs/sdks/RUST.md)** - Native Rust client library
 
-### Examples
+### 💡 Examples
 
 - **[Real-Time Chat](docs/examples/CHAT_SAMPLE.md)** - Multi-room chat application
 - **[Event Broadcasting](docs/examples/EVENT_BROADCAST.md)** - System-wide events
 - **[Task Queue](docs/examples/TASK_QUEUE.md)** - Distributed task processing
 - **[Pub/Sub Pattern](docs/examples/PUBSUB_PATTERN.md)** - Notification system
 
-## Performance
+## 📊 Performance
 
-### Achieved (Benchmarked - January 2025)
+### ✅ Achieved (Benchmarked - January 2025)
 
-**Redis-Level Optimizations Complete** ✅
+**🚀 Redis-Level Optimizations Complete** ✅
 
 | Operation | Target | Actual | Status |
 |-----------|--------|--------|--------|
@@ -241,7 +247,7 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 | Queue Consume | < 1ms | **~1.5µs publish** | ✅ **667x better** |
 | Queue Throughput | 10K msg/s | **581K msgs/s** | ✅ **58x better** |
 
-### Optimization Results
+### 📈 Optimization Results
 
 | Metric | Before | After | Improvement |
 |--------|--------|-------|-------------|
@@ -251,7 +257,7 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 | Concurrent ops | Limited | **64x parallel** | Linear scaling |
 | TTL cleanup CPU | 100% | **1-10%** | **10-100x reduction** |
 
-### Planned
+### 🔜 Planned
 
 | Operation | Target | Status |
 |-----------|--------|--------|
@@ -263,7 +269,7 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 
 See [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md) and [docs/TEST_COVERAGE_REPORT.md](docs/TEST_COVERAGE_REPORT.md) for detailed analysis.
 
-## Comparison
+## ⚖️ Comparison
 
 | Feature | Synap | Redis | RabbitMQ | Kafka |
 |---------|-------|-------|----------|-------|
@@ -292,24 +298,24 @@ See [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md) and [docs/TEST_COVERA
 
 **Legend**: ✅ Implemented | 🔄 In Progress | ❌ Not Available
 
-## License
+## 📄 License
 
-MIT License - See LICENSE for details
+MIT License - See [LICENSE](LICENSE) for details.
 
-## Contributing
+## 🤝 Contributing
 
 See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution guidelines.
 
-## Project Status
+## 📊 Project Status
 
 **Status**: ✅ Phase 1 Complete | 🟡 Phase 2 In Progress  
 **Version**: 0.2.0-beta (in development)  
 **Edition**: Rust 2024 (nightly 1.85+)  
 **Last Updated**: October 21, 2025
 
-### Implementation Complete ✅
+### ✅ Implementation Complete
 
-#### Phase 1: Foundation (v0.1.0-alpha)
+#### 🎯 Phase 1: Foundation (v0.1.0-alpha)
 - ✅ Radix tree-based key-value store
 - ✅ GET/SET/DELETE + Atomic (INCR/DECR)
 - ✅ Batch operations (MSET/MGET/MDEL)
@@ -320,9 +326,9 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - ✅ Comprehensive error handling
 - ✅ Advanced logging (JSON + Pretty formats)
 
-#### Phase 2: Core Features (v0.2.0-beta) - In Progress
+#### 🔄 Phase 2: Core Features (v0.2.0-beta) - In Progress
 
-**Queue System** ✅ COMPLETE
+**📨 Queue System** ✅ COMPLETE
 - ✅ FIFO with priority support (0-9)
 - ✅ ACK/NACK mechanism + retry logic
 - ✅ Dead Letter Queue (DLQ)
@@ -331,7 +337,7 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - ✅ **Zero-duplicate guarantee** (5 concurrency tests)
 - ✅ Performance: 7,500+ msg/s with 50 concurrent consumers
 
-**Authentication & Authorization** ✅ COMPLETE
+**🔒 Authentication & Authorization** ✅ COMPLETE
 - ✅ **User management** (bcrypt password hashing)
 - ✅ **Role-Based Access Control** (admin, readonly, custom roles)
 - ✅ **API Keys** (expiration, IP filtering, usage tracking)
@@ -340,29 +346,29 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - ✅ **Multi-tenant support** via permission patterns
 - ✅ **23 security tests** (100% auth module coverage)
 
-**Compression** ✅ COMPLETE
+**🗜️ Compression** ✅ COMPLETE
 - ✅ LZ4 (fast compression)
 - ✅ Zstandard (better ratio)
 - ✅ Configurable thresholds
 - ✅ 6 comprehensive tests
 
-**Event Streams** 🔄 IN PROGRESS
+**📡 Event Streams** 🔄 IN PROGRESS
 - 🔄 Ring buffer implementation
 - 🔄 Room-based isolation
 - 🔄 Message history
 - 🔄 Offset-based consumption
 
-**Pub/Sub System** 🔵 PLANNED
+**🔔 Pub/Sub System** 🔵 PLANNED
 - Topic routing
 - Wildcard subscriptions
 - Fan-out messaging
 
-**Persistence** 🔵 PLANNED
+**💾 Persistence** 🔵 PLANNED
 - WAL (Write-Ahead Log)
 - Snapshot system
 - Recovery procedures
 
-#### Testing & Quality
+#### 🧪 Testing & Quality
 - ✅ **206/208 tests passing (99.04%)**
   - 62 library tests (KV, Queue, Persistence, Auth, Compression)
   - 9 integration performance tests (all optimizations validated)
@@ -377,7 +383,7 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - ✅ Clean `cargo fmt` and `cargo clippy`
 - ✅ Comprehensive documentation (10+ docs)
 
-### Quick Start
+### 🚀 Quick Start
 
 ```bash
 # Clone and build
@@ -405,7 +411,7 @@ curl -X POST http://localhost:15500/kv/set \
 curl http://localhost:15500/kv/get/test
 ```
 
-### Queue System Examples
+### 📨 Queue System Examples
 
 ```bash
 # Create queue
@@ -427,7 +433,7 @@ curl -X POST http://localhost:15500/queue/jobs/ack \
   -d '{"message_id": "xxx-xxx-xxx"}'
 ```
 
-### Authentication Examples
+### 🔒 Authentication Examples
 
 ```bash
 # Basic Auth (Redis-style)
@@ -442,7 +448,7 @@ curl http://localhost:15500/queue/list?api_key=sk_XXXXX...
 
 See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) for complete authentication guide.
 
-### Next Phases
+### 🔜 Next Phases
 
 **Phase 2 (Q4 2025)**: Event Streams, Pub/Sub, Persistence  
 **Phase 3 (Q1 2026)**: Replication, Advanced Protocols  
