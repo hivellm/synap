@@ -65,19 +65,19 @@ impl AclRule {
 
     /// Check if context has access
     pub fn check_access(&self, ctx: &AuthContext, action: Action) -> bool {
-        // Check if action is allowed
-        if !self.allowed_actions.contains(&action) && !self.allowed_actions.contains(&Action::All) {
-            return false;
-        }
-
         // If no auth required, allow
         if !self.require_auth {
             return true;
         }
 
-        // Admin always has access
+        // Admin always has access (check BEFORE action validation)
         if ctx.is_admin {
             return true;
+        }
+
+        // Check if action is allowed
+        if !self.allowed_actions.contains(&action) && !self.allowed_actions.contains(&Action::All) {
+            return false;
         }
 
         // Check if authenticated

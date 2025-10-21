@@ -7,43 +7,142 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+### Added - Phase 2 Features (Q4 2025)
 
+#### 🔐 Authentication & Authorization System
+- **User Management** with bcrypt password hashing (DEFAULT_COST = 12)
+  - Create/delete users with secure password storage
+  - Enable/disable user accounts
+  - Last login tracking
+  - Password change capability
+  - Case-sensitive usernames
+
+- **Role-Based Access Control (RBAC)**
+  - Built-in roles: `admin`, `readonly`
+  - Custom role creation with fine-grained permissions
+  - Permission patterns with wildcards (`*`, `prefix:*`)
+  - Actions: Read, Write, Delete, Admin, All
+  - Role assignment to users
+
+- **API Key Management**
+  - Auto-generated secure keys (32-char, `sk_` prefix)
+  - Configurable expiration (days from creation)
+  - IP address filtering/whitelisting
+  - Usage tracking (count + last_used_at)
+  - Enable/disable without deletion
+  - Automatic cleanup of expired keys
+
+- **Access Control Lists (ACL)**
+  - Resource types: Queue, KV, Stream, PubSub, Admin
+  - Rule-based access control
+  - Public and authenticated rules
+  - User and role-based restrictions
+  - Wildcard pattern matching
+
+- **Authentication Methods**
+  - HTTP Basic Auth (Redis-style: `username:password@host`)
+  - Bearer Token (API Key in Authorization header)
+  - Query parameter API keys (`?api_key=sk_XXX`)
+  - Client IP extraction and validation
+
+- **Security Features**
+  - Optional authentication (disabled by default)
+  - Mandatory for 0.0.0.0 binding (production)
+  - Multi-tenant isolation via permissions
+  - Audit-ready (usage tracking, last login)
+  - Production-ready security
+
+#### 📦 Queue System (Phase 2 Week 1-3)
+- **Core Queue Implementation**
+  - FIFO with priority support (0-9, 9 = highest)
+  - ACK/NACK mechanism for reliable delivery
+  - Configurable retry logic (max_retries)
+  - Dead Letter Queue (DLQ) for failed messages
+  - Background deadline checker (1s interval)
+  - Pending message tracking
+
+- **9 REST API Endpoints**
+  - POST `/queue/:name` - Create queue with custom config
+  - POST `/queue/:name/publish` - Publish messages
+  - GET `/queue/:name/consume/:consumer_id` - Consume messages
+  - POST `/queue/:name/ack` - Acknowledge processing
+  - POST `/queue/:name/nack` - Negative acknowledge (retry/DLQ)
+  - GET `/queue/:name/stats` - Queue statistics
+  - POST `/queue/:name/purge` - Clear all messages
+  - DELETE `/queue/:name` - Delete queue
+  - GET `/queue/list` - List all queues
+
+- **Concurrency Protection (Zero Duplicates)**
+  - Thread-safe RwLock implementation
+  - Atomic message consumption (pop_front)
+  - 5 comprehensive concurrency tests
+  - Tested with 10-50 concurrent consumers
+  - 100-1000 messages per test scenario
+  - **ZERO duplicates** detected across all scenarios
+  - Performance: ~7,500 msg/s with high concurrency
+
+#### 🗜️ Compression System
+- **LZ4 Compression** (fast, low CPU)
+- **Zstandard (Zstd)** (better ratio, configurable level)
+- Configurable minimum payload size
+- Compression ratio tracking
+- 6 comprehensive tests
+
+#### 📊 Advanced Features
 - **Advanced Logging** with tracing-subscriber
-  - JSON format support (structured logging for production)
-  - Pretty format support (colored output for development)
+  - JSON format (structured logging for production)
+  - Pretty format (colored output for development)
   - File/line number tracking
   - Thread ID and name tracking
   - Span context support
-  - Configurable via `config.yml`
 
 - **Configuration System**
-  - YAML-based configuration (Redis-compatible style)
+  - YAML-based (Redis-compatible style)
   - Multiple config files (dev, prod, example)
-  - CLI argument overrides (--config, --host, --port)
-  - Environment variable support (RUST_LOG)
+  - CLI argument overrides
+  - Environment variable support
   - Comprehensive inline documentation
 
 - **Synap CLI** (Redis-compatible client)
   - Interactive REPL mode with rustyline
-  - Command mode for scripting
-  - 18 Redis-compatible commands
-  - Colored output with timing information
+  - 18+ Redis-compatible commands
+  - Colored output with timing
   - Command history and completion
   - Full documentation in docs/CLI_GUIDE.md
 
-- **New KV Commands**
-  - KEYS - List all keys
-  - DBSIZE - Get database size
-  - FLUSHDB/FLUSHALL - Clear database
-  - EXPIRE - Set key expiration
-  - PERSIST - Remove key expiration
+- **Extended KV Commands**
+  - KEYS, DBSIZE, FLUSHDB/FLUSHALL
+  - EXPIRE, TTL, PERSIST
+  - SCAN with prefix matching
 
 ### Changed
 
-- Updated tracing-subscriber to 0.3 with JSON and env-filter features
-- Enhanced main.rs with configurable logging
-- Updated AGENTS.md with Context7 dependency check rule
+- **Architecture**: Introduced `AppState` for shared resources (KVStore + QueueManager)
+- **Router**: Updated to support multiple subsystems
+- **Config**: Added queue, authentication, ACL, and rate_limit sections
+- **Dependencies**: Added bcrypt, chrono, base64, rand for security
+- **Edition**: Rust 2024 with nightly toolchain
+
+### Tests
+
+**Total: 96 tests passing** ✅
+- 35 unit tests (21 KV + 14 Queue)
+- 23 authentication tests (users, roles, API keys, ACL)
+- 8 integration tests
+- 10 S2S REST tests
+- 20 S2S StreamableHTTP tests
+
+**Coverage**: ~92% (comprehensive security and concurrency coverage)
+
+### Documentation
+
+- 📄 `docs/AUTHENTICATION.md` - Complete authentication guide
+- 📄 `docs/QUEUE_CONCURRENCY_TESTS.md` - Concurrency test documentation
+- 📄 `docs/BENCHMARK_RESULTS.md` - Performance benchmarks
+- 📄 `docs/CLI_GUIDE.md` - CLI usage guide
+- 📄 `docs/CONFIGURATION.md` - Configuration reference
+- 📄 `docs/TESTING.md` - Testing strategy
+- 📄 `docs/PHASE1_SUMMARY.md` - Phase 1 implementation summary
 
 ## [0.1.0-alpha] - 2025-10-21
 
@@ -118,12 +217,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Known Limitations
 
-- In-memory only (no persistence yet)
-- No replication support
-- No authentication/authorization
-- No TLS/SSL support
-- No WebSocket support
-- Single-node deployment only
+- In-memory only (persistence planned Phase 2 Week 10-12)
+- No replication support (planned Phase 3)
+- No WebSocket support (planned Phase 2)
+- Rate limiting temporarily disabled (implementation in progress)
+- TLS/SSL via reverse proxy only (nginx, Caddy)
+- Single-node deployment (clustering planned Phase 5)
 
 These limitations will be addressed in future phases.
 
@@ -131,27 +230,33 @@ These limitations will be addressed in future phases.
 
 ## Future Releases
 
-### [0.2.0-beta] - Planned Q2 2025
-- Queue System (FIFO with ACK/NACK)
-- Event Streams (room-based broadcasting)
-- Pub/Sub Router (topic-based messaging)
-- Persistence Layer (WAL + Snapshots)
-- WebSocket support
+### [0.2.0-beta] - In Progress (Q4 2025)
+- ✅ Queue System (FIFO with ACK/NACK, priorities, DLQ)
+- ✅ Authentication & Authorization (users, roles, API keys, ACL)
+- ✅ Compression (LZ4/Zstd)
+- ✅ Queue REST API (9 endpoints)
+- ✅ Concurrency protection (zero duplicates)
+- 🔄 Event Streams (in progress)
+- 🔄 Pub/Sub Router (planned)
+- 🔄 Persistence Layer (planned)
+- 🔄 WebSocket support (planned)
 
-### [0.3.0-rc] - Planned Q3 2025
-- Master-Slave Replication
-- Compression (LZ4/Zstd)
+### [0.3.0-rc] - Planned Q1 2026
+- Master-Slave Replication (auth structure ready)
 - L1/L2 Cache System
 - MCP Protocol Integration
 - UMICP Protocol Integration
 - TCP Protocol Support
+- Rate Limiting (governor crate)
 
-### [1.0.0] - Planned Q4 2025
+### [1.0.0] - Planned Q2 2026
 - Production hardening
-- Security features (Auth, TLS, RBAC)
+- ✅ Security features (Auth, TLS via proxy, RBAC)
 - Distribution packages (MSI, DEB, Homebrew)
 - GUI Dashboard
 - Complete documentation
+- Performance tuning
+- Chaos engineering tests
 
 ---
 

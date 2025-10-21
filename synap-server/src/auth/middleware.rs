@@ -162,7 +162,6 @@ impl AuthMiddleware {
 mod tests {
     use super::super::{Action, Permission};
     use super::*;
-    use std::str::FromStr;
 
     #[test]
     fn test_get_client_ip() {
