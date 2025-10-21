@@ -31,6 +31,13 @@ pub fn create_router(
         .route("/kv/stats", get(handlers::kv_stats))
         // Persistence endpoints
         .route("/snapshot", post(handlers::trigger_snapshot))
+        // Event Stream REST API endpoints
+        .route("/stream/:room", post(handlers::stream_create_room))
+        .route("/stream/:room/publish", post(handlers::stream_publish))
+        .route("/stream/:room/consume/:subscriber_id", get(handlers::stream_consume))
+        .route("/stream/:room/stats", get(handlers::stream_room_stats))
+        .route("/stream/:room", delete(handlers::stream_delete_room))
+        .route("/stream/list", get(handlers::stream_list_rooms))
         // Queue REST API endpoints
         .route("/queue/:name", post(handlers::queue_create))
         .route("/queue/:name/publish", post(handlers::queue_publish))

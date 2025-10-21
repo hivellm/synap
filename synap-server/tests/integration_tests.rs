@@ -11,6 +11,7 @@ async fn spawn_test_server() -> String {
     let state = AppState {
         kv_store,
         queue_manager: None,
+        stream_manager: None,
         persistence: None,
     };
     let app = create_router(state, false, 1000);

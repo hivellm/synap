@@ -15,6 +15,7 @@ async fn spawn_test_server() -> String {
     let state = AppState {
         kv_store,
         queue_manager: Some(queue_manager),
+        stream_manager: None,
         persistence: None,
     };
 

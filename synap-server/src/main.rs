@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use synap_server::{AppState, KVStore, QueueManager, ServerConfig, create_router};
+use synap_server::{AppState, KVStore, QueueManager, StreamManager, StreamConfig, ServerConfig, create_router};
 use synap_server::persistence::{PersistenceLayer, recover};
 use tracing::{info, warn};
 
@@ -128,6 +128,14 @@ async fn main() -> Result<()> {
         info!("Queue system disabled");
     }
 
+    // Initialize stream manager (enabled by default for now)
+    let stream_manager = {
+        let stream_mgr = Arc::new(StreamManager::new(StreamConfig::default()));
+        stream_mgr.clone().start_compaction_task();
+        info!("Event Stream system enabled");
+        Some(stream_mgr)
+    };
+
     // Create persistence layer if enabled
     let persistence = if config.persistence.enabled {
         match PersistenceLayer::new(config.persistence.clone()).await {
@@ -152,10 +160,11 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Create application state with persistence
+    // Create application state with persistence and streams
     let app_state = AppState {
         kv_store,
         queue_manager,
+        stream_manager,
         persistence,
     };
 
