@@ -371,11 +371,11 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 ### Queue System
 | Feature | Phase | Status |
 |---------|-------|--------|
-| FIFO queue | Phase 2 | 🔵 Planned |
-| Priorities | Phase 2 | 🔵 Planned |
-| ACK/NACK | Phase 2 | 🔵 Planned |
-| Retry logic | Phase 2 | 🔵 Planned |
-| DLQ | Phase 2 | 🔵 Planned |
+| FIFO queue | Phase 2 | ✅ Complete |
+| Priorities | Phase 2 | ✅ Complete |
+| ACK/NACK | Phase 2 | ✅ Complete |
+| Retry logic | Phase 2 | ✅ Complete |
+| DLQ | Phase 2 | ✅ Complete |
 | Persistence | Phase 2 | 🔵 Planned |
 
 ### Event Streams
