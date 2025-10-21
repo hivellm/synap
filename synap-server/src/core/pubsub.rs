@@ -5,7 +5,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::debug;
+use tokio::sync::mpsc;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use super::SynapError;
@@ -16,6 +17,9 @@ pub type SubscriberId = String;
 /// Unique identifier for a message
 pub type MessageId = String;
 
+/// Message sender channel for WebSocket delivery
+pub type MessageSender = mpsc::UnboundedSender<Message>;
+
 /// Pub/Sub Router - manages topic-based publish/subscribe messaging
 #[derive(Clone)]
 pub struct PubSubRouter {
@@ -24,6 +28,9 @@ pub struct PubSubRouter {
     
     /// Wildcard subscriptions (separate for efficiency)
     wildcard_subs: Arc<RwLock<Vec<WildcardSubscription>>>,
+    
+    /// Active WebSocket connections by subscriber_id
+    connections: Arc<RwLock<HashMap<SubscriberId, MessageSender>>>,
     
     /// Statistics
     stats: Arc<RwLock<PubSubStats>>,
@@ -102,6 +109,7 @@ impl PubSubRouter {
         Self {
             topics: Arc::new(RwLock::new(Trie::new())),
             wildcard_subs: Arc::new(RwLock::new(Vec::new())),
+            connections: Arc::new(RwLock::new(HashMap::new())),
             stats: Arc::new(RwLock::new(PubSubStats {
                 total_topics: 0,
                 total_subscribers: 0,
@@ -110,6 +118,20 @@ impl PubSubRouter {
                 messages_delivered: 0,
             })),
         }
+    }
+
+    /// Register a WebSocket connection for a subscriber
+    pub fn register_connection(&self, subscriber_id: String, sender: MessageSender) {
+        let mut connections = self.connections.write();
+        connections.insert(subscriber_id.clone(), sender);
+        debug!("WebSocket connection registered for subscriber: {}", subscriber_id);
+    }
+
+    /// Unregister a WebSocket connection
+    pub fn unregister_connection(&self, subscriber_id: &str) {
+        let mut connections = self.connections.write();
+        connections.remove(subscriber_id);
+        debug!("WebSocket connection unregistered for subscriber: {}", subscriber_id);
     }
 
     /// Subscribe to one or more topics (exact or wildcard)
@@ -266,8 +288,13 @@ impl PubSubRouter {
             message.id, topic, subscriber_count
         );
 
-        // TODO: Actually deliver messages to subscribers via WebSocket
-        // For now, we just track that they would be delivered
+        // Deliver messages to active WebSocket connections
+        let delivered = self.deliver_message(&message, &subscribers);
+
+        debug!(
+            "Delivered message {} to {}/{} subscribers",
+            message.id, delivered, subscriber_count
+        );
 
         Ok(PublishResult {
             message_id: message.id,
@@ -378,6 +405,25 @@ impl PubSubRouter {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs()
+    }
+
+    /// Deliver message to active WebSocket subscribers
+    fn deliver_message(&self, message: &Message, subscribers: &HashSet<SubscriberId>) -> usize {
+        let connections = self.connections.read();
+        let mut delivered = 0;
+
+        for sub_id in subscribers {
+            if let Some(sender) = connections.get(sub_id) {
+                // Try to send message to WebSocket (non-blocking, unbounded channel)
+                if sender.send(message.clone()).is_ok() {
+                    delivered += 1;
+                } else {
+                    warn!("Failed to deliver message to subscriber: {}", sub_id);
+                }
+            }
+        }
+
+        delivered
     }
 }
 

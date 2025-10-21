@@ -7,7 +7,7 @@ pub mod types;
 
 pub use error::SynapError;
 pub use kv_store::KVStore;
-pub use pubsub::{Message, PubSubRouter, PubSubStats, PublishResult, SubscribeResult, TopicInfo};
+pub use pubsub::{Message, MessageSender, PubSubRouter, PubSubStats, PublishResult, SubscribeResult, TopicInfo};
 pub use queue::{QueueConfig, QueueManager, QueueMessage, QueueStats};
 pub use stream::{StreamConfig, StreamEvent, StreamManager, RoomStats};
 pub use types::{EvictionPolicy, KVConfig, KVStats, StoredValue};

@@ -1,13 +1,17 @@
-use crate::core::{KVStore, QueueManager, SynapError};
+use crate::core::{KVStore, Message, MessageSender, QueueManager, SynapError};
 use crate::protocol::{Request, Response};
 use axum::{
     Json,
-    extract::{Path, State},
+    extract::{Path, State, ws::{WebSocket, WebSocketUpgrade}},
+    response::{IntoResponse, Response as AxumResponse},
 };
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{debug, error};
+use tokio::sync::mpsc;
+use tracing::{debug, error, info, warn};
 
 /// Application state shared across handlers
 #[derive(Clone)]
@@ -665,6 +669,12 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "pubsub.stats" => handle_pubsub_stats_cmd(&state, &request).await,
         "pubsub.topics" => handle_pubsub_topics_cmd(&state, &request).await,
         "pubsub.info" => handle_pubsub_info_cmd(&state, &request).await,
+        "stream.create" => handle_stream_create_cmd(&state, &request).await,
+        "stream.publish" => handle_stream_publish_cmd(&state, &request).await,
+        "stream.consume" => handle_stream_consume_cmd(&state, &request).await,
+        "stream.stats" => handle_stream_stats_cmd(&state, &request).await,
+        "stream.list" => handle_stream_list_cmd(&state, &request).await,
+        "stream.delete" => handle_stream_delete_cmd(&state, &request).await,
         _ => Err(SynapError::UnknownCommand(request.command.clone())),
     };
 
@@ -1281,6 +1291,158 @@ async fn handle_queue_purge_cmd(
 }
 
 // ============================================================================
+// Pub/Sub WebSocket Handler
+// ============================================================================
+
+/// WebSocket handler for Pub/Sub subscriptions
+/// GET /pubsub/ws?topics=topic1,topic2,*.wildcard
+pub async fn pubsub_websocket(
+    State(state): State<AppState>,
+    ws: WebSocketUpgrade,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> AxumResponse {
+    let pubsub_router = match state.pubsub_router.as_ref() {
+        Some(router) => router.clone(),
+        None => {
+            return (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "Pub/Sub system disabled",
+            )
+                .into_response();
+        }
+    };
+
+    // Parse topics from query params
+    let topics_str = params.get("topics").cloned().unwrap_or_default();
+    let topics: Vec<String> = topics_str
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .collect();
+
+    if topics.is_empty() {
+        return (
+            axum::http::StatusCode::BAD_REQUEST,
+            "At least one topic required in query param: ?topics=topic1,topic2",
+        )
+            .into_response();
+    }
+
+    info!("WebSocket connection requested for topics: {:?}", topics);
+
+    ws.on_upgrade(move |socket| handle_pubsub_socket(socket, pubsub_router, topics))
+}
+
+/// Handle individual WebSocket connection for Pub/Sub
+async fn handle_pubsub_socket(
+    socket: WebSocket,
+    pubsub_router: Arc<crate::core::PubSubRouter>,
+    topics: Vec<String>,
+) {
+    let (mut ws_sender, mut ws_receiver) = socket.split();
+
+    // Subscribe to topics
+    let subscribe_result = match pubsub_router.subscribe(topics.clone()) {
+        Ok(result) => result,
+        Err(e) => {
+            error!("Failed to subscribe: {}", e);
+            let _ = ws_sender
+                .send(axum::extract::ws::Message::Text(
+                    json!({
+                        "error": e.to_string()
+                    })
+                    .to_string(),
+                ))
+                .await;
+            return;
+        }
+    };
+
+    let subscriber_id = subscribe_result.subscriber_id.clone();
+    info!("Subscriber {} connected to topics: {:?}", subscriber_id, topics);
+
+    // Create channel for receiving messages
+    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+
+    // Register connection
+    pubsub_router.register_connection(subscriber_id.clone(), tx);
+
+    // Send welcome message in the loop (first iteration will handle it)
+    let welcome_msg = json!({
+        "type": "connected",
+        "subscriber_id": subscriber_id,
+        "topics": topics,
+        "subscription_count": subscribe_result.subscription_count
+    });
+    
+    // Send welcome message
+    if ws_sender.send(axum::extract::ws::Message::Text(welcome_msg.to_string())).await.is_err() {
+        warn!("Failed to send welcome message to subscriber: {}", subscriber_id);
+        pubsub_router.unregister_connection(&subscriber_id);
+        return;
+    }
+
+    // Process both incoming WebSocket messages and outgoing Pub/Sub messages
+    loop {
+        tokio::select! {
+            // Receive messages from Pub/Sub channel
+            Some(message) = rx.recv() => {
+                let msg_json = serde_json::to_string(&json!({
+                    "type": "message",
+                    "message_id": message.id,
+                    "topic": message.topic,
+                    "payload": message.payload,
+                    "metadata": message.metadata,
+                    "timestamp": message.timestamp
+                }))
+                .unwrap();
+
+                if ws_sender
+                    .send(axum::extract::ws::Message::Text(msg_json))
+                    .await
+                    .is_err()
+                {
+                    warn!("Failed to send message to subscriber: {}", subscriber_id);
+                    break;
+                }
+            }
+
+            // Handle incoming WebSocket messages (keepalive/pings)
+            Some(msg) = ws_receiver.next() => {
+                match msg {
+                    Ok(axum::extract::ws::Message::Close(_)) => {
+                        info!("Subscriber {} closed connection", subscriber_id);
+                        break;
+                    }
+                    Ok(axum::extract::ws::Message::Ping(data)) => {
+                        if ws_sender.send(axum::extract::ws::Message::Pong(data)).await.is_err() {
+                            break;
+                        }
+                    }
+                    Ok(_) => {
+                        // Ignore other message types
+                    }
+                    Err(e) => {
+                        warn!("WebSocket error for subscriber {}: {}", subscriber_id, e);
+                        break;
+                    }
+                }
+            }
+
+            else => {
+                // Both channels closed
+                break;
+            }
+        }
+    }
+
+    // Cleanup
+    pubsub_router.unregister_connection(&subscriber_id);
+    let _ = pubsub_router.unsubscribe(&subscriber_id, None);
+    info!("Subscriber {} disconnected and cleaned up", subscriber_id);
+}
+
+// ============================================================================
 // Pub/Sub REST API Handlers
 // ============================================================================
 
@@ -1601,4 +1763,186 @@ async fn handle_pubsub_info_cmd(
         Some(info) => Ok(serde_json::to_value(info).map_err(|e| SynapError::SerializationError(e.to_string()))?),
         None => Err(SynapError::InvalidRequest(format!("Topic '{}' not found", topic))),
     }
+}
+
+// ============================================================================
+// Event Streams StreamableHTTP Command Handlers
+// ============================================================================
+
+async fn handle_stream_create_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let stream_manager = state
+        .stream_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
+
+    let room = request
+        .payload
+        .get("room")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'room' field".to_string()))?;
+
+    stream_manager
+        .create_room(room)
+        .await
+        .map_err(|e| SynapError::InvalidRequest(e))?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "room": room
+    }))
+}
+
+async fn handle_stream_publish_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let stream_manager = state
+        .stream_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
+
+    let room = request
+        .payload
+        .get("room")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'room' field".to_string()))?;
+
+    let event = request
+        .payload
+        .get("event")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'event' field".to_string()))?;
+
+    let data = request
+        .payload
+        .get("data")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'data' field".to_string()))?;
+
+    let data_bytes =
+        serde_json::to_vec(data).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let offset = stream_manager
+        .publish(room, event, data_bytes)
+        .await
+        .map_err(|e| SynapError::InvalidRequest(e))?;
+
+    Ok(serde_json::json!({
+        "offset": offset,
+        "room": room
+    }))
+}
+
+async fn handle_stream_consume_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let stream_manager = state
+        .stream_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
+
+    let room = request
+        .payload
+        .get("room")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'room' field".to_string()))?;
+
+    let subscriber_id = request
+        .payload
+        .get("subscriber_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'subscriber_id' field".to_string()))?;
+
+    let from_offset = request
+        .payload
+        .get("from_offset")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let limit = request
+        .payload
+        .get("limit")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(100) as usize;
+
+    let events = stream_manager
+        .consume(room, subscriber_id, from_offset, limit)
+        .await
+        .map_err(|e| SynapError::InvalidRequest(e))?;
+
+    let next_offset = events.last().map(|e| e.offset + 1).unwrap_or(from_offset);
+
+    Ok(serde_json::json!({
+        "events": events,
+        "next_offset": next_offset
+    }))
+}
+
+async fn handle_stream_stats_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let stream_manager = state
+        .stream_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
+
+    let room = request
+        .payload
+        .get("room")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'room' field".to_string()))?;
+
+    let stats = stream_manager
+        .room_stats(room)
+        .await
+        .map_err(|e| SynapError::InvalidRequest(e))?;
+
+    Ok(serde_json::to_value(stats).map_err(|e| SynapError::SerializationError(e.to_string()))?)
+}
+
+async fn handle_stream_list_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let stream_manager = state
+        .stream_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
+
+    let rooms = stream_manager.list_rooms().await;
+
+    Ok(serde_json::json!({
+        "rooms": rooms,
+        "count": rooms.len()
+    }))
+}
+
+async fn handle_stream_delete_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let stream_manager = state
+        .stream_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
+
+    let room = request
+        .payload
+        .get("room")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'room' field".to_string()))?;
+
+    stream_manager
+        .delete_room(room)
+        .await
+        .map_err(|e| SynapError::InvalidRequest(e))?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "deleted": room
+    }))
 }

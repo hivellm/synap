@@ -199,8 +199,8 @@ Implementação completa com resultados excepcionais:
 - **Topic-Based Messaging**: Redis/MQTT-style publish/subscribe
   - Hierarchical topic namespace with dot notation
   - Example topics: `notifications.email`, `metrics.cpu.usage`, `events.user.login`
-  - Fire-and-forget pattern (no message persistence)
-  - Multiple subscribers per topic with fan-out delivery
+  - Real-time push delivery via WebSocket
+  - Multiple subscribers per topic with concurrent fan-out
   
 - **Wildcard Subscriptions**: Flexible pattern matching
   - Single-level wildcard (`*`): Matches exactly one level
@@ -209,20 +209,27 @@ Implementação completa com resultados excepcionais:
     - `events.user.#` matches `events.user`, `events.user.login`, `events.user.login.success`
   - Validation: `#` must be at end of pattern, only one `#` allowed
   
-- **6 REST API Endpoints + 6 StreamableHTTP Commands**:
-  - POST `/pubsub/subscribe` | `pubsub.subscribe` - Subscribe to topics (returns subscriber_id)
+- **Protocol Support**:
+  - **WebSocket** (`/pubsub/ws?topics=topic1,*.pattern`) - **Primary** for subscriptions (real-time push)
+  - **REST + StreamableHTTP** - For publishing messages and management
+  
+- **API Endpoints**:
+  - GET `/pubsub/ws?topics=...` - **WebSocket subscription** (real-time push delivery)
   - POST `/pubsub/:topic/publish` | `pubsub.publish` - Publish message to topic
-  - POST `/pubsub/unsubscribe` | `pubsub.unsubscribe` - Unsubscribe from topics
   - GET `/pubsub/stats` | `pubsub.stats` - Get Pub/Sub statistics
   - GET `/pubsub/topics` | `pubsub.topics` - List all topics
   - GET `/pubsub/:topic/info` | `pubsub.info` - Get topic information
+  - POST `/pubsub/subscribe` ⚠️ **Deprecated** - Use WebSocket instead
+  - POST `/pubsub/unsubscribe` ⚠️ **Deprecated** - WebSocket auto-cleanup on disconnect
   
 - **Core Features**:
+  - **WebSocket-based subscriptions** with persistent connections
+  - **mpsc channels** for non-blocking message delivery
   - Radix Trie for efficient topic storage and prefix matching
   - Separate wildcard subscription list for pattern matching
   - Real-time statistics tracking (topics, subscribers, messages)
   - Topic metadata (subscriber count, message count, created_at)
-  - Atomic subscription/unsubscribe operations
+  - Auto-cleanup on WebSocket disconnect (unsubscribe + connection cleanup)
   
 - **Performance**:
   - O(k) topic lookup (k = topic length)
