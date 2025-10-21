@@ -90,8 +90,8 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 ## Phase 2: Core Features (Q2 2025) - v0.2.0-beta
 
 **Duration**: 10-12 weeks  
-**Status**: 🟡 In Progress (Started October 21, 2025)  
-**Focus**: Queue system, event streams, and persistence
+**Status**: ✅ COMPLETE (October 21, 2025)  
+**Focus**: Queue system, event streams, pub/sub, and persistence
 
 ### Milestones
 
@@ -217,7 +217,7 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 #### Week 7-9: Protocol Extensions
 - [ ] MCP implementation
 - [ ] UMICP integration
-- [ ] WebSocket support
+- [x] WebSocket support (COMPLETE - added in Phase 2)
 - [ ] Protocol negotiation
 - [ ] Protocol tests
 
