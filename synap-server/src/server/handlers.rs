@@ -15,6 +15,7 @@ pub struct AppState {
     pub kv_store: Arc<KVStore>,
     pub queue_manager: Option<Arc<QueueManager>>,
     pub stream_manager: Option<Arc<crate::core::StreamManager>>,
+    pub pubsub_router: Option<Arc<crate::core::PubSubRouter>>,
     pub persistence: Option<Arc<crate::persistence::PersistenceLayer>>,
 }
 
@@ -1271,4 +1272,165 @@ async fn handle_queue_purge_cmd(
 
     let count = queue_manager.purge(queue).await?;
     Ok(serde_json::json!({ "purged": count }))
+}
+
+// ============================================================================
+// Pub/Sub REST API Handlers
+// ============================================================================
+
+// Pub/Sub REST API types
+#[derive(Debug, Deserialize)]
+pub struct SubscribeRequest {
+    pub topics: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PublishMessageRequest {
+    pub payload: serde_json::Value,
+    pub metadata: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UnsubscribeRequest {
+    pub subscriber_id: String,
+    pub topics: Option<Vec<String>>,
+}
+
+/// POST /pubsub/subscribe - Subscribe to topics
+pub async fn pubsub_subscribe(
+    State(state): State<AppState>,
+    Json(req): Json<SubscribeRequest>,
+) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
+    debug!("POST /pubsub/subscribe - topics: {:?}", req.topics);
+
+    let pubsub_router = state.pubsub_router.as_ref().ok_or_else(|| {
+        Json(serde_json::json!({
+            "error": "Pub/Sub system disabled"
+        }))
+    })?;
+
+    match pubsub_router.subscribe(req.topics) {
+        Ok(result) => Ok(Json(serde_json::json!({
+            "subscriber_id": result.subscriber_id,
+            "topics": result.topics,
+            "subscription_count": result.subscription_count,
+        }))),
+        Err(e) => {
+            error!("Subscribe error: {}", e);
+            Err(Json(serde_json::json!({
+                "error": e.to_string()
+            })))
+        }
+    }
+}
+
+/// POST /pubsub/:topic/publish - Publish message to topic
+pub async fn pubsub_publish(
+    State(state): State<AppState>,
+    Path(topic): Path<String>,
+    Json(req): Json<PublishMessageRequest>,
+) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
+    debug!("POST /pubsub/{}/publish", topic);
+
+    let pubsub_router = state.pubsub_router.as_ref().ok_or_else(|| {
+        Json(serde_json::json!({
+            "error": "Pub/Sub system disabled"
+        }))
+    })?;
+
+    match pubsub_router.publish(&topic, req.payload, req.metadata) {
+        Ok(result) => Ok(Json(serde_json::json!({
+            "message_id": result.message_id,
+            "topic": result.topic,
+            "subscribers_matched": result.subscribers_matched,
+        }))),
+        Err(e) => {
+            error!("Publish error: {}", e);
+            Err(Json(serde_json::json!({
+                "error": e.to_string()
+            })))
+        }
+    }
+}
+
+/// POST /pubsub/unsubscribe - Unsubscribe from topics
+pub async fn pubsub_unsubscribe(
+    State(state): State<AppState>,
+    Json(req): Json<UnsubscribeRequest>,
+) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
+    debug!("POST /pubsub/unsubscribe - subscriber_id: {}", req.subscriber_id);
+
+    let pubsub_router = state.pubsub_router.as_ref().ok_or_else(|| {
+        Json(serde_json::json!({
+            "error": "Pub/Sub system disabled"
+        }))
+    })?;
+
+    match pubsub_router.unsubscribe(&req.subscriber_id, req.topics) {
+        Ok(count) => Ok(Json(serde_json::json!({
+            "unsubscribed": count
+        }))),
+        Err(e) => {
+            error!("Unsubscribe error: {}", e);
+            Err(Json(serde_json::json!({
+                "error": e.to_string()
+            })))
+        }
+    }
+}
+
+/// GET /pubsub/stats - Get Pub/Sub statistics
+pub async fn pubsub_stats(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
+    debug!("GET /pubsub/stats");
+
+    let pubsub_router = state.pubsub_router.as_ref().ok_or_else(|| {
+        Json(serde_json::json!({
+            "error": "Pub/Sub system disabled"
+        }))
+    })?;
+
+    let stats = pubsub_router.get_stats();
+    Ok(Json(serde_json::to_value(stats).unwrap()))
+}
+
+/// GET /pubsub/topics - List all topics
+pub async fn pubsub_list_topics(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
+    debug!("GET /pubsub/topics");
+
+    let pubsub_router = state.pubsub_router.as_ref().ok_or_else(|| {
+        Json(serde_json::json!({
+            "error": "Pub/Sub system disabled"
+        }))
+    })?;
+
+    let topics = pubsub_router.list_topics();
+    Ok(Json(serde_json::json!({
+        "topics": topics,
+        "count": topics.len()
+    })))
+}
+
+/// GET /pubsub/:topic/info - Get topic information
+pub async fn pubsub_topic_info(
+    State(state): State<AppState>,
+    Path(topic): Path<String>,
+) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
+    debug!("GET /pubsub/{}/info", topic);
+
+    let pubsub_router = state.pubsub_router.as_ref().ok_or_else(|| {
+        Json(serde_json::json!({
+            "error": "Pub/Sub system disabled"
+        }))
+    })?;
+
+    match pubsub_router.get_topic_info(&topic) {
+        Some(info) => Ok(Json(serde_json::to_value(info).unwrap())),
+        None => Err(Json(serde_json::json!({
+            "error": "Topic not found"
+        }))),
+    }
 }

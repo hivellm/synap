@@ -108,22 +108,22 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 - [ ] Queue persistence (planned Phase 2 Week 10-12)
 - [ ] Queue benchmarks (to be added)
 
-#### Week 4-6: Event Streams
-- [ ] Ring buffer implementation
-- [ ] Room-based isolation
-- [ ] Message history
-- [ ] Offset-based consumption
-- [ ] Stream compaction
-- [ ] Subscriber management
-- [ ] Stream benchmarks
+#### Week 4-6: Event Streams ✅ COMPLETE
+- [x] Ring buffer implementation
+- [x] Room-based isolation
+- [x] Message history
+- [x] Offset-based consumption
+- [x] Stream compaction
+- [x] Subscriber management
+- [ ] Stream benchmarks (to be added)
 
-#### Week 7-9: Pub/Sub System
-- [ ] Topic routing
-- [ ] Wildcard subscriptions
-- [ ] Fan-out messaging
-- [ ] Topic hierarchies
-- [ ] Subscription filtering
-- [ ] Pub/Sub benchmarks
+#### Week 7-9: Pub/Sub System ✅ COMPLETE
+- [x] Topic routing
+- [x] Wildcard subscriptions (* and #)
+- [x] Fan-out messaging
+- [x] Topic hierarchies
+- [x] Subscription filtering
+- [ ] Pub/Sub benchmarks (to be added)
 
 #### Week 10-12: Persistence Layer ✅ COMPLETE
 - [x] Write-Ahead Log (WAL)
@@ -177,8 +177,8 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 - ✅ Complete queue system
 - ✅ SDKs (TypeScript)
 - ✅ Persistence layer (WAL + Snapshots)
-- 🔄 Event streaming (in progress)
-- 🔵 Pub/Sub messaging (planned)
+- ✅ Event streaming (COMPLETE)
+- ✅ Pub/Sub messaging (COMPLETE)
 - 🔵 Python SDK (planned)
 
 ### Success Criteria

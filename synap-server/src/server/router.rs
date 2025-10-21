@@ -51,6 +51,13 @@ pub fn create_router(
         .route("/queue/:name/purge", post(handlers::queue_purge))
         .route("/queue/:name", delete(handlers::queue_delete))
         .route("/queue/list", get(handlers::queue_list))
+        // Pub/Sub REST API endpoints
+        .route("/pubsub/subscribe", post(handlers::pubsub_subscribe))
+        .route("/pubsub/:topic/publish", post(handlers::pubsub_publish))
+        .route("/pubsub/unsubscribe", post(handlers::pubsub_unsubscribe))
+        .route("/pubsub/stats", get(handlers::pubsub_stats))
+        .route("/pubsub/topics", get(handlers::pubsub_list_topics))
+        .route("/pubsub/:topic/info", get(handlers::pubsub_topic_info))
         // StreamableHTTP command endpoint
         .route("/api/v1/command", post(handlers::command_handler))
         // Add state and middleware

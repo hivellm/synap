@@ -9,15 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎉 Phase 2 Complete - Performance + Persistence + Event Streams ✅
 
-**Status**: Production Ready | **Tests**: 222/224 (99.11%) | **Features**: KV + Queue + Streams + Persistence
+**Status**: Production Ready | **Tests**: 233/235 (99.15%) | **Features**: KV + Queue + Streams + Pub/Sub + Persistence
 
 #### Executive Summary
 Implementação completa com resultados excepcionais:
 - **Performance**: Redis-level (10M+ ops/s, 87ns P99 latency, 54% memory reduction)
 - **Persistence**: AsyncWAL + Streaming Snapshots integrados e funcionando
 - **Event Streams**: Sistema completo com ring buffer e offset-based consumption
+- **Pub/Sub System**: Topic-based messaging com wildcard subscriptions (* e #)
 - **Queue System**: Zero-duplicate guarantee com 581K msgs/s
-- **Tests**: 99.11% coverage (222/224 passing)
+- **Tests**: 99.15% coverage (233/235 passing)
 
 ### Added - Redis-Level Performance Optimizations ✅ COMPLETE
 
@@ -170,9 +171,9 @@ Implementação completa com resultados excepcionais:
 
 ### Testing & Validation
 
-**Test Suite**: 222/224 tests passing (99.11%)
+**Test Suite**: 233/235 tests passing (99.15%)
 
-- ✅ **Core Library Tests** (67/67): KV Store, Queue, Streams, Persistence, Auth, Compression
+- ✅ **Core Library Tests** (78/78): KV Store, Queue, Streams, Pub/Sub, Persistence, Auth, Compression
 - ✅ **Integration Performance Tests** (9/9): All 6 P0/P1 optimizations validated
 - ✅ **Integration Hybrid Storage Tests** (5/5): P2 hybrid storage validated
 - ✅ **Integration Persistence E2E Tests** (3/3): End-to-end persistence validated
@@ -192,6 +193,55 @@ Implementação completa com resultados excepcionais:
 - [scripts/README_TESTING.md](scripts/README_TESTING.md) - Testing guide
 
 
+
+#### 📡 Pub/Sub System ✅ NEW
+- **Topic-Based Messaging**: Redis/MQTT-style publish/subscribe
+  - Hierarchical topic namespace with dot notation
+  - Example topics: `notifications.email`, `metrics.cpu.usage`, `events.user.login`
+  - Fire-and-forget pattern (no message persistence)
+  - Multiple subscribers per topic with fan-out delivery
+  
+- **Wildcard Subscriptions**: Flexible pattern matching
+  - Single-level wildcard (`*`): Matches exactly one level
+    - `notifications.*` matches `notifications.email`, `notifications.sms`
+  - Multi-level wildcard (`#`): Matches zero or more levels
+    - `events.user.#` matches `events.user`, `events.user.login`, `events.user.login.success`
+  - Validation: `#` must be at end of pattern, only one `#` allowed
+  
+- **6 REST API Endpoints**:
+  - POST `/pubsub/subscribe` - Subscribe to topics (returns subscriber_id)
+  - POST `/pubsub/:topic/publish` - Publish message to topic
+  - POST `/pubsub/unsubscribe` - Unsubscribe from topics
+  - GET `/pubsub/stats` - Get Pub/Sub statistics
+  - GET `/pubsub/topics` - List all topics
+  - GET `/pubsub/:topic/info` - Get topic information
+  
+- **Core Features**:
+  - Radix Trie for efficient topic storage and prefix matching
+  - Separate wildcard subscription list for pattern matching
+  - Real-time statistics tracking (topics, subscribers, messages)
+  - Topic metadata (subscriber count, message count, created_at)
+  - Atomic subscription/unsubscribe operations
+  
+- **Performance**:
+  - O(k) topic lookup (k = topic length)
+  - O(n×m) wildcard matching (n = wildcard subs, m = pattern segments)
+  - Target: < 0.5ms for topic routing + delivery
+  - Concurrent fan-out to multiple subscribers
+  
+- **11 Comprehensive Tests** (100% passing):
+  - Exact topic subscriptions
+  - Single-level wildcard matching (`*`)
+  - Multi-level wildcard matching (`#`)
+  - Pattern compilation and validation
+  - Subscribe/unsubscribe operations
+  - Multiple subscribers per topic
+  - Hierarchical topic patterns
+  - Statistics and topic info endpoints
+  
+- **Comparison with Event Streams**:
+  - Pub/Sub: No persistence, wildcards, lower latency, notifications
+  - Streams: Ring buffer, history replay, offset-based, guaranteed ordering
 
 ### Added - Phase 2 Features (Q4 2025)
 

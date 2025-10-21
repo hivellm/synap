@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use synap_server::{AppState, KVStore, QueueManager, StreamManager, StreamConfig, ServerConfig, create_router};
+use synap_server::{AppState, KVStore, PubSubRouter, QueueManager, StreamManager, StreamConfig, ServerConfig, create_router};
 use synap_server::persistence::{PersistenceLayer, recover};
 use tracing::{info, warn};
 
@@ -136,6 +136,13 @@ async fn main() -> Result<()> {
         Some(stream_mgr)
     };
 
+    // Initialize Pub/Sub router (enabled by default for now)
+    let pubsub_router = {
+        let router = Arc::new(PubSubRouter::new());
+        info!("Pub/Sub system enabled");
+        Some(router)
+    };
+
     // Create persistence layer if enabled
     let persistence = if config.persistence.enabled {
         match PersistenceLayer::new(config.persistence.clone()).await {
@@ -165,6 +172,7 @@ async fn main() -> Result<()> {
         kv_store,
         queue_manager,
         stream_manager,
+        pubsub_router,
         persistence,
     };
 
