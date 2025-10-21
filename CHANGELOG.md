@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎉 Phase 2 Complete - Performance + Persistence + Event Streams ✅
 
-**Status**: Production Ready | **Tests**: 233/235 (99.15%) | **Features**: KV + Queue + Streams + Pub/Sub + Persistence
+**Status**: Production Ready | **Tests**: 246/248 (99.19%) | **Features**: KV + Queue + Streams + Pub/Sub + Persistence
 
 #### Executive Summary
 Implementação completa com resultados excepcionais:
@@ -18,7 +18,7 @@ Implementação completa com resultados excepcionais:
 - **Event Streams**: Sistema completo com ring buffer e offset-based consumption
 - **Pub/Sub System**: Topic-based messaging com wildcard subscriptions (* e #)
 - **Queue System**: Zero-duplicate guarantee com 581K msgs/s
-- **Tests**: 99.15% coverage (233/235 passing)
+- **Tests**: 99.19% coverage (246/248 passing)
 
 ### Added - Redis-Level Performance Optimizations ✅ COMPLETE
 
@@ -171,9 +171,10 @@ Implementação completa com resultados excepcionais:
 
 ### Testing & Validation
 
-**Test Suite**: 233/235 tests passing (99.15%)
+**Test Suite**: 246/248 tests passing (99.19%)
 
 - ✅ **Core Library Tests** (78/78): KV Store, Queue, Streams, Pub/Sub, Persistence, Auth, Compression
+- ✅ **Pub/Sub Integration Tests** (24/24): REST API (11) + StreamableHTTP (13)
 - ✅ **Integration Performance Tests** (9/9): All 6 P0/P1 optimizations validated
 - ✅ **Integration Hybrid Storage Tests** (5/5): P2 hybrid storage validated
 - ✅ **Integration Persistence E2E Tests** (3/3): End-to-end persistence validated
@@ -208,13 +209,13 @@ Implementação completa com resultados excepcionais:
     - `events.user.#` matches `events.user`, `events.user.login`, `events.user.login.success`
   - Validation: `#` must be at end of pattern, only one `#` allowed
   
-- **6 REST API Endpoints**:
-  - POST `/pubsub/subscribe` - Subscribe to topics (returns subscriber_id)
-  - POST `/pubsub/:topic/publish` - Publish message to topic
-  - POST `/pubsub/unsubscribe` - Unsubscribe from topics
-  - GET `/pubsub/stats` - Get Pub/Sub statistics
-  - GET `/pubsub/topics` - List all topics
-  - GET `/pubsub/:topic/info` - Get topic information
+- **6 REST API Endpoints + 6 StreamableHTTP Commands**:
+  - POST `/pubsub/subscribe` | `pubsub.subscribe` - Subscribe to topics (returns subscriber_id)
+  - POST `/pubsub/:topic/publish` | `pubsub.publish` - Publish message to topic
+  - POST `/pubsub/unsubscribe` | `pubsub.unsubscribe` - Unsubscribe from topics
+  - GET `/pubsub/stats` | `pubsub.stats` - Get Pub/Sub statistics
+  - GET `/pubsub/topics` | `pubsub.topics` - List all topics
+  - GET `/pubsub/:topic/info` | `pubsub.info` - Get topic information
   
 - **Core Features**:
   - Radix Trie for efficient topic storage and prefix matching
@@ -229,8 +230,9 @@ Implementação completa com resultados excepcionais:
   - Target: < 0.5ms for topic routing + delivery
   - Concurrent fan-out to multiple subscribers
   
-- **11 Comprehensive Tests** (100% passing):
-  - Exact topic subscriptions
+- **24 Comprehensive Tests** (100% passing):
+  - 11 REST API tests (exact subscriptions, wildcards, unsubscribe, stats)
+  - 13 StreamableHTTP tests (commands, error handling, complex patterns)
   - Single-level wildcard matching (`*`)
   - Multi-level wildcard matching (`#`)
   - Pattern compilation and validation
@@ -238,6 +240,7 @@ Implementação completa com resultados excepcionais:
   - Multiple subscribers per topic
   - Hierarchical topic patterns
   - Statistics and topic info endpoints
+  - Error handling (missing topics, empty topics, not found)
   
 - **Comparison with Event Streams**:
   - Pub/Sub: No persistence, wildcards, lower latency, notifications

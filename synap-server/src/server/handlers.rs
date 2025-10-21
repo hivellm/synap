@@ -659,6 +659,12 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "queue.list" => handle_queue_list_cmd(&state, &request).await,
         "queue.stats" => handle_queue_stats_cmd(&state, &request).await,
         "queue.purge" => handle_queue_purge_cmd(&state, &request).await,
+        "pubsub.subscribe" => handle_pubsub_subscribe_cmd(&state, &request).await,
+        "pubsub.publish" => handle_pubsub_publish_cmd(&state, &request).await,
+        "pubsub.unsubscribe" => handle_pubsub_unsubscribe_cmd(&state, &request).await,
+        "pubsub.stats" => handle_pubsub_stats_cmd(&state, &request).await,
+        "pubsub.topics" => handle_pubsub_topics_cmd(&state, &request).await,
+        "pubsub.info" => handle_pubsub_info_cmd(&state, &request).await,
         _ => Err(SynapError::UnknownCommand(request.command.clone())),
     };
 
@@ -1432,5 +1438,167 @@ pub async fn pubsub_topic_info(
         None => Err(Json(serde_json::json!({
             "error": "Topic not found"
         }))),
+    }
+}
+
+// ============================================================================
+// Pub/Sub StreamableHTTP Command Handlers
+// ============================================================================
+
+async fn handle_pubsub_subscribe_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let pubsub_router = state
+        .pubsub_router
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Pub/Sub system disabled".to_string()))?;
+
+    let topics_val = request
+        .payload
+        .get("topics")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'topics' field".to_string()))?;
+
+    let topics_arr = topics_val
+        .as_array()
+        .ok_or_else(|| SynapError::InvalidRequest("'topics' must be an array".to_string()))?;
+
+    let topics: Vec<String> = topics_arr
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
+
+    if topics.is_empty() {
+        return Err(SynapError::InvalidRequest(
+            "At least one topic required".to_string(),
+        ));
+    }
+
+    let result = pubsub_router.subscribe(topics)?;
+
+    Ok(serde_json::json!({
+        "subscriber_id": result.subscriber_id,
+        "topics": result.topics,
+        "subscription_count": result.subscription_count
+    }))
+}
+
+async fn handle_pubsub_publish_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let pubsub_router = state
+        .pubsub_router
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Pub/Sub system disabled".to_string()))?;
+
+    let topic = request
+        .payload
+        .get("topic")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'topic' field".to_string()))?;
+
+    let payload = request
+        .payload
+        .get("payload")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'payload' field".to_string()))?
+        .clone();
+
+    let metadata = request
+        .payload
+        .get("metadata")
+        .and_then(|v| {
+            if let serde_json::Value::Object(map) = v {
+                Some(
+                    map.iter()
+                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                        .collect(),
+                )
+            } else {
+                None
+            }
+        });
+
+    let result = pubsub_router.publish(topic, payload, metadata)?;
+
+    Ok(serde_json::json!({
+        "message_id": result.message_id,
+        "topic": result.topic,
+        "subscribers_matched": result.subscribers_matched
+    }))
+}
+
+async fn handle_pubsub_unsubscribe_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let pubsub_router = state
+        .pubsub_router
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Pub/Sub system disabled".to_string()))?;
+
+    let subscriber_id = request
+        .payload
+        .get("subscriber_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'subscriber_id' field".to_string()))?;
+
+    let topics = request.payload.get("topics").and_then(|v| {
+        v.as_array()
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+    });
+
+    let count = pubsub_router.unsubscribe(subscriber_id, topics)?;
+
+    Ok(serde_json::json!({ "unsubscribed": count }))
+}
+
+async fn handle_pubsub_stats_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let pubsub_router = state
+        .pubsub_router
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Pub/Sub system disabled".to_string()))?;
+
+    let stats = pubsub_router.get_stats();
+    Ok(serde_json::to_value(stats).map_err(|e| SynapError::SerializationError(e.to_string()))?)
+}
+
+async fn handle_pubsub_topics_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let pubsub_router = state
+        .pubsub_router
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Pub/Sub system disabled".to_string()))?;
+
+    let topics = pubsub_router.list_topics();
+    Ok(serde_json::json!({
+        "topics": topics,
+        "count": topics.len()
+    }))
+}
+
+async fn handle_pubsub_info_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let pubsub_router = state
+        .pubsub_router
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Pub/Sub system disabled".to_string()))?;
+
+    let topic = request
+        .payload
+        .get("topic")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'topic' field".to_string()))?;
+
+    match pubsub_router.get_topic_info(topic) {
+        Some(info) => Ok(serde_json::to_value(info).map_err(|e| SynapError::SerializationError(e.to_string()))?),
+        None => Err(SynapError::InvalidRequest(format!("Topic '{}' not found", topic))),
     }
 }
