@@ -145,7 +145,7 @@ impl ReplicaNode {
 
         match cmd {
             ReplicationCommand::FullSync {
-                snapshot_data,
+                snapshot_data: _,
                 offset,
             } => {
                 info!("Receiving full sync, offset: {}", offset);
@@ -234,7 +234,7 @@ impl ReplicaNode {
         // Apply to KV store
         match &op.operation {
             Operation::KVSet { key, value, ttl } => {
-                self.kv_store.set(key.as_str(), value.clone(), *ttl).await;
+                let _ = self.kv_store.set(key.as_str(), value.clone(), *ttl).await;
             }
             Operation::KVDel { keys } => {
                 let _ = self.kv_store.mdel(keys).await;

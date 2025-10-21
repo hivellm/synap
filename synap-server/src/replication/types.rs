@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use thiserror::Error;
 
 /// Node role in replication topology
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum NodeRole {
     /// Master node - accepts writes, sends to replicas
@@ -11,13 +11,8 @@ pub enum NodeRole {
     /// Replica node - read-only, receives from master
     Replica,
     /// Standalone node - no replication
+    #[default]
     Standalone,
-}
-
-impl Default for NodeRole {
-    fn default() -> Self {
-        NodeRole::Standalone
-    }
 }
 
 /// Replication command (sent from master to replica)

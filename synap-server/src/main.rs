@@ -3,7 +3,7 @@ use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use synap_server::persistence::{PersistenceLayer, recover};
-use synap_server::replication::{MasterNode, NodeRole, ReplicaNode, ReplicationConfig};
+use synap_server::replication::NodeRole;
 use synap_server::{
     AppState, KVStore, PubSubRouter, QueueManager, ServerConfig, StreamConfig, StreamManager,
     create_router,

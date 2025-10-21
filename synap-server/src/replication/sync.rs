@@ -1,9 +1,9 @@
-/// Synchronization utilities for replication
-///
-/// This module provides helpers for:
-/// - Snapshot creation and transfer
-/// - Incremental sync
-/// - Checksum verification
+//! Synchronization utilities for replication
+//!
+//! This module provides helpers for:
+//! - Snapshot creation and transfer
+//! - Incremental sync
+//! - Checksum verification
 
 use crate::core::KVStore;
 use crate::persistence::types::Operation;
@@ -42,7 +42,7 @@ pub async fn create_snapshot(kv_store: &KVStore, offset: u64) -> Result<Vec<u8>,
 
     // Serialize operations
     let data = bincode::serialize(&operations).map_err(|e| e.to_string())?;
-    
+
     // Calculate checksum
     let checksum = crc32fast::hash(&data);
 
@@ -72,8 +72,7 @@ pub async fn create_snapshot(kv_store: &KVStore, offset: u64) -> Result<Vec<u8>,
 /// Apply snapshot to KV store
 pub async fn apply_snapshot(kv_store: &KVStore, snapshot: &[u8]) -> Result<u64, String> {
     // Deserialize metadata
-    let metadata: SnapshotMetadata =
-        bincode::deserialize(snapshot).map_err(|e| e.to_string())?;
+    let metadata: SnapshotMetadata = bincode::deserialize(snapshot).map_err(|e| e.to_string())?;
 
     let metadata_size = bincode::serialized_size(&metadata).map_err(|e| e.to_string())? as usize;
     let data = &snapshot[metadata_size..];
@@ -127,7 +126,7 @@ mod tests {
     #[tokio::test]
     async fn test_snapshot_creation_and_application() {
         let kv1 = KVStore::new(KVConfig::default());
-        
+
         // Populate KV store
         kv1.set("key1", b"value1".to_vec(), None).await.unwrap();
         kv1.set("key2", b"value2".to_vec(), None).await.unwrap();
@@ -140,7 +139,7 @@ mod tests {
         // Apply to new KV store
         let kv2 = KVStore::new(KVConfig::default());
         let offset = apply_snapshot(&kv2, &snapshot).await.unwrap();
-        
+
         assert_eq!(offset, 100);
 
         // Verify data
@@ -155,7 +154,7 @@ mod tests {
         kv.set("test", b"data".to_vec(), None).await.unwrap();
 
         let mut snapshot = create_snapshot(&kv, 0).await.unwrap();
-        
+
         // Corrupt data
         if let Some(last) = snapshot.last_mut() {
             *last = !*last;
@@ -164,7 +163,7 @@ mod tests {
         // Should fail checksum
         let kv2 = KVStore::new(KVConfig::default());
         let result = apply_snapshot(&kv2, &snapshot).await;
-        
+
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Checksum mismatch"));
     }

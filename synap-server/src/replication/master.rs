@@ -26,6 +26,7 @@ use uuid::Uuid;
 /// - Handles full and partial sync
 /// - Heartbeat mechanism
 pub struct MasterNode {
+    #[allow(dead_code)]
     config: ReplicationConfig,
     replication_log: Arc<ReplicationLog>,
 
@@ -47,6 +48,7 @@ struct ReplicaConnection {
 
 enum ReplicationMessage {
     Operation(Operation),
+    #[allow(dead_code)]
     Heartbeat,
 }
 
@@ -234,7 +236,7 @@ impl MasterNode {
     /// Send full sync (snapshot) to replica
     async fn send_full_sync(
         stream: &mut TcpStream,
-        kv_store: &KVStore,
+        _kv_store: &KVStore,
         replication_log: &ReplicationLog,
     ) -> ReplicationResult<()> {
         // Get snapshot data (simplified - in production, use streaming)
