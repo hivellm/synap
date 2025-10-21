@@ -352,11 +352,14 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - ✅ Configurable thresholds
 - ✅ 6 comprehensive tests
 
-**📡 Event Streams** 🔄 IN PROGRESS
-- 🔄 Ring buffer implementation
-- 🔄 Room-based isolation
-- 🔄 Message history
-- 🔄 Offset-based consumption
+**📡 Event Streams** ✅ COMPLETE
+- ✅ Ring buffer implementation (VecDeque, 10K msg/room)
+- ✅ Room-based isolation (multi-tenant)
+- ✅ Message history (offset-based replay)
+- ✅ Offset-based consumption (Kafka-style)
+- ✅ Automatic compaction (retention policy)
+- ✅ 6 REST API endpoints
+- ✅ 5 comprehensive tests
 
 **🔔 Pub/Sub System** 🔵 PLANNED
 - Topic routing
@@ -367,11 +370,12 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - ✅ AsyncWAL with group commit (3-5x throughput)
 - ✅ Streaming snapshot v2 (O(1) memory)
 - ✅ Automatic recovery on startup
-- ✅ Integrated with KV Store handlers
+- ✅ Integrated with ALL KV Store handlers
+- ✅ Manual snapshot endpoint (POST /snapshot)
 
 #### 🧪 Testing & Quality
-- ✅ **217/219 tests passing (99.09%)**
-  - 62 library tests (KV, Queue, Persistence, Auth, Compression)
+- ✅ **222/224 tests passing (99.11%)**
+  - 67 library tests (KV, Queue, Streams, Persistence, Auth, Compression)
   - 17 integration tests (performance, hybrid storage, persistence e2e)
   - 58 authentication tests
   - 26 config/error tests
