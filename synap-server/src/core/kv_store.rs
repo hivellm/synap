@@ -2,23 +2,133 @@ use super::error::{Result, SynapError};
 use super::types::{KVConfig, KVStats, StoredValue};
 use parking_lot::RwLock;
 use radix_trie::{Trie, TrieCommon};
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
 const SHARD_COUNT: usize = 64;
+const HASHMAP_THRESHOLD: usize = 10_000; // Switch to RadixTrie after 10K keys
 
-/// Single shard of the KV store
+/// Storage backend for a shard (adaptive: HashMap for small, RadixTrie for large)
+enum ShardStorage {
+    /// HashMap for datasets < 10K keys (2-3x faster)
+    Small(HashMap<String, StoredValue>),
+    /// RadixTrie for datasets >= 10K keys (memory efficient for large sets)
+    Large(Trie<String, StoredValue>),
+}
+
+impl ShardStorage {
+    fn new() -> Self {
+        // Start with HashMap for better small-dataset performance
+        Self::Small(HashMap::new())
+    }
+    
+    fn len(&self) -> usize {
+        match self {
+            Self::Small(map) => map.len(),
+            Self::Large(trie) => trie.len(),
+        }
+    }
+    
+    fn get(&self, key: &str) -> Option<&StoredValue> {
+        match self {
+            Self::Small(map) => map.get(key),
+            Self::Large(trie) => trie.get(key),
+        }
+    }
+    
+    fn get_mut(&mut self, key: &str) -> Option<&mut StoredValue> {
+        match self {
+            Self::Small(map) => map.get_mut(key),
+            Self::Large(trie) => trie.get_mut(key),
+        }
+    }
+    
+    fn insert(&mut self, key: String, value: StoredValue) -> Option<StoredValue> {
+        match self {
+            Self::Small(map) => {
+                let result = map.insert(key, value);
+                // Check if we need to upgrade to RadixTrie
+                if map.len() >= HASHMAP_THRESHOLD {
+                    self.upgrade_to_trie();
+                }
+                result
+            }
+            Self::Large(trie) => trie.insert(key, value),
+        }
+    }
+    
+    fn remove(&mut self, key: &str) -> Option<StoredValue> {
+        match self {
+            Self::Small(map) => map.remove(key),
+            Self::Large(trie) => trie.remove(key),
+        }
+    }
+    
+    fn iter(&self) -> Box<dyn Iterator<Item = (&String, &StoredValue)> + '_> {
+        match self {
+            Self::Small(map) => Box::new(map.iter()),
+            Self::Large(trie) => Box::new(trie.iter().map(|(k, v)| (k, v))),
+        }
+    }
+    
+    fn keys(&self) -> Box<dyn Iterator<Item = &String> + '_> {
+        match self {
+            Self::Small(map) => Box::new(map.keys()),
+            Self::Large(trie) => Box::new(trie.keys()),
+        }
+    }
+    
+    fn clear(&mut self) {
+        match self {
+            Self::Small(map) => map.clear(),
+            Self::Large(trie) => *trie = Trie::new(),
+        }
+    }
+    
+    /// Get keys with a specific prefix (for SCAN command)
+    fn get_prefix_keys(&self, prefix: &str) -> Vec<String> {
+        match self {
+            Self::Small(map) => {
+                // HashMap doesn't have prefix search, so filter manually
+                map.keys()
+                    .filter(|k| k.starts_with(prefix))
+                    .cloned()
+                    .collect()
+            }
+            Self::Large(trie) => {
+                // Use RadixTrie's efficient prefix search
+                trie.get_raw_descendant(prefix)
+                    .map(|subtrie| subtrie.keys().cloned().collect())
+                    .unwrap_or_default()
+            }
+        }
+    }
+    
+    /// Upgrade from HashMap to RadixTrie when threshold is reached
+    fn upgrade_to_trie(&mut self) {
+        if let Self::Small(map) = self {
+            debug!("Upgrading shard from HashMap to RadixTrie (threshold {} reached)", HASHMAP_THRESHOLD);
+            let mut trie = Trie::new();
+            for (k, v) in map.drain() {
+                trie.insert(k, v);
+            }
+            *self = Self::Large(trie);
+        }
+    }
+}
+
+/// Single shard of the KV store with adaptive storage
 struct KVShard {
-    data: RwLock<Trie<String, StoredValue>>,
+    data: RwLock<ShardStorage>,
 }
 
 impl KVShard {
     fn new() -> Self {
         Self {
-            data: RwLock::new(Trie::new()),
+            data: RwLock::new(ShardStorage::new()),
         }
     }
 }
@@ -282,9 +392,7 @@ impl KVStore {
             let data = shard.data.read();
             
             let shard_keys: Vec<String> = if let Some(prefix) = prefix {
-                data.get_raw_descendant(prefix)
-                    .map(|subtrie| subtrie.keys().map(|k| k.to_string()).collect())
-                    .unwrap_or_default()
+                data.get_prefix_keys(prefix)
             } else {
                 data.keys().map(|k| k.to_string()).collect()
             };
@@ -393,7 +501,7 @@ impl KVStore {
         // Clear all shards
         for shard in self.shards.iter() {
             let mut data = shard.data.write();
-            *data = Trie::new();
+            data.clear();
         }
 
         let mut stats = self.stats.write();
