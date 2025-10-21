@@ -265,9 +265,9 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 | Pub/Sub Publish | < 0.5ms | 🔵 Planned |
 | Replication Lag | < 10ms | 🔵 Planned |
 
-**Test Coverage**: 206/208 tests passing (99.04%)
+**Test Coverage**: 217/219 tests passing (99.09%)
 
-See [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md) and [docs/TEST_COVERAGE_REPORT.md](docs/TEST_COVERAGE_REPORT.md) for detailed analysis.
+**Scripts**: `./scripts/test-performance.ps1` (full suite), `./scripts/quick-test.ps1` (fast validation)
 
 ## ⚖️ Comparison
 
