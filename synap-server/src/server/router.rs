@@ -4,6 +4,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use tower_http::{
+    compression::CompressionLayer,
     cors::{Any, CorsLayer},
     trace::TraceLayer,
 };
@@ -45,6 +46,7 @@ pub fn create_router(
         .route("/api/v1/command", post(handlers::command_handler))
         // Add state and middleware
         .with_state(state)
+        .layer(CompressionLayer::new()) // Gzip compression for responses
         .layer(TraceLayer::new_for_http())
         .layer(cors)
     // NOTE: Rate limiting disabled for now due to Clone requirements

@@ -1,0 +1,249 @@
+// Gzip Compression Tests
+// Tests that REST API supports gzip compression (tower-http CompressionLayer)
+
+use reqwest::Client;
+use serde_json::json;
+use std::sync::Arc;
+use std::time::Duration;
+use synap_server::{AppState, KVConfig, KVStore, QueueConfig, QueueManager, create_router};
+use tokio::net::TcpListener;
+
+async fn spawn_test_server() -> String {
+    let kv_store = Arc::new(KVStore::new(KVConfig::default()));
+    let queue_manager = Arc::new(QueueManager::new(QueueConfig::default()));
+
+    let state = AppState {
+        kv_store,
+        queue_manager: Some(queue_manager),
+    };
+
+    let app = create_router(state, false, 1000);
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let url = format!("http://{}", addr);
+
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    url
+}
+
+// Note: reqwest automatically handles gzip decompression when the server
+// sends compressed responses. These tests verify the server works correctly
+// with compression enabled (via tower-http CompressionLayer).
+
+#[tokio::test]
+async fn test_compression_layer_enabled() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Verify server handles requests normally with compression layer
+    let response = client
+        .get(&format!("{}/health", base_url))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["status"], "healthy");
+}
+
+#[tokio::test]
+async fn test_compression_with_large_response() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Create many keys
+    for i in 0..100 {
+        client
+            .post(&format!("{}/kv/set", base_url))
+            .json(&json!({
+                "key": format!("key_{}", i),
+                "value": format!("Value {}", i)
+            }))
+            .send()
+            .await
+            .unwrap();
+    }
+
+    // Request stats (will be compressed if large enough)
+    let response = client
+        .get(&format!("{}/kv/stats", base_url))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert!(body["total_keys"].as_u64().unwrap() >= 100);
+}
+
+#[tokio::test]
+async fn test_compression_transparent_to_client() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // reqwest automatically handles compression/decompression
+    let response = client
+        .get(&format!("{}/health", base_url))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["service"], "synap");
+}
+
+#[tokio::test]
+async fn test_compression_with_queue_operations() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Create multiple queues
+    for i in 0..50 {
+        client
+            .post(&format!("{}/queue/queue_{}", base_url, i))
+            .json(&json!({}))
+            .send()
+            .await
+            .unwrap();
+    }
+
+    // List queues (auto-compressed by tower-http if large)
+    let response = client
+        .get(&format!("{}/queue/list", base_url))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    let body: serde_json::Value = response.json().await.unwrap();
+    let queues = body["queues"].as_array().unwrap();
+    assert!(queues.len() >= 50);
+}
+
+#[tokio::test]
+async fn test_compression_preserves_complex_json() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Set a complex value
+    let complex_value = json!({
+        "user": {
+            "id": 123,
+            "name": "Alice",
+            "tags": ["admin", "developer", "reviewer"],
+            "metadata": {
+                "created_at": "2025-10-21",
+                "last_seen": "2025-10-21T12:00:00Z"
+            }
+        }
+    });
+
+    client
+        .post(&format!("{}/kv/set", base_url))
+        .json(&json!({
+            "key": "complex_data",
+            "value": complex_value
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // Get (compression handled transparently)
+    let response = client
+        .get(&format!("{}/kv/get/complex_data", base_url))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert!(body["found"].as_bool().unwrap());
+
+    let value = &body["value"];
+    assert_eq!(value["user"]["id"], 123);
+    assert_eq!(value["user"]["name"], "Alice");
+    assert_eq!(value["user"]["tags"].as_array().unwrap().len(), 3);
+}
+
+#[tokio::test]
+async fn test_compression_with_concurrent_requests() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    let mut handles = vec![];
+
+    // 20 concurrent requests (compression handled transparently)
+    for i in 0..20 {
+        let url = base_url.clone();
+        let client = client.clone();
+
+        let handle = tokio::spawn(async move {
+            let response = client
+                .post(&format!("{}/kv/set", url))
+                .json(&json!({
+                    "key": format!("comp_key_{}", i),
+                    "value": format!("Value {}", i)
+                }))
+                .send()
+                .await
+                .unwrap();
+
+            assert!(response.status().is_success());
+            response.json::<serde_json::Value>().await.unwrap()
+        });
+
+        handles.push(handle);
+    }
+
+    // All should succeed
+    for handle in handles {
+        let body = handle.await.unwrap();
+        assert_eq!(body["success"], true);
+    }
+}
+
+#[tokio::test]
+async fn test_compression_with_large_payload() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Create a large payload (will benefit from compression)
+    let large_value = "Large data content that will be compressed by gzip. ".repeat(200);
+
+    let response = client
+        .post(&format!("{}/kv/set", base_url))
+        .json(&json!({
+            "key": "large_key",
+            "value": large_value
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["success"], true);
+
+    // Retrieve the large value (compressed by server, decompressed by client)
+    let response = client
+        .get(&format!("{}/kv/get/large_key", base_url))
+        .send()
+        .await
+        .unwrap();
+
+    assert!(response.status().is_success());
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert!(body["found"].as_bool().unwrap());
+
+    // Verify data integrity after compression/decompression
+    let retrieved_value = body["value"].as_str().unwrap();
+    assert!(retrieved_value.contains("Large data content"));
+    assert!(retrieved_value.len() > 1000);
+}

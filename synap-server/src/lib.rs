@@ -12,6 +12,6 @@ pub use auth::{
 };
 pub use compression::{CompressionAlgorithm, Compressor};
 pub use config::ServerConfig;
-pub use core::{KVConfig, KVStore, QueueConfig, QueueManager, SynapError};
+pub use core::{EvictionPolicy, KVConfig, KVStore, QueueConfig, QueueManager, SynapError};
 pub use protocol::{Request, Response};
 pub use server::{AppState, create_router};

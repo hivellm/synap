@@ -21,7 +21,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 thiserror = "1.0"
 anyhow = "1.0"
-tower-http = { version = "0.5", features = ["trace", "cors"] }
+tower-http = { version = "0.5", features = ["trace", "cors", "compression-gzip"] }
 serde_yaml = "0.9"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 lz4 = "1.24"
