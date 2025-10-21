@@ -70,3 +70,11 @@ harness = false
 name = "compression_bench"
 harness = false
 
+[[bench]]
+name = "kv_persistence_bench"
+harness = false
+
+[[bench]]
+name = "queue_persistence_bench"
+harness = false
+

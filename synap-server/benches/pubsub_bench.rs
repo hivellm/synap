@@ -1,8 +1,8 @@
 use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
-use synap_server::core::PubSubRouter;
-use std::sync::Arc;
 use serde_json::json;
 use std::collections::HashMap;
+use std::sync::Arc;
+use synap_server::core::PubSubRouter;
 
 /// Benchmark: Topic publish throughput
 fn bench_pubsub_publish(c: &mut Criterion) {
@@ -208,7 +208,11 @@ fn bench_pubsub_with_metadata(c: &mut Criterion) {
 
         b.iter(|| {
             router
-                .publish("test.topic", black_box(payload.clone()), Some(metadata.clone()))
+                .publish(
+                    "test.topic",
+                    black_box(payload.clone()),
+                    Some(metadata.clone()),
+                )
                 .unwrap();
         });
     });
