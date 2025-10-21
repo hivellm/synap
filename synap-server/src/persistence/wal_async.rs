@@ -1,7 +1,7 @@
-use super::types::{FsyncMode, Operation, PersistenceError, Result, WALEntry, WALConfig};
+use super::types::{FsyncMode, Operation, PersistenceError, Result, WALConfig, WALEntry};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
@@ -39,7 +39,7 @@ impl AsyncWAL {
             .await?;
 
         let writer = BufWriter::with_capacity(config.buffer_size_kb * 1024, file);
-        
+
         // Scan for last offset
         let current_offset = Arc::new(AtomicU64::new(0));
         let last_offset = Self::scan_for_last_offset(&config.path).await?;
@@ -77,7 +77,7 @@ impl AsyncWAL {
             // Try to read entry size
             let size = match file.read_u64().await {
                 Ok(s) => s,
-                Err(_) => break,  // EOF
+                Err(_) => break, // EOF
             };
 
             // Read checksum
@@ -117,7 +117,7 @@ impl AsyncWAL {
     ) {
         const MAX_BATCH_SIZE: usize = 1000;
         let batch_timeout = Duration::from_millis(10);
-        
+
         let mut batch: Vec<WriteOperation> = Vec::with_capacity(MAX_BATCH_SIZE);
         let mut last_fsync = std::time::Instant::now();
 
@@ -127,7 +127,7 @@ impl AsyncWAL {
                 // Receive first operation (blocking)
                 Some(op) = rx.recv() => {
                     batch.push(op);
-                    
+
                     // Try to fill batch (non-blocking)
                     while batch.len() < MAX_BATCH_SIZE {
                         match rx.try_recv() {
@@ -136,22 +136,26 @@ impl AsyncWAL {
                         }
                     }
                 }
-                
+
                 // Timeout for small batches
                 _ = tokio::time::sleep(batch_timeout), if !batch.is_empty() => {
                     // Process current batch
                 }
-                
+
                 else => break,  // Channel closed
             }
 
             if !batch.is_empty() {
                 // Write all entries in batch
                 let mut responses = Vec::with_capacity(batch.len());
-                
-                for WriteOperation { operation, response_tx } in batch.drain(..) {
+
+                for WriteOperation {
+                    operation,
+                    response_tx,
+                } in batch.drain(..)
+                {
                     let offset = current_offset.fetch_add(1, Ordering::SeqCst);
-                    
+
                     let entry = WALEntry {
                         offset,
                         timestamp: SystemTime::now()
@@ -204,10 +208,7 @@ impl AsyncWAL {
     }
 
     /// Write a single entry to the writer
-    async fn write_entry(
-        writer: &mut BufWriter<File>,
-        entry: &WALEntry,
-    ) -> Result<()> {
+    async fn write_entry(writer: &mut BufWriter<File>, entry: &WALEntry) -> Result<()> {
         // Serialize entry
         let data = bincode::serialize(entry)?;
         let checksum = crc32fast::hash(&data);
@@ -223,7 +224,7 @@ impl AsyncWAL {
     /// Append an operation to the WAL (returns immediately, actual write is batched)
     pub async fn append(&self, operation: Operation) -> Result<u64> {
         let (tx, rx) = oneshot::channel();
-        
+
         let write_op = WriteOperation {
             operation,
             response_tx: tx,
@@ -261,7 +262,7 @@ impl AsyncWAL {
             // Read entry size
             let size = match file.read_u64().await {
                 Ok(s) => s,
-                Err(_) => break,  // EOF
+                Err(_) => break, // EOF
             };
 
             // Read checksum
@@ -302,4 +303,3 @@ impl AsyncWAL {
         Ok(entries)
     }
 }
-

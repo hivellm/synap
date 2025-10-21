@@ -175,4 +175,3 @@ pub fn get_mcp_tools() -> Vec<Tool> {
         },
     ]
 }
-

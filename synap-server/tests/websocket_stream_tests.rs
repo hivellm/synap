@@ -109,7 +109,7 @@ async fn test_stream_websocket_real_time_push() {
     tokio::time::timeout(tokio::time::Duration::from_millis(500), async {
         while let Some(Ok(Message::Text(text))) = read.next().await {
             let msg: serde_json::Value = serde_json::from_str(&text).unwrap();
-            
+
             if msg["type"] == "event" {
                 assert_eq!(msg["event"], "test.event");
                 assert_eq!(msg["data"]["message"], "Hello WebSocket");
@@ -165,7 +165,7 @@ async fn test_stream_websocket_multiple_events() {
     tokio::time::timeout(tokio::time::Duration::from_secs(1), async {
         while let Some(Ok(Message::Text(text))) = read.next().await {
             let msg: serde_json::Value = serde_json::from_str(&text).unwrap();
-            
+
             if msg["type"] == "event" {
                 received += 1;
                 if received == 3 {
@@ -208,9 +208,12 @@ async fn test_stream_websocket_from_offset() {
     }
 
     // Connect from offset 5
-    let (ws_stream, _) = connect_async(format!("{}/stream/offset_room/ws/sub4?from_offset=5", ws_url))
-        .await
-        .unwrap();
+    let (ws_stream, _) = connect_async(format!(
+        "{}/stream/offset_room/ws/sub4?from_offset=5",
+        ws_url
+    ))
+    .await
+    .unwrap();
 
     let (mut write, mut read) = ws_stream.split();
 
@@ -222,7 +225,7 @@ async fn test_stream_websocket_from_offset() {
     tokio::time::timeout(tokio::time::Duration::from_millis(500), async {
         while let Some(Ok(Message::Text(text))) = read.next().await {
             let msg: serde_json::Value = serde_json::from_str(&text).unwrap();
-            
+
             if msg["type"] == "event" {
                 let offset = msg["offset"].as_u64().unwrap();
                 if first_offset.is_none() {
@@ -235,7 +238,9 @@ async fn test_stream_websocket_from_offset() {
     .await
     .expect("Timeout");
 
-    assert!(first_offset.unwrap() >= 5, "Should start from offset 5 or later");
+    assert!(
+        first_offset.unwrap() >= 5,
+        "Should start from offset 5 or later"
+    );
     write.close().await.unwrap();
 }
-

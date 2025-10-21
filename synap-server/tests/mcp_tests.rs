@@ -1,13 +1,13 @@
+use rmcp::model::CallToolRequestParam;
 use serde_json::json;
 use std::sync::Arc;
-use synap_server::{handle_mcp_tool, AppState, KVStore, QueueConfig, QueueManager, ServerConfig};
-use rmcp::model::CallToolRequestParam;
+use synap_server::{AppState, KVStore, QueueConfig, QueueManager, ServerConfig, handle_mcp_tool};
 
 #[tokio::test]
 async fn test_mcp_kv_get() {
     let config = ServerConfig::default();
     let kv_store = Arc::new(KVStore::new(config.to_kv_config()));
-    
+
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
         queue_manager: None,
@@ -17,7 +17,10 @@ async fn test_mcp_kv_get() {
     });
 
     // Set a value first
-    kv_store.set("test_key", b"test_value".to_vec(), None).await.unwrap();
+    kv_store
+        .set("test_key", b"test_value".to_vec(), None)
+        .await
+        .unwrap();
 
     // Test MCP tool call
     let request = CallToolRequestParam {
@@ -46,7 +49,9 @@ async fn test_mcp_kv_set() {
             "key": "mcp_key",
             "value": "mcp_value",
             "ttl": 60
-        }).as_object().cloned(),
+        })
+        .as_object()
+        .cloned(),
     };
 
     let result = handle_mcp_tool(request, state.clone()).await;
@@ -61,7 +66,7 @@ async fn test_mcp_kv_set() {
 async fn test_mcp_kv_delete() {
     let config = ServerConfig::default();
     let kv_store = Arc::new(KVStore::new(config.to_kv_config()));
-    
+
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
         queue_manager: None,
@@ -71,7 +76,10 @@ async fn test_mcp_kv_delete() {
     });
 
     // Set then delete
-    kv_store.set("to_del", b"value".to_vec(), None).await.unwrap();
+    kv_store
+        .set("to_del", b"value".to_vec(), None)
+        .await
+        .unwrap();
 
     let request = CallToolRequestParam {
         name: "synap_kv_delete".into(),
@@ -90,7 +98,7 @@ async fn test_mcp_kv_delete() {
 async fn test_mcp_kv_scan() {
     let config = ServerConfig::default();
     let kv_store = Arc::new(KVStore::new(config.to_kv_config()));
-    
+
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
         queue_manager: None,
@@ -101,7 +109,10 @@ async fn test_mcp_kv_scan() {
 
     // Set multiple keys
     for i in 1..=5 {
-        kv_store.set(&format!("user:{}", i), b"data".to_vec(), None).await.unwrap();
+        kv_store
+            .set(&format!("user:{}", i), b"data".to_vec(), None)
+            .await
+            .unwrap();
     }
 
     let request = CallToolRequestParam {
@@ -109,7 +120,9 @@ async fn test_mcp_kv_scan() {
         arguments: json!({
             "prefix": "user:",
             "limit": 10
-        }).as_object().cloned(),
+        })
+        .as_object()
+        .cloned(),
     };
 
     let result = handle_mcp_tool(request, state).await;
@@ -120,7 +133,7 @@ async fn test_mcp_kv_scan() {
 async fn test_mcp_queue_publish() {
     let config = ServerConfig::default();
     let queue_manager = Arc::new(QueueManager::new(QueueConfig::default()));
-    
+
     let state = Arc::new(AppState {
         kv_store: Arc::new(KVStore::new(config.to_kv_config())),
         queue_manager: Some(queue_manager.clone()),
@@ -138,7 +151,9 @@ async fn test_mcp_queue_publish() {
             "queue": "test_q",
             "message": "test message",
             "priority": 8
-        }).as_object().cloned(),
+        })
+        .as_object()
+        .cloned(),
     };
 
     let result = handle_mcp_tool(request, state).await;

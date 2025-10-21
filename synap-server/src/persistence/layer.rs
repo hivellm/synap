@@ -43,10 +43,10 @@ impl PersistenceLayer {
         }
 
         let operation = Operation::KVSet { key, value, ttl };
-        
+
         // AsyncWAL batches this automatically
         self.wal.append(operation).await?;
-        
+
         // Track operations for snapshot threshold
         let mut ops = self.operations_since_snapshot.write();
         *ops += 1;
@@ -61,9 +61,9 @@ impl PersistenceLayer {
         }
 
         let operation = Operation::KVDel { keys };
-        
+
         self.wal.append(operation).await?;
-        
+
         let mut ops = self.operations_since_snapshot.write();
         *ops += 1;
 
@@ -81,9 +81,9 @@ impl PersistenceLayer {
         }
 
         let operation = Operation::QueuePublish { queue, message };
-        
+
         self.wal.append(operation).await?;
-        
+
         let mut ops = self.operations_since_snapshot.write();
         *ops += 1;
 
@@ -101,7 +101,7 @@ impl PersistenceLayer {
         }
 
         let operation = Operation::QueueAck { queue, message_id };
-        
+
         self.wal.append(operation).await?;
 
         Ok(())
@@ -120,22 +120,22 @@ impl PersistenceLayer {
         let should_snapshot = {
             let last = self.last_snapshot.read();
             let ops = self.operations_since_snapshot.read();
-            
+
             let time_elapsed = last.elapsed().as_secs() >= self.config.snapshot.interval_secs;
             let ops_threshold = *ops >= self.config.snapshot.operation_threshold;
-            
+
             time_elapsed || ops_threshold
         };
 
         if should_snapshot {
             info!("Creating periodic snapshot");
-            
+
             let wal_offset = self.wal.current_offset();
-            
+
             self.snapshot_mgr
                 .create_snapshot(kv_store, queue_manager, wal_offset)
                 .await?;
-            
+
             // Reset counters
             *self.last_snapshot.write() = Instant::now();
             *self.operations_since_snapshot.write() = 0;
@@ -151,7 +151,7 @@ impl PersistenceLayer {
         queue_manager: Option<Arc<QueueManager>>,
     ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(60));  // Check every minute
+            let mut interval = tokio::time::interval(Duration::from_secs(60)); // Check every minute
 
             loop {
                 interval.tick().await;
@@ -172,4 +172,3 @@ impl PersistenceLayer {
         Ok(())
     }
 }
-

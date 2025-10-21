@@ -9,7 +9,9 @@ use synap_server::{AppState, KVConfig, KVStore, create_router};
 use tokio::net::TcpListener;
 
 async fn spawn_test_server() -> String {
-    let kv_store = Arc::new(KVStore::new(KVConfig::default()));
+    let mut config = KVConfig::default();
+    config.allow_flush_commands = true; // Enable FLUSHDB for tests
+    let kv_store = Arc::new(KVStore::new(config));
     let state = AppState {
         kv_store,
         queue_manager: None,
@@ -323,8 +325,14 @@ async fn test_streamable_kv_flushdb() {
 
     // Test FLUSHDB
     let res = send_command(&client, &base_url, "kv.flushdb", json!({})).await;
-    assert!(res["success"].as_bool().unwrap_or(false), "FLUSHDB should succeed");
-    assert!(res["payload"]["flushed"].as_u64().is_some(), "Should return flushed count");
+    assert!(
+        res["success"].as_bool().unwrap_or(false),
+        "FLUSHDB should succeed"
+    );
+    assert!(
+        res["payload"]["flushed"].as_u64().is_some(),
+        "Should return flushed count"
+    );
 
     // Verify empty
     let res = send_command(&client, &base_url, "kv.dbsize", json!({})).await;
@@ -465,8 +473,14 @@ async fn test_streamable_complete_workflow() {
 
     // 7. FLUSHDB
     let res = send_command(&client, &base_url, "kv.flushdb", json!({})).await;
-    assert!(res["success"].as_bool().unwrap_or(false), "FLUSHDB should succeed");
-    assert!(res["payload"]["flushed"].as_u64().is_some(), "Should return flushed count");
+    assert!(
+        res["success"].as_bool().unwrap_or(false),
+        "FLUSHDB should succeed"
+    );
+    assert!(
+        res["payload"]["flushed"].as_u64().is_some(),
+        "Should return flushed count"
+    );
 
     // 8. Verify empty
     let res = send_command(&client, &base_url, "kv.dbsize", json!({})).await;

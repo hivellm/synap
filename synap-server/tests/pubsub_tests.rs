@@ -19,7 +19,7 @@ async fn spawn_test_server() -> String {
     };
 
     let app = create_router(app_state, false, 100);
-    
+
     // Bind to random port
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
@@ -129,7 +129,10 @@ async fn test_pubsub_wildcard_single_level() {
 
     // Publish to non-matching topic (too many levels)
     let res = client
-        .post(format!("{}/pubsub/notifications.email.user/publish", base_url))
+        .post(format!(
+            "{}/pubsub/notifications.email.user/publish",
+            base_url
+        ))
         .json(&json!({
             "payload": {"test": true}
         }))
@@ -325,7 +328,7 @@ async fn test_pubsub_list_topics() {
 
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["count"], 3);
-    
+
     let topics = body["topics"].as_array().unwrap();
     assert_eq!(topics.len(), 3);
 }
@@ -486,4 +489,3 @@ async fn test_pubsub_hierarchical_topics() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["subscribers_matched"], 0);
 }
-

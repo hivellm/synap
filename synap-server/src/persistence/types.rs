@@ -63,24 +63,19 @@ pub enum Operation {
         value: Vec<u8>,
         ttl: Option<u64>,
     },
-    
+
     /// KV Store DELETE operation
-    KVDel {
-        keys: Vec<String>,
-    },
-    
+    KVDel { keys: Vec<String> },
+
     /// Queue PUBLISH operation
     QueuePublish {
         queue: String,
         message: QueueMessage,
     },
-    
+
     /// Queue ACK operation
-    QueueAck {
-        queue: String,
-        message_id: String,
-    },
-    
+    QueueAck { queue: String, message_id: String },
+
     /// Queue NACK operation
     QueueNack {
         queue: String,
@@ -95,8 +90,8 @@ pub struct Snapshot {
     pub version: u32,
     pub timestamp: u64,
     pub wal_offset: u64,
-    pub kv_data: HashMap<String, Vec<u8>>,  // Simplified for now
-    pub queue_data: HashMap<String, Vec<QueueMessage>>,  // Simplified for now
+    pub kv_data: HashMap<String, Vec<u8>>, // Simplified for now
+    pub queue_data: HashMap<String, Vec<QueueMessage>>, // Simplified for now
 }
 
 /// Persistence configuration
@@ -110,7 +105,7 @@ pub struct PersistenceConfig {
 impl Default for PersistenceConfig {
     fn default() -> Self {
         Self {
-            enabled: true,  // Persistence enabled by default for data safety
+            enabled: true, // Persistence enabled by default for data safety
             wal: WALConfig::default(),
             snapshot: SnapshotConfig::default(),
         }
@@ -157,10 +152,10 @@ impl Default for SnapshotConfig {
         Self {
             enabled: true,
             directory: PathBuf::from("./data/snapshots"),
-            interval_secs: 300,  // 5 minutes
+            interval_secs: 300, // 5 minutes
             operation_threshold: 10_000,
             max_snapshots: 10,
-            compression: false,  // Disabled for now
+            compression: false, // Disabled for now
         }
     }
 }
@@ -176,4 +171,3 @@ pub enum FsyncMode {
     /// Never fsync (fastest, least safe)
     Never,
 }
-

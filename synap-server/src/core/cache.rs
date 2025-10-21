@@ -11,7 +11,7 @@ use tracing::debug;
 pub struct CacheLayer {
     /// L1 Cache - in-memory LRU
     l1: Arc<RwLock<LRUCache>>,
-    
+
     /// Cache statistics
     stats: Arc<RwLock<CacheStats>>,
 }
@@ -20,10 +20,10 @@ pub struct CacheLayer {
 struct LRUCache {
     /// Cache data
     data: HashMap<String, CacheEntry>,
-    
+
     /// LRU ordering (most recent at back)
     lru_order: VecDeque<String>,
-    
+
     /// Maximum capacity
     max_size: usize,
 }
@@ -33,13 +33,13 @@ struct LRUCache {
 struct CacheEntry {
     /// Cached value
     value: Vec<u8>,
-    
+
     /// TTL (if any)
     ttl: Option<u64>,
-    
+
     /// Last accessed timestamp
     last_accessed: u64,
-    
+
     /// Size in bytes
     size: usize,
 }
@@ -98,15 +98,15 @@ impl CacheLayer {
         if let Some(entry) = l1.data.get_mut(key) {
             entry.last_accessed = Self::current_timestamp();
             let value = entry.value.clone();
-            
-            // Move to back of LRU (most recent) - done after releasing the borrow
-            drop(entry); // Explicitly drop the mutable borrow
+
+            // Move to back of LRU (most recent)
+            let _ = entry; // Release the mutable borrow
             l1.lru_order.retain(|k| k != key);
             l1.lru_order.push_back(key.to_string());
 
             stats.l1_hits += 1;
             debug!("L1 Cache HIT for key: {}", key);
-            
+
             Some(value)
         } else {
             None
@@ -149,7 +149,7 @@ impl CacheLayer {
 
         l1.data.insert(key.clone(), entry);
         l1.lru_order.push_back(key.clone());
-        
+
         stats.l1_entries = l1.data.len();
         stats.l1_size = l1.max_size;
         stats.total_bytes += entry_size;
@@ -178,7 +178,7 @@ impl CacheLayer {
         let count = l1.data.len();
         l1.data.clear();
         l1.lru_order.clear();
-        
+
         stats.l1_entries = 0;
         stats.total_bytes = 0;
 
@@ -189,7 +189,7 @@ impl CacheLayer {
     pub fn get_stats(&self) -> CacheStats {
         let stats = self.stats.read();
         let mut result = stats.clone();
-        
+
         // Calculate hit rate
         let total = result.l1_hits + result.l1_misses;
         result
@@ -218,12 +218,12 @@ mod tests {
     #[test]
     fn test_cache_put_get() {
         let cache = CacheLayer::new(100);
-        
+
         cache.put("key1".to_string(), vec![1, 2, 3], None);
-        
+
         let value = cache.get("key1").unwrap();
         assert_eq!(value, vec![1, 2, 3]);
-        
+
         let stats = cache.get_stats();
         assert_eq!(stats.l1_hits, 1);
         assert_eq!(stats.l1_misses, 0);
@@ -232,10 +232,10 @@ mod tests {
     #[test]
     fn test_cache_miss() {
         let cache = CacheLayer::new(100);
-        
+
         let value = cache.get("nonexistent");
         assert!(value.is_none());
-        
+
         let stats = cache.get_stats();
         assert_eq!(stats.l1_hits, 0);
         assert_eq!(stats.l1_misses, 1);
@@ -244,20 +244,20 @@ mod tests {
     #[test]
     fn test_cache_lru_eviction() {
         let cache = CacheLayer::new(3); // Small cache
-        
+
         // Fill cache
         cache.put("key1".to_string(), vec![1], None);
         cache.put("key2".to_string(), vec![2], None);
         cache.put("key3".to_string(), vec![3], None);
-        
+
         // Add one more - should evict key1 (oldest)
         cache.put("key4".to_string(), vec![4], None);
-        
+
         assert!(cache.get("key1").is_none(), "key1 should be evicted");
         assert!(cache.get("key2").is_some(), "key2 should still exist");
         assert!(cache.get("key3").is_some(), "key3 should still exist");
         assert!(cache.get("key4").is_some(), "key4 should exist");
-        
+
         let stats = cache.get_stats();
         assert_eq!(stats.l1_evictions, 1);
     }
@@ -265,10 +265,10 @@ mod tests {
     #[test]
     fn test_cache_ttl_expiration() {
         let cache = CacheLayer::new(100);
-        
+
         let past_ttl = CacheLayer::current_timestamp() - 10; // 10 seconds ago
         cache.put("expired".to_string(), vec![1, 2, 3], Some(past_ttl));
-        
+
         // Should return None (expired)
         let value = cache.get("expired");
         assert!(value.is_none());
@@ -277,10 +277,10 @@ mod tests {
     #[test]
     fn test_cache_delete() {
         let cache = CacheLayer::new(100);
-        
+
         cache.put("key1".to_string(), vec![1, 2, 3], None);
         assert!(cache.get("key1").is_some());
-        
+
         cache.delete("key1");
         assert!(cache.get("key1").is_none());
     }
@@ -288,17 +288,17 @@ mod tests {
     #[test]
     fn test_cache_invalidate_all() {
         let cache = CacheLayer::new(100);
-        
+
         cache.put("key1".to_string(), vec![1], None);
         cache.put("key2".to_string(), vec![2], None);
         cache.put("key3".to_string(), vec![3], None);
-        
+
         cache.invalidate_all();
-        
+
         assert!(cache.get("key1").is_none());
         assert!(cache.get("key2").is_none());
         assert!(cache.get("key3").is_none());
-        
+
         let stats = cache.get_stats();
         assert_eq!(stats.l1_entries, 0);
     }
@@ -306,19 +306,24 @@ mod tests {
     #[test]
     fn test_cache_lru_order() {
         let cache = CacheLayer::new(3);
-        
+
         cache.put("key1".to_string(), vec![1], None);
         cache.put("key2".to_string(), vec![2], None);
         cache.put("key3".to_string(), vec![3], None);
-        
+
         // Access key1 (moves to back)
         cache.get("key1");
-        
+
         // Add key4 - should evict key2 (now oldest)
         cache.put("key4".to_string(), vec![4], None);
-        
-        assert!(cache.get("key1").is_some(), "key1 was accessed, should not be evicted");
-        assert!(cache.get("key2").is_none(), "key2 should be evicted (oldest)");
+
+        assert!(
+            cache.get("key1").is_some(),
+            "key1 was accessed, should not be evicted"
+        );
+        assert!(
+            cache.get("key2").is_none(),
+            "key2 should be evicted (oldest)"
+        );
     }
 }
-

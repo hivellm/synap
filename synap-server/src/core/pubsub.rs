@@ -2,8 +2,8 @@ use parking_lot::RwLock;
 use radix_trie::{Trie, TrieCommon};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
@@ -25,13 +25,13 @@ pub type MessageSender = mpsc::UnboundedSender<Message>;
 pub struct PubSubRouter {
     /// Exact topic subscriptions (Trie for efficient prefix matching)
     topics: Arc<RwLock<Trie<String, TopicSubscribers>>>,
-    
+
     /// Wildcard subscriptions (separate for efficiency)
     wildcard_subs: Arc<RwLock<Vec<WildcardSubscription>>>,
-    
+
     /// Active WebSocket connections by subscriber_id
     connections: Arc<RwLock<HashMap<SubscriberId, MessageSender>>>,
-    
+
     /// Statistics
     stats: Arc<RwLock<PubSubStats>>,
 }
@@ -62,9 +62,9 @@ pub struct WildcardMatcher {
 /// Segment matcher types
 #[derive(Clone, Debug, PartialEq)]
 pub enum SegmentMatcher {
-    Exact(String),    // Literal string
-    SingleLevel,      // * wildcard (matches exactly one level)
-    MultiLevel,       // # wildcard (matches zero or more levels)
+    Exact(String), // Literal string
+    SingleLevel,   // * wildcard (matches exactly one level)
+    MultiLevel,    // # wildcard (matches zero or more levels)
 }
 
 /// Pub/Sub statistics
@@ -124,14 +124,20 @@ impl PubSubRouter {
     pub fn register_connection(&self, subscriber_id: String, sender: MessageSender) {
         let mut connections = self.connections.write();
         connections.insert(subscriber_id.clone(), sender);
-        debug!("WebSocket connection registered for subscriber: {}", subscriber_id);
+        debug!(
+            "WebSocket connection registered for subscriber: {}",
+            subscriber_id
+        );
     }
 
     /// Unregister a WebSocket connection
     pub fn unregister_connection(&self, subscriber_id: &str) {
         let mut connections = self.connections.write();
         connections.remove(subscriber_id);
-        debug!("WebSocket connection unregistered for subscriber: {}", subscriber_id);
+        debug!(
+            "WebSocket connection unregistered for subscriber: {}",
+            subscriber_id
+        );
     }
 
     /// Subscribe to one or more topics (exact or wildcard)
@@ -144,19 +150,22 @@ impl PubSubRouter {
                 // Wildcard subscription
                 let matcher = Self::compile_pattern(topic_pattern)?;
                 let mut wildcards = self.wildcard_subs.write();
-                
+
                 wildcards.push(WildcardSubscription {
                     pattern: topic_pattern.clone(),
                     subscriber_id: subscriber_id.clone(),
                     compiled_pattern: matcher,
                 });
-                
+
                 subscription_count += 1;
-                debug!("Subscriber {} added wildcard pattern: {}", subscriber_id, topic_pattern);
+                debug!(
+                    "Subscriber {} added wildcard pattern: {}",
+                    subscriber_id, topic_pattern
+                );
             } else {
                 // Exact topic subscription
                 let mut topics_map = self.topics.write();
-                
+
                 if let Some(topic_subs) = topics_map.get_mut(topic_pattern) {
                     topic_subs.subscribers.insert(subscriber_id.clone());
                 } else {
@@ -174,9 +183,12 @@ impl PubSubRouter {
                         },
                     );
                 }
-                
+
                 subscription_count += 1;
-                debug!("Subscriber {} added to topic: {}", subscriber_id, topic_pattern);
+                debug!(
+                    "Subscriber {} added to topic: {}",
+                    subscriber_id, topic_pattern
+                );
             }
         }
 
@@ -191,7 +203,11 @@ impl PubSubRouter {
     }
 
     /// Unsubscribe from topics
-    pub fn unsubscribe(&self, subscriber_id: &str, topics: Option<Vec<String>>) -> Result<usize, SynapError> {
+    pub fn unsubscribe(
+        &self,
+        subscriber_id: &str,
+        topics: Option<Vec<String>>,
+    ) -> Result<usize, SynapError> {
         let mut unsubscribed = 0;
 
         if let Some(topic_list) = topics {
@@ -237,7 +253,10 @@ impl PubSubRouter {
         // Update stats
         self.update_stats();
 
-        debug!("Subscriber {} unsubscribed from {} topics", subscriber_id, unsubscribed);
+        debug!(
+            "Subscriber {} unsubscribed from {} topics",
+            subscriber_id, unsubscribed
+        );
         Ok(unsubscribed)
     }
 
@@ -250,7 +269,9 @@ impl PubSubRouter {
     ) -> Result<PublishResult, SynapError> {
         // Validate topic
         if topic.is_empty() {
-            return Err(SynapError::InvalidValue("Topic cannot be empty".to_string()));
+            return Err(SynapError::InvalidValue(
+                "Topic cannot be empty".to_string(),
+            ));
         }
 
         // Create message
@@ -344,7 +365,10 @@ impl PubSubRouter {
             .collect();
 
         // Validate: # can only be at the end
-        let multi_level_count = segments.iter().filter(|s| matches!(s, SegmentMatcher::MultiLevel)).count();
+        let multi_level_count = segments
+            .iter()
+            .filter(|s| matches!(s, SegmentMatcher::MultiLevel))
+            .count();
         if multi_level_count > 1 {
             return Err(SynapError::InvalidValue(
                 "Pattern can only contain one # wildcard".to_string(),
@@ -482,10 +506,10 @@ mod tests {
     #[test]
     fn test_exact_subscription() {
         let router = PubSubRouter::new();
-        
+
         let result = router.subscribe(vec!["test.topic".to_string()]).unwrap();
         assert_eq!(result.subscription_count, 1);
-        
+
         let stats = router.get_stats();
         assert_eq!(stats.total_topics, 1);
         assert_eq!(stats.total_subscribers, 1);
@@ -494,40 +518,60 @@ mod tests {
     #[test]
     fn test_wildcard_single_level() {
         let router = PubSubRouter::new();
-        
-        let result = router.subscribe(vec!["notifications.*".to_string()]).unwrap();
+
+        let result = router
+            .subscribe(vec!["notifications.*".to_string()])
+            .unwrap();
         assert_eq!(result.subscription_count, 1);
-        
+
         // Publish to matching topic
-        let publish_result = router.publish("notifications.email", serde_json::json!({"test": true}), None).unwrap();
+        let publish_result = router
+            .publish(
+                "notifications.email",
+                serde_json::json!({"test": true}),
+                None,
+            )
+            .unwrap();
         assert_eq!(publish_result.subscribers_matched, 1);
-        
+
         // Publish to non-matching topic
-        let publish_result = router.publish("notifications.email.user", serde_json::json!({"test": true}), None).unwrap();
+        let publish_result = router
+            .publish(
+                "notifications.email.user",
+                serde_json::json!({"test": true}),
+                None,
+            )
+            .unwrap();
         assert_eq!(publish_result.subscribers_matched, 0);
     }
 
     #[test]
     fn test_wildcard_multi_level() {
         let router = PubSubRouter::new();
-        
+
         let result = router.subscribe(vec!["events.user.#".to_string()]).unwrap();
         assert_eq!(result.subscription_count, 1);
-        
+
         // All these should match
         let topics = vec![
             "events.user",
             "events.user.login",
             "events.user.login.success",
         ];
-        
+
         for topic in topics {
             let publish_result = router.publish(topic, serde_json::json!({}), None).unwrap();
-            assert_eq!(publish_result.subscribers_matched, 1, "Topic {} should match", topic);
+            assert_eq!(
+                publish_result.subscribers_matched, 1,
+                "Topic {} should match",
+                topic
+            );
         }
-        
+
         // This should not match
-        let publish_result = router.publish("events.admin", serde_json::json!({}), None).unwrap();
+        let publish_result = router
+            .publish("events.admin", serde_json::json!({}), None)
+            .unwrap();
         assert_eq!(publish_result.subscribers_matched, 0);
     }
 
@@ -537,11 +581,11 @@ mod tests {
         assert!(PubSubRouter::compile_pattern("test.*").is_ok());
         assert!(PubSubRouter::compile_pattern("test.#").is_ok());
         assert!(PubSubRouter::compile_pattern("*.test.*").is_ok());
-        
+
         // Invalid patterns (# not at end)
         assert!(PubSubRouter::compile_pattern("#.test").is_err());
         assert!(PubSubRouter::compile_pattern("test.#.more").is_err());
-        
+
         // Invalid patterns (multiple #)
         assert!(PubSubRouter::compile_pattern("#.#").is_err());
     }
@@ -549,19 +593,27 @@ mod tests {
     #[test]
     fn test_unsubscribe() {
         let router = PubSubRouter::new();
-        
-        let result = router.subscribe(vec!["topic1".to_string(), "topic2".to_string()]).unwrap();
+
+        let result = router
+            .subscribe(vec!["topic1".to_string(), "topic2".to_string()])
+            .unwrap();
         let sub_id = result.subscriber_id;
-        
+
         // Unsubscribe from one topic
-        let count = router.unsubscribe(&sub_id, Some(vec!["topic1".to_string()])).unwrap();
+        let count = router
+            .unsubscribe(&sub_id, Some(vec!["topic1".to_string()]))
+            .unwrap();
         assert_eq!(count, 1);
-        
+
         // Verify only one subscription remains
-        let publish_result = router.publish("topic1", serde_json::json!({}), None).unwrap();
+        let publish_result = router
+            .publish("topic1", serde_json::json!({}), None)
+            .unwrap();
         assert_eq!(publish_result.subscribers_matched, 0);
-        
-        let publish_result = router.publish("topic2", serde_json::json!({}), None).unwrap();
+
+        let publish_result = router
+            .publish("topic2", serde_json::json!({}), None)
+            .unwrap();
         assert_eq!(publish_result.subscribers_matched, 1);
     }
 
@@ -574,12 +626,12 @@ mod tests {
                 SegmentMatcher::SingleLevel,
             ],
         };
-        
+
         assert!(matcher.matches(&["notifications", "email"]));
         assert!(matcher.matches(&["notifications", "sms"]));
         assert!(!matcher.matches(&["notifications", "email", "user"]));
         assert!(!matcher.matches(&["notifications"]));
-        
+
         // Multi-level wildcard
         let matcher = WildcardMatcher {
             segments: vec![
@@ -588,11 +640,10 @@ mod tests {
                 SegmentMatcher::MultiLevel,
             ],
         };
-        
+
         assert!(matcher.matches(&["events", "user"]));
         assert!(matcher.matches(&["events", "user", "login"]));
         assert!(matcher.matches(&["events", "user", "login", "success"]));
         assert!(!matcher.matches(&["events", "admin"]));
     }
 }
-

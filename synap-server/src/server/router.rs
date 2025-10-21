@@ -25,7 +25,7 @@ pub fn create_router(
         // Health check
         .route("/health", get(handlers::health_check))
         // KV endpoints
-        .route("/kv/ws", get(handlers::kv_websocket))  // WebSocket for WATCH (future)
+        .route("/kv/ws", get(handlers::kv_websocket)) // WebSocket for WATCH (future)
         .route("/kv/set", post(handlers::kv_set))
         .route("/kv/get/:key", get(handlers::kv_get))
         .route("/kv/del/:key", delete(handlers::kv_delete))
@@ -33,15 +33,24 @@ pub fn create_router(
         // Persistence endpoints
         .route("/snapshot", post(handlers::trigger_snapshot))
         // Event Stream endpoints
-        .route("/stream/:room/ws/:subscriber_id", get(handlers::stream_websocket))  // WebSocket for real-time push
+        .route(
+            "/stream/:room/ws/:subscriber_id",
+            get(handlers::stream_websocket),
+        ) // WebSocket for real-time push
         .route("/stream/:room", post(handlers::stream_create_room))
         .route("/stream/:room/publish", post(handlers::stream_publish))
-        .route("/stream/:room/consume/:subscriber_id", get(handlers::stream_consume))
+        .route(
+            "/stream/:room/consume/:subscriber_id",
+            get(handlers::stream_consume),
+        )
         .route("/stream/:room/stats", get(handlers::stream_room_stats))
         .route("/stream/:room", delete(handlers::stream_delete_room))
         .route("/stream/list", get(handlers::stream_list_rooms))
         // Queue endpoints
-        .route("/queue/:name/ws/:consumer_id", get(handlers::queue_websocket))  // WebSocket for continuous consume
+        .route(
+            "/queue/:name/ws/:consumer_id",
+            get(handlers::queue_websocket),
+        ) // WebSocket for continuous consume
         .route("/queue/:name", post(handlers::queue_create))
         .route("/queue/:name/publish", post(handlers::queue_publish))
         .route(
@@ -55,8 +64,8 @@ pub fn create_router(
         .route("/queue/:name", delete(handlers::queue_delete))
         .route("/queue/list", get(handlers::queue_list))
         // Pub/Sub endpoints
-        .route("/pubsub/ws", get(handlers::pubsub_websocket))  // WebSocket for subscriptions
-        .route("/pubsub/subscribe", post(handlers::pubsub_subscribe))  // Legacy REST (deprecated)
+        .route("/pubsub/ws", get(handlers::pubsub_websocket)) // WebSocket for subscriptions
+        .route("/pubsub/subscribe", post(handlers::pubsub_subscribe)) // Legacy REST (deprecated)
         .route("/pubsub/:topic/publish", post(handlers::pubsub_publish))
         .route("/pubsub/unsubscribe", post(handlers::pubsub_unsubscribe))
         .route("/pubsub/stats", get(handlers::pubsub_stats))

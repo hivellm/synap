@@ -2,7 +2,10 @@ use crate::core::{KVStore, Message, MessageSender, QueueManager, SynapError};
 use crate::protocol::{Request, Response};
 use axum::{
     Json,
-    extract::{Path, State, ws::{WebSocket, WebSocketUpgrade}},
+    extract::{
+        Path, State,
+        ws::{WebSocket, WebSocketUpgrade},
+    },
     response::{IntoResponse, Response as AxumResponse},
 };
 use futures_util::{SinkExt, StreamExt};
@@ -148,11 +151,17 @@ pub async fn kv_set(
         .map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
     // Set in KV store
-    state.kv_store.set(&req.key, value_bytes.clone(), req.ttl).await?;
+    state
+        .kv_store
+        .set(&req.key, value_bytes.clone(), req.ttl)
+        .await?;
 
     // Log to WAL (async, non-blocking)
     if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence.log_kv_set(req.key.clone(), value_bytes, req.ttl).await {
+        if let Err(e) = persistence
+            .log_kv_set(req.key.clone(), value_bytes, req.ttl)
+            .await
+        {
             error!("Failed to log KV SET to WAL: {}", e);
             // Don't fail the request, data is already in memory
         }
@@ -274,7 +283,7 @@ pub async fn stream_create_room(
     stream_manager
         .create_room(&room_name)
         .await
-        .map_err(|e| SynapError::InvalidRequest(e))?;
+        .map_err(SynapError::InvalidRequest)?;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -295,13 +304,13 @@ pub async fn stream_publish(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
 
-    let data_bytes = serde_json::to_vec(&req.data)
-        .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    let data_bytes =
+        serde_json::to_vec(&req.data).map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
     let offset = stream_manager
         .publish(&room_name, &req.event, data_bytes)
         .await
-        .map_err(|e| SynapError::InvalidRequest(e))?;
+        .map_err(SynapError::InvalidRequest)?;
 
     Ok(Json(StreamPublishResponse {
         offset,
@@ -315,7 +324,10 @@ pub async fn stream_consume(
     Path((room_name, subscriber_id)): Path<(String, String)>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Result<Json<StreamConsumeResponse>, SynapError> {
-    debug!("REST STREAM CONSUME from room: {}, subscriber: {}", room_name, subscriber_id);
+    debug!(
+        "REST STREAM CONSUME from room: {}, subscriber: {}",
+        room_name, subscriber_id
+    );
 
     let stream_manager = state
         .stream_manager
@@ -335,7 +347,7 @@ pub async fn stream_consume(
     let events = stream_manager
         .consume(&room_name, &subscriber_id, from_offset, limit)
         .await
-        .map_err(|e| SynapError::InvalidRequest(e))?;
+        .map_err(SynapError::InvalidRequest)?;
 
     let next_offset = events.last().map(|e| e.offset + 1).unwrap_or(from_offset);
 
@@ -360,7 +372,7 @@ pub async fn stream_room_stats(
     let stats = stream_manager
         .room_stats(&room_name)
         .await
-        .map_err(|e| SynapError::InvalidRequest(e))?;
+        .map_err(SynapError::InvalidRequest)?;
 
     Ok(Json(stats))
 }
@@ -399,7 +411,7 @@ pub async fn stream_delete_room(
     stream_manager
         .delete_room(&room_name)
         .await
-        .map_err(|e| SynapError::InvalidRequest(e))?;
+        .map_err(SynapError::InvalidRequest)?;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -721,7 +733,9 @@ async fn handle_kv_set_cmd(
 
     // Log to WAL
     if let Some(ref persistence) = state.persistence {
-        let _ = persistence.log_kv_set(key.to_string(), value_bytes, ttl).await;
+        let _ = persistence
+            .log_kv_set(key.to_string(), value_bytes, ttl)
+            .await;
     }
 
     Ok(serde_json::json!({ "success": true }))
@@ -812,7 +826,9 @@ async fn handle_kv_incr_cmd(
 
     // Log final value to WAL (INCR is a SET operation)
     if let Some(ref persistence) = state.persistence {
-        let _ = persistence.log_kv_set(key.to_string(), value.to_string().into_bytes(), None).await;
+        let _ = persistence
+            .log_kv_set(key.to_string(), value.to_string().into_bytes(), None)
+            .await;
     }
 
     Ok(serde_json::json!({ "value": value }))
@@ -838,7 +854,9 @@ async fn handle_kv_decr_cmd(
 
     // Log final value to WAL (DECR is a SET operation)
     if let Some(ref persistence) = state.persistence {
-        let _ = persistence.log_kv_set(key.to_string(), value.to_string().into_bytes(), None).await;
+        let _ = persistence
+            .log_kv_set(key.to_string(), value.to_string().into_bytes(), None)
+            .await;
     }
 
     Ok(serde_json::json!({ "value": value }))
@@ -1069,12 +1087,25 @@ async fn handle_queue_create_cmd(
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'name' field".to_string()))?;
 
     let config = request.payload.get("config").and_then(|v| {
-        let max_depth = v.get("max_depth").and_then(|d| d.as_u64()).map(|d| d as usize);
+        let max_depth = v
+            .get("max_depth")
+            .and_then(|d| d.as_u64())
+            .map(|d| d as usize);
         let ack_deadline_secs = v.get("ack_deadline_secs").and_then(|d| d.as_u64());
-        let default_max_retries = v.get("default_max_retries").and_then(|d| d.as_u64()).map(|d| d as u32);
-        let default_priority = v.get("default_priority").and_then(|d| d.as_u64()).map(|d| d as u8);
+        let default_max_retries = v
+            .get("default_max_retries")
+            .and_then(|d| d.as_u64())
+            .map(|d| d as u32);
+        let default_priority = v
+            .get("default_priority")
+            .and_then(|d| d.as_u64())
+            .map(|d| d as u8);
 
-        if max_depth.is_some() || ack_deadline_secs.is_some() || default_max_retries.is_some() || default_priority.is_some() {
+        if max_depth.is_some()
+            || ack_deadline_secs.is_some()
+            || default_max_retries.is_some()
+            || default_priority.is_some()
+        {
             Some(crate::core::QueueConfig {
                 max_depth: max_depth.unwrap_or(100_000),
                 ack_deadline_secs: ack_deadline_secs.unwrap_or(30),
@@ -1136,12 +1167,22 @@ async fn handle_queue_publish_cmd(
         .filter_map(|v| v.as_u64().map(|n| n as u8))
         .collect();
 
-    let priority = request.payload.get("priority").and_then(|v| v.as_u64()).map(|p| p as u8);
-    let max_retries = request.payload.get("max_retries").and_then(|v| v.as_u64()).map(|r| r as u32);
+    let priority = request
+        .payload
+        .get("priority")
+        .and_then(|v| v.as_u64())
+        .map(|p| p as u8);
+    let max_retries = request
+        .payload
+        .get("max_retries")
+        .and_then(|v| v.as_u64())
+        .map(|r| r as u32);
     // Note: headers are ignored for now - not supported by the queue manager
     // let headers = request.payload.get("headers")...
 
-    let message_id = queue_manager.publish(queue, payload_bytes, priority, max_retries).await?;
+    let message_id = queue_manager
+        .publish(queue, payload_bytes, priority, max_retries)
+        .await?;
     Ok(serde_json::json!({ "message_id": message_id }))
 }
 
@@ -1322,7 +1363,7 @@ pub async fn kv_websocket(
     }
 
     info!("KV WebSocket WATCH connection for keys: {:?}", keys);
-    
+
     // Note: Full implementation would require KVStore to support change notifications
     // For now, return not implemented
     (
@@ -1354,7 +1395,10 @@ pub async fn queue_websocket(
         }
     };
 
-    info!("Queue WebSocket connection: queue={}, consumer={}", queue_name, consumer_id);
+    info!(
+        "Queue WebSocket connection: queue={}, consumer={}",
+        queue_name, consumer_id
+    );
 
     ws.on_upgrade(move |socket| handle_queue_socket(socket, queue_manager, queue_name, consumer_id))
 }
@@ -1374,8 +1418,12 @@ async fn handle_queue_socket(
         "queue": queue_name,
         "consumer_id": consumer_id
     });
-    
-    if ws_sender.send(axum::extract::ws::Message::Text(welcome.to_string())).await.is_err() {
+
+    if ws_sender
+        .send(axum::extract::ws::Message::Text(welcome.to_string()))
+        .await
+        .is_err()
+    {
         warn!("Failed to send welcome to consumer: {}", consumer_id);
         return;
     }
@@ -1501,7 +1549,13 @@ pub async fn stream_websocket(
     );
 
     ws.on_upgrade(move |socket| {
-        handle_stream_socket(socket, stream_manager, room_name, subscriber_id, from_offset)
+        handle_stream_socket(
+            socket,
+            stream_manager,
+            room_name,
+            subscriber_id,
+            from_offset,
+        )
     })
 }
 
@@ -1522,9 +1576,16 @@ async fn handle_stream_socket(
         "subscriber_id": subscriber_id,
         "from_offset": current_offset
     });
-    
-    if ws_sender.send(axum::extract::ws::Message::Text(welcome.to_string())).await.is_err() {
-        warn!("Failed to send welcome to stream subscriber: {}", subscriber_id);
+
+    if ws_sender
+        .send(axum::extract::ws::Message::Text(welcome.to_string()))
+        .await
+        .is_err()
+    {
+        warn!(
+            "Failed to send welcome to stream subscriber: {}",
+            subscriber_id
+        );
         return;
     }
 
@@ -1594,7 +1655,10 @@ async fn handle_stream_socket(
         }
     }
 
-    info!("Stream subscriber {} disconnected from room {}", subscriber_id, room_name);
+    info!(
+        "Stream subscriber {} disconnected from room {}",
+        subscriber_id, room_name
+    );
 }
 
 // ============================================================================
@@ -1666,7 +1730,10 @@ async fn handle_pubsub_socket(
     };
 
     let subscriber_id = subscribe_result.subscriber_id.clone();
-    info!("Subscriber {} connected to topics: {:?}", subscriber_id, topics);
+    info!(
+        "Subscriber {} connected to topics: {:?}",
+        subscriber_id, topics
+    );
 
     // Create channel for receiving messages
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
@@ -1681,10 +1748,17 @@ async fn handle_pubsub_socket(
         "topics": topics,
         "subscription_count": subscribe_result.subscription_count
     });
-    
+
     // Send welcome message
-    if ws_sender.send(axum::extract::ws::Message::Text(welcome_msg.to_string())).await.is_err() {
-        warn!("Failed to send welcome message to subscriber: {}", subscriber_id);
+    if ws_sender
+        .send(axum::extract::ws::Message::Text(welcome_msg.to_string()))
+        .await
+        .is_err()
+    {
+        warn!(
+            "Failed to send welcome message to subscriber: {}",
+            subscriber_id
+        );
         pubsub_router.unregister_connection(&subscriber_id);
         return;
     }
@@ -1833,7 +1907,10 @@ pub async fn pubsub_unsubscribe(
     State(state): State<AppState>,
     Json(req): Json<UnsubscribeRequest>,
 ) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
-    debug!("POST /pubsub/unsubscribe - subscriber_id: {}", req.subscriber_id);
+    debug!(
+        "POST /pubsub/unsubscribe - subscriber_id: {}",
+        req.subscriber_id
+    );
 
     let pubsub_router = state.pubsub_router.as_ref().ok_or_else(|| {
         Json(serde_json::json!({
@@ -1973,20 +2050,17 @@ async fn handle_pubsub_publish_cmd(
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'payload' field".to_string()))?
         .clone();
 
-    let metadata = request
-        .payload
-        .get("metadata")
-        .and_then(|v| {
-            if let serde_json::Value::Object(map) = v {
-                Some(
-                    map.iter()
-                        .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                        .collect(),
-                )
-            } else {
-                None
-            }
-        });
+    let metadata = request.payload.get("metadata").and_then(|v| {
+        if let serde_json::Value::Object(map) = v {
+            Some(
+                map.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
+                    .collect(),
+            )
+        } else {
+            None
+        }
+    });
 
     let result = pubsub_router.publish(topic, payload, metadata)?;
 
@@ -2013,8 +2087,11 @@ async fn handle_pubsub_unsubscribe_cmd(
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'subscriber_id' field".to_string()))?;
 
     let topics = request.payload.get("topics").and_then(|v| {
-        v.as_array()
-            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+        v.as_array().map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
     });
 
     let count = pubsub_router.unsubscribe(subscriber_id, topics)?;
@@ -2067,8 +2144,12 @@ async fn handle_pubsub_info_cmd(
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'topic' field".to_string()))?;
 
     match pubsub_router.get_topic_info(topic) {
-        Some(info) => Ok(serde_json::to_value(info).map_err(|e| SynapError::SerializationError(e.to_string()))?),
-        None => Err(SynapError::InvalidRequest(format!("Topic '{}' not found", topic))),
+        Some(info) => Ok(serde_json::to_value(info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?),
+        None => Err(SynapError::InvalidRequest(format!(
+            "Topic '{}' not found",
+            topic
+        ))),
     }
 }
 
@@ -2094,7 +2175,7 @@ async fn handle_stream_create_cmd(
     stream_manager
         .create_room(room)
         .await
-        .map_err(|e| SynapError::InvalidRequest(e))?;
+        .map_err(SynapError::InvalidRequest)?;
 
     Ok(serde_json::json!({
         "success": true,
@@ -2134,7 +2215,7 @@ async fn handle_stream_publish_cmd(
     let offset = stream_manager
         .publish(room, event, data_bytes)
         .await
-        .map_err(|e| SynapError::InvalidRequest(e))?;
+        .map_err(SynapError::InvalidRequest)?;
 
     Ok(serde_json::json!({
         "offset": offset,
@@ -2178,7 +2259,7 @@ async fn handle_stream_consume_cmd(
     let events = stream_manager
         .consume(room, subscriber_id, from_offset, limit)
         .await
-        .map_err(|e| SynapError::InvalidRequest(e))?;
+        .map_err(SynapError::InvalidRequest)?;
 
     let next_offset = events.last().map(|e| e.offset + 1).unwrap_or(from_offset);
 
@@ -2206,7 +2287,7 @@ async fn handle_stream_stats_cmd(
     let stats = stream_manager
         .room_stats(room)
         .await
-        .map_err(|e| SynapError::InvalidRequest(e))?;
+        .map_err(SynapError::InvalidRequest)?;
 
     Ok(serde_json::to_value(stats).map_err(|e| SynapError::SerializationError(e.to_string()))?)
 }
@@ -2246,7 +2327,7 @@ async fn handle_stream_delete_cmd(
     stream_manager
         .delete_room(room)
         .await
-        .map_err(|e| SynapError::InvalidRequest(e))?;
+        .map_err(SynapError::InvalidRequest)?;
 
     Ok(serde_json::json!({
         "success": true,

@@ -509,4 +509,3 @@ async fn test_pubsub_error_empty_topics() {
     assert_eq!(res["success"], false);
     assert!(res["error"].as_str().unwrap().contains("topic"));
 }
-

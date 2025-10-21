@@ -129,7 +129,7 @@ async fn test_crash_recovery() {
 
         // Verify store was created successfully
         let size = kv.dbsize().await.unwrap();
-        assert_eq!(size, 0);  // Fresh start on recovery
+        assert_eq!(size, 0); // Fresh start on recovery
     }
 
     // Cleanup
@@ -157,8 +157,14 @@ async fn test_snapshot_create_and_load() {
 
     // Create KV store with some data
     let kv_store = KVStore::new(KVConfig::default());
-    kv_store.set("key1", b"value1".to_vec(), None).await.unwrap();
-    kv_store.set("key2", b"value2".to_vec(), None).await.unwrap();
+    kv_store
+        .set("key1", b"value1".to_vec(), None)
+        .await
+        .unwrap();
+    kv_store
+        .set("key2", b"value2".to_vec(), None)
+        .await
+        .unwrap();
 
     // Create snapshot
     let snapshot_path = snapshot_mgr
@@ -171,7 +177,7 @@ async fn test_snapshot_create_and_load() {
     // Load snapshot
     let (snapshot, _path) = snapshot_mgr.load_latest().await.unwrap().unwrap();
 
-    assert_eq!(snapshot.version, 2);  // Updated to version 2 (streaming format)
+    assert_eq!(snapshot.version, 2); // Updated to version 2 (streaming format)
     assert_eq!(snapshot.wal_offset, 42);
     assert_eq!(snapshot.kv_data.len(), 2);
     assert_eq!(snapshot.kv_data.get("key1").unwrap(), b"value1");
@@ -193,7 +199,7 @@ async fn test_snapshot_cleanup_old() {
         directory: snapshot_dir.clone(),
         interval_secs: 300,
         operation_threshold: 10_000,
-        max_snapshots: 3,  // Keep only 3
+        max_snapshots: 3, // Keep only 3
         compression: false,
     };
 
@@ -202,24 +208,28 @@ async fn test_snapshot_cleanup_old() {
 
     // Create 5 snapshots with different timestamps
     for i in 0..5 {
-        kv_store.set(&format!("key{}", i), b"value".to_vec(), None)
+        kv_store
+            .set(&format!("key{}", i), b"value".to_vec(), None)
             .await
             .unwrap();
-        
+
         snapshot_mgr
             .create_snapshot(&kv_store, None, i)
             .await
             .unwrap();
-        
+
         // Sleep to ensure different timestamps
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
     }
 
     // Should have only 3 snapshots (oldest 2 removed during creation)
     let stats = snapshot_mgr.stats().await.unwrap();
-    assert!(stats.count <= 3, "Expected <= 3 snapshots, got {}", stats.count);
+    assert!(
+        stats.count <= 3,
+        "Expected <= 3 snapshots, got {}",
+        stats.count
+    );
 
     // Cleanup
     let _ = tokio::fs::remove_dir_all(&snapshot_dir).await;
 }
-

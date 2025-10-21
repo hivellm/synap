@@ -26,28 +26,28 @@ impl ShardStorage {
         // Start with HashMap for better small-dataset performance
         Self::Small(HashMap::new())
     }
-    
+
     fn len(&self) -> usize {
         match self {
             Self::Small(map) => map.len(),
             Self::Large(trie) => trie.len(),
         }
     }
-    
+
     fn get(&self, key: &str) -> Option<&StoredValue> {
         match self {
             Self::Small(map) => map.get(key),
             Self::Large(trie) => trie.get(key),
         }
     }
-    
+
     fn get_mut(&mut self, key: &str) -> Option<&mut StoredValue> {
         match self {
             Self::Small(map) => map.get_mut(key),
             Self::Large(trie) => trie.get_mut(key),
         }
     }
-    
+
     fn insert(&mut self, key: String, value: StoredValue) -> Option<StoredValue> {
         match self {
             Self::Small(map) => {
@@ -61,35 +61,35 @@ impl ShardStorage {
             Self::Large(trie) => trie.insert(key, value),
         }
     }
-    
+
     fn remove(&mut self, key: &str) -> Option<StoredValue> {
         match self {
             Self::Small(map) => map.remove(key),
             Self::Large(trie) => trie.remove(key),
         }
     }
-    
+
     fn iter(&self) -> Vec<(String, StoredValue)> {
         match self {
             Self::Small(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
             Self::Large(trie) => trie.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         }
     }
-    
+
     fn keys(&self) -> Vec<String> {
         match self {
             Self::Small(map) => map.keys().cloned().collect(),
             Self::Large(trie) => trie.keys().cloned().collect(),
         }
     }
-    
+
     fn clear(&mut self) {
         match self {
             Self::Small(map) => map.clear(),
             Self::Large(trie) => *trie = Trie::new(),
         }
     }
-    
+
     /// Get keys with a specific prefix (for SCAN command)
     fn get_prefix_keys(&self, prefix: &str) -> Vec<String> {
         match self {
@@ -108,11 +108,14 @@ impl ShardStorage {
             }
         }
     }
-    
+
     /// Upgrade from HashMap to RadixTrie when threshold is reached
     fn upgrade_to_trie(&mut self) {
         if let Self::Small(map) = self {
-            debug!("Upgrading shard from HashMap to RadixTrie (threshold {} reached)", HASHMAP_THRESHOLD);
+            debug!(
+                "Upgrading shard from HashMap to RadixTrie (threshold {} reached)",
+                HASHMAP_THRESHOLD
+            );
             let mut trie = Trie::new();
             for (k, v) in map.drain() {
                 trie.insert(k, v);
@@ -246,7 +249,8 @@ impl KVStore {
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
-                    .as_secs() + secs
+                    .as_secs()
+                    + secs
             });
             cache.put(key.to_string(), value, cache_ttl);
         }
@@ -272,7 +276,7 @@ impl KVStore {
         // Cache miss - get from storage
         let shard = self.get_shard(key);
         let mut data = shard.data.write();
-        
+
         let mut stats = self.stats.write();
         stats.gets += 1;
 
@@ -289,15 +293,15 @@ impl KVStore {
             // Update access time for LRU
             value.update_access();
             stats.hits += 1;
-            
+
             let value_data = value.data().to_vec();
-            
+
             // Populate cache
             if let Some(ref cache) = self.cache {
                 let ttl = value.ttl_remaining();
                 cache.put(key.to_string(), value_data.clone(), ttl);
             }
-            
+
             Ok(Some(value_data))
         } else {
             stats.misses += 1;
@@ -439,19 +443,19 @@ impl KVStore {
         debug!("SCAN prefix={:?}, limit={}", prefix, limit);
 
         let mut keys = Vec::new();
-        
+
         // Scan all shards
         for shard in self.shards.iter() {
             let data = shard.data.read();
-            
+
             let shard_keys: Vec<String> = if let Some(prefix) = prefix {
                 data.get_prefix_keys(prefix)
             } else {
                 data.keys()
             };
-            
+
             keys.extend(shard_keys);
-            
+
             // Early return if we hit the limit
             if keys.len() >= limit {
                 keys.truncate(limit);
@@ -467,17 +471,17 @@ impl KVStore {
     async fn cleanup_expired(&self) {
         const SAMPLE_SIZE: usize = 20;
         const MAX_ITERATIONS: usize = 16;
-        
+
         let mut total_expired = 0;
-        
+
         // Sample from each shard
         for shard in self.shards.iter() {
             for _ in 0..MAX_ITERATIONS {
                 let mut expired_keys = Vec::new();
-                
+
                 {
                     let data = shard.data.read();
-                    
+
                     // Sample random keys (simple sampling by taking first N)
                     let all_entries = data.iter();
                     let sampled: Vec<(String, bool)> = all_entries
@@ -485,14 +489,14 @@ impl KVStore {
                         .take(SAMPLE_SIZE)
                         .map(|(k, v)| (k, v.is_expired()))
                         .collect();
-                    
+
                     for (key, is_expired) in sampled {
                         if is_expired {
                             expired_keys.push(key);
                         }
                     }
                 }
-                
+
                 // Remove expired keys
                 if !expired_keys.is_empty() {
                     let mut data = shard.data.write();
@@ -501,16 +505,19 @@ impl KVStore {
                     }
                     total_expired += expired_keys.len();
                 }
-                
+
                 // If less than 25% were expired, stop sampling this shard
                 if expired_keys.len() < SAMPLE_SIZE / 4 {
                     break;
                 }
             }
         }
-        
+
         if total_expired > 0 {
-            debug!("Adaptive TTL cleanup: {} expired keys removed", total_expired);
+            debug!(
+                "Adaptive TTL cleanup: {} expired keys removed",
+                total_expired
+            );
             let mut stats = self.stats.write();
             stats.total_keys = stats.total_keys.saturating_sub(total_expired);
         }
@@ -524,13 +531,13 @@ impl KVStore {
     /// Get all keys (no limit)
     pub async fn keys(&self) -> Result<Vec<String>> {
         let mut all_keys = Vec::new();
-        
+
         // Collect keys from all shards
         for shard in self.shards.iter() {
             let data = shard.data.read();
             all_keys.extend(data.keys());
         }
-        
+
         Ok(all_keys)
     }
 
@@ -624,7 +631,7 @@ impl KVStore {
                 let data = shard.data.read();
                 data.iter()
             };
-            
+
             for (key, value) in entries {
                 if !value.is_expired() {
                     dump.insert(key, value.data().to_vec());
@@ -828,7 +835,7 @@ mod tests {
     #[tokio::test]
     async fn test_flushdb() {
         let mut config = KVConfig::default();
-        config.allow_flush_commands = true;  // Enable FLUSHDB for test
+        config.allow_flush_commands = true; // Enable FLUSHDB for test
         let store = KVStore::new(config);
 
         store.set("key1", b"value1".to_vec(), None).await.unwrap();

@@ -10,7 +10,10 @@ async fn test_kv_with_cache_hit() {
     let store = KVStore::new_with_cache(config, Some(1000));
 
     // Set a value
-    store.set("cached_key", vec![1, 2, 3, 4], None).await.unwrap();
+    store
+        .set("cached_key", vec![1, 2, 3, 4], None)
+        .await
+        .unwrap();
 
     // First get - should populate cache
     let value1 = store.get("cached_key").await.unwrap();
@@ -51,7 +54,7 @@ async fn test_kv_cache_invalidation_on_delete() {
 
     // Set and cache
     store.set("to_delete", vec![5, 6, 7], None).await.unwrap();
-    
+
     // Get - populates cache
     store.get("to_delete").await.unwrap();
 
@@ -91,14 +94,17 @@ async fn test_kv_cache_ttl_expiration() {
 async fn test_kv_cache_flushdb_invalidation() {
     let config = KVConfig {
         max_memory_mb: 100,
-        allow_flush_commands: true,  // Enable FLUSHDB
+        allow_flush_commands: true, // Enable FLUSHDB
         ..Default::default()
     };
     let store = KVStore::new_with_cache(config, Some(1000));
 
     // Set multiple keys
     for i in 1..=10 {
-        store.set(&format!("key{}", i), vec![i as u8], None).await.unwrap();
+        store
+            .set(&format!("key{}", i), vec![i as u8], None)
+            .await
+            .unwrap();
         store.get(&format!("key{}", i)).await.unwrap(); // Populate cache
     }
 
@@ -123,11 +129,10 @@ async fn test_kv_without_cache() {
     let store = KVStore::new(config); // No cache
 
     store.set("key1", vec![1, 2, 3], None).await.unwrap();
-    
+
     let value = store.get("key1").await.unwrap();
     assert_eq!(value, Some(vec![1, 2, 3]));
 
     let deleted = store.delete("key1").await.unwrap();
     assert_eq!(deleted, true);
 }
-

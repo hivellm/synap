@@ -309,7 +309,7 @@ async fn test_stream_stats_command() {
     .await;
 
     assert_eq!(res["success"], true);
-    assert_eq!(res["payload"]["name"], "stats_room");  // RoomStats has "name" field
+    assert_eq!(res["payload"]["name"], "stats_room"); // RoomStats has "name" field
     assert!(res["payload"]["message_count"].as_u64().unwrap() >= 3);
 }
 
@@ -507,8 +507,10 @@ async fn test_stream_offset_tracking() {
         .await;
 
         let offset = res["payload"]["offset"].as_u64().unwrap();
-        assert!(offset >= last_offset, "Offsets should be monotonically increasing");
+        assert!(
+            offset >= last_offset,
+            "Offsets should be monotonically increasing"
+        );
         last_offset = offset;
     }
 }
-

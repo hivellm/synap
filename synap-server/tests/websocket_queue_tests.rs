@@ -114,17 +114,20 @@ async fn test_queue_websocket_consume_and_ack() {
     tokio::time::timeout(tokio::time::Duration::from_millis(500), async {
         while let Some(Ok(Message::Text(text))) = read.next().await {
             let msg: serde_json::Value = serde_json::from_str(&text).unwrap();
-            
+
             if msg["type"] == "message" {
                 assert_eq!(msg["message_id"], message_id);
                 assert_eq!(msg["priority"], 5);
-                
+
                 // Send ACK
                 let ack_cmd = json!({
                     "command": "ack",
                     "message_id": message_id
                 });
-                write.send(Message::Text(ack_cmd.to_string())).await.unwrap();
+                write
+                    .send(Message::Text(ack_cmd.to_string()))
+                    .await
+                    .unwrap();
                 break;
             }
         }
@@ -179,7 +182,7 @@ async fn test_queue_websocket_nack_and_requeue() {
     tokio::time::timeout(tokio::time::Duration::from_millis(500), async {
         while let Some(Ok(Message::Text(text))) = read.next().await {
             let msg: serde_json::Value = serde_json::from_str(&text).unwrap();
-            
+
             if msg["type"] == "message" {
                 // Send NACK with requeue
                 let nack_cmd = json!({
@@ -187,7 +190,10 @@ async fn test_queue_websocket_nack_and_requeue() {
                     "message_id": message_id,
                     "requeue": true
                 });
-                write.send(Message::Text(nack_cmd.to_string())).await.unwrap();
+                write
+                    .send(Message::Text(nack_cmd.to_string()))
+                    .await
+                    .unwrap();
                 break;
             }
         }
@@ -199,7 +205,7 @@ async fn test_queue_websocket_nack_and_requeue() {
     tokio::time::timeout(tokio::time::Duration::from_secs(2), async {
         while let Some(Ok(Message::Text(text))) = read.next().await {
             let msg: serde_json::Value = serde_json::from_str(&text).unwrap();
-            
+
             if msg["type"] == "message" {
                 assert_eq!(msg["message_id"], message_id);
                 // ACK this time
@@ -207,7 +213,10 @@ async fn test_queue_websocket_nack_and_requeue() {
                     "command": "ack",
                     "message_id": message_id
                 });
-                write.send(Message::Text(ack_cmd.to_string())).await.unwrap();
+                write
+                    .send(Message::Text(ack_cmd.to_string()))
+                    .await
+                    .unwrap();
                 break;
             }
         }
@@ -260,17 +269,20 @@ async fn test_queue_websocket_multiple_messages() {
     tokio::time::timeout(tokio::time::Duration::from_secs(2), async {
         while let Some(Ok(Message::Text(text))) = read.next().await {
             let msg: serde_json::Value = serde_json::from_str(&text).unwrap();
-            
+
             if msg["type"] == "message" {
                 received_count += 1;
-                
+
                 // Send ACK
                 let ack_cmd = json!({
                     "command": "ack",
                     "message_id": msg["message_id"]
                 });
-                write.send(Message::Text(ack_cmd.to_string())).await.unwrap();
-                
+                write
+                    .send(Message::Text(ack_cmd.to_string()))
+                    .await
+                    .unwrap();
+
                 if received_count == 5 {
                     break;
                 }
@@ -283,4 +295,3 @@ async fn test_queue_websocket_multiple_messages() {
     assert_eq!(received_count, 5);
     write.close().await.unwrap();
 }
-

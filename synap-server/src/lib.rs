@@ -13,6 +13,10 @@ pub use auth::{
 };
 pub use compression::{CompressionAlgorithm, Compressor};
 pub use config::ServerConfig;
-pub use core::{EvictionPolicy, KVConfig, KVStore, Message, PubSubRouter, PubSubStats, PublishResult, QueueConfig, QueueManager, RoomStats, StreamConfig, StreamManager, SubscribeResult, SynapError, TopicInfo};
+pub use core::{
+    EvictionPolicy, KVConfig, KVStore, Message, PubSubRouter, PubSubStats, PublishResult,
+    QueueConfig, QueueManager, RoomStats, StreamConfig, StreamManager, SubscribeResult, SynapError,
+    TopicInfo,
+};
 pub use protocol::{Request, Response};
-pub use server::{handle_mcp_tool, get_mcp_tools, AppState, create_router};
+pub use server::{AppState, create_router, get_mcp_tools, handle_mcp_tool};

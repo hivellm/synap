@@ -2,8 +2,11 @@ use anyhow::Result;
 use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use synap_server::{AppState, KVStore, PubSubRouter, QueueManager, StreamManager, StreamConfig, ServerConfig, create_router};
 use synap_server::persistence::{PersistenceLayer, recover};
+use synap_server::{
+    AppState, KVStore, PubSubRouter, QueueManager, ServerConfig, StreamConfig, StreamManager,
+    create_router,
+};
 use tracing::{info, warn};
 
 #[derive(Parser, Debug)]
@@ -83,7 +86,7 @@ async fn main() -> Result<()> {
     // Recover from persistence or create fresh
     let kv_config = config.to_kv_config();
     let queue_config = config.to_queue_config();
-    
+
     let (kv_store, queue_manager, _wal_offset) = if config.persistence.enabled {
         info!("Persistence enabled, attempting recovery...");
         match recover(&config.persistence, kv_config.clone(), queue_config.clone()).await {
@@ -100,7 +103,7 @@ async fn main() -> Result<()> {
                     } else {
                         None
                     },
-                    0
+                    0,
                 )
             }
         }
@@ -113,7 +116,7 @@ async fn main() -> Result<()> {
             } else {
                 None
             },
-            0
+            0,
         )
     };
 
@@ -148,13 +151,12 @@ async fn main() -> Result<()> {
         match PersistenceLayer::new(config.persistence.clone()).await {
             Ok(layer) => {
                 let layer = Arc::new(layer);
-                
+
                 // Start background snapshot task
-                layer.clone().start_snapshot_task(
-                    kv_store.clone(),
-                    queue_manager.clone(),
-                );
-                
+                layer
+                    .clone()
+                    .start_snapshot_task(kv_store.clone(), queue_manager.clone());
+
                 info!("Persistence layer initialized (WAL + Snapshots)");
                 Some(layer)
             }

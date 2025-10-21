@@ -91,7 +91,7 @@ async fn test_pubsub_websocket_instant_delivery() {
     tokio::time::timeout(tokio::time::Duration::from_millis(100), async {
         while let Some(Ok(Message::Text(text))) = read.next().await {
             let msg: serde_json::Value = serde_json::from_str(&text).unwrap();
-            
+
             if msg["type"] == "message" {
                 assert_eq!(msg["topic"], "notifications.email");
                 assert_eq!(msg["payload"]["to"], "user@test.com");
@@ -140,7 +140,7 @@ async fn test_pubsub_websocket_wildcard_single_level() {
     tokio::time::timeout(tokio::time::Duration::from_millis(100), async {
         while let Some(Ok(Message::Text(text))) = read.next().await {
             let msg: serde_json::Value = serde_json::from_str(&text).unwrap();
-            
+
             if msg["type"] == "message" {
                 assert_eq!(msg["topic"], "alerts.critical");
                 assert_eq!(msg["payload"]["level"], "critical");
@@ -153,7 +153,10 @@ async fn test_pubsub_websocket_wildcard_single_level() {
 
     // Publish to non-matching topic (too many levels)
     client
-        .post(format!("{}/pubsub/alerts.critical.database/publish", base_url))
+        .post(format!(
+            "{}/pubsub/alerts.critical.database/publish",
+            base_url
+        ))
         .json(&json!({
             "payload": {"test": true}
         }))
@@ -173,7 +176,10 @@ async fn test_pubsub_websocket_wildcard_single_level() {
     .await;
 
     // Timeout is expected (no message should arrive)
-    assert!(result.is_err(), "Should timeout - no message for non-matching topic");
+    assert!(
+        result.is_err(),
+        "Should timeout - no message for non-matching topic"
+    );
 
     write.close().await.unwrap();
 }
@@ -220,7 +226,7 @@ async fn test_pubsub_websocket_multiple_topics() {
     tokio::time::timeout(tokio::time::Duration::from_millis(200), async {
         while let Some(Ok(Message::Text(text))) = read.next().await {
             let msg: serde_json::Value = serde_json::from_str(&text).unwrap();
-            
+
             if msg["type"] == "message" {
                 received += 1;
                 if received == 2 {
@@ -247,12 +253,12 @@ async fn test_pubsub_websocket_multiple_subscribers() {
         let (ws_stream, _) = connect_async(format!("{}/pubsub/ws?topics=broadcast.topic", ws_url))
             .await
             .unwrap();
-        
+
         let (write, mut read) = ws_stream.split();
-        
+
         // Skip welcome
         read.next().await;
-        
+
         subscribers.push((write, read));
     }
 
@@ -272,7 +278,7 @@ async fn test_pubsub_websocket_multiple_subscribers() {
         tokio::time::timeout(tokio::time::Duration::from_millis(100), async {
             while let Some(Ok(Message::Text(text))) = read.next().await {
                 let msg: serde_json::Value = serde_json::from_str(&text).unwrap();
-                
+
                 if msg["type"] == "message" {
                     assert_eq!(msg["topic"], "broadcast.topic");
                     assert_eq!(msg["payload"]["broadcast"], "to all");
@@ -286,4 +292,3 @@ async fn test_pubsub_websocket_multiple_subscribers() {
         write.close().await.unwrap();
     }
 }
-

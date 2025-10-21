@@ -1,9 +1,9 @@
 use super::types::{Operation, PersistenceConfig, Result};
 use super::{SnapshotManager, WriteAheadLog};
+use crate::core::QueueConfig;
 use crate::core::kv_store::KVStore;
 use crate::core::queue::QueueManager;
 use crate::core::types::KVConfig;
-use crate::core::QueueConfig;
 use tracing::info;
 
 /// Recover system state from persistence
@@ -172,4 +172,3 @@ pub struct SnapshotInfo {
     pub kv_count: usize,
     pub queue_count: usize,
 }
-

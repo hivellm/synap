@@ -20,7 +20,10 @@ pub struct QueueMessage {
     /// Unique message identifier
     pub id: MessageId,
     /// Message payload (bytes) - Arc-shared to avoid cloning
-    #[serde(serialize_with = "serialize_arc_payload", deserialize_with = "deserialize_arc_payload")]
+    #[serde(
+        serialize_with = "serialize_arc_payload",
+        deserialize_with = "deserialize_arc_payload"
+    )]
     pub payload: Arc<Vec<u8>>,
     /// Priority (0-9, where 9 is highest)
     pub priority: u8,
@@ -37,7 +40,10 @@ pub struct QueueMessage {
 }
 
 // Serialization helpers for Arc<Vec<u8>>
-fn serialize_arc_payload<S>(payload: &Arc<Vec<u8>>, serializer: S) -> std::result::Result<S::Ok, S::Error>
+fn serialize_arc_payload<S>(
+    payload: &Arc<Vec<u8>>,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error>
 where
     S: serde::Serializer,
 {
@@ -90,7 +96,7 @@ impl QueueMessage {
 struct PendingMessage {
     message: Arc<QueueMessage>,
     consumer_id: ConsumerId,
-    ack_deadline: u32,  // Unix timestamp for compact storage
+    ack_deadline: u32, // Unix timestamp for compact storage
 }
 
 impl PendingMessage {

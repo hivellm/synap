@@ -151,7 +151,10 @@ async fn handle_queue_publish(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing message", None))?;
 
-    let priority = args.get("priority").and_then(|v| v.as_u64()).map(|p| p as u8);
+    let priority = args
+        .get("priority")
+        .and_then(|v| v.as_u64())
+        .map(|p| p as u8);
 
     let message_id = queue_manager
         .publish(queue, message.as_bytes().to_vec(), priority, None)
@@ -284,4 +287,3 @@ async fn handle_pubsub_publish(
         .to_string(),
     )]))
 }
-

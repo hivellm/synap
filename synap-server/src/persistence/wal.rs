@@ -1,7 +1,7 @@
-use super::types::{FsyncMode, Operation, PersistenceError, Result, WALEntry, WALConfig};
+use super::types::{FsyncMode, Operation, PersistenceError, Result, WALConfig, WALEntry};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
@@ -61,7 +61,7 @@ impl WriteAheadLog {
             // Try to read entry size
             let size = match file.read_u64().await {
                 Ok(s) => s,
-                Err(_) => break,  // EOF
+                Err(_) => break, // EOF
             };
 
             // Read checksum
@@ -153,7 +153,7 @@ impl WriteAheadLog {
             // Read entry size
             let size = match file.read_u64().await {
                 Ok(s) => s,
-                Err(_) => break,  // EOF
+                Err(_) => break, // EOF
             };
 
             // Read checksum
@@ -186,9 +186,8 @@ impl WriteAheadLog {
             }
 
             // Deserialize
-            let entry: WALEntry = bincode::deserialize(&data).map_err(|_| {
-                PersistenceError::InvalidEntry
-            })?;
+            let entry: WALEntry =
+                bincode::deserialize(&data).map_err(|_| PersistenceError::InvalidEntry)?;
 
             if entry.offset >= from_offset {
                 entries.push(entry);
@@ -206,7 +205,10 @@ impl WriteAheadLog {
 
     /// Truncate WAL (keep entries after specified offset)
     pub async fn truncate(&mut self, keep_after_offset: u64) -> Result<()> {
-        info!("Truncating WAL, keeping entries after offset {}", keep_after_offset);
+        info!(
+            "Truncating WAL, keeping entries after offset {}",
+            keep_after_offset
+        );
 
         // Create new WAL file
         let new_path = self.path.with_extension("wal.new");
@@ -216,12 +218,12 @@ impl WriteAheadLog {
             .truncate(true)
             .open(&new_path)
             .await?;
-        
+
         let mut new_writer = BufWriter::new(new_file);
 
         // Replay and copy entries
         let entries = self.replay(keep_after_offset).await?;
-        
+
         for entry in entries {
             let data = bincode::serialize(&entry)?;
             let checksum = crc32fast::hash(&data);
@@ -265,4 +267,3 @@ impl Drop for WriteAheadLog {
         // Users should call flush() explicitly before dropping
     }
 }
-
