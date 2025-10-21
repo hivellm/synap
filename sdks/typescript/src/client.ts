@@ -83,7 +83,7 @@ export class SynapClient {
         );
       }
 
-      const data: SynapResponse<T> = await response.json();
+      const data = await response.json() as SynapResponse<T>;
 
       if (this.debug) {
         console.log('[Synap] Response:', JSON.stringify(data, null, 2));
@@ -148,7 +148,7 @@ export class SynapClient {
       throw new NetworkError('Health check failed');
     }
 
-    return response.json();
+    return response.json() as Promise<{ status: string; service: string; version: string }>;
   }
 
   /**

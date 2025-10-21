@@ -95,12 +95,12 @@ describe('KVStore', () => {
 
   describe('Batch operations', () => {
     it('should MSET multiple keys', async () => {
-      const count = await synap.kv.mset({
+      const success = await synap.kv.mset({
         'batch:1': 'value1',
         'batch:2': 'value2',
         'batch:3': 'value3',
       });
-      expect(count).toBe(3);
+      expect(success).toBe(true);
     });
 
     it('should MGET multiple keys', async () => {

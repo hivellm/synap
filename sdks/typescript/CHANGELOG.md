@@ -1,6 +1,20 @@
-# Changelog - @synap/client
+# Changelog - @hivellm/synap
 
 All notable changes to the Synap TypeScript SDK will be documented in this file.
+
+## [0.2.0-beta.2] - 2025-10-21
+
+### Changed
+- **BREAKING**: Package name changed from `@synap/client` to `@hivellm/synap`
+- **BREAKING**: `mset()` now returns `boolean` instead of `number`
+- Fixed `get()` to return `null` instead of `undefined` for non-existent keys
+- Fixed `mset()`, `mget()`, `mdel()` batch operations to use correct server format
+- Fixed `expire()` to use `ttl` parameter name instead of `seconds`
+- Fixed `persist()` to correctly parse server response
+- Fixed `mget()` to convert array response to object keyed by original keys
+
+### Added
+- Full test coverage for all KV operations (23 tests passing)
 
 ## [0.2.0-beta.1] - 2025-10-21
 

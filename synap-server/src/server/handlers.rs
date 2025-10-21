@@ -430,6 +430,7 @@ async fn handle_command(store: Arc<KVStore>, request: Request) -> Result<Respons
         "kv.flushdb" => handle_kv_flushdb_cmd(store, &request).await,
         "kv.flushall" => handle_kv_flushall_cmd(store, &request).await,
         "kv.expire" => handle_kv_expire_cmd(store, &request).await,
+        "kv.ttl" => handle_kv_ttl_cmd(store, &request).await,
         "kv.persist" => handle_kv_persist_cmd(store, &request).await,
         "kv.stats" => handle_kv_stats_cmd(store, &request).await,
         _ => Err(SynapError::UnknownCommand(request.command.clone())),
@@ -742,6 +743,20 @@ async fn handle_kv_expire_cmd(
 
     let result = store.expire(key, ttl).await?;
     Ok(serde_json::json!({ "result": result }))
+}
+
+async fn handle_kv_ttl_cmd(
+    store: Arc<KVStore>,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let ttl = store.ttl(key).await?;
+    Ok(serde_json::json!({ "ttl": ttl }))
 }
 
 async fn handle_kv_persist_cmd(

@@ -1,4 +1,4 @@
-# @synap/client
+# @hivellm/synap
 
 Official TypeScript/JavaScript SDK for [Synap](https://github.com/hivellm/synap) - High-Performance In-Memory Key-Value Store & Message Broker.
 
@@ -19,11 +19,11 @@ Official TypeScript/JavaScript SDK for [Synap](https://github.com/hivellm/synap)
 ## Installation
 
 ```bash
-npm install @synap/client
+npm install @hivellm/synap
 # or
-yarn add @synap/client
+yarn add @hivellm/synap
 # or
-pnpm add @synap/client
+pnpm add @hivellm/synap
 ```
 
 ---
@@ -33,7 +33,7 @@ pnpm add @synap/client
 ### Basic Usage
 
 ```typescript
-import { Synap } from '@synap/client';
+import { Synap } from '@hivellm/synap';
 
 // Create client
 const synap = new Synap({
@@ -289,7 +289,7 @@ await synap.queue.publishString('secure-queue', 'message');
 ## Error Handling
 
 ```typescript
-import { SynapError, NetworkError, ServerError, TimeoutError } from '@synap/client';
+import { SynapError, NetworkError, ServerError, TimeoutError } from '@hivellm/synap';
 
 try {
   await synap.kv.set('mykey', 'value');
@@ -431,7 +431,7 @@ See [API Documentation](./docs/API.md) for complete API reference.
 The SDK is written in TypeScript and provides full type safety:
 
 ```typescript
-import { Synap, QueueMessage, KVStats } from '@synap/client';
+import { Synap, QueueMessage, KVStats } from '@hivellm/synap';
 
 const synap = new Synap();
 
@@ -460,7 +460,7 @@ The SDK works in modern browsers (ES2022+):
 
 ```html
 <script type="module">
-  import { Synap } from 'https://cdn.jsdelivr.net/npm/@synap/client/+esm';
+  import { Synap } from 'https://cdn.jsdelivr.net/npm/@hivellm/synap/+esm';
   
   const synap = new Synap({ url: 'http://localhost:15500' });
   await synap.kv.set('browser:key', 'value');

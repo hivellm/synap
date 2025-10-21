@@ -1,6 +1,6 @@
 {
-  "name": "@synap/client",
-  "version": "0.2.0-beta.1",
+  "name": "@hivellm/synap",
+  "version": "0.2.0-beta.2",
   "description": "Official TypeScript/JavaScript SDK for Synap - High-Performance In-Memory Key-Value Store & Message Broker",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

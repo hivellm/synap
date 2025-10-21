@@ -31,8 +31,8 @@ export class KVStore {
    * Get a value by key
    */
   async get<T = JSONValue>(key: string): Promise<T | null> {
-    const result = await this.client.sendCommand<{ value: T | null }>('kv.get', { key });
-    return result.value;
+    const result = await this.client.sendCommand<{ found: boolean; value?: T }>('kv.get', { key });
+    return result.found && result.value !== undefined ? result.value : null;
   }
 
   /**
@@ -76,20 +76,26 @@ export class KVStore {
   /**
    * Set multiple key-value pairs atomically
    */
-  async mset(entries: Record<string, JSONValue>): Promise<number> {
-    const result = await this.client.sendCommand<{ count: number }>('kv.mset', { entries });
-    return result.count;
+  async mset(entries: Record<string, JSONValue>): Promise<boolean> {
+    const pairs = Object.entries(entries).map(([key, value]) => ({ key, value }));
+    const result = await this.client.sendCommand<{ success: boolean }>('kv.mset', { pairs });
+    return result.success;
   }
 
   /**
    * Get multiple values by keys
    */
   async mget<T = JSONValue>(keys: string[]): Promise<Record<string, T | null>> {
-    const result = await this.client.sendCommand<{ values: Record<string, T | null> }>(
+    const result = await this.client.sendCommand<{ values: Array<T | null> }>(
       'kv.mget',
       { keys }
     );
-    return result.values;
+    // Convert array to object keyed by the original keys
+    const valuesObj: Record<string, T | null> = {};
+    keys.forEach((key, index) => {
+      valuesObj[key] = result.values[index];
+    });
+    return valuesObj;
   }
 
   /**
@@ -132,11 +138,11 @@ export class KVStore {
    * Set expiration time for a key
    */
   async expire(key: string, seconds: number): Promise<boolean> {
-    const result = await this.client.sendCommand<{ success: boolean }>('kv.expire', {
+    const result = await this.client.sendCommand<{ result: boolean }>('kv.expire', {
       key,
-      seconds,
+      ttl: seconds,
     });
-    return result.success;
+    return result.result;
   }
 
   /**
@@ -151,8 +157,8 @@ export class KVStore {
    * Remove expiration from a key
    */
   async persist(key: string): Promise<boolean> {
-    const result = await this.client.sendCommand<{ success: boolean }>('kv.persist', { key });
-    return result.success;
+    const result = await this.client.sendCommand<{ result: boolean }>('kv.persist', { key });
+    return result.result;
   }
 
   /**
