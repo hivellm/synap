@@ -110,7 +110,11 @@ impl Compressor {
         let mut decompressed = Vec::new();
         decoder.read_to_end(&mut decompressed)?;
 
-        debug!("LZ4 decompressed: {} → {} bytes", data.len(), decompressed.len());
+        debug!(
+            "LZ4 decompressed: {} → {} bytes",
+            data.len(),
+            decompressed.len()
+        );
         Ok(decompressed)
     }
 
@@ -133,7 +137,11 @@ impl Compressor {
     fn decompress_zstd(&self, data: &[u8]) -> Result<Vec<u8>, std::io::Error> {
         let decompressed = zstd::decode_all(data)?;
 
-        debug!("Zstd decompressed: {} → {} bytes", data.len(), decompressed.len());
+        debug!(
+            "Zstd decompressed: {} → {} bytes",
+            data.len(),
+            decompressed.len()
+        );
         Ok(decompressed)
     }
 
@@ -165,11 +173,15 @@ mod tests {
         let compressor = Compressor::new(config);
 
         let data = b"Hello, World! This is a test string that should compress well.".repeat(10);
-        let compressed = compressor.compress(&data, Some(CompressionAlgorithm::Lz4)).unwrap();
-        
+        let compressed = compressor
+            .compress(&data, Some(CompressionAlgorithm::Lz4))
+            .unwrap();
+
         assert!(compressed.len() < data.len());
-        
-        let decompressed = compressor.decompress(&compressed, CompressionAlgorithm::Lz4).unwrap();
+
+        let decompressed = compressor
+            .decompress(&compressed, CompressionAlgorithm::Lz4)
+            .unwrap();
         assert_eq!(data.to_vec(), decompressed);
     }
 
@@ -184,11 +196,15 @@ mod tests {
         let compressor = Compressor::new(config);
 
         let data = b"Hello, World! This is a test string that should compress well.".repeat(10);
-        let compressed = compressor.compress(&data, Some(CompressionAlgorithm::Zstd)).unwrap();
-        
+        let compressed = compressor
+            .compress(&data, Some(CompressionAlgorithm::Zstd))
+            .unwrap();
+
         assert!(compressed.len() < data.len());
-        
-        let decompressed = compressor.decompress(&compressed, CompressionAlgorithm::Zstd).unwrap();
+
+        let decompressed = compressor
+            .decompress(&compressed, CompressionAlgorithm::Zstd)
+            .unwrap();
         assert_eq!(data.to_vec(), decompressed);
     }
 
@@ -203,7 +219,7 @@ mod tests {
 
         let small_data = b"Small";
         let result = compressor.compress(small_data, None).unwrap();
-        
+
         // Should not compress (too small)
         assert_eq!(result, small_data);
     }
@@ -218,7 +234,7 @@ mod tests {
 
         let data = b"Hello, World!".repeat(100);
         let result = compressor.compress(&data, None).unwrap();
-        
+
         // Should return original data
         assert_eq!(result, data);
     }
@@ -226,10 +242,10 @@ mod tests {
     #[test]
     fn test_compression_ratio() {
         let compressor = Compressor::new(CompressionConfig::default());
-        
+
         let ratio = compressor.compression_ratio(1000, 500);
         assert_eq!(ratio, 2.0);
-        
+
         let ratio = compressor.compression_ratio(1000, 333);
         assert!((ratio - 3.0).abs() < 0.01);
     }
@@ -250,4 +266,3 @@ mod tests {
         assert!(!compressor.should_compress(&small_data));
     }
 }
-

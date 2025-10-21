@@ -5,7 +5,7 @@ use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
-use synap_server::{create_router, KVConfig, KVStore};
+use synap_server::{KVConfig, KVStore, create_router};
 use tokio::net::TcpListener;
 
 async fn spawn_test_server() -> String {
@@ -112,7 +112,13 @@ async fn test_streamable_kv_exists() {
     let client = Client::new();
 
     // Test non-existent key
-    let res = send_command(&client, &base_url, "kv.exists", json!({"key": "nonexistent"})).await;
+    let res = send_command(
+        &client,
+        &base_url,
+        "kv.exists",
+        json!({"key": "nonexistent"}),
+    )
+    .await;
     assert_eq!(res["payload"]["exists"], false);
 
     // Setup: SET a key
@@ -345,13 +351,7 @@ async fn test_streamable_kv_expire_persist() {
     assert_eq!(res["payload"]["result"], true);
 
     // Test PERSIST
-    let res = send_command(
-        &client,
-        &base_url,
-        "kv.persist",
-        json!({"key": "temp_key"}),
-    )
-    .await;
+    let res = send_command(&client, &base_url, "kv.persist", json!({"key": "temp_key"})).await;
 
     assert_eq!(res["success"], true);
     assert_eq!(res["payload"]["result"], true);
@@ -530,7 +530,13 @@ async fn test_streamable_stats_command() {
     let client = Client::new();
 
     // Perform various operations
-    send_command(&client, &base_url, "kv.set", json!({"key": "k1", "value": "v1"})).await;
+    send_command(
+        &client,
+        &base_url,
+        "kv.set",
+        json!({"key": "k1", "value": "v1"}),
+    )
+    .await;
     send_command(&client, &base_url, "kv.get", json!({"key": "k1"})).await;
     send_command(&client, &base_url, "kv.get", json!({"key": "nonexistent"})).await;
     send_command(&client, &base_url, "kv.del", json!({"key": "k1"})).await;
@@ -604,4 +610,3 @@ async fn test_streamable_mdel_command() {
     let res = send_command(&client, &base_url, "kv.dbsize", json!({})).await;
     assert_eq!(res["payload"]["size"], 7);
 }
-

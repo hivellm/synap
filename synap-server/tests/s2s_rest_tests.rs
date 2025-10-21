@@ -5,7 +5,7 @@ use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
-use synap_server::{create_router, KVConfig, KVStore};
+use synap_server::{KVConfig, KVStore, create_router};
 use tokio::net::TcpListener;
 
 async fn spawn_test_server() -> String {
@@ -29,10 +29,14 @@ async fn test_rest_health_endpoint() {
     let base_url = spawn_test_server().await;
     let client = Client::new();
 
-    let res = client.get(format!("{}/health", base_url)).send().await.unwrap();
+    let res = client
+        .get(format!("{}/health", base_url))
+        .send()
+        .await
+        .unwrap();
 
     assert_eq!(res.status(), 200);
-    
+
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["status"], "healthy");
     assert_eq!(body["service"], "synap");
@@ -57,7 +61,7 @@ async fn test_rest_set_endpoint() {
         .unwrap();
 
     assert_eq!(res.status(), 200);
-    
+
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["success"], true);
     assert_eq!(body["key"], "test_key");
@@ -87,7 +91,7 @@ async fn test_rest_get_endpoint() {
         .unwrap();
 
     assert_eq!(res.status(), 200);
-    
+
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["found"], true);
     assert_eq!(body["value"]["username"], "alice");
@@ -106,7 +110,7 @@ async fn test_rest_get_nonexistent() {
         .unwrap();
 
     assert_eq!(res.status(), 200);
-    
+
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["found"], false);
     assert_eq!(body["value"], serde_json::Value::Null);
@@ -133,7 +137,7 @@ async fn test_rest_delete_endpoint() {
         .unwrap();
 
     assert_eq!(res.status(), 200);
-    
+
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["deleted"], true);
     assert_eq!(body["key"], "to_delete");
@@ -172,7 +176,7 @@ async fn test_rest_stats_endpoint() {
         .unwrap();
 
     assert_eq!(res.status(), 200);
-    
+
     let body: serde_json::Value = res.json().await.unwrap();
     assert!(body["total_keys"].as_u64().unwrap() >= 10);
     assert!(body["operations"]["sets"].as_u64().unwrap() >= 10);
@@ -195,7 +199,7 @@ async fn test_rest_workflow_complete() {
             .send()
             .await
             .unwrap();
-        
+
         assert_eq!(res.status(), 200);
     }
 
@@ -206,7 +210,7 @@ async fn test_rest_workflow_complete() {
             .send()
             .await
             .unwrap();
-        
+
         let body: serde_json::Value = res.json().await.unwrap();
         assert_eq!(body["found"], true);
         assert_eq!(body["value"]["name"], format!("Product {}", i));
@@ -219,7 +223,7 @@ async fn test_rest_workflow_complete() {
             .send()
             .await
             .unwrap();
-        
+
         let body: serde_json::Value = res.json().await.unwrap();
         assert_eq!(body["deleted"], true);
     }
@@ -320,7 +324,7 @@ async fn test_rest_concurrent_requests() {
     for i in 0..10 {
         let client = Arc::clone(&client);
         let url = base_url.clone();
-        
+
         let handle = tokio::spawn(async move {
             client
                 .post(format!("{}/kv/set", url))
@@ -329,7 +333,7 @@ async fn test_rest_concurrent_requests() {
                 .await
                 .unwrap()
         });
-        
+
         handles.push(handle);
     }
 
@@ -349,4 +353,3 @@ async fn test_rest_concurrent_requests() {
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["total_keys"].as_u64().unwrap(), 10);
 }
-

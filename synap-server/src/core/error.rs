@@ -38,6 +38,18 @@ pub enum SynapError {
 
     #[error("Internal error: {0}")]
     InternalError(String),
+
+    #[error("Queue not found: {0}")]
+    QueueNotFound(String),
+
+    #[error("Queue is full: {0}")]
+    QueueFull(String),
+
+    #[error("Message not found: {0}")]
+    MessageNotFound(String),
+
+    #[error("Consumer not found: {0}")]
+    ConsumerNotFound(String),
 }
 
 impl SynapError {
@@ -55,6 +67,10 @@ impl SynapError {
             Self::SerializationError(_) | Self::InternalError(_) => {
                 StatusCode::INTERNAL_SERVER_ERROR
             }
+            Self::QueueNotFound(_) | Self::MessageNotFound(_) | Self::ConsumerNotFound(_) => {
+                StatusCode::NOT_FOUND
+            }
+            Self::QueueFull(_) => StatusCode::INSUFFICIENT_STORAGE,
         }
     }
 }
