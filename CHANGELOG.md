@@ -90,20 +90,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New snapshots automatically use v2 format
 - Consider backing up data before upgrading
 
+#### P2 Optimizations (Advanced) ✅ NEW
+
+- **Hybrid HashMap/RadixTrie Storage**: Adaptive storage backend
+  - HashMap for datasets < 10K keys (2-3x faster for small data)
+  - RadixTrie for datasets >= 10K keys (memory efficient for large data)
+  - Automatic upgrade at threshold with logging
+  - Prefix search support for both storage types
+  - Benchmark results: 8.3M ops/s (100 keys), 7.4M ops/s (5K keys)
+
+- **CompactString Infrastructure**: Foundation for future optimization
+  - Added compact_str v0.8 dependency
+  - 30% memory reduction potential for short keys (<= 24 bytes)
+  - Not currently integrated (RadixTrie TrieKey compatibility issue)
+  - Future: Custom TrieKey implementation could enable it
+
 ### Testing & Validation
 
-**Test Suite**: 206/208 tests passing (99.04%)
+**Test Suite**: 211/213 tests passing (99.06%)
 
 - ✅ **Core Library Tests** (62/62): KV Store, Queue, Persistence, Auth, Compression
-- ✅ **Integration Performance Tests** (9/9): All 6 optimizations validated
+- ✅ **Integration Performance Tests** (9/9): All 6 P0/P1 optimizations validated
+- ✅ **Integration Hybrid Storage Tests** (5/5): P2 hybrid storage validated
 - ✅ **Auth & Security Tests** (58/58): Users, roles, API keys, ACL
 - ✅ **Protocol Tests** (55/57): REST, Streamable, WebSocket (2 pre-existing S2S failures)
 - ✅ **Config & Error Tests** (26/26): Configuration and error handling
 
 **Benchmark Coverage**:
-- KV Store: Memory efficiency, concurrency, write throughput, read latency, TTL cleanup, memory footprint, shard distribution
-- Queue: Arc-shared payloads, concurrent pub/sub, priority ordering, pending messages, queue depth, deadline checking
-- Persistence: AsyncWAL throughput, streaming snapshots, snapshot loading, full recovery, concurrent WAL writes
+- **KV Store** (kv_bench): Memory efficiency, concurrency, write throughput, read latency, TTL cleanup, memory footprint, shard distribution
+- **Queue** (queue_bench): Arc-shared payloads, concurrent pub/sub, priority ordering, pending messages, queue depth, deadline checking
+- **Persistence** (persistence_bench): AsyncWAL throughput, streaming snapshots, snapshot loading, full recovery, concurrent WAL writes
+- **Hybrid Storage** (hybrid_bench): Small dataset performance, upgrade threshold, prefix search, random access, mixed operations
 
 **Documentation**:
 - [docs/BENCHMARK_RESULTS.md](docs/BENCHMARK_RESULTS.md) - Complete benchmark results
