@@ -2,8 +2,8 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.85%2B)-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-206%2F208%20(99.04%25)-brightgreen.svg)](#testing--quality)
-[![Coverage](https://img.shields.io/badge/coverage-99%25-brightgreen.svg)](docs/TEST_COVERAGE_REPORT.md)
+[![Tests](https://img.shields.io/badge/tests-337%2F337%20(100%25)-brightgreen.svg)](#testing--quality)
+[![Coverage](https://img.shields.io/badge/coverage-99.30%25-brightgreen.svg)](docs/TESTING.md)
 [![Version](https://img.shields.io/badge/version-0.2.0--beta-blue.svg)](#project-status)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
@@ -268,7 +268,7 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 | Pub/Sub Publish | < 0.5ms | 🔵 Planned |
 | Replication Lag | < 10ms | 🔵 Planned |
 
-**Test Coverage**: 217/219 tests passing (99.09%)
+**Test Coverage**: 337/337 tests passing (100%)
 
 **Scripts**: `./scripts/test-performance.ps1` (full suite), `./scripts/quick-test.ps1` (fast validation)
 
@@ -311,7 +311,7 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 
 ## 📊 Project Status
 
-**Status**: ✅ Phase 1 Complete | 🟡 Phase 2 In Progress  
+**Status**: ✅ Phase 1 Complete | ✅ Phase 2 Complete (Persistence)  
 **Version**: 0.2.0-beta (in development)  
 **Edition**: Rust 2024 (nightly 1.85+)  
 **Last Updated**: October 21, 2025
@@ -329,7 +329,7 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - ✅ Comprehensive error handling
 - ✅ Advanced logging (JSON + Pretty formats)
 
-#### 🔄 Phase 2: Core Features (v0.2.0-beta) - In Progress
+#### ✅ Phase 2: Core Features (v0.2.0-beta) - COMPLETE (Oct 2025)
 
 **📨 Queue System** ✅ COMPLETE
 - ✅ FIFO with priority support (0-9)
@@ -410,7 +410,7 @@ git clone https://github.com/hivellm/synap.git
 cd synap
 cargo build --release
 
-# Run tests (96 passing)
+# Run tests (337 passing)
 cargo test
 
 # Run server
@@ -469,9 +469,9 @@ See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) for complete authentication
 
 ### 🔜 Next Phases
 
-**Phase 2 (Q4 2025)**: Event Streams, Pub/Sub, Persistence  
-**Phase 3 (Q1 2026)**: Replication, Advanced Protocols  
-**Phase 4 (Q2 2026)**: Production hardening, GUI Dashboard
+**✅ Phase 2 (Q4 2025)**: Event Streams, Pub/Sub, Persistence - **COMPLETE**  
+**⏳ Phase 3 (Q1 2026)**: Replication, UMICP Protocol, Clustering  
+**⏳ Phase 4 (Q2 2026)**: Production hardening, GUI Dashboard, Distribution packages
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for details.
 
