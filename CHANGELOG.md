@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### 🎉 Phase 2 Complete - Performance + Persistence + Event Streams ✅
 
-**Status**: Production Ready | **Tests**: 258/260 (99.23%) | **Features**: KV + Queue + Streams + Pub/Sub + Persistence
+**Status**: Production Ready | **Tests**: 271/273 (99.27%) | **Features**: KV + Queue + Streams + Pub/Sub + Persistence
 
 #### Executive Summary
 Implementação completa com resultados excepcionais:
@@ -18,7 +18,7 @@ Implementação completa com resultados excepcionais:
 - **Event Streams**: Sistema completo com ring buffer e offset-based consumption
 - **Pub/Sub System**: Topic-based messaging com wildcard subscriptions (* e #)
 - **Queue System**: Zero-duplicate guarantee com 581K msgs/s
-- **Tests**: 99.23% coverage (258/260 passing)
+- **Tests**: 99.27% coverage (271/273 passing)
 
 ### Added - Redis-Level Performance Optimizations ✅ COMPLETE
 
@@ -172,11 +172,12 @@ Implementação completa com resultados excepcionais:
 
 ### Testing & Validation
 
-**Test Suite**: 258/260 tests passing (99.23%)
+**Test Suite**: 271/273 tests passing (99.27%)
 
 - ✅ **Core Library Tests** (78/78): KV Store, Queue, Streams, Pub/Sub, Persistence, Auth, Compression
-- ✅ **Pub/Sub Integration Tests** (24/24): REST API (11) + StreamableHTTP (13)
-- ✅ **Event Streams Integration Tests** (17/17): REST API (5) + StreamableHTTP (12)
+- ✅ **Pub/Sub Integration Tests** (29/29): REST (11) + StreamableHTTP (13) + WebSocket (5)
+- ✅ **Event Streams Integration Tests** (21/21): REST (5) + StreamableHTTP (12) + WebSocket (4)
+- ✅ **Queue Integration Tests** (18/18): REST + StreamableHTTP + WebSocket (4)
 - ✅ **Integration Performance Tests** (9/9): All 6 P0/P1 optimizations validated
 - ✅ **Integration Hybrid Storage Tests** (5/5): P2 hybrid storage validated
 - ✅ **Integration Persistence E2E Tests** (3/3): End-to-end persistence validated

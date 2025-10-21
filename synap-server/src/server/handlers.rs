@@ -1536,11 +1536,15 @@ async fn handle_stream_socket(
                     Ok(events) => {
                         if !events.is_empty() {
                             for event in &events {
+                                // Deserialize data from bytes to JSON
+                                let data_json: serde_json::Value = serde_json::from_slice(&event.data)
+                                    .unwrap_or(serde_json::Value::Null);
+
                                 let event_json = json!({
                                     "type": "event",
                                     "offset": event.offset,
                                     "event": event.event,
-                                    "data": event.data,
+                                    "data": data_json,
                                     "timestamp": event.timestamp
                                 });
 
