@@ -207,11 +207,12 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 - [ ] Replication tests
 
 #### Week 4-6: Compression & Cache
-- [ ] LZ4 integration
-- [ ] Zstd integration
-- [ ] L1/L2 cache system
-- [ ] Adaptive caching
-- [ ] Cache metrics
+- [x] LZ4 integration (COMPLETE - added in Phase 2)
+- [x] Zstd integration (COMPLETE - added in Phase 2)
+- [x] L1 cache system (COMPLETE - LRU with TTL support)
+- [x] Cache metrics (COMPLETE - hits, misses, evictions)
+- [ ] L2 disk cache (future - not priority)
+- [ ] Adaptive caching strategies (future)
 - [ ] Compression benchmarks
 
 #### Week 7-9: Protocol Extensions

@@ -59,6 +59,21 @@ impl StoredValue {
         }
     }
 
+    /// Get remaining TTL in seconds (for cache)
+    pub fn ttl_remaining(&self) -> Option<u64> {
+        match self {
+            Self::Persistent(_) => None,
+            Self::Expiring { expires_at, .. } => {
+                let now = Self::current_timestamp();
+                if *expires_at > now {
+                    Some((*expires_at - now) as u64)
+                } else {
+                    Some(0)
+                }
+            }
+        }
+    }
+
     /// Get remaining TTL in seconds
     pub fn remaining_ttl_secs(&self) -> Option<u64> {
         match self {

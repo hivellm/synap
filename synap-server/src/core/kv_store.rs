@@ -5,7 +5,7 @@ use radix_trie::{Trie, TrieCommon};
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 
 const SHARD_COUNT: usize = 64;
@@ -142,11 +142,18 @@ pub struct KVStore {
     shards: Arc<[Arc<KVShard>; SHARD_COUNT]>,
     stats: Arc<RwLock<KVStats>>,
     config: KVConfig,
+    /// Optional L1/L2 cache layer
+    cache: Option<Arc<crate::core::CacheLayer>>,
 }
 
 impl KVStore {
     /// Create a new KV store with 64-way sharding
     pub fn new(config: KVConfig) -> Self {
+        Self::new_with_cache(config, None)
+    }
+
+    /// Create KV store with optional cache layer
+    pub fn new_with_cache(config: KVConfig, cache_size: Option<usize>) -> Self {
         info!(
             "Initializing sharded KV store (64 shards) with max_memory={}MB, eviction={:?}",
             config.max_memory_mb, config.eviction_policy
@@ -155,10 +162,17 @@ impl KVStore {
         // Initialize all 64 shards
         let shards: [Arc<KVShard>; SHARD_COUNT] = std::array::from_fn(|_| Arc::new(KVShard::new()));
 
+        // Initialize cache if requested
+        let cache = cache_size.map(|size| {
+            info!("Enabling L1 cache with {} entries", size);
+            Arc::new(crate::core::CacheLayer::new(size))
+        });
+
         Self {
             shards: Arc::new(shards),
             stats: Arc::new(RwLock::new(KVStats::default())),
             config,
+            cache,
         }
     }
 
@@ -197,7 +211,7 @@ impl KVStore {
     pub async fn set(&self, key: &str, value: Vec<u8>, ttl_secs: Option<u64>) -> Result<()> {
         debug!("SET key={}, size={}, ttl={:?}", key, value.len(), ttl_secs);
 
-        let stored = StoredValue::new(value, ttl_secs);
+        let stored = StoredValue::new(value.clone(), ttl_secs);
         let entry_size = self.estimate_entry_size(key, &stored);
 
         // Check memory limits
@@ -226,6 +240,17 @@ impl KVStore {
             stats.total_memory_bytes += entry_size;
         }
 
+        // Update cache
+        if let Some(ref cache) = self.cache {
+            let cache_ttl = ttl_secs.map(|secs| {
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() + secs
+            });
+            cache.put(key.to_string(), value, cache_ttl);
+        }
+
         Ok(())
     }
 
@@ -233,6 +258,18 @@ impl KVStore {
     pub async fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
         debug!("GET key={}", key);
 
+        // Try L1 cache first
+        if let Some(ref cache) = self.cache {
+            if let Some(cached_value) = cache.get(key) {
+                debug!("L1 Cache HIT: {}", key);
+                let mut stats = self.stats.write();
+                stats.gets += 1;
+                stats.hits += 1;
+                return Ok(Some(cached_value));
+            }
+        }
+
+        // Cache miss - get from storage
         let shard = self.get_shard(key);
         let mut data = shard.data.write();
         
@@ -252,7 +289,16 @@ impl KVStore {
             // Update access time for LRU
             value.update_access();
             stats.hits += 1;
-            Ok(Some(value.data().to_vec()))
+            
+            let value_data = value.data().to_vec();
+            
+            // Populate cache
+            if let Some(ref cache) = self.cache {
+                let ttl = value.ttl_remaining();
+                cache.put(key.to_string(), value_data.clone(), ttl);
+            }
+            
+            Ok(Some(value_data))
         } else {
             stats.misses += 1;
             Ok(None)
@@ -262,6 +308,11 @@ impl KVStore {
     /// Delete a key
     pub async fn delete(&self, key: &str) -> Result<bool> {
         debug!("DELETE key={}", key);
+
+        // Invalidate cache first
+        if let Some(ref cache) = self.cache {
+            cache.delete(key);
+        }
 
         let shard = self.get_shard(key);
         let mut data = shard.data.write();
@@ -500,6 +551,11 @@ impl KVStore {
         }
 
         let count = self.stats.read().total_keys;
+
+        // Invalidate cache
+        if let Some(ref cache) = self.cache {
+            cache.invalidate_all();
+        }
 
         // Clear all shards
         for shard in self.shards.iter() {
