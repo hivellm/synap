@@ -90,19 +90,19 @@ v0.1.0      v0.2.0      v0.3.0      v1.0.0      v1.5.0
 ## Phase 2: Core Features (Q2 2025) - v0.2.0-beta
 
 **Duration**: 10-12 weeks  
-**Status**: 🔵 Planned  
+**Status**: 🟡 In Progress (Started October 21, 2025)  
 **Focus**: Queue system, event streams, and persistence
 
 ### Milestones
 
 #### Week 1-3: Queue System
-- [ ] FIFO queue implementation
-- [ ] Message priorities
-- [ ] ACK/NACK mechanism
-- [ ] Retry logic with backoff
-- [ ] Dead letter queue
-- [ ] Queue persistence
-- [ ] Queue benchmarks
+- [x] FIFO queue implementation
+- [x] Message priorities (0-9)
+- [x] ACK/NACK mechanism
+- [x] Retry logic with configurable max retries
+- [x] Dead letter queue
+- [ ] Queue persistence (planned Phase 2 Week 10-12)
+- [ ] Queue benchmarks (to be added)
 
 #### Week 4-6: Event Streams
 - [ ] Ring buffer implementation
