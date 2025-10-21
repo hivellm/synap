@@ -5,14 +5,15 @@
 - **[README](README.md)** - Project overview and quick start
 - **[ARCHITECTURE](ARCHITECTURE.md)** - System architecture and design
 - **[API Reference](api/REST_API.md)** - Complete API documentation
+- **[Documentation Organization](ORGANIZATION.md)** - How documentation is structured
 
 ## Getting Started
 
 1. [Project Overview](README.md) - Features, use cases, and quick start
 2. [Design Decisions](DESIGN_DECISIONS.md) - Technical choices and rationale
 3. [Architecture](ARCHITECTURE.md) - System components and data flow
-4. [Configuration](CONFIGURATION.md) - Configuration reference
-5. [Development](DEVELOPMENT.md) - Setup and development guide
+4. [Configuration](specs/CONFIGURATION.md) - Configuration reference
+5. [Development](specs/DEVELOPMENT.md) - Setup and development guide
 
 ## Core Specifications
 
@@ -32,9 +33,10 @@
 - **[Protocol Messages](api/PROTOCOL_MESSAGES.md)** - Message formats
 
 ### Performance & Optimization
-- **[Compression & Cache](COMPRESSION_AND_CACHE.md)** - Smart compression and hot data caching
-- **[Performance](PERFORMANCE.md)** - Benchmarks and targets
-- **[Optimization](OPTIMIZATION.md)** - Optimization strategies
+- **[Compression & Cache](specs/COMPRESSION_AND_CACHE.md)** - Smart compression and hot data caching
+- **[Performance](specs/PERFORMANCE.md)** - Benchmarks and targets
+- **[Optimization](specs/OPTIMIZATION.md)** - Optimization strategies
+- **[Performance Optimizations](specs/PERFORMANCE_OPTIMIZATIONS.md)** - Advanced optimization techniques
 
 ## Client SDKs
 
@@ -49,6 +51,12 @@
 - **[Task Queue](examples/TASK_QUEUE.md)** - Distributed task processing
 - **[Pub/Sub Patterns](examples/PUBSUB_PATTERN.md)** - Notification systems
 
+## Benchmarks
+
+- **[Benchmark Results](benchmarks/BENCHMARK_RESULTS_EXTENDED.md)** - Extended performance benchmarks
+- **[Persistence Benchmarks](benchmarks/PERSISTENCE_BENCHMARKS.md)** - WAL and snapshot performance
+- **[Queue Concurrency Tests](benchmarks/QUEUE_CONCURRENCY_TESTS.md)** - Queue system concurrency analysis
+
 ## Architecture Diagrams
 
 - **[System Architecture](diagrams/system-architecture.mmd)** - Overall system design
@@ -58,15 +66,16 @@
 
 ## Operations
 
-- **[Performance](PERFORMANCE.md)** - Performance targets and benchmarks
-- **[Optimization](OPTIMIZATION.md)** - Optimization strategies
-- **[Deployment](DEPLOYMENT.md)** - Deployment guide
-- **[Packaging & Distribution](PACKAGING_AND_DISTRIBUTION.md)** - Build installers for all platforms
-- **[Configuration](CONFIGURATION.md)** - Configuration reference
+- **[Configuration](specs/CONFIGURATION.md)** - Configuration reference
+- **[Deployment](specs/DEPLOYMENT.md)** - Deployment guide
+- **[Packaging & Distribution](specs/PACKAGING_AND_DISTRIBUTION.md)** - Build installers for all platforms
+- **[Build Guide](BUILD.md)** - Build instructions
+- **[Testing](TESTING.md)** - Testing guide
 
 ## User Interface
 
-- **[GUI Dashboard](GUI_DASHBOARD.md)** - Electron-based desktop application (planned)
+- **[GUI Dashboard](specs/GUI_DASHBOARD.md)** - Electron-based desktop application (planned)
+- **[CLI Guide](CLI_GUIDE.md)** - Command-line interface documentation
 
 ## Project Planning
 
@@ -104,21 +113,21 @@
 
 ### High Availability Deployment
 1. [Replication Specification](specs/REPLICATION.md)
-2. [Deployment Guide](DEPLOYMENT.md)
-3. [Configuration Reference](CONFIGURATION.md)
+2. [Deployment Guide](specs/DEPLOYMENT.md)
+3. [Configuration Reference](specs/CONFIGURATION.md)
 
 ## By Component
 
 ### Key-Value Store
 - [Specification](specs/KEY_VALUE_STORE.md)
 - [API Reference](api/REST_API.md#key-value-store-api)
-- [Performance](PERFORMANCE.md#scenario-1-key-value-workload)
+- [Performance](specs/PERFORMANCE.md#scenario-1-key-value-workload)
 
 ### Queue System
 - [Specification](specs/QUEUE_SYSTEM.md)
 - [API Reference](api/REST_API.md#queue-system-api)
 - [Task Queue Example](examples/TASK_QUEUE.md)
-- [Performance](PERFORMANCE.md#scenario-2-queue-processing)
+- [Performance](specs/PERFORMANCE.md#scenario-2-queue-processing)
 
 ### Event Stream
 - [Specification](specs/EVENT_STREAM.md)
@@ -134,7 +143,7 @@
 ### Replication
 - [Specification](specs/REPLICATION.md)
 - [Flow Diagram](diagrams/replication-flow.mmd)
-- [Deployment Guide](DEPLOYMENT.md#2-master-slave-production)
+- [Deployment Guide](specs/DEPLOYMENT.md#2-master-slave-production)
 
 ## Quick Reference
 
@@ -176,18 +185,18 @@ cargo add synap-client
 |---------|-------|--------|--------------|
 | Overview | 1 | ✅ Complete | 2025-10-16 |
 | Architecture | 3 | ✅ Complete | 2025-10-16 |
-| Core Specs | 6 | ✅ Complete | 2025-10-15 |
+| Core Specs | 16 | ✅ Complete | 2025-10-21 |
 | Protocol | 3 | ✅ Complete | 2025-10-16 |
 | API Reference | 2 | ✅ Complete | 2025-10-15 |
 | SDKs | 3 | ✅ Complete | 2025-10-15 |
 | Examples | 4 | ✅ Complete | 2025-10-15 |
 | Diagrams | 4 | ✅ Complete | 2025-10-15 |
-| Operations | 5 | ✅ Complete | 2025-10-16 |
-| User Interface | 1 | ✅ Complete | 2025-10-16 |
+| Benchmarks | 3 | ✅ Complete | 2025-10-21 |
+| Operations | 5 | ✅ Complete | 2025-10-21 |
+| User Interface | 2 | ✅ Complete | 2025-10-16 |
 | Project Planning | 2 | ✅ Complete | 2025-10-16 |
-| Build Scripts | 4 | ✅ Complete | 2025-10-16 |
 
-**Total Documentation**: 28 files, ~23,400 lines
+**Total Documentation**: 48 files, organized and consolidated
 
 ### Key Additions
 - ✅ **Persistence System**: WAL + Snapshot specification added
@@ -206,7 +215,7 @@ cargo add synap-client
 
 ## Contributing
 
-See [DEVELOPMENT.md](DEVELOPMENT.md) for contribution guidelines.
+See [DEVELOPMENT.md](specs/DEVELOPMENT.md) for contribution guidelines.
 
 ## Project Status
 
