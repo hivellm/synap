@@ -1,0 +1,373 @@
+# Synap - Cursor AI Rules
+
+## Project Context
+
+Synap is a high-performance in-memory key-value store and message broker built in Rust (Edition 2024).
+
+**Tech Stack**:
+- Rust Edition 2024 (nightly 1.85+)
+- Tokio async runtime
+- Axum web framework
+- Radix trie for storage
+- Multi-protocol: StreamableHTTP, MCP, UMICP, TCP
+
+## Code Quality Standards
+
+### Rust Best Practices
+
+1. **Always use Rust Edition 2024**
+   - Leverage latest features (async traits, improved pattern matching)
+   - Use modern patterns and idioms
+
+2. **Error Handling**
+   - Use `Result<T, SynapError>` consistently
+   - Never use `.unwrap()` in production code
+   - Provide context in error messages
+
+3. **Async/Await**
+   - All I/O operations must be async
+   - Use `tokio::spawn` for concurrent tasks
+   - Avoid blocking operations in async contexts
+
+4. **Ownership & Borrowing**
+   - Use `&self` instead of `self` when method doesn't consume
+   - Prefer `Arc<RwLock<T>>` for shared mutable state
+   - Clone only when necessary
+
+5. **Type Safety**
+   - Leverage the type system for compile-time guarantees
+   - Use enums for state machines
+   - Avoid `unwrap()` - use pattern matching or `?`
+
+### Code Style
+
+1. **Formatting**
+   - Always run `cargo fmt` before committing
+   - Follow Rust standard style (enforced by rustfmt)
+
+2. **Linting**
+   - Code must pass `cargo clippy` with no warnings
+   - Apply clippy suggestions when reasonable
+   - Use `#[allow(clippy::...)]` sparingly with justification
+
+3. **Naming Conventions**
+   - Types: `PascalCase` (e.g., `KVStore`, `SynapError`)
+   - Functions/methods: `snake_case` (e.g., `start_ttl_cleanup`)
+   - Constants: `SCREAMING_SNAKE_CASE` (e.g., `MAX_CONNECTIONS`)
+   - Lifetimes: `'a`, `'b`, etc. (short, descriptive)
+
+### Testing Standards
+
+1. **Test Coverage**
+   - Maintain >80% test coverage
+   - Unit tests in same file as implementation (`#[cfg(test)]`)
+   - Integration tests in `tests/` directory
+
+2. **Test Organization**
+   ```rust
+   #[cfg(test)]
+   mod tests {
+       use super::*;
+       
+       #[tokio::test]
+       async fn test_operation_name() {
+           // Arrange
+           // Act
+           // Assert
+       }
+   }
+   ```
+
+3. **Test Naming**
+   - Use descriptive names: `test_set_with_ttl_expires_correctly`
+   - Group related tests in modules
+
+### Performance Guidelines
+
+1. **Memory Efficiency**
+   - Use radix trie for memory-efficient string storage
+   - Avoid unnecessary clones
+   - Monitor memory usage in statistics
+
+2. **Concurrency**
+   - Minimize lock contention (use RwLock for read-heavy)
+   - Prefer message passing over shared state when possible
+   - Use `DashMap` for lock-free concurrent access
+
+3. **Benchmarking**
+   - Add benchmarks for performance-critical paths
+   - Target: <1ms p95 latency for operations
+   - Run benchmarks before optimizing
+
+## Documentation Standards
+
+### File Organization
+
+**CRITICAL RULE**: Minimize Markdown files. All documentation must be in `/docs` except:
+- ✅ `README.md` (root) - Project overview and quick start
+- ✅ `CHANGELOG.md` (root) - Version history
+- ✅ `AGENTS.md` (root) - AI assistant instructions
+
+**DO NOT CREATE**:
+- ❌ Individual `.md` files in project root
+- ❌ Scattered documentation files
+- ❌ Duplicate documentation
+
+**Structure**:
+```
+synap/
+├── README.md              ✅ Main project README
+├── CHANGELOG.md           ✅ Version history
+├── AGENTS.md              ✅ AI instructions
+├── docs/                  ✅ All other documentation
+│   ├── ARCHITECTURE.md
+│   ├── DEVELOPMENT.md
+│   ├── ROADMAP.md
+│   ├── specs/
+│   │   ├── KEY_VALUE_STORE.md
+│   │   └── ...
+│   └── api/
+│       └── REST_API.md
+└── synap-server/
+    └── src/
+```
+
+### Code Documentation
+
+1. **Module Documentation**
+   ```rust
+   //! Module description
+   //! 
+   //! Detailed explanation of module purpose
+   ```
+
+2. **Function Documentation**
+   ```rust
+   /// Brief description (one line)
+   ///
+   /// # Arguments
+   /// * `key` - The key name
+   ///
+   /// # Returns
+   /// Returns `Ok(value)` on success
+   ///
+   /// # Example
+   /// ```
+   /// let result = store.get("key").await?;
+   /// ```
+   pub async fn get(&self, key: &str) -> Result<Option<Vec<u8>>>
+   ```
+
+3. **Public API**
+   - All public functions must have doc comments
+   - Include examples for non-trivial functions
+   - Document error conditions
+
+### Git Practices
+
+1. **Commit Messages**
+   - Follow Conventional Commits format
+   - Types: `feat`, `fix`, `docs`, `refactor`, `perf`, `test`, `chore`
+   - Example: `feat: add atomic INCR/DECR operations`
+
+2. **Before Committing**
+   - Run `cargo fmt`
+   - Run `cargo clippy`
+   - Run `cargo test`
+   - Update CHANGELOG.md if needed
+
+3. **Never Commit**
+   - `target/` directory
+   - IDE files (`.vscode/`, `.idea/`)
+   - Local config files
+   - Build artifacts
+
+## Protocol Implementation
+
+### StreamableHTTP Protocol
+
+1. **Message Envelope**
+   ```json
+   {
+     "command": "kv.set",
+     "request_id": "uuid",
+     "payload": {...}
+   }
+   ```
+
+2. **Command Naming**
+   - Format: `{component}.{operation}`
+   - Examples: `kv.get`, `queue.publish`, `stream.subscribe`
+
+3. **Error Responses**
+   - Always include `success: false`
+   - Provide descriptive error messages
+   - Return appropriate HTTP status codes
+
+### Future Protocols (Phase 2+)
+
+- **MCP**: Model Context Protocol for AI tools
+- **UMICP**: Universal Matrix Inter-Communication Protocol
+- **TCP**: Raw TCP socket support
+
+## Architecture Patterns
+
+1. **Layered Architecture**
+   ```
+   Protocol Layer (HTTP/MCP/UMICP/TCP)
+        ↓
+   Router Layer (command routing)
+        ↓
+   Core Layer (KV/Queue/Stream/PubSub)
+        ↓
+   Storage Layer (Radix trie, Ring buffer)
+   ```
+
+2. **State Management**
+   - Use `Arc<RwLock<T>>` for shared state
+   - Clone Arc pointers, not data
+   - Minimize lock scope
+
+3. **Error Propagation**
+   - Use `?` operator for error propagation
+   - Convert errors at layer boundaries
+   - Provide context when wrapping errors
+
+## Common Patterns
+
+### KV Store Pattern
+```rust
+pub async fn operation(&self, key: &str) -> Result<T> {
+    debug!("OPERATION key={}", key);
+    
+    let data = self.data.read();  // or .write()
+    let mut stats = self.stats.write();
+    
+    // Operation logic
+    stats.operation_count += 1;
+    
+    Ok(result)
+}
+```
+
+### HTTP Handler Pattern
+```rust
+pub async fn handler(
+    State(store): State<Arc<KVStore>>,
+    Json(req): Json<Request>,
+) -> Result<Json<Response>, SynapError> {
+    debug!("Handler: {:?}", req);
+    
+    let result = store.operation(&req.key).await?;
+    
+    Ok(Json(Response { success: true, data: result }))
+}
+```
+
+### Background Task Pattern
+```rust
+pub fn start_background_task(&self) -> JoinHandle<()> {
+    let store = self.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_millis(100));
+        loop {
+            interval.tick().await;
+            store.periodic_work().await;
+        }
+    })
+}
+```
+
+## Dependencies Management
+
+1. **Keep Dependencies Updated**
+   - Use latest stable versions from crates.io
+   - Check Context7 for latest versions
+   - Document version choices in CHANGELOG
+
+2. **Minimize Dependencies**
+   - Only add when necessary
+   - Prefer well-maintained crates
+   - Check for security advisories
+
+3. **Feature Flags**
+   - Use features for optional functionality
+   - Example: `--features full` for all features
+
+## Development Workflow
+
+1. **Before Starting Work**
+   ```bash
+   cargo build
+   cargo test
+   ```
+
+2. **During Development**
+   ```bash
+   cargo watch -x 'test' -x 'run'
+   ```
+
+3. **Before Committing**
+   ```bash
+   cargo fmt
+   cargo clippy -- -D warnings
+   cargo test
+   cargo build --release
+   ```
+
+4. **Release Process**
+   ```bash
+   # Update version in Cargo.toml
+   # Update CHANGELOG.md
+   cargo test
+   cargo build --release
+   git commit -m "release: v0.x.0"
+   git tag -a v0.x.0 -m "Version 0.x.0"
+   ```
+
+## Performance Targets
+
+- **Latency**: <1ms p95 for KV operations
+- **Throughput**: >100K ops/sec per core
+- **Memory**: Radix tree 30% less than HashMap
+- **Test Time**: <5s for full test suite
+- **Build Time**: <30s for release build
+
+## Security Guidelines
+
+1. **Input Validation**
+   - Validate all external input
+   - Sanitize keys and values
+   - Enforce size limits
+
+2. **Memory Safety**
+   - Leverage Rust's ownership system
+   - Avoid unsafe code without justification
+   - Document all unsafe blocks
+
+3. **Error Messages**
+   - Don't leak internal details
+   - Log detailed errors internally
+   - Return safe messages to clients
+
+## AI Assistant Guidelines
+
+When working with AI assistants (like Cursor AI):
+
+1. **Always check vectorizer first** for project context
+2. **Reference existing patterns** in the codebase
+3. **Update documentation** when adding features
+4. **Run tests** before declaring complete
+5. **Follow Rust idioms** - don't translate from other languages
+
+## Resources
+
+- **Rust Book**: https://doc.rust-lang.org/book/
+- **Tokio Tutorial**: https://tokio.rs/tokio/tutorial
+- **Axum Examples**: https://github.com/tokio-rs/axum/tree/main/examples
+- **Context7 Docs**: https://context7.com
+
+---
+
+**Remember**: Code quality > speed of delivery. Write it right the first time.
+

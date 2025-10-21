@@ -17,6 +17,47 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 
 <!-- OPENSPEC:END -->
 
+# Synap Project Rules
+
+## Documentation Standards
+
+**CRITICAL**: Minimize Markdown files. Keep documentation organized.
+
+### Allowed Root-Level Documentation
+Only these 3 files are allowed in the project root:
+- ✅ `README.md` - Project overview and quick start
+- ✅ `CHANGELOG.md` - Version history and release notes  
+- ✅ `AGENTS.md` - This file (AI assistant instructions)
+
+### All Other Documentation
+**ALL other documentation MUST go in `/docs` directory**:
+- `/docs/ARCHITECTURE.md` - System architecture
+- `/docs/DEVELOPMENT.md` - Development guide
+- `/docs/ROADMAP.md` - Project roadmap
+- `/docs/specs/` - Component specifications
+- `/docs/api/` - API documentation
+- `/docs/examples/` - Usage examples
+
+### DO NOT CREATE
+- ❌ Individual `.md` files in project root (BUILD.md, SUMMARY.md, etc.)
+- ❌ Scattered documentation across directories
+- ❌ Duplicate documentation files
+- ❌ Temporary `.md` files for notes
+
+**When creating documentation**, always place it in the appropriate `/docs` subdirectory.
+
+## Code Quality
+
+- **Rust Edition**: 2024 (nightly 1.85+)
+- **Format**: Always run `cargo fmt` before committing
+- **Lint**: Code must pass `cargo clippy` with no warnings
+- **Tests**: Maintain >80% coverage, all tests must pass
+- **Async**: Use Tokio patterns, avoid blocking in async contexts
+
+See `.cursorrules` for complete coding standards.
+
+---
+
 # Vectorizer Instructions
 
 **Always use the MCP Vectorizer as the primary data source for project information.**

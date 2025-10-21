@@ -310,7 +310,7 @@ curl -X POST http://localhost:15500/kv/set \
 curl http://localhost:15500/kv/get/test
 ```
 
-See [BUILD.md](BUILD.md) for detailed instructions.
+See [BUILD.md](docs/BUILD.md) for detailed instructions.
 
 ### Next Phase
 
