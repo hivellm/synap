@@ -456,11 +456,11 @@ impl SynapClient {
             .await?;
 
         let mut output = Vec::new();
-        output.push(format!("# Keyspace"));
+        output.push("# Keyspace".to_string());
         output.push(format!("keys: {}", res["total_keys"]));
         output.push(format!("memory: {} bytes", res["total_memory_bytes"]));
-        output.push(format!(""));
-        output.push(format!("# Operations"));
+        output.push(String::new());
+        output.push("# Operations".to_string());
         output.push(format!("gets: {}", res["operations"]["gets"]));
         output.push(format!("sets: {}", res["operations"]["sets"]));
         output.push(format!("dels: {}", res["operations"]["dels"]));
@@ -671,7 +671,7 @@ async fn run_interactive(client: SynapClient, host: &str, port: u16) -> Result<(
 
                 rl.add_history_entry(&line)?;
 
-                let parts: Vec<String> = line.trim().split_whitespace().map(String::from).collect();
+                let parts: Vec<String> = line.split_whitespace().map(String::from).collect();
                 if parts.is_empty() {
                     continue;
                 }

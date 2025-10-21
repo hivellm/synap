@@ -42,14 +42,42 @@ async fn main() -> Result<()> {
         config.server.port = port;
     }
 
-    // Initialize tracing
+    // Initialize tracing based on config
     let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| config.logging.level.clone());
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::new(log_level))
-        .init();
+
+    match config.logging.format.as_str() {
+        "json" => {
+            // JSON format for production (structured logging)
+            tracing_subscriber::fmt()
+                .json()
+                .with_env_filter(tracing_subscriber::EnvFilter::new(log_level))
+                .with_target(true)
+                .with_thread_ids(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true)
+                .with_current_span(true)
+                .init();
+        }
+        _ => {
+            // Pretty format for development (human-readable)
+            tracing_subscriber::fmt()
+                .pretty()
+                .with_env_filter(tracing_subscriber::EnvFilter::new(log_level))
+                .with_target(true)
+                .with_thread_names(true)
+                .with_file(true)
+                .with_line_number(true)
+                .init();
+        }
+    }
 
     info!("Starting Synap Server v{}", env!("CARGO_PKG_VERSION"));
     info!("Configuration loaded from: {}", args.config);
+    info!(
+        "Log format: {}, level: {}",
+        config.logging.format, config.logging.level
+    );
 
     // Create KV store
     let kv_config = config.to_kv_config();

@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Advanced Logging** with tracing-subscriber
+  - JSON format support (structured logging for production)
+  - Pretty format support (colored output for development)
+  - File/line number tracking
+  - Thread ID and name tracking
+  - Span context support
+  - Configurable via `config.yml`
+
+- **Configuration System**
+  - YAML-based configuration (Redis-compatible style)
+  - Multiple config files (dev, prod, example)
+  - CLI argument overrides (--config, --host, --port)
+  - Environment variable support (RUST_LOG)
+  - Comprehensive inline documentation
+
+- **Synap CLI** (Redis-compatible client)
+  - Interactive REPL mode with rustyline
+  - Command mode for scripting
+  - 18 Redis-compatible commands
+  - Colored output with timing information
+  - Command history and completion
+  - Full documentation in docs/CLI_GUIDE.md
+
+- **New KV Commands**
+  - KEYS - List all keys
+  - DBSIZE - Get database size
+  - FLUSHDB/FLUSHALL - Clear database
+  - EXPIRE - Set key expiration
+  - PERSIST - Remove key expiration
+
+### Changed
+
+- Updated tracing-subscriber to 0.3 with JSON and env-filter features
+- Enhanced main.rs with configurable logging
+- Updated AGENTS.md with Context7 dependency check rule
+
 ## [0.1.0-alpha] - 2025-10-21
 
 ### Added
