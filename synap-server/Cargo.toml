@@ -19,7 +19,7 @@ tracing-subscriber = { workspace = true, features = ["json", "env-filter"] }
 thiserror.workspace = true
 anyhow.workspace = true
 tower-http.workspace = true
-tower = "0.4"
+tower = { version = "0.4", features = ["limit", "timeout"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
 serde_yaml = "0.9"
 clap = { version = "4.5", features = ["derive"] }

@@ -71,6 +71,55 @@ kv_store:
   ttl_cleanup_interval_ms: 100
 
 # ============================================================================
+# QUEUE SYSTEM (Phase 2)
+# ============================================================================
+
+queue:
+  # Enable or disable queue system
+  # Default: true
+  enabled: true
+  
+  # Maximum number of messages per queue
+  # When limit is reached, new publishes will fail
+  # Default: 100000
+  max_depth: 100000
+  
+  # ACK deadline in seconds
+  # After this time, unacknowledged messages are requeued
+  # Default: 30 seconds
+  ack_deadline_secs: 30
+  
+  # Default maximum retry attempts before moving to DLQ
+  # Can be overridden per message
+  # Default: 3
+  default_max_retries: 3
+  
+  # Default message priority (0-9, where 9 is highest)
+  # Can be overridden per message
+  # Default: 5
+  default_priority: 5
+
+# ============================================================================
+# RATE LIMITING
+# ============================================================================
+
+rate_limit:
+  # Enable or disable rate limiting
+  # NOTE: Currently disabled due to implementation constraints (Clone requirement)
+  # Will be re-implemented using per-route middleware or governor crate
+  # Default: false (disabled for maximum performance)
+  enabled: false
+  
+  # Maximum requests per second
+  # Default: 1000 req/s
+  requests_per_second: 1000
+  
+  # Burst size (allows temporary spikes)
+  # Not used by current implementation but reserved for future
+  # Default: 100
+  burst_size: 100
+
+# ============================================================================
 # LOGGING
 # ============================================================================
 

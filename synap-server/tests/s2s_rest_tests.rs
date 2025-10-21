@@ -5,12 +5,16 @@ use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
-use synap_server::{KVConfig, KVStore, create_router};
+use synap_server::{AppState, KVConfig, KVStore, create_router};
 use tokio::net::TcpListener;
 
 async fn spawn_test_server() -> String {
-    let store = Arc::new(KVStore::new(KVConfig::default()));
-    let app = create_router(store);
+    let kv_store = Arc::new(KVStore::new(KVConfig::default()));
+    let state = AppState {
+        kv_store,
+        queue_manager: None,
+    };
+    let app = create_router(state, false, 1000);
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

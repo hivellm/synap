@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use uuid::Uuid;
 
 /// Message ID type
@@ -602,5 +602,459 @@ mod tests {
 
         let deleted = manager.delete_queue("temp_queue").await.unwrap();
         assert!(!deleted);
+    }
+
+    // ==================== CONCURRENCY TESTS ====================
+    // These tests ensure no duplicate processing when multiple consumers
+    // are competing for messages
+
+    #[tokio::test]
+    async fn test_concurrent_consumers_no_duplicates() {
+        use std::collections::HashSet;
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+
+        let manager = Arc::new(QueueManager::new(QueueConfig::default()));
+        manager
+            .create_queue("concurrent_queue", None)
+            .await
+            .unwrap();
+
+        // Publish 100 messages
+        let num_messages = 100;
+        for i in 0..num_messages {
+            manager
+                .publish(
+                    "concurrent_queue",
+                    format!("msg-{}", i).into_bytes(),
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+        }
+
+        // Track consumed messages
+        let consumed = Arc::new(Mutex::new(HashSet::new()));
+        let mut handles = vec![];
+
+        // Spawn 10 concurrent consumers
+        for consumer_id in 0..10 {
+            let manager_clone = Arc::clone(&manager);
+            let consumed_clone = Arc::clone(&consumed);
+
+            let handle = tokio::spawn(async move {
+                let consumer_name = format!("consumer-{}", consumer_id);
+
+                // Each consumer tries to consume messages
+                loop {
+                    match manager_clone
+                        .consume("concurrent_queue", &consumer_name)
+                        .await
+                    {
+                        Ok(Some(msg)) => {
+                            let mut set = consumed_clone.lock().await;
+                            let message_content = String::from_utf8_lossy(&msg.payload).to_string();
+
+                            // Check for duplicates - this should NEVER happen
+                            assert!(
+                                !set.contains(&message_content),
+                                "DUPLICATE MESSAGE DETECTED: {} consumed by {}",
+                                message_content,
+                                consumer_name
+                            );
+
+                            set.insert(message_content.clone());
+                            drop(set); // Release lock
+
+                            // ACK the message
+                            manager_clone
+                                .ack("concurrent_queue", &msg.id)
+                                .await
+                                .unwrap();
+                        }
+                        Ok(None) => {
+                            // Queue empty, we're done
+                            break;
+                        }
+                        Err(e) => {
+                            panic!("Unexpected error: {}", e);
+                        }
+                    }
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all consumers to finish
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // Verify all messages were consumed exactly once
+        let final_consumed = consumed.lock().await;
+        assert_eq!(
+            final_consumed.len(),
+            num_messages,
+            "Expected {} messages, got {}",
+            num_messages,
+            final_consumed.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_high_concurrency_stress_test() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let manager = Arc::new(QueueManager::new(QueueConfig::default()));
+        manager.create_queue("stress_queue", None).await.unwrap();
+
+        // Publish 1000 messages
+        let num_messages = 1000;
+        for i in 0..num_messages {
+            manager
+                .publish(
+                    "stress_queue",
+                    format!("msg-{:04}", i).into_bytes(),
+                    None,
+                    None,
+                )
+                .await
+                .unwrap();
+        }
+
+        // Counter for consumed messages
+        let consumed_count = Arc::new(AtomicUsize::new(0));
+        let mut handles = vec![];
+
+        // Spawn 50 concurrent consumers (high contention)
+        for consumer_id in 0..50 {
+            let manager_clone = Arc::clone(&manager);
+            let counter_clone = Arc::clone(&consumed_count);
+
+            let handle = tokio::spawn(async move {
+                let consumer_name = format!("consumer-{}", consumer_id);
+                let mut local_count = 0;
+
+                loop {
+                    match manager_clone.consume("stress_queue", &consumer_name).await {
+                        Ok(Some(msg)) => {
+                            local_count += 1;
+                            counter_clone.fetch_add(1, Ordering::SeqCst);
+
+                            // ACK immediately
+                            manager_clone.ack("stress_queue", &msg.id).await.unwrap();
+                        }
+                        Ok(None) => {
+                            break;
+                        }
+                        Err(e) => {
+                            panic!("Unexpected error in consumer {}: {}", consumer_name, e);
+                        }
+                    }
+                }
+
+                local_count
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all consumers and collect individual counts
+        let mut total_from_consumers = 0;
+        for handle in handles {
+            let count = handle.await.unwrap();
+            total_from_consumers += count;
+        }
+
+        // Verify counts match
+        let final_count = consumed_count.load(Ordering::SeqCst);
+        assert_eq!(
+            final_count, num_messages,
+            "Expected {} consumed messages, got {}",
+            num_messages, final_count
+        );
+        assert_eq!(
+            total_from_consumers, num_messages,
+            "Sum of individual consumer counts ({}) doesn't match total ({})",
+            total_from_consumers, num_messages
+        );
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_publish_and_consume() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let manager = Arc::new(QueueManager::new(QueueConfig::default()));
+        manager.create_queue("pubsub_queue", None).await.unwrap();
+
+        let published_count = Arc::new(AtomicUsize::new(0));
+        let consumed_count = Arc::new(AtomicUsize::new(0));
+
+        let mut handles = vec![];
+
+        // Spawn 5 publishers
+        for publisher_id in 0..5 {
+            let manager_clone = Arc::clone(&manager);
+            let counter_clone = Arc::clone(&published_count);
+
+            let handle = tokio::spawn(async move {
+                for i in 0..100 {
+                    let payload = format!("pub-{}-msg-{}", publisher_id, i).into_bytes();
+                    manager_clone
+                        .publish("pubsub_queue", payload, None, None)
+                        .await
+                        .unwrap();
+                    counter_clone.fetch_add(1, Ordering::SeqCst);
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        // Spawn 10 consumers (running concurrently with publishers)
+        for consumer_id in 0..10 {
+            let manager_clone = Arc::clone(&manager);
+            let counter_clone = Arc::clone(&consumed_count);
+
+            let handle = tokio::spawn(async move {
+                let consumer_name = format!("consumer-{}", consumer_id);
+
+                // Keep consuming until we don't get messages for a while
+                let mut empty_attempts = 0;
+                while empty_attempts < 10 {
+                    match manager_clone.consume("pubsub_queue", &consumer_name).await {
+                        Ok(Some(msg)) => {
+                            counter_clone.fetch_add(1, Ordering::SeqCst);
+                            manager_clone.ack("pubsub_queue", &msg.id).await.unwrap();
+                            empty_attempts = 0; // Reset
+                        }
+                        Ok(None) => {
+                            empty_attempts += 1;
+                            tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+                        }
+                        Err(e) => {
+                            panic!("Unexpected error: {}", e);
+                        }
+                    }
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for all tasks
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // Give a bit of time for final processing
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        let published = published_count.load(Ordering::SeqCst);
+        let consumed = consumed_count.load(Ordering::SeqCst);
+
+        assert_eq!(published, 500, "Expected 500 published messages");
+        assert_eq!(consumed, 500, "Expected all 500 messages to be consumed");
+    }
+
+    #[tokio::test]
+    async fn test_no_message_loss_under_contention() {
+        use std::collections::HashSet;
+        use std::sync::Arc;
+        use tokio::sync::Mutex;
+
+        let manager = Arc::new(QueueManager::new(QueueConfig::default()));
+        manager.create_queue("no_loss_queue", None).await.unwrap();
+
+        // Publish 500 uniquely identifiable messages
+        let num_messages = 500;
+        let mut expected_messages = HashSet::new();
+
+        for i in 0..num_messages {
+            let msg_id = format!("unique-msg-{:05}", i);
+            expected_messages.insert(msg_id.clone());
+            manager
+                .publish("no_loss_queue", msg_id.into_bytes(), None, None)
+                .await
+                .unwrap();
+        }
+
+        // Track received messages
+        let received = Arc::new(Mutex::new(HashSet::new()));
+        let mut handles = vec![];
+
+        // Spawn 20 consumers with aggressive competition
+        for consumer_id in 0..20 {
+            let manager_clone = Arc::clone(&manager);
+            let received_clone = Arc::clone(&received);
+
+            let handle = tokio::spawn(async move {
+                let consumer_name = format!("consumer-{}", consumer_id);
+
+                loop {
+                    match manager_clone.consume("no_loss_queue", &consumer_name).await {
+                        Ok(Some(msg)) => {
+                            let msg_content = String::from_utf8_lossy(&msg.payload).to_string();
+
+                            let mut set = received_clone.lock().await;
+
+                            // Detect duplicates
+                            if set.contains(&msg_content) {
+                                panic!("DUPLICATE: Message '{}' consumed twice!", msg_content);
+                            }
+
+                            set.insert(msg_content);
+                            drop(set);
+
+                            // ACK
+                            manager_clone.ack("no_loss_queue", &msg.id).await.unwrap();
+                        }
+                        Ok(None) => break,
+                        Err(e) => panic!("Error: {}", e),
+                    }
+                }
+            });
+
+            handles.push(handle);
+        }
+
+        // Wait for completion
+        for handle in handles {
+            handle.await.unwrap();
+        }
+
+        // Verify all messages received exactly once
+        let final_received = received.lock().await;
+
+        assert_eq!(
+            final_received.len(),
+            num_messages,
+            "Expected {} messages, received {}",
+            num_messages,
+            final_received.len()
+        );
+
+        // Verify we got exactly the messages we sent
+        for expected in &expected_messages {
+            assert!(
+                final_received.contains(expected),
+                "Message '{}' was never received!",
+                expected
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_priority_with_concurrent_consumers() {
+        use std::sync::Arc;
+
+        let manager = Arc::new(QueueManager::new(QueueConfig::default()));
+        manager
+            .create_queue("priority_concurrent", None)
+            .await
+            .unwrap();
+
+        // Publish messages with different priorities
+        for i in 0..30 {
+            let priority = match i % 3 {
+                0 => 9, // High
+                1 => 5, // Medium
+                _ => 1, // Low
+            };
+            manager
+                .publish(
+                    "priority_concurrent",
+                    format!("msg-{}", i).into_bytes(),
+                    Some(priority),
+                    None,
+                )
+                .await
+                .unwrap();
+        }
+
+        let mut handles = vec![];
+        let manager_clone = Arc::clone(&manager);
+
+        // Spawn 5 concurrent consumers
+        for consumer_id in 0..5 {
+            let manager_clone2 = Arc::clone(&manager_clone);
+
+            let handle = tokio::spawn(async move {
+                let consumer_name = format!("consumer-{}", consumer_id);
+                let mut consumed = vec![];
+
+                loop {
+                    match manager_clone2
+                        .consume("priority_concurrent", &consumer_name)
+                        .await
+                    {
+                        Ok(Some(msg)) => {
+                            consumed.push((
+                                msg.priority,
+                                String::from_utf8_lossy(&msg.payload).to_string(),
+                            ));
+                            manager_clone2
+                                .ack("priority_concurrent", &msg.id)
+                                .await
+                                .unwrap();
+                        }
+                        Ok(None) => break,
+                        Err(e) => panic!("Error: {}", e),
+                    }
+                }
+
+                consumed
+            });
+
+            handles.push(handle);
+        }
+
+        // Collect all consumed messages
+        let mut all_consumed = vec![];
+        for handle in handles {
+            let mut consumed = handle.await.unwrap();
+            all_consumed.append(&mut consumed);
+        }
+
+        // Verify all 30 messages were consumed
+        assert_eq!(
+            all_consumed.len(),
+            30,
+            "All messages should be consumed exactly once"
+        );
+
+        // Verify higher priority messages tend to come first (not strict ordering due to concurrency)
+        let high_priority_indices: Vec<usize> = all_consumed
+            .iter()
+            .enumerate()
+            .filter(|(_, (prio, _))| *prio == 9)
+            .map(|(idx, _)| idx)
+            .collect();
+
+        let low_priority_indices: Vec<usize> = all_consumed
+            .iter()
+            .enumerate()
+            .filter(|(_, (prio, _))| *prio == 1)
+            .map(|(idx, _)| idx)
+            .collect();
+
+        // On average, high priority should come before low priority
+        if !high_priority_indices.is_empty() && !low_priority_indices.is_empty() {
+            let avg_high: f64 = high_priority_indices.iter().sum::<usize>() as f64
+                / high_priority_indices.len() as f64;
+            let avg_low: f64 = low_priority_indices.iter().sum::<usize>() as f64
+                / low_priority_indices.len() as f64;
+
+            assert!(
+                avg_high < avg_low,
+                "High priority messages should generally come before low priority (avg high: {}, avg low: {})",
+                avg_high,
+                avg_low
+            );
+        }
     }
 }

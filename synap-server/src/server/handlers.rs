@@ -1,12 +1,20 @@
-use crate::core::{KVStore, SynapError};
+use crate::core::{KVStore, QueueManager, SynapError};
 use crate::protocol::{Request, Response};
 use axum::{
     Json,
     extract::{Path, State},
 };
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, error};
+
+/// Application state shared across handlers
+#[derive(Clone)]
+pub struct AppState {
+    pub kv_store: Arc<KVStore>,
+    pub queue_manager: Option<Arc<QueueManager>>,
+}
 
 // Request/Response types for REST API
 #[derive(Debug, Deserialize)]
@@ -61,9 +69,51 @@ pub async fn health_check() -> Json<serde_json::Value> {
     }))
 }
 
+// Queue REST API types
+#[derive(Debug, Deserialize)]
+pub struct CreateQueueRequest {
+    pub max_depth: Option<usize>,
+    pub ack_deadline_secs: Option<u64>,
+    pub default_max_retries: Option<u32>,
+    pub default_priority: Option<u8>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PublishRequest {
+    pub payload: Vec<u8>,
+    pub priority: Option<u8>,
+    pub max_retries: Option<u32>,
+    pub headers: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct PublishResponse {
+    pub message_id: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ConsumeResponse {
+    pub message_id: Option<String>,
+    pub payload: Option<Vec<u8>>,
+    pub priority: Option<u8>,
+    pub retry_count: Option<u32>,
+    pub headers: Option<HashMap<String, String>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AckRequest {
+    pub message_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NackRequest {
+    pub message_id: String,
+    pub requeue: bool,
+}
+
 /// SET endpoint - store a key-value pair
 pub async fn kv_set(
-    State(store): State<Arc<KVStore>>,
+    State(state): State<AppState>,
     Json(req): Json<SetRequest>,
 ) -> Result<Json<SetResponse>, SynapError> {
     debug!("REST SET key={}", req.key);
@@ -71,7 +121,7 @@ pub async fn kv_set(
     let value_bytes = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
-    store.set(&req.key, value_bytes, req.ttl).await?;
+    state.kv_store.set(&req.key, value_bytes, req.ttl).await?;
 
     Ok(Json(SetResponse {
         success: true,
@@ -81,18 +131,18 @@ pub async fn kv_set(
 
 /// GET endpoint - retrieve a value by key
 pub async fn kv_get(
-    State(store): State<Arc<KVStore>>,
+    State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<GetResponse>, SynapError> {
     debug!("REST GET key={}", key);
 
-    let value_bytes = store.get(&key).await?;
+    let value_bytes = state.kv_store.get(&key).await?;
 
     if let Some(bytes) = value_bytes {
         let value: serde_json::Value = serde_json::from_slice(&bytes)
             .map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
-        let ttl = store.ttl(&key).await.ok().flatten();
+        let ttl = state.kv_store.ttl(&key).await.ok().flatten();
 
         Ok(Json(GetResponse {
             found: true,
@@ -110,23 +160,21 @@ pub async fn kv_get(
 
 /// DELETE endpoint - delete a key
 pub async fn kv_delete(
-    State(store): State<Arc<KVStore>>,
+    State(state): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<DeleteResponse>, SynapError> {
     debug!("REST DELETE key={}", key);
 
-    let deleted = store.delete(&key).await?;
+    let deleted = state.kv_store.delete(&key).await?;
 
     Ok(Json(DeleteResponse { deleted, key }))
 }
 
 /// STATS endpoint - get store statistics
-pub async fn kv_stats(
-    State(store): State<Arc<KVStore>>,
-) -> Result<Json<StatsResponse>, SynapError> {
+pub async fn kv_stats(State(state): State<AppState>) -> Result<Json<StatsResponse>, SynapError> {
     debug!("REST STATS");
 
-    let stats = store.stats().await;
+    let stats = state.kv_store.stats().await;
 
     Ok(Json(StatsResponse {
         total_keys: stats.total_keys,
@@ -142,9 +190,215 @@ pub async fn kv_stats(
     }))
 }
 
+// ==================== Queue REST Endpoints ====================
+
+/// Create queue endpoint
+pub async fn queue_create(
+    State(state): State<AppState>,
+    Path(queue_name): Path<String>,
+    Json(req): Json<CreateQueueRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST CREATE QUEUE: {}", queue_name);
+
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let config = if req.max_depth.is_some() || req.ack_deadline_secs.is_some() {
+        Some(crate::core::QueueConfig {
+            max_depth: req.max_depth.unwrap_or(100_000),
+            ack_deadline_secs: req.ack_deadline_secs.unwrap_or(30),
+            default_max_retries: req.default_max_retries.unwrap_or(3),
+            default_priority: req.default_priority.unwrap_or(5),
+        })
+    } else {
+        None
+    };
+
+    queue_manager.create_queue(&queue_name, config).await?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "queue": queue_name
+    })))
+}
+
+/// Publish message endpoint
+pub async fn queue_publish(
+    State(state): State<AppState>,
+    Path(queue_name): Path<String>,
+    Json(req): Json<PublishRequest>,
+) -> Result<Json<PublishResponse>, SynapError> {
+    debug!("REST PUBLISH to queue: {}", queue_name);
+
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let message_id = queue_manager
+        .publish(&queue_name, req.payload, req.priority, req.max_retries)
+        .await?;
+
+    Ok(Json(PublishResponse { message_id }))
+}
+
+/// Consume message endpoint
+pub async fn queue_consume(
+    State(state): State<AppState>,
+    Path((queue_name, consumer_id)): Path<(String, String)>,
+) -> Result<Json<ConsumeResponse>, SynapError> {
+    debug!("REST CONSUME from queue: {} by {}", queue_name, consumer_id);
+
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let message = queue_manager.consume(&queue_name, &consumer_id).await?;
+
+    if let Some(msg) = message {
+        Ok(Json(ConsumeResponse {
+            message_id: Some(msg.id),
+            payload: Some(msg.payload),
+            priority: Some(msg.priority),
+            retry_count: Some(msg.retry_count),
+            headers: Some(msg.headers),
+        }))
+    } else {
+        Ok(Json(ConsumeResponse {
+            message_id: None,
+            payload: None,
+            priority: None,
+            retry_count: None,
+            headers: None,
+        }))
+    }
+}
+
+/// ACK message endpoint
+pub async fn queue_ack(
+    State(state): State<AppState>,
+    Path(queue_name): Path<String>,
+    Json(req): Json<AckRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!(
+        "REST ACK message: {} in queue: {}",
+        req.message_id, queue_name
+    );
+
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    queue_manager.ack(&queue_name, &req.message_id).await?;
+
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+/// NACK message endpoint
+pub async fn queue_nack(
+    State(state): State<AppState>,
+    Path(queue_name): Path<String>,
+    Json(req): Json<NackRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!(
+        "REST NACK message: {} in queue: {}",
+        req.message_id, queue_name
+    );
+
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    queue_manager
+        .nack(&queue_name, &req.message_id, req.requeue)
+        .await?;
+
+    Ok(Json(serde_json::json!({ "success": true })))
+}
+
+/// Queue stats endpoint
+pub async fn queue_stats(
+    State(state): State<AppState>,
+    Path(queue_name): Path<String>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST QUEUE STATS: {}", queue_name);
+
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let stats = queue_manager.stats(&queue_name).await?;
+
+    Ok(Json(serde_json::to_value(stats).map_err(|e| {
+        SynapError::SerializationError(e.to_string())
+    })?))
+}
+
+/// List queues endpoint
+pub async fn queue_list(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST LIST QUEUES");
+
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let queues = queue_manager.list_queues().await?;
+
+    Ok(Json(serde_json::json!({ "queues": queues })))
+}
+
+/// Purge queue endpoint
+pub async fn queue_purge(
+    State(state): State<AppState>,
+    Path(queue_name): Path<String>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST PURGE QUEUE: {}", queue_name);
+
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let count = queue_manager.purge(&queue_name).await?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "purged": count
+    })))
+}
+
+/// Delete queue endpoint
+pub async fn queue_delete(
+    State(state): State<AppState>,
+    Path(queue_name): Path<String>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST DELETE QUEUE: {}", queue_name);
+
+    let queue_manager = state
+        .queue_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
+
+    let deleted = queue_manager.delete_queue(&queue_name).await?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "deleted": deleted
+    })))
+}
+
 /// StreamableHTTP command handler
 pub async fn command_handler(
-    State(store): State<Arc<KVStore>>,
+    State(state): State<AppState>,
     Json(request): Json<Request>,
 ) -> Result<Json<Response>, SynapError> {
     debug!(
@@ -152,7 +406,7 @@ pub async fn command_handler(
         request.command, request.request_id
     );
 
-    let response = handle_command(store, request).await?;
+    let response = handle_command(state.kv_store, request).await?;
     Ok(Json(response))
 }
 

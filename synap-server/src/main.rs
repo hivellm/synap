@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use synap_server::{KVStore, ServerConfig, create_router};
+use synap_server::{AppState, KVStore, QueueManager, ServerConfig, create_router};
 use tracing::info;
 
 #[derive(Parser, Debug)]
@@ -81,13 +81,45 @@ async fn main() -> Result<()> {
 
     // Create KV store
     let kv_config = config.to_kv_config();
-    let store = Arc::new(KVStore::new(kv_config));
+    let kv_store = Arc::new(KVStore::new(kv_config));
 
     // Start TTL cleanup task
-    store.start_ttl_cleanup();
+    kv_store.start_ttl_cleanup();
 
-    // Create router
-    let app = create_router(store);
+    // Create Queue Manager (if enabled)
+    let queue_manager = if config.queue.enabled {
+        let queue_config = config.to_queue_config();
+        let manager = Arc::new(QueueManager::new(queue_config));
+
+        // Start deadline checker task
+        manager.start_deadline_checker();
+
+        info!("Queue system enabled");
+        Some(manager)
+    } else {
+        info!("Queue system disabled");
+        None
+    };
+
+    // Create application state
+    let app_state = AppState {
+        kv_store,
+        queue_manager,
+    };
+
+    // Create router with rate limiting
+    let app = create_router(
+        app_state,
+        config.rate_limit.enabled,
+        config.rate_limit.requests_per_second,
+    );
+
+    if config.rate_limit.enabled {
+        info!(
+            "Rate limiting enabled: {} req/s (burst: {})",
+            config.rate_limit.requests_per_second, config.rate_limit.burst_size
+        );
+    }
 
     // Bind server
     let addr: SocketAddr = config.server_addr().parse()?;

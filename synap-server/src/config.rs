@@ -2,15 +2,17 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
-use crate::core::{EvictionPolicy, KVConfig};
+use crate::core::{EvictionPolicy, KVConfig, QueueConfig};
 
 /// Main server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
     pub server: Server,
     pub kv_store: KVStoreConfig,
+    pub queue: QueueSystemConfig,
     pub logging: LoggingConfig,
     pub protocols: ProtocolsConfig,
+    pub rate_limit: RateLimitConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +27,22 @@ pub struct KVStoreConfig {
     pub max_memory_mb: usize,
     pub eviction_policy: EvictionPolicy,
     pub ttl_cleanup_interval_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueSystemConfig {
+    pub enabled: bool,
+    pub max_depth: usize,
+    pub ack_deadline_secs: u64,
+    pub default_max_retries: u32,
+    pub default_priority: u8,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitConfig {
+    pub enabled: bool,
+    pub requests_per_second: u64,
+    pub burst_size: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,6 +82,13 @@ impl Default for ServerConfig {
                 eviction_policy: EvictionPolicy::Lru,
                 ttl_cleanup_interval_ms: 100,
             },
+            queue: QueueSystemConfig {
+                enabled: true,
+                max_depth: 100_000,
+                ack_deadline_secs: 30,
+                default_max_retries: 3,
+                default_priority: 5,
+            },
             logging: LoggingConfig {
                 level: "info".to_string(),
                 format: "json".to_string(),
@@ -77,6 +102,11 @@ impl Default for ServerConfig {
                     enabled: true,
                     prefix: "/kv".to_string(),
                 },
+            },
+            rate_limit: RateLimitConfig {
+                enabled: false,
+                requests_per_second: 1000,
+                burst_size: 100,
             },
         }
     }
@@ -96,6 +126,16 @@ impl ServerConfig {
             max_memory_mb: self.kv_store.max_memory_mb,
             eviction_policy: self.kv_store.eviction_policy,
             ttl_cleanup_interval_ms: self.kv_store.ttl_cleanup_interval_ms,
+        }
+    }
+
+    /// Convert to QueueConfig
+    pub fn to_queue_config(&self) -> QueueConfig {
+        QueueConfig {
+            max_depth: self.queue.max_depth,
+            ack_deadline_secs: self.queue.ack_deadline_secs,
+            default_max_retries: self.queue.default_max_retries,
+            default_priority: self.queue.default_priority,
         }
     }
 
