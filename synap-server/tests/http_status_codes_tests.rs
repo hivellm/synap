@@ -16,6 +16,7 @@ async fn spawn_test_server() -> String {
         kv_store,
         queue_manager: Some(queue_manager),
         stream_manager: None,
+        pubsub_router: None,
         persistence: None,
     };
 
