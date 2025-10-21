@@ -100,6 +100,75 @@ queue:
   default_priority: 5
 
 # ============================================================================
+# AUTHENTICATION & SECURITY
+# ============================================================================
+
+authentication:
+  # Enable/disable authentication
+  # Default: false (disabled for development)
+  # IMPORTANT: Authentication is REQUIRED when binding to 0.0.0.0
+  enabled: false
+  
+  # Require authentication for all endpoints
+  # If false, anonymous access is allowed (with limited permissions)
+  # Default: false
+  require_auth: false
+  
+  # Default admin user (created on first startup if no users exist)
+  # CHANGE THESE IN PRODUCTION!
+  default_admin:
+    username: "admin"
+    password: "changeme"
+  
+  # Session/Token settings
+  # API keys can have expiration time (in days)
+  # Set to 0 for no expiration
+  api_key_default_expiration_days: 90
+  
+  # IP whitelisting for API keys
+  # Empty list = all IPs allowed
+  # Example: ["192.168.1.0/24", "10.0.0.1"]
+  api_key_allowed_ips: []
+
+# Access Control Lists (ACL)
+# Define who can access what resources
+acl:
+  # Enable ACL enforcement
+  enabled: false
+  
+  # Default rules (examples)
+  rules:
+    # Public queue (no auth required)
+    - resource: "queue:public"
+      require_auth: false
+      actions: ["read", "write"]
+    
+    # Protected queue (auth required)
+    - resource: "queue:private"
+      require_auth: true
+      actions: ["read", "write"]
+      allowed_users: []  # Empty = all authenticated users
+      allowed_roles: ["admin", "queue_user"]
+    
+    # Admin-only queue
+    - resource: "queue:admin"
+      require_auth: true
+      actions: ["all"]
+      allowed_roles: ["admin"]
+    
+    # KV Store (read-only for authenticated users)
+    - resource: "kv:*"
+      require_auth: true
+      actions: ["read"]
+      allowed_users: []
+    
+    # KV Store write (admin only)
+    - resource: "kv:*"
+      require_auth: true
+      actions: ["write", "delete"]
+      allowed_roles: ["admin"]
+
+# ============================================================================
 # RATE LIMITING
 # ============================================================================
 
