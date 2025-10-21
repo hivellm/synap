@@ -3,6 +3,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::core::{EvictionPolicy, KVConfig, QueueConfig};
+use crate::persistence::PersistenceConfig;
 
 /// Main server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -13,6 +14,8 @@ pub struct ServerConfig {
     pub logging: LoggingConfig,
     pub protocols: ProtocolsConfig,
     pub rate_limit: RateLimitConfig,
+    #[serde(default)]
+    pub persistence: PersistenceConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -27,6 +30,8 @@ pub struct KVStoreConfig {
     pub max_memory_mb: usize,
     pub eviction_policy: EvictionPolicy,
     pub ttl_cleanup_interval_ms: u64,
+    #[serde(default)]
+    pub allow_flush_commands: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -81,6 +86,7 @@ impl Default for ServerConfig {
                 max_memory_mb: 4096,
                 eviction_policy: EvictionPolicy::Lru,
                 ttl_cleanup_interval_ms: 100,
+                allow_flush_commands: false,
             },
             queue: QueueSystemConfig {
                 enabled: true,
@@ -108,6 +114,7 @@ impl Default for ServerConfig {
                 requests_per_second: 1000,
                 burst_size: 100,
             },
+            persistence: PersistenceConfig::default(),
         }
     }
 }
@@ -126,6 +133,7 @@ impl ServerConfig {
             max_memory_mb: self.kv_store.max_memory_mb,
             eviction_policy: self.kv_store.eviction_policy,
             ttl_cleanup_interval_ms: self.kv_store.ttl_cleanup_interval_ms,
+            allow_flush_commands: self.kv_store.allow_flush_commands,
         }
     }
 

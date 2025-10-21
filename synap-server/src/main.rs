@@ -3,7 +3,8 @@ use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use synap_server::{AppState, KVStore, QueueManager, ServerConfig, create_router};
-use tracing::info;
+use synap_server::persistence::{PersistenceLayer, recover};
+use tracing::{info, warn};
 
 #[derive(Parser, Debug)]
 #[command(name = "synap-server")]
@@ -79,25 +80,75 @@ async fn main() -> Result<()> {
         config.logging.format, config.logging.level
     );
 
-    // Create KV store
+    // Recover from persistence or create fresh
     let kv_config = config.to_kv_config();
-    let kv_store = Arc::new(KVStore::new(kv_config));
+    let queue_config = config.to_queue_config();
+    
+    let (kv_store, queue_manager, _wal_offset) = if config.persistence.enabled {
+        info!("Persistence enabled, attempting recovery...");
+        match recover(&config.persistence, kv_config.clone(), queue_config.clone()).await {
+            Ok((kv, qm, offset)) => {
+                info!("Recovery successful, WAL offset: {}", offset);
+                (Arc::new(kv), qm.map(Arc::new), offset)
+            }
+            Err(e) => {
+                warn!("Recovery failed: {}, starting fresh", e);
+                (
+                    Arc::new(KVStore::new(kv_config.clone())),
+                    if config.queue.enabled {
+                        Some(Arc::new(QueueManager::new(queue_config.clone())))
+                    } else {
+                        None
+                    },
+                    0
+                )
+            }
+        }
+    } else {
+        info!("Persistence disabled, starting fresh");
+        (
+            Arc::new(KVStore::new(kv_config.clone())),
+            if config.queue.enabled {
+                Some(Arc::new(QueueManager::new(queue_config.clone())))
+            } else {
+                None
+            },
+            0
+        )
+    };
 
     // Start TTL cleanup task
     kv_store.start_ttl_cleanup();
 
-    // Create Queue Manager (if enabled)
-    let queue_manager = if config.queue.enabled {
-        let queue_config = config.to_queue_config();
-        let manager = Arc::new(QueueManager::new(queue_config));
-
-        // Start deadline checker task
-        manager.start_deadline_checker();
-
+    // Start queue deadline checker if queue enabled
+    if let Some(ref qm) = queue_manager {
+        qm.start_deadline_checker();
         info!("Queue system enabled");
-        Some(manager)
     } else {
         info!("Queue system disabled");
+    }
+
+    // Create persistence layer if enabled
+    let _persistence = if config.persistence.enabled {
+        match PersistenceLayer::new(config.persistence.clone()).await {
+            Ok(layer) => {
+                let layer = Arc::new(layer);
+                
+                // Start background snapshot task
+                layer.clone().start_snapshot_task(
+                    kv_store.clone(),
+                    queue_manager.clone(),
+                );
+                
+                info!("Persistence layer initialized (WAL + Snapshots)");
+                Some(layer)
+            }
+            Err(e) => {
+                warn!("Failed to initialize persistence: {}", e);
+                None
+            }
+        }
+    } else {
         None
     };
 

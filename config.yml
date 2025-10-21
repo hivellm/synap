@@ -48,6 +48,11 @@ kv_store:
   # units are case insensitive: 1GB 1Gb 1gB are all the same.
   max_memory_mb: 4096  # 4GB default
   
+  # DANGEROUS COMMANDS (disabled by default for production safety)
+  # Like Redis, FLUSHDB and FLUSHALL are disabled by default to prevent
+  # accidental data loss. Enable only in development/testing environments.
+  allow_flush_commands: false
+  
   # MAXMEMORY POLICY: how Synap will select what to remove when maxmemory
   # is reached. You can select one from the following behaviors:
   #
@@ -261,25 +266,30 @@ protocols:
 #   sync_interval_ms: 100
 
 # ============================================================================
-# PERSISTENCE (Planned for Phase 2)
+# PERSISTENCE (Phase 2 - IMPLEMENTED)
 # ============================================================================
 
 # Optional persistence using Write-Ahead Log and Snapshots
-# persistence:
-#   enabled: false
-#   
-#   # Write-Ahead Log (WAL) settings
-#   wal:
-#     enabled: true
-#     path: "./data/wal"
-#     fsync_mode: "periodic"  # always, periodic, or no
-#     fsync_interval_ms: 1000
-#   
-#   # Snapshot settings
-#   snapshot:
-#     enabled: true
-#     path: "./data/snapshots"
-#     interval_secs: 300  # Every 5 minutes
+persistence:
+  enabled: true  # Data durability enabled by default
+  
+  # Write-Ahead Log (WAL) settings
+  wal:
+    enabled: true
+    path: "./data/wal/synap.wal"
+    buffer_size_kb: 64
+    fsync_mode: "periodic"  # always, periodic, never
+    fsync_interval_ms: 1000
+    max_size_mb: 1024
+  
+  # Snapshot settings
+  snapshot:
+    enabled: true
+    directory: "./data/snapshots"
+    interval_secs: 300  # Every 5 minutes
+    operation_threshold: 10000  # Or every 10K operations
+    max_snapshots: 10  # Keep last 10 snapshots
+    compression: false  # Not yet implemented
 
 # ============================================================================
 # SECURITY (Planned for Phase 4)

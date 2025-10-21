@@ -22,3 +22,6 @@ Thumbs.db
 test-results/
 coverage/
 
+# Persistence data
+data/
+

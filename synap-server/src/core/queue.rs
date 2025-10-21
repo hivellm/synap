@@ -14,7 +14,7 @@ pub type MessageId = String;
 pub type ConsumerId = String;
 
 /// Queue message with metadata
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueMessage {
     /// Unique message identifier
     pub id: MessageId,
@@ -27,9 +27,10 @@ pub struct QueueMessage {
     /// Maximum retries allowed
     pub max_retries: u32,
     /// When message was created
-    #[serde(skip)]
+    #[serde(skip, default = "Instant::now")]
     pub created_at: Instant,
     /// Custom headers
+    #[serde(default)]
     pub headers: HashMap<String, String>,
 }
 
@@ -390,6 +391,21 @@ impl QueueManager {
 
         let mut queues = self.queues.write();
         Ok(queues.remove(queue_name).is_some())
+    }
+
+    /// Dump all queue messages for persistence
+    pub async fn dump(&self) -> Result<HashMap<String, Vec<QueueMessage>>> {
+        let queues = self.queues.read();
+        let mut dump = HashMap::new();
+
+        for (name, queue) in queues.iter() {
+            let mut messages = Vec::new();
+            messages.extend(queue.messages.iter().cloned());
+            // Note: Pending messages are in-flight, we could optionally include them
+            dump.insert(name.clone(), messages);
+        }
+
+        Ok(dump)
     }
 }
 

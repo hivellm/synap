@@ -285,6 +285,13 @@ impl KVStore {
     pub async fn flushdb(&self) -> Result<usize> {
         debug!("FLUSHDB");
 
+        // Check if FLUSH commands are allowed (disabled by default like Redis)
+        if !self.config.allow_flush_commands {
+            return Err(SynapError::InvalidRequest(
+                "FLUSHDB is disabled. Set 'allow_flush_commands: true' in config to enable this dangerous command".to_string()
+            ));
+        }
+
         let mut data = self.data.write();
         let mut stats = self.stats.write();
 
@@ -304,6 +311,11 @@ impl KVStore {
 
     /// Flush all databases (alias for flushdb in single-db mode)
     pub async fn flushall(&self) -> Result<usize> {
+        if !self.config.allow_flush_commands {
+            return Err(SynapError::InvalidRequest(
+                "FLUSHALL is disabled. Set 'allow_flush_commands: true' in config to enable this dangerous command".to_string()
+            ));
+        }
         self.flushdb().await
     }
 
@@ -333,6 +345,20 @@ impl KVStore {
         } else {
             Ok(false)
         }
+    }
+
+    /// Dump all key-value pairs for persistence
+    pub async fn dump(&self) -> Result<std::collections::HashMap<String, Vec<u8>>> {
+        let data = self.data.read();
+        let mut dump = std::collections::HashMap::new();
+
+        for (key, value) in data.iter() {
+            if !value.is_expired() {
+                dump.insert(key.to_string(), value.data.clone());
+            }
+        }
+
+        Ok(dump)
     }
 }
 

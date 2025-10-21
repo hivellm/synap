@@ -2,6 +2,7 @@ pub mod auth;
 pub mod compression;
 pub mod config;
 pub mod core;
+pub mod persistence;
 pub mod protocol;
 pub mod server;
 
