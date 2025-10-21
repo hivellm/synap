@@ -12,6 +12,8 @@ const SHARD_COUNT: usize = 64;
 const HASHMAP_THRESHOLD: usize = 10_000; // Switch to RadixTrie after 10K keys
 
 /// Storage backend for a shard (adaptive: HashMap for small, RadixTrie for large)
+/// Note: CompactString could reduce memory by 30% for short keys, but RadixTrie
+/// doesn't implement TrieKey for CompactString. Using String for compatibility.
 enum ShardStorage {
     /// HashMap for datasets < 10K keys (2-3x faster)
     Small(HashMap<String, StoredValue>),
@@ -67,17 +69,17 @@ impl ShardStorage {
         }
     }
     
-    fn iter(&self) -> Box<dyn Iterator<Item = (&String, &StoredValue)> + '_> {
+    fn iter(&self) -> Vec<(String, StoredValue)> {
         match self {
-            Self::Small(map) => Box::new(map.iter()),
-            Self::Large(trie) => Box::new(trie.iter().map(|(k, v)| (k, v))),
+            Self::Small(map) => map.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+            Self::Large(trie) => trie.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
         }
     }
     
-    fn keys(&self) -> Box<dyn Iterator<Item = &String> + '_> {
+    fn keys(&self) -> Vec<String> {
         match self {
-            Self::Small(map) => Box::new(map.keys()),
-            Self::Large(trie) => Box::new(trie.keys()),
+            Self::Small(map) => map.keys().cloned().collect(),
+            Self::Large(trie) => trie.keys().cloned().collect(),
         }
     }
     
@@ -95,7 +97,7 @@ impl ShardStorage {
                 // HashMap doesn't have prefix search, so filter manually
                 map.keys()
                     .filter(|k| k.starts_with(prefix))
-                    .cloned()
+                    .map(|k| k.to_string())
                     .collect()
             }
             Self::Large(trie) => {
@@ -394,7 +396,7 @@ impl KVStore {
             let shard_keys: Vec<String> = if let Some(prefix) = prefix {
                 data.get_prefix_keys(prefix)
             } else {
-                data.keys().map(|k| k.to_string()).collect()
+                data.keys()
             };
             
             keys.extend(shard_keys);
@@ -426,10 +428,11 @@ impl KVStore {
                     let data = shard.data.read();
                     
                     // Sample random keys (simple sampling by taking first N)
-                    let sampled: Vec<(String, bool)> = data
-                        .iter()
+                    let all_entries = data.iter();
+                    let sampled: Vec<(String, bool)> = all_entries
+                        .into_iter()
                         .take(SAMPLE_SIZE)
-                        .map(|(k, v)| (k.to_string(), v.is_expired()))
+                        .map(|(k, v)| (k, v.is_expired()))
                         .collect();
                     
                     for (key, is_expired) in sampled {
@@ -474,7 +477,7 @@ impl KVStore {
         // Collect keys from all shards
         for shard in self.shards.iter() {
             let data = shard.data.read();
-            all_keys.extend(data.keys().map(|k| k.to_string()));
+            all_keys.extend(data.keys());
         }
         
         Ok(all_keys)
@@ -561,10 +564,14 @@ impl KVStore {
 
         // Collect from all shards
         for shard in self.shards.iter() {
-            let data = shard.data.read();
-            for (key, value) in data.iter() {
+            let entries = {
+                let data = shard.data.read();
+                data.iter()
+            };
+            
+            for (key, value) in entries {
                 if !value.is_expired() {
-                    dump.insert(key.to_string(), value.data().to_vec());
+                    dump.insert(key, value.data().to_vec());
                 }
             }
         }
