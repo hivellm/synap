@@ -30,6 +30,7 @@ bcrypt = "0.15"
 chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
 rand = "0.8"
+compact_str = { version = "0.8", features = ["serde"] }
 
 [profile.release]
 opt-level = 3

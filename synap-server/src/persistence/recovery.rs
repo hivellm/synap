@@ -48,7 +48,7 @@ pub async fn recover(
                     queues
                         .publish(
                             &queue_name,
-                            message.payload,
+                            (*message.payload).clone(), // Convert Arc<Vec<u8>> to Vec<u8>
                             Some(message.priority),
                             Some(message.max_retries),
                         )
@@ -89,7 +89,7 @@ pub async fn recover(
                     if qm.create_queue(&queue, None).await.is_ok() {
                         qm.publish(
                             &queue,
-                            message.payload,
+                            (*message.payload).clone(), // Convert Arc<Vec<u8>> to Vec<u8>
                             Some(message.priority),
                             Some(message.max_retries),
                         )

@@ -3,7 +3,7 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -14,24 +14,49 @@ pub type MessageId = String;
 pub type ConsumerId = String;
 
 /// Queue message with metadata
+/// Uses Arc for payload sharing to reduce memory usage
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueMessage {
     /// Unique message identifier
     pub id: MessageId,
-    /// Message payload (bytes)
-    pub payload: Vec<u8>,
+    /// Message payload (bytes) - Arc-shared to avoid cloning
+    #[serde(serialize_with = "serialize_arc_payload", deserialize_with = "deserialize_arc_payload")]
+    pub payload: Arc<Vec<u8>>,
     /// Priority (0-9, where 9 is highest)
     pub priority: u8,
     /// Number of times this message was retried
     pub retry_count: u32,
     /// Maximum retries allowed
     pub max_retries: u32,
-    /// When message was created
-    #[serde(skip, default = "Instant::now")]
-    pub created_at: Instant,
+    /// When message was created (Unix timestamp)
+    #[serde(skip, default = "current_timestamp")]
+    pub created_at: u32,
     /// Custom headers
     #[serde(default)]
     pub headers: HashMap<String, String>,
+}
+
+// Serialization helpers for Arc<Vec<u8>>
+fn serialize_arc_payload<S>(payload: &Arc<Vec<u8>>, serializer: S) -> std::result::Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_bytes(payload.as_ref())
+}
+
+fn deserialize_arc_payload<'de, D>(deserializer: D) -> std::result::Result<Arc<Vec<u8>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let vec = Vec::<u8>::deserialize(deserializer)?;
+    Ok(Arc::new(vec))
+}
+
+fn current_timestamp() -> u32 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as u32)
+        .unwrap_or(0)
 }
 
 impl QueueMessage {
@@ -39,11 +64,11 @@ impl QueueMessage {
     pub fn new(payload: Vec<u8>, priority: u8, max_retries: u32) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
-            payload,
+            payload: Arc::new(payload),
             priority: priority.min(9), // Cap at 9
             retry_count: 0,
             max_retries,
-            created_at: Instant::now(),
+            created_at: current_timestamp(),
             headers: HashMap::new(),
         }
     }
@@ -60,12 +85,27 @@ impl QueueMessage {
 }
 
 /// Pending message (delivered but not acknowledged)
+/// Uses Arc to share message reference instead of cloning
 #[derive(Debug, Clone)]
 struct PendingMessage {
-    message: QueueMessage,
+    message: Arc<QueueMessage>,
     consumer_id: ConsumerId,
-    delivered_at: Instant,
-    ack_deadline: Instant,
+    ack_deadline: u32,  // Unix timestamp for compact storage
+}
+
+impl PendingMessage {
+    fn new(message: Arc<QueueMessage>, consumer_id: ConsumerId, ack_deadline_secs: u64) -> Self {
+        let now = current_timestamp();
+        Self {
+            message,
+            consumer_id,
+            ack_deadline: now.saturating_add(ack_deadline_secs as u32),
+        }
+    }
+
+    fn is_expired(&self) -> bool {
+        current_timestamp() >= self.ack_deadline
+    }
 }
 
 /// Queue configuration
@@ -108,9 +148,9 @@ pub struct QueueStats {
 #[derive(Debug)]
 struct Queue {
     name: String,
-    messages: VecDeque<QueueMessage>,
+    messages: VecDeque<Arc<QueueMessage>>,
     pending: HashMap<MessageId, PendingMessage>,
-    dead_letter: VecDeque<QueueMessage>,
+    dead_letter: VecDeque<Arc<QueueMessage>>,
     stats: QueueStats,
     config: QueueConfig,
 }
@@ -134,15 +174,16 @@ impl Queue {
         }
 
         let message_id = message.id.clone();
+        let message_arc = Arc::new(message);
 
         // Insert in priority order (higher priority first)
         let insert_pos = self
             .messages
             .iter()
-            .position(|m| m.priority < message.priority)
+            .position(|m| m.priority < message_arc.priority)
             .unwrap_or(self.messages.len());
 
-        self.messages.insert(insert_pos, message);
+        self.messages.insert(insert_pos, message_arc);
         self.stats.published += 1;
         self.stats.depth = self.messages.len();
 
@@ -151,26 +192,25 @@ impl Queue {
 
     /// Consume message from queue
     fn consume(&mut self, consumer_id: ConsumerId) -> Option<QueueMessage> {
-        if let Some(message) = self.messages.pop_front() {
-            let message_id = message.id.clone();
-            let ack_deadline = Instant::now() + Duration::from_secs(self.config.ack_deadline_secs);
+        if let Some(message_arc) = self.messages.pop_front() {
+            let message_id = message_arc.id.clone();
 
-            // Add to pending
+            // Add to pending with Arc reference
             self.pending.insert(
                 message_id,
-                PendingMessage {
-                    message: message.clone(),
+                PendingMessage::new(
+                    Arc::clone(&message_arc),
                     consumer_id,
-                    delivered_at: Instant::now(),
-                    ack_deadline,
-                },
+                    self.config.ack_deadline_secs,
+                ),
             );
 
             self.stats.consumed += 1;
             self.stats.depth = self.messages.len();
             self.stats.consumers = 1; // Simplified for now
 
-            Some(message)
+            // Return cloned message (Arc deref + clone)
+            Some((*message_arc).clone())
         } else {
             None
         }
@@ -189,7 +229,9 @@ impl Queue {
     /// Negative acknowledge (requeue or dead letter)
     fn nack(&mut self, message_id: &str, requeue: bool) -> Result<()> {
         if let Some(pending) = self.pending.remove(message_id) {
-            let mut message = pending.message;
+            // Get mutable copy of the message
+            let message_ref = &pending.message;
+            let mut message = (**message_ref).clone();
 
             self.stats.nacked += 1;
 
@@ -203,7 +245,7 @@ impl Queue {
                     "Message {} exceeded retries (retry_count={}, max={}), moving to DLQ",
                     message_id, message.retry_count, message.max_retries
                 );
-                self.dead_letter.push_back(message);
+                self.dead_letter.push_back(Arc::new(message));
                 self.stats.dead_lettered += 1;
             } else if requeue {
                 // Requeue with updated retry count
@@ -211,7 +253,7 @@ impl Queue {
                     "Requeuing message {} (retry {})",
                     message_id, message.retry_count
                 );
-                self.messages.push_back(message);
+                self.messages.push_back(Arc::new(message));
                 self.stats.depth = self.messages.len();
             }
 
@@ -223,11 +265,10 @@ impl Queue {
 
     /// Check for expired pending messages
     fn check_expired_pending(&mut self) {
-        let now = Instant::now();
         let expired: Vec<String> = self
             .pending
             .iter()
-            .filter(|(_, p)| now >= p.ack_deadline)
+            .filter(|(_, p)| p.is_expired())
             .map(|(id, _)| id.clone())
             .collect();
 
@@ -400,7 +441,8 @@ impl QueueManager {
 
         for (name, queue) in queues.iter() {
             let mut messages = Vec::new();
-            messages.extend(queue.messages.iter().cloned());
+            // Clone the QueueMessage (not the Arc) for serialization
+            messages.extend(queue.messages.iter().map(|arc_msg| (**arc_msg).clone()));
             // Note: Pending messages are in-flight, we could optionally include them
             dump.insert(name.clone(), messages);
         }
@@ -429,7 +471,7 @@ mod tests {
         // Consume
         let message = manager.consume("test_queue", "consumer1").await.unwrap();
         assert!(message.is_some());
-        assert_eq!(message.unwrap().payload, b"Hello");
+        assert_eq!(*message.unwrap().payload, b"Hello");
     }
 
     #[tokio::test]
@@ -457,7 +499,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(msg1.payload, b"High");
+        assert_eq!(*msg1.payload, b"High");
         assert_eq!(msg1.priority, 9);
 
         let msg2 = manager
@@ -465,7 +507,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(msg2.payload, b"Medium");
+        assert_eq!(*msg2.payload, b"Medium");
         assert_eq!(msg2.priority, 5);
 
         let msg3 = manager
@@ -473,7 +515,7 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        assert_eq!(msg3.payload, b"Low");
+        assert_eq!(*msg3.payload, b"Low");
         assert_eq!(msg3.priority, 1);
     }
 

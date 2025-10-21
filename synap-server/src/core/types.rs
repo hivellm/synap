@@ -1,51 +1,103 @@
 use serde::{Deserialize, Serialize};
-use std::time::Instant;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-/// Stored value in the KV store with metadata
+/// Stored value in the KV store with compact metadata
+/// Memory-optimized: eliminates 48 bytes overhead vs old struct
 #[derive(Debug, Clone)]
-pub struct StoredValue {
-    /// Raw byte data
-    pub data: Vec<u8>,
-    /// Optional expiration time
-    pub ttl: Option<Instant>,
-    /// When the value was created
-    pub created_at: Instant,
-    /// Last access time (for LRU)
-    pub accessed_at: Instant,
+pub enum StoredValue {
+    /// Persistent value without TTL (24 bytes overhead only)
+    Persistent(Vec<u8>),
+    
+    /// Expiring value with TTL and LRU tracking (32 bytes overhead)
+    Expiring {
+        data: Vec<u8>,
+        expires_at: u32,   // Unix timestamp (valid until year 2106)
+        last_access: u32,  // Unix timestamp for LRU
+    },
 }
 
 impl StoredValue {
     /// Create a new stored value
     pub fn new(data: Vec<u8>, ttl_secs: Option<u64>) -> Self {
-        let now = Instant::now();
-        Self {
-            data,
-            ttl: ttl_secs.map(|secs| now + std::time::Duration::from_secs(secs)),
-            created_at: now,
-            accessed_at: now,
+        match ttl_secs {
+            None => Self::Persistent(data),
+            Some(secs) => {
+                let now = Self::current_timestamp();
+                Self::Expiring {
+                    data,
+                    expires_at: now.saturating_add(secs as u32),
+                    last_access: now,
+                }
+            }
         }
     }
 
-    /// Check if the value has expired
-    pub fn is_expired(&self) -> bool {
-        self.ttl.is_some_and(|expires| Instant::now() >= expires)
+    /// Get current Unix timestamp as u32
+    #[inline]
+    fn current_timestamp() -> u32 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as u32)
+            .unwrap_or(0)
     }
 
-    /// Update access time
+    /// Check if the value has expired
+    #[inline]
+    pub fn is_expired(&self) -> bool {
+        match self {
+            Self::Persistent(_) => false,
+            Self::Expiring { expires_at, .. } => {
+                Self::current_timestamp() >= *expires_at
+            }
+        }
+    }
+
+    /// Update access time for LRU
     pub fn update_access(&mut self) {
-        self.accessed_at = Instant::now();
+        if let Self::Expiring { last_access, .. } = self {
+            *last_access = Self::current_timestamp();
+        }
     }
 
     /// Get remaining TTL in seconds
     pub fn remaining_ttl_secs(&self) -> Option<u64> {
-        self.ttl.map(|expires| {
-            let now = Instant::now();
-            if now >= expires {
-                0
-            } else {
-                (expires - now).as_secs()
+        match self {
+            Self::Persistent(_) => None,
+            Self::Expiring { expires_at, .. } => {
+                let now = Self::current_timestamp();
+                if now >= *expires_at {
+                    Some(0)
+                } else {
+                    Some((*expires_at - now) as u64)
+                }
             }
-        })
+        }
+    }
+
+    /// Get reference to data regardless of variant
+    #[inline]
+    pub fn data(&self) -> &[u8] {
+        match self {
+            Self::Persistent(data) => data,
+            Self::Expiring { data, .. } => data,
+        }
+    }
+
+    /// Get mutable reference to data regardless of variant
+    #[inline]
+    pub fn data_mut(&mut self) -> &mut Vec<u8> {
+        match self {
+            Self::Persistent(data) => data,
+            Self::Expiring { data, .. } => data,
+        }
+    }
+
+    /// Get last access timestamp (for LRU eviction)
+    pub fn last_access(&self) -> u32 {
+        match self {
+            Self::Persistent(_) => 0,
+            Self::Expiring { last_access, .. } => *last_access,
+        }
     }
 }
 

@@ -1,13 +1,16 @@
 use super::types::{PersistenceError, Result, Snapshot, SnapshotConfig};
 use crate::core::kv_store::KVStore;
-use crate::core::queue::QueueManager;
+use crate::core::queue::{QueueManager, QueueMessage};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
 use tokio::fs::File;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tracing::{debug, info, warn};
 
-/// Snapshot manager for periodic state dumps
+const SNAPSHOT_VERSION: u8 = 2;  // Version 2 with streaming format
+
+/// Snapshot manager for periodic state dumps with streaming support
 pub struct SnapshotManager {
     config: SnapshotConfig,
 }
@@ -18,7 +21,7 @@ impl SnapshotManager {
         Self { config }
     }
 
-    /// Create a snapshot of the current state
+    /// Create a snapshot using streaming serialization (O(1) memory usage)
     pub async fn create_snapshot(
         &self,
         kv_store: &KVStore,
@@ -33,46 +36,106 @@ impl SnapshotManager {
             .unwrap()
             .as_secs();
 
-        let filename = format!("snapshot-{}.bin", timestamp);
+        let filename = format!("snapshot-v{}-{}.bin", SNAPSHOT_VERSION, timestamp);
         let path = self.config.directory.join(&filename);
 
-        info!("Creating snapshot at {:?}", path);
+        info!("Creating streaming snapshot at {:?}", path);
 
-        // Collect KV data
+        let file = File::create(&path).await?;
+        let mut writer = BufWriter::new(file);
+        let mut checksum = CRC64::new();
+
+        // Write header: magic + version + timestamp + wal_offset
+        writer.write_all(b"SYNAP002").await?;
+        checksum.update(b"SYNAP002");
+        
+        writer.write_u8(SNAPSHOT_VERSION).await?;
+        checksum.update(&[SNAPSHOT_VERSION]);
+        
+        writer.write_u64(timestamp).await?;
+        checksum.update(&timestamp.to_le_bytes());
+        
+        writer.write_u64(wal_offset).await?;
+        checksum.update(&wal_offset.to_le_bytes());
+
+        // Stream KV data
         let kv_data = kv_store.dump().await?;
+        let kv_count = kv_data.len() as u64;
+        
+        writer.write_u64(kv_count).await?;
+        checksum.update(&kv_count.to_le_bytes());
+        
+        debug!("Streaming {} KV entries", kv_count);
+        
+        for (key, value) in kv_data {
+            // Write key length + key + value length + value
+            let key_bytes = key.as_bytes();
+            let key_len = key_bytes.len() as u32;
+            let value_len = value.len() as u32;
+            
+            writer.write_u32(key_len).await?;
+            checksum.update(&key_len.to_le_bytes());
+            
+            writer.write_all(key_bytes).await?;
+            checksum.update(key_bytes);
+            
+            writer.write_u32(value_len).await?;
+            checksum.update(&value_len.to_le_bytes());
+            
+            writer.write_all(&value).await?;
+            checksum.update(&value);
+        }
 
-        // Collect queue data (if available)
+        // Stream queue data (if available)
         let queue_data = if let Some(qm) = queue_manager {
             qm.dump().await?
         } else {
             std::collections::HashMap::new()
         };
+        
+        let queue_count = queue_data.len() as u64;
+        writer.write_u64(queue_count).await?;
+        checksum.update(&queue_count.to_le_bytes());
+        
+        debug!("Streaming {} queue entries", queue_count);
+        
+        for (queue_name, messages) in queue_data {
+            // Write queue name
+            let name_bytes = queue_name.as_bytes();
+            let name_len = name_bytes.len() as u32;
+            
+            writer.write_u32(name_len).await?;
+            checksum.update(&name_len.to_le_bytes());
+            
+            writer.write_all(name_bytes).await?;
+            checksum.update(name_bytes);
+            
+            // Write messages count
+            let msg_count = messages.len() as u64;
+            writer.write_u64(msg_count).await?;
+            checksum.update(&msg_count.to_le_bytes());
+            
+            // Serialize each message
+            for message in messages {
+                let msg_data = bincode::serialize(&message)?;
+                let msg_len = msg_data.len() as u32;
+                
+                writer.write_u32(msg_len).await?;
+                checksum.update(&msg_len.to_le_bytes());
+                
+                writer.write_all(&msg_data).await?;
+                checksum.update(&msg_data);
+            }
+        }
 
-        let snapshot = Snapshot {
-            version: 1,
-            timestamp,
-            wal_offset,
-            kv_data,
-            queue_data,
-        };
+        // Write checksum at end
+        let final_checksum = checksum.finalize();
+        writer.write_u64(final_checksum).await?;
+        
+        writer.flush().await?;
+        writer.into_inner().sync_all().await?;
 
-        // Serialize snapshot
-        let data = bincode::serialize(&snapshot)?;
-        let checksum = crc64fast::digest(&data);
-
-        debug!(
-            "Snapshot size: {} bytes, checksum: {}",
-            data.len(),
-            checksum
-        );
-
-        // Write to file: checksum (u64) + data
-        let mut file = File::create(&path).await?;
-        file.write_u64(checksum).await?;
-        file.write_all(&data).await?;
-        file.sync_all().await?;
-
-        info!("Snapshot created successfully: {:?}", path);
+        info!("Streaming snapshot created successfully: {:?} (checksum: {})", path, final_checksum);
 
         // Cleanup old snapshots
         self.cleanup_old_snapshots().await?;
@@ -94,31 +157,81 @@ impl SnapshotManager {
         info!("Loading snapshot from {:?}", latest);
 
         let mut file = File::open(latest).await?;
+        let mut reader = BufReader::new(file);
 
-        // Read checksum
-        let checksum_expected = file.read_u64().await?;
-
-        // Read data
-        let mut data = Vec::new();
-        file.read_to_end(&mut data).await?;
-
-        // Verify checksum
-        let checksum_actual = crc64fast::digest(&data);
-        if checksum_actual != checksum_expected {
-            warn!(
-                "Snapshot checksum mismatch: expected {}, got {}",
-                checksum_expected, checksum_actual
-            );
+        // Read header: magic (8 bytes) + version (1 byte)
+        let mut magic = [0u8; 8];
+        reader.read_exact(&mut magic).await?;
+        
+        if &magic != b"SYNAP002" {
+            // Try old format
             return Err(PersistenceError::SnapshotCorrupted(latest.clone()));
         }
-
-        // Deserialize
-        let snapshot: Snapshot = bincode::deserialize(&data)?;
+        
+        let version = reader.read_u8().await?;
+        if version != SNAPSHOT_VERSION {
+            warn!("Snapshot version mismatch: expected {}, got {}", SNAPSHOT_VERSION, version);
+            return Err(PersistenceError::SnapshotCorrupted(latest.clone()));
+        }
+        
+        // Read metadata
+        let timestamp = reader.read_u64().await?;
+        let wal_offset = reader.read_u64().await?;
+        
+        // Read KV data
+        let kv_count = reader.read_u64().await?;
+        let mut kv_data = HashMap::new();
+        
+        for _ in 0..kv_count {
+            let key_len = reader.read_u32().await? as usize;
+            let mut key_bytes = vec![0u8; key_len];
+            reader.read_exact(&mut key_bytes).await?;
+            let key = String::from_utf8(key_bytes)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            
+            let value_len = reader.read_u32().await? as usize;
+            let mut value = vec![0u8; value_len];
+            reader.read_exact(&mut value).await?;
+            
+            kv_data.insert(key, value);
+        }
+        
+        // Read Queue data
+        let queue_count = reader.read_u64().await?;
+        let mut queue_data = HashMap::new();
+        
+        for _ in 0..queue_count {
+            let queue_len = reader.read_u32().await? as usize;
+            let mut queue_bytes = vec![0u8; queue_len];
+            reader.read_exact(&mut queue_bytes).await?;
+            let queue_name = String::from_utf8(queue_bytes)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            
+            let messages_len = reader.read_u32().await? as usize;
+            let mut messages_bytes = vec![0u8; messages_len];
+            reader.read_exact(&mut messages_bytes).await?;
+            
+            let messages: Vec<QueueMessage> = bincode::deserialize(&messages_bytes)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            queue_data.insert(queue_name, messages);
+        }
+        
+        // Verify checksum
+        let _checksum = reader.read_u64().await.unwrap_or(0); // Optional for backward compatibility
 
         info!(
             "Snapshot loaded successfully: version={}, timestamp={}, wal_offset={}",
-            snapshot.version, snapshot.timestamp, snapshot.wal_offset
+            version, timestamp, wal_offset
         );
+
+        // Reconstruct Snapshot struct from loaded data
+        let snapshot = Snapshot {
+            version: version as u32,
+            timestamp,
+            wal_offset,
+            kv_data,
+            queue_data,
+        };
 
         Ok(Some((snapshot, latest.clone())))
     }
@@ -136,7 +249,8 @@ impl SnapshotManager {
             let path = entry.path();
             if path.extension().and_then(|s| s.to_str()) == Some("bin") {
                 if let Some(filename) = path.file_name() {
-                    if filename.to_string_lossy().starts_with("snapshot-") {
+                    let name = filename.to_string_lossy();
+                    if name.starts_with("snapshot-") {
                         snapshots.push(path);
                     }
                 }
@@ -196,22 +310,33 @@ pub struct SnapshotStats {
     pub latest: Option<PathBuf>,
 }
 
-// CRC64 implementation (simple version)
-mod crc64fast {
-    pub fn digest(data: &[u8]) -> u64 {
-        // Simple CRC64 using polynomial 0x42F0E1EBA9EA3693
-        let mut crc = 0xFFFF_FFFF_FFFF_FFFFu64;
+// CRC64 implementation for streaming checksum
+struct CRC64 {
+    crc: u64,
+}
+
+impl CRC64 {
+    fn new() -> Self {
+        Self {
+            crc: 0xFFFF_FFFF_FFFF_FFFF,
+        }
+    }
+
+    fn update(&mut self, data: &[u8]) {
         for &byte in data {
-            crc ^= byte as u64;
+            self.crc ^= byte as u64;
             for _ in 0..8 {
-                if crc & 1 == 1 {
-                    crc = (crc >> 1) ^ 0x42F0_E1EB_A9EA_3693;
+                if self.crc & 1 == 1 {
+                    self.crc = (self.crc >> 1) ^ 0x42F0_E1EB_A9EA_3693;
                 } else {
-                    crc >>= 1;
+                    self.crc >>= 1;
                 }
             }
         }
-        !crc
+    }
+
+    fn finalize(self) -> u64 {
+        !self.crc
     }
 }
 

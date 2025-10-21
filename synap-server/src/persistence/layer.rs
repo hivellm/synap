@@ -1,15 +1,15 @@
 use super::types::{Operation, PersistenceConfig};
-use super::{SnapshotManager, WriteAheadLog};
+use super::{AsyncWAL, SnapshotManager};
 use crate::core::{KVStore, QueueManager};
 use parking_lot::RwLock;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{debug, info};
-use tokio::sync::Mutex;
+use tracing::info;
 
 /// Persistence layer that wraps operations with WAL logging
+/// Uses AsyncWAL for high-throughput group commit optimization
 pub struct PersistenceLayer {
-    wal: Arc<Mutex<WriteAheadLog>>,
+    wal: Arc<AsyncWAL>,
     snapshot_mgr: Arc<SnapshotManager>,
     config: PersistenceConfig,
     last_snapshot: Arc<RwLock<Instant>>,
@@ -17,13 +17,13 @@ pub struct PersistenceLayer {
 }
 
 impl PersistenceLayer {
-    /// Create a new persistence layer
+    /// Create a new persistence layer with AsyncWAL
     pub async fn new(config: PersistenceConfig) -> super::types::Result<Self> {
-        let wal = WriteAheadLog::open(config.wal.clone()).await?;
+        let wal = AsyncWAL::open(config.wal.clone()).await?;
         let snapshot_mgr = SnapshotManager::new(config.snapshot.clone());
 
         Ok(Self {
-            wal: Arc::new(Mutex::new(wal)),
+            wal: Arc::new(wal),
             snapshot_mgr: Arc::new(snapshot_mgr),
             config,
             last_snapshot: Arc::new(RwLock::new(Instant::now())),
@@ -31,7 +31,7 @@ impl PersistenceLayer {
         })
     }
 
-    /// Log a KV SET operation
+    /// Log a KV SET operation (non-blocking with group commit)
     pub async fn log_kv_set(
         &self,
         key: String,
@@ -44,8 +44,8 @@ impl PersistenceLayer {
 
         let operation = Operation::KVSet { key, value, ttl };
         
-        let mut wal = self.wal.lock().await;
-        wal.append(operation).await?;
+        // AsyncWAL batches this automatically
+        self.wal.append(operation).await?;
         
         // Track operations for snapshot threshold
         let mut ops = self.operations_since_snapshot.write();
@@ -62,8 +62,7 @@ impl PersistenceLayer {
 
         let operation = Operation::KVDel { keys };
         
-        let mut wal = self.wal.lock().await;
-        wal.append(operation).await?;
+        self.wal.append(operation).await?;
         
         let mut ops = self.operations_since_snapshot.write();
         *ops += 1;
@@ -83,8 +82,7 @@ impl PersistenceLayer {
 
         let operation = Operation::QueuePublish { queue, message };
         
-        let mut wal = self.wal.lock().await;
-        wal.append(operation).await?;
+        self.wal.append(operation).await?;
         
         let mut ops = self.operations_since_snapshot.write();
         *ops += 1;
@@ -104,8 +102,7 @@ impl PersistenceLayer {
 
         let operation = Operation::QueueAck { queue, message_id };
         
-        let mut wal = self.wal.lock().await;
-        wal.append(operation).await?;
+        self.wal.append(operation).await?;
 
         Ok(())
     }
@@ -133,10 +130,7 @@ impl PersistenceLayer {
         if should_snapshot {
             info!("Creating periodic snapshot");
             
-            let wal_offset = {
-                let wal = self.wal.lock().await;
-                wal.current_offset()
-            };
+            let wal_offset = self.wal.current_offset();
             
             self.snapshot_mgr
                 .create_snapshot(kv_store, queue_manager, wal_offset)
@@ -172,10 +166,10 @@ impl PersistenceLayer {
         })
     }
 
-    /// Flush WAL to disk
+    /// No explicit flush needed with AsyncWAL (group commit handles it)
     pub async fn flush(&self) -> super::types::Result<()> {
-        let mut wal = self.wal.lock().await;
-        wal.flush().await
+        // AsyncWAL handles batching and flushing automatically
+        Ok(())
     }
 }
 

@@ -261,7 +261,7 @@ pub async fn queue_consume(
     if let Some(msg) = message {
         Ok(Json(ConsumeResponse {
             message_id: Some(msg.id),
-            payload: Some(msg.payload),
+            payload: Some((*msg.payload).clone()), // Convert Arc<Vec<u8>> to Vec<u8>
             priority: Some(msg.priority),
             retry_count: Some(msg.retry_count),
             headers: Some(msg.headers),
@@ -903,7 +903,7 @@ async fn handle_queue_consume_cmd(
         Ok(serde_json::json!({
             "message": {
                 "id": msg.id,
-                "payload": msg.payload,
+                "payload": (*msg.payload).clone(), // Convert Arc<Vec<u8>> to Vec<u8>
                 "priority": msg.priority,
                 "retry_count": msg.retry_count,
                 "headers": msg.headers,

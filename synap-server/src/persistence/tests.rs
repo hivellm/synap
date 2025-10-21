@@ -171,7 +171,7 @@ async fn test_snapshot_create_and_load() {
     // Load snapshot
     let (snapshot, _path) = snapshot_mgr.load_latest().await.unwrap().unwrap();
 
-    assert_eq!(snapshot.version, 1);
+    assert_eq!(snapshot.version, 2);  // Updated to version 2 (streaming format)
     assert_eq!(snapshot.wal_offset, 42);
     assert_eq!(snapshot.kv_data.len(), 2);
     assert_eq!(snapshot.kv_data.get("key1").unwrap(), b"value1");
