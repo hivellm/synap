@@ -12,6 +12,8 @@ async fn test_mcp_kv_get() {
         kv_store: kv_store.clone(),
         queue_manager: None,
         stream_manager: None,
+        partition_manager: None,
+        consumer_group_manager: None,
         pubsub_router: None,
         persistence: None,
     });
@@ -39,6 +41,8 @@ async fn test_mcp_kv_set() {
         kv_store: Arc::new(KVStore::new(config.to_kv_config())),
         queue_manager: None,
         stream_manager: None,
+        partition_manager: None,
+        consumer_group_manager: None,
         pubsub_router: None,
         persistence: None,
     });
@@ -71,6 +75,8 @@ async fn test_mcp_kv_delete() {
         kv_store: kv_store.clone(),
         queue_manager: None,
         stream_manager: None,
+        partition_manager: None,
+        consumer_group_manager: None,
         pubsub_router: None,
         persistence: None,
     });
@@ -103,6 +109,8 @@ async fn test_mcp_kv_scan() {
         kv_store: kv_store.clone(),
         queue_manager: None,
         stream_manager: None,
+        partition_manager: None,
+        consumer_group_manager: None,
         pubsub_router: None,
         persistence: None,
     });
@@ -138,6 +146,8 @@ async fn test_mcp_queue_publish() {
         kv_store: Arc::new(KVStore::new(config.to_kv_config())),
         queue_manager: Some(queue_manager.clone()),
         stream_manager: None,
+        partition_manager: None,
+        consumer_group_manager: None,
         pubsub_router: None,
         persistence: None,
     });

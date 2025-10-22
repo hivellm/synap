@@ -158,6 +158,136 @@ curl -X POST http://localhost:15500/pubsub/publish \
   -d '{"topic": "notifications.email", "message": "New order"}'
 ```
 
+### 🔄 Replication Setup
+
+Synap supports master-slave replication for high availability and read scaling.
+
+#### Quick Start with Docker
+
+```bash
+# Start 1 master + 3 replicas
+docker-compose up -d
+
+# Master available at: localhost:15500
+# Replica 1 at: localhost:15501
+# Replica 2 at: localhost:15502
+# Replica 3 at: localhost:15503
+```
+
+#### Manual Setup
+
+**Master Node Configuration** (`config-master.yml`):
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 15500
+
+replication:
+  enabled: true
+  role: "master"
+  replica_listen_address: "0.0.0.0:15501"
+  heartbeat_interval_ms: 1000
+  max_lag_ms: 10000
+  buffer_size_kb: 256
+  replica_timeout_secs: 30
+
+persistence:
+  enabled: true
+  wal:
+    enabled: true
+    path: "./data/wal/synap.wal"
+  snapshot:
+    enabled: true
+    directory: "./data/snapshots"
+```
+
+**Replica Node Configuration** (`config-replica.yml`):
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 15500
+
+replication:
+  enabled: true
+  role: "replica"
+  master_address: "master:15501"  # Master's replication port
+  heartbeat_interval_ms: 1000
+  max_lag_ms: 10000
+  buffer_size_kb: 256
+  auto_reconnect: true
+  reconnect_delay_ms: 5000
+
+persistence:
+  enabled: true
+  wal:
+    enabled: true
+    path: "./data/wal/synap.wal"
+  snapshot:
+    enabled: true
+    directory: "./data/snapshots"
+```
+
+**Start Nodes**:
+
+```bash
+# Terminal 1: Start master
+synap-server --config config-master.yml
+
+# Terminal 2: Start replica 1
+synap-server --config config-replica-1.yml
+
+# Terminal 3: Start replica 2
+synap-server --config config-replica-2.yml
+```
+
+#### Usage Patterns
+
+**Write to Master**:
+
+```bash
+# All writes go to master
+curl -X POST http://localhost:15500/kv/set \
+  -H "Content-Type: application/json" \
+  -d '{"key": "user:100", "value": "Alice", "ttl": 3600}'
+```
+
+**Read from Replicas** (Load Balancing):
+
+```bash
+# Read from replica 1 (eventually consistent, ~5ms lag)
+curl http://localhost:15501/kv/get/user:100
+
+# Read from replica 2
+curl http://localhost:15502/kv/get/user:100
+
+# Read from replica 3
+curl http://localhost:15503/kv/get/user:100
+```
+
+**Monitor Replication Status**:
+
+```bash
+# Check replication health on master
+curl http://localhost:15500/health/replication
+
+# Check replication status on replica
+curl http://localhost:15501/health/replication
+```
+
+#### Consistency Guarantees
+
+- **Master Reads**: Strongly consistent (immediate)
+- **Replica Reads**: Eventually consistent (~5-10ms lag typical)
+- **Write Durability**: Writes confirmed after master commit
+- **Replication**: Asynchronous to replicas
+- **Lag Monitoring**: Real-time offset tracking
+
+See [docs/specs/REPLICATION.md](docs/specs/REPLICATION.md) for complete replication documentation.
+
+For detailed Docker deployment guide, see [docs/DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md).
+
 ## 🎯 Use Cases
 
 ### 💬 Real-Time Chat

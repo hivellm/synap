@@ -1,0 +1,203 @@
+# ============================================================================
+# Synap Replication Cluster - Docker Compose
+# ============================================================================
+#
+# This docker-compose configuration deploys a Synap replication cluster:
+# - 1 Master node (write operations)
+# - 3 Replica nodes (read operations, high availability)
+#
+# Architecture:
+#   Client Writes → Master (port 15500)
+#   Client Reads  → Replicas (ports 15501, 15502, 15503) via load balancer
+#   Replication   → Master:15501 ↔ Replicas (internal network)
+#
+# Usage:
+#   docker-compose up -d              # Start all nodes
+#   docker-compose ps                  # Check status
+#   docker-compose logs -f master      # View master logs
+#   docker-compose logs -f replica1    # View replica logs
+#   docker-compose down                # Stop cluster
+#   docker-compose down -v             # Stop and remove volumes
+#
+# ============================================================================
+
+version: '3.8'
+
+services:
+  # ==========================================================================
+  # Master Node (Write Operations)
+  # ==========================================================================
+  master:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: synap-master
+    hostname: master
+    ports:
+      - "15500:15500"  # HTTP API (client access)
+      - "15501:15501"  # Replication port
+    environment:
+      - RUST_LOG=info
+      - SYNAP_ROLE=master
+    volumes:
+      - master_data:/data
+      - ./config-master.yml:/app/config.yml:ro
+    networks:
+      - synap-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:15500/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    labels:
+      - "synap.role=master"
+      - "synap.cluster=synap-cluster-1"
+
+  # ==========================================================================
+  # Replica 1 (Read Operations)
+  # ==========================================================================
+  replica1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: synap-replica1
+    hostname: replica1
+    ports:
+      - "15510:15500"  # HTTP API (client access)
+    environment:
+      - RUST_LOG=info
+      - SYNAP_ROLE=replica
+      - SYNAP_MASTER_ADDRESS=master:15501
+    volumes:
+      - replica1_data:/data
+      - ./config-replica.yml:/app/config.yml:ro
+    networks:
+      - synap-network
+    depends_on:
+      master:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:15500/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      - "synap.role=replica"
+      - "synap.cluster=synap-cluster-1"
+      - "synap.replica_id=replica-1"
+
+  # ==========================================================================
+  # Replica 2 (Read Operations)
+  # ==========================================================================
+  replica2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: synap-replica2
+    hostname: replica2
+    ports:
+      - "15520:15500"  # HTTP API (client access)
+    environment:
+      - RUST_LOG=info
+      - SYNAP_ROLE=replica
+      - SYNAP_MASTER_ADDRESS=master:15501
+    volumes:
+      - replica2_data:/data
+      - ./config-replica.yml:/app/config.yml:ro
+    networks:
+      - synap-network
+    depends_on:
+      master:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:15500/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      - "synap.role=replica"
+      - "synap.cluster=synap-cluster-1"
+      - "synap.replica_id=replica-2"
+
+  # ==========================================================================
+  # Replica 3 (Read Operations)
+  # ==========================================================================
+  replica3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: synap-replica3
+    hostname: replica3
+    ports:
+      - "15530:15500"  # HTTP API (client access)
+    environment:
+      - RUST_LOG=info
+      - SYNAP_ROLE=replica
+      - SYNAP_MASTER_ADDRESS=master:15501
+    volumes:
+      - replica3_data:/data
+      - ./config-replica.yml:/app/config.yml:ro
+    networks:
+      - synap-network
+    depends_on:
+      master:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:15500/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    labels:
+      - "synap.role=replica"
+      - "synap.cluster=synap-cluster-1"
+      - "synap.replica_id=replica-3"
+
+# ============================================================================
+# Networks
+# ============================================================================
+networks:
+  synap-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/16
+
+# ============================================================================
+# Volumes (Data Persistence)
+# ============================================================================
+volumes:
+  master_data:
+    driver: local
+    labels:
+      - "synap.role=master"
+      - "synap.type=data"
+  
+  replica1_data:
+    driver: local
+    labels:
+      - "synap.role=replica"
+      - "synap.replica_id=replica-1"
+      - "synap.type=data"
+  
+  replica2_data:
+    driver: local
+    labels:
+      - "synap.role=replica"
+      - "synap.replica_id=replica-2"
+      - "synap.type=data"
+  
+  replica3_data:
+    driver: local
+    labels:
+      - "synap.role=replica"
+      - "synap.replica_id=replica-3"
+      - "synap.type=data"
+

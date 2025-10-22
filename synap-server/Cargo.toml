@@ -34,7 +34,9 @@ rand.workspace = true
 bincode = "1.3"
 crc32fast = "1.4"
 compact_str.workspace = true
-rmcp = { version = "0.8.2", features = ["server"] }
+rmcp = { version = "0.8.2", features = ["server", "transport-streamable-http-server"] }
+hyper = "1.7"
+hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
 
 [dev-dependencies]
 criterion = { version = "0.7", features = ["async_tokio"] }

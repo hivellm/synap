@@ -1,0 +1,105 @@
+# ============================================================================
+# Synap Replica Node Configuration
+# ============================================================================
+# 
+# Replica node is read-only and syncs from master
+# Use this configuration for replica nodes in a replication cluster
+#
+# ============================================================================
+
+# ============================================================================
+# NETWORK
+# ============================================================================
+server:
+  host: "0.0.0.0"
+  port: 15500
+  websocket_enabled: false
+
+# ============================================================================
+# MEMORY MANAGEMENT
+# ============================================================================
+kv_store:
+  max_memory_mb: 4096
+  eviction_policy: "lru"
+  ttl_cleanup_interval_ms: 100
+  allow_flush_commands: false
+
+# ============================================================================
+# QUEUE SYSTEM
+# ============================================================================
+queue:
+  enabled: true
+  max_depth: 100000
+  ack_deadline_secs: 30
+  default_max_retries: 3
+  default_priority: 5
+
+# ============================================================================
+# RATE LIMITING
+# ============================================================================
+rate_limit:
+  enabled: false
+  requests_per_second: 1000
+  burst_size: 100
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+logging:
+  level: "info"
+  format: "json"
+
+# ============================================================================
+# PROTOCOLS
+# ============================================================================
+protocols:
+  streamable_http:
+    enabled: true
+    path: "/api/v1/command"
+  rest:
+    enabled: true
+    prefix: "/kv"
+
+# ============================================================================
+# REPLICATION (REPLICA)
+# ============================================================================
+replication:
+  enabled: true
+  role: "replica"
+  
+  # Master node address to sync from
+  # This will be overridden by SYNAP_MASTER_ADDRESS env var in Docker
+  master_address: "master:15501"
+  
+  # Performance tuning
+  heartbeat_interval_ms: 1000
+  max_lag_ms: 10000
+  buffer_size_kb: 256
+  auto_reconnect: true
+  reconnect_delay_ms: 5000
+  replica_timeout_secs: 30
+
+# ============================================================================
+# PERSISTENCE
+# ============================================================================
+persistence:
+  enabled: true
+  
+  # Write-Ahead Log
+  wal:
+    enabled: true
+    path: "/data/wal/synap.wal"
+    buffer_size_kb: 64
+    fsync_mode: "periodic"
+    fsync_interval_ms: 1000
+    max_size_mb: 1024
+  
+  # Snapshots
+  snapshot:
+    enabled: true
+    directory: "/data/snapshots"
+    interval_secs: 300
+    operation_threshold: 10000
+    max_snapshots: 10
+    compression: false
+

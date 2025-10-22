@@ -1,0 +1,58 @@
+# Rust build artifacts
+target/
+**/*.rs.bk
+*.pdb
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+
+# Documentation (not needed in image)
+docs/
+*.md
+!README.md
+
+# Tests
+tests/
+benches/
+
+# CI/CD
+.github/
+
+# Data directories
+data/
+*.db
+*.db-shm
+*.db-wal
+*.wal
+snapshots/
+
+# Logs
+*.log
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Scripts (except those needed for runtime)
+scripts/
+
+# Examples
+examples/
+
+# Config files (will be mounted)
+config*.yml
+!config.yml
+
