@@ -169,3 +169,4 @@ Prometheus metrics:
 **Last Updated**: October 22, 2025  
 **Tests**: 7 passing (LRU, LFU, ARC, L2)
 
+

@@ -167,3 +167,4 @@ compress_json/Zstd/10KB time: [712.34 µs 718.92 µs 725.81 µs]
 **Last Updated**: October 22, 2025  
 **Benchmarks**: 12 scenarios (compression, decompression, ratio)
 
+

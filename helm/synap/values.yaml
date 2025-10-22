@@ -1,0 +1,201 @@
+# Default values for synap
+# This is a YAML-formatted file.
+
+replicaCount: 1
+
+image:
+  repository: hivellm/synap
+  pullPolicy: IfNotPresent
+  tag: "" # Overrides the image tag whose default is the chart appVersion
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "15500"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  fsGroup: 2000
+
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 15500
+  targetPort: 15500
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: synap.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: synap-tls
+  #    hosts:
+  #      - synap.local
+
+resources:
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi
+  annotations: {}
+
+# Synap configuration
+config:
+  server:
+    host: "0.0.0.0"
+    port: 15500
+    websocket_enabled: true
+
+  kv_store:
+    max_memory_mb: 4096
+    eviction_policy: "lru"
+    ttl_cleanup_interval_ms: 100
+    allow_flush_commands: false
+
+  queue:
+    enabled: true
+    max_depth: 100000
+    ack_deadline_secs: 30
+    default_max_retries: 3
+    default_priority: 5
+
+  rate_limit:
+    enabled: false
+    requests_per_second: 1000
+    burst_size: 100
+
+  logging:
+    level: "info"
+    format: "json"
+
+  persistence:
+    enabled: true
+    wal:
+      enabled: true
+      path: "/data/wal/synap.wal"
+      fsync_mode: "periodic"
+      fsync_interval_ms: 10
+    snapshot:
+      enabled: true
+      directory: "/data/snapshots"
+      interval_secs: 3600
+      auto_snapshot: true
+
+  replication:
+    enabled: false
+    role: "standalone"
+    # For master node:
+    # role: "master"
+    # replica_listen_address: "0.0.0.0:15501"
+    # For replica node:
+    # role: "replica"
+    # master_address: "synap-master:15501"
+
+# Replication configuration
+replication:
+  master:
+    enabled: false
+    replicaCount: 1
+    service:
+      type: ClusterIP
+      port: 15501
+
+  replica:
+    enabled: false
+    replicaCount: 2
+    masterAddress: "synap-master:15501"
+
+# Prometheus ServiceMonitor
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity: {}
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1
+
+# Init containers
+initContainers: []
+
+# Extra volumes
+extraVolumes: []
+
+# Extra volume mounts
+extraVolumeMounts: []
+
+# Extra environment variables
+extraEnv: []
+  # - name: CUSTOM_VAR
+  #   value: "custom_value"
+
+# Liveness probe
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# Readiness probe
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+

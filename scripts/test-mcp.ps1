@@ -29,3 +29,4 @@ Write-Host "   - synap_pubsub_publish (Publish to topic)"
 Write-Host ""
 Write-Host "📖 See docs/protocol/MCP_USAGE.md for integration guide" -ForegroundColor Blue
 
+

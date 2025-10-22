@@ -1,0 +1,22 @@
+apiVersion: v2
+name: synap
+description: High-Performance In-Memory Key-Value Store & Message Broker
+type: application
+version: 0.3.0
+appVersion: "0.3.0"
+keywords:
+  - database
+  - key-value
+  - message-broker
+  - queue
+  - streams
+  - pubsub
+  - replication
+home: https://github.com/hivellm/synap
+sources:
+  - https://github.com/hivellm/synap
+maintainers:
+  - name: HiveLLM Team
+    url: https://github.com/hivellm
+icon: https://raw.githubusercontent.com/hivellm/synap/main/docs/logo.png
+

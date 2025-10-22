@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "synap.fullname" . }}
+  labels:
+    {{- include "synap.labels" . | nindent 4 }}
+data:
+  config.yml: |
+    server:
+      host: {{ .Values.config.server.host | quote }}
+      port: {{ .Values.config.server.port }}
+      websocket_enabled: {{ .Values.config.server.websocket_enabled }}
+
+    kv_store:
+      max_memory_mb: {{ .Values.config.kv_store.max_memory_mb }}
+      eviction_policy: {{ .Values.config.kv_store.eviction_policy | quote }}
+      ttl_cleanup_interval_ms: {{ .Values.config.kv_store.ttl_cleanup_interval_ms }}
+      allow_flush_commands: {{ .Values.config.kv_store.allow_flush_commands }}
+
+    queue:
+      enabled: {{ .Values.config.queue.enabled }}
+      max_depth: {{ .Values.config.queue.max_depth }}
+      ack_deadline_secs: {{ .Values.config.queue.ack_deadline_secs }}
+      default_max_retries: {{ .Values.config.queue.default_max_retries }}
+      default_priority: {{ .Values.config.queue.default_priority }}
+
+    rate_limit:
+      enabled: {{ .Values.config.rate_limit.enabled }}
+      requests_per_second: {{ .Values.config.rate_limit.requests_per_second }}
+      burst_size: {{ .Values.config.rate_limit.burst_size }}
+
+    logging:
+      level: {{ .Values.config.logging.level | quote }}
+      format: {{ .Values.config.logging.format | quote }}
+
+    protocols:
+      streamable_http:
+        enabled: true
+        path: "/api/v1/command"
+      rest:
+        enabled: true
+        prefix: "/kv"
+
+    persistence:
+      enabled: {{ .Values.config.persistence.enabled }}
+      {{- if .Values.config.persistence.enabled }}
+      wal:
+        enabled: {{ .Values.config.persistence.wal.enabled }}
+        path: {{ .Values.config.persistence.wal.path | quote }}
+        fsync_mode: {{ .Values.config.persistence.wal.fsync_mode | quote }}
+        fsync_interval_ms: {{ .Values.config.persistence.wal.fsync_interval_ms }}
+      snapshot:
+        enabled: {{ .Values.config.persistence.snapshot.enabled }}
+        directory: {{ .Values.config.persistence.snapshot.directory | quote }}
+        interval_secs: {{ .Values.config.persistence.snapshot.interval_secs }}
+        auto_snapshot: {{ .Values.config.persistence.snapshot.auto_snapshot }}
+      {{- end }}
+
+    replication:
+      enabled: {{ .Values.config.replication.enabled }}
+      role: {{ .Values.config.replication.role | quote }}
+      {{- if eq .Values.config.replication.role "master" }}
+      replica_listen_address: "0.0.0.0:15501"
+      heartbeat_interval_ms: 1000
+      max_lag_ms: 10000
+      {{- else if eq .Values.config.replication.role "replica" }}
+      master_address: {{ .Values.replication.replica.masterAddress | quote }}
+      auto_reconnect: true
+      reconnect_delay_ms: 5000
+      {{- end }}
+

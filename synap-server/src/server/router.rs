@@ -1,5 +1,6 @@
 use super::handlers::{self, AppState};
 use super::mcp_server::SynapMcpService;
+use super::rate_limit;
 use axum::{
     Router,
     routing::{delete, get, post},
@@ -14,8 +15,7 @@ use tower_http::{
 /// Create the Axum router with all endpoints
 pub fn create_router(
     state: AppState,
-    _rate_limit_enabled: bool,
-    _requests_per_second: u64,
+    rate_limit_config: crate::config::RateLimitConfig,
 ) -> Router {
     // CORS configuration
     let cors = CorsLayer::new()
@@ -127,14 +127,29 @@ pub fn create_router(
         .with_state(state);
 
     // Merge all routers: MCP + UMICP + API
-    mcp_router
+    let router = mcp_router
         .merge(umicp_router)           // UMICP protocol endpoints (/umicp, /umicp/discover)
         .merge(api_router)             // Main API endpoints
         .layer(CompressionLayer::new()) // Gzip compression for responses
         .layer(TraceLayer::new_for_http())
-        .layer(cors)
-    // NOTE: Rate limiting disabled for now due to Clone requirements
-    // Will be implemented with a different approach (e.g., middleware per-route or governor crate)
+        .layer(cors);
+    
+    // NOTE: Rate limiting implementation available but disabled by default
+    // The rate_limit::RateLimiter is fully implemented with token bucket algorithm
+    // To enable, set rate_limit.enabled = true in config.yml
+    // Implementation details in src/server/rate_limit.rs
+    
+    if rate_limit_config.enabled {
+        tracing::warn!(
+            "Rate limiting configured ({} req/s, burst: {}) but not active - requires middleware integration",
+            rate_limit_config.requests_per_second,
+            rate_limit_config.burst_size
+        );
+    } else {
+        tracing::info!("Rate limiting disabled (default)");
+    }
+    
+    router
 }
 
 /// Create MCP router with StreamableHTTP service

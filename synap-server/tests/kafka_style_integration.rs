@@ -435,3 +435,4 @@ async fn test_multiple_consumer_groups_same_topic() {
     assert_eq!(assignment_b.len(), 3);
 }
 
+

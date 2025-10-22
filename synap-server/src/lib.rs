@@ -26,4 +26,4 @@ pub use protocol::{Request, Response};
 pub use replication::{
     MasterNode, NodeRole, ReplicaNode, ReplicationConfig, ReplicationLog, ReplicationStats,
 };
-pub use server::{AppState, create_router, get_mcp_tools, handle_mcp_tool};
+pub use server::{AppState, create_router, get_mcp_tools, handle_mcp_tool, init_metrics};

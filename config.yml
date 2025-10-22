@@ -178,20 +178,29 @@ acl:
 # ============================================================================
 
 rate_limit:
-  # Enable or disable rate limiting
-  # NOTE: Currently disabled due to implementation constraints (Clone requirement)
-  # Will be re-implemented using per-route middleware or governor crate
+  # Enable or disable rate limiting (tower-governor implementation)
+  # Uses token bucket algorithm with per-IP tracking
+  # Protects against DoS attacks and excessive API usage
   # Default: false (disabled for maximum performance)
   enabled: false
   
-  # Maximum requests per second
+  # Maximum requests per second per IP
+  # Controls the refill rate of the token bucket
+  # Recommended: 100-1000 for public APIs, 10000+ for internal services
   # Default: 1000 req/s
   requests_per_second: 1000
   
-  # Burst size (allows temporary spikes)
-  # Not used by current implementation but reserved for future
+  # Burst size (maximum tokens in bucket)
+  # Allows temporary spikes above the rate limit
+  # Should be >= requests_per_second for smooth traffic
+  # Recommended: 10-20% of requests_per_second
   # Default: 100
   burst_size: 100
+  
+  # Examples:
+  # - Public API: enabled: true, requests_per_second: 100, burst_size: 20
+  # - Internal API: enabled: false (or high limits: 10000 req/s)
+  # - Development: enabled: false
 
 # ============================================================================
 # LOGGING

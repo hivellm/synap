@@ -7,7 +7,7 @@ use synap_server::replication::NodeRole;
 use synap_server::{
     AppState, ConsumerGroupConfig, ConsumerGroupManager, KVStore, PartitionConfig,
     PartitionManager, PubSubRouter, QueueManager, ServerConfig, StreamConfig, StreamManager,
-    create_router,
+    create_router, init_metrics,
 };
 use tracing::{info, warn};
 
@@ -238,11 +238,13 @@ async fn main() -> Result<()> {
         persistence,
     };
 
+    // Initialize Prometheus metrics
+    init_metrics();
+    
     // Create router with rate limiting
     let app = create_router(
         app_state,
-        config.rate_limit.enabled,
-        config.rate_limit.requests_per_second,
+        config.rate_limit.clone(),
     );
 
     if config.rate_limit.enabled {

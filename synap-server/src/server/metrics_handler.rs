@@ -4,6 +4,9 @@ use axum::{http::StatusCode, response::IntoResponse};
 
 /// GET /metrics - Prometheus metrics endpoint
 pub async fn metrics_handler() -> impl IntoResponse {
+    // Update system metrics before encoding
+    update_system_metrics().await;
+    
     match crate::metrics::encode_metrics() {
         Ok(metrics) => (
             StatusCode::OK,
@@ -17,6 +20,36 @@ pub async fn metrics_handler() -> impl IntoResponse {
         )
             .into_response(),
     }
+}
+
+/// Initialize metrics with default values
+pub fn init_metrics() {
+    // Force initialization of all metrics by accessing them
+    let _ = &*crate::metrics::KV_OPS_TOTAL;
+    let _ = &*crate::metrics::KV_OP_DURATION;
+    let _ = &*crate::metrics::KV_KEYS_TOTAL;
+    let _ = &*crate::metrics::KV_MEMORY_BYTES;
+    let _ = &*crate::metrics::QUEUE_OPS_TOTAL;
+    let _ = &*crate::metrics::QUEUE_DEPTH;
+    let _ = &*crate::metrics::QUEUE_OP_DURATION;
+    let _ = &*crate::metrics::QUEUE_DLQ_TOTAL;
+    let _ = &*crate::metrics::STREAM_OPS_TOTAL;
+    let _ = &*crate::metrics::STREAM_EVENTS_TOTAL;
+    let _ = &*crate::metrics::STREAM_SUBSCRIBERS;
+    let _ = &*crate::metrics::STREAM_BUFFER_SIZE;
+    let _ = &*crate::metrics::PUBSUB_OPS_TOTAL;
+    let _ = &*crate::metrics::PUBSUB_MESSAGES_TOTAL;
+    let _ = &*crate::metrics::PUBSUB_SUBSCRIPTIONS;
+    let _ = &*crate::metrics::REPL_LAG;
+    let _ = &*crate::metrics::REPL_OPS_TOTAL;
+    let _ = &*crate::metrics::REPL_BYTES_TOTAL;
+    let _ = &*crate::metrics::HTTP_REQUESTS_TOTAL;
+    let _ = &*crate::metrics::HTTP_REQUEST_DURATION;
+    let _ = &*crate::metrics::HTTP_CONNECTIONS;
+    let _ = &*crate::metrics::PROCESS_MEMORY_BYTES;
+    let _ = &*crate::metrics::PROCESS_CPU_USAGE;
+    
+    tracing::info!("Prometheus metrics initialized (17 metric types registered)");
 }
 
 /// Update system metrics (called periodically)
@@ -41,4 +74,5 @@ pub async fn update_system_metrics() {
             .set((load.five * 100.0) as i64);
     }
 }
+
 

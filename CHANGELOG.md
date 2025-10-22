@@ -7,6 +7,180 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Phase 4 Features: Monitoring & Security ✅ NEW (October 22, 2025)
+
+#### 📊 Prometheus Metrics (COMPLETE)
+**Production-ready monitoring with comprehensive metrics collection**:
+
+**Features Implemented**:
+- ✅ **KV Store Metrics**: Operations count, latency, key count, memory usage
+- ✅ **Queue Metrics**: Operations, depth, latency, DLQ count  
+- ✅ **Stream Metrics**: Events, subscribers, buffer size
+- ✅ **Pub/Sub Metrics**: Messages, subscriptions, operations
+- ✅ **Replication Metrics**: Lag, throughput, bytes transferred
+- ✅ **HTTP Metrics**: Requests, duration, active connections
+- ✅ **System Metrics**: Process memory, CPU usage
+
+**Endpoint**: `GET /metrics` (Prometheus format)
+
+**Metrics Available** (17 metric types):
+1. `synap_kv_operations_total` - Counter by operation & status
+2. `synap_kv_operation_duration_seconds` - Histogram by operation  
+3. `synap_kv_keys_total` - Gauge by shard
+4. `synap_kv_memory_bytes` - Gauge by type
+5. `synap_queue_operations_total` - Counter by queue & operation
+6. `synap_queue_depth` - Gauge by queue
+7. `synap_queue_operation_duration_seconds` - Histogram
+8. `synap_queue_dlq_messages` - Gauge by queue
+9. `synap_stream_operations_total` - Counter by room
+10. `synap_stream_events_total` - Counter by room & event
+11. `synap_stream_subscribers` - Gauge by room
+12. `synap_stream_buffer_size` - Gauge by room
+13. `synap_pubsub_operations_total` - Counter
+14. `synap_pubsub_messages_total` - Counter by topic
+15. `synap_replication_lag_operations` - Gauge by replica
+16. `synap_http_requests_total` - Counter by method, path, status
+17. `synap_http_request_duration_seconds` - Histogram
+
+**Usage** with Prometheus + Grafana:
+```yaml
+# prometheus.yml
+scrape_configs:
+  - job_name: 'synap'
+    static_configs:
+      - targets: ['localhost:15500']
+```
+
+**System Metrics Update**: Background task updates memory/CPU metrics every 60s
+
+#### 🚦 Rate Limiting Implementation (Available)
+**Token bucket rate limiting with per-IP tracking**:
+
+**Features Implemented**:
+- ✅ **Token Bucket Algorithm**: Refillable token bucket per IP
+- ✅ **Per-IP Tracking**: Separate limits for each client IP
+- ✅ **Configurable Limits**: Requests/sec and burst size
+- ✅ **Automatic Cleanup**: Removes stale buckets every 60s
+- ✅ **Graceful Responses**: HTTP 429 (Too Many Requests) with headers
+
+**Configuration** (`config.yml`):
+```yaml
+rate_limit:
+  enabled: false  # Set to true to enable
+  requests_per_second: 1000
+  burst_size: 100  # Allow temporary spikes
+```
+
+**Implementation Details**:
+- Module: `src/server/rate_limit.rs`
+- Algorithm: Token bucket with time-based refill
+- Storage: In-memory HashMap with RwLock
+- Cleanup: Background task (60s interval)
+- Response: HTTP 429 with logging
+
+**Status**: Implementation complete, integration pending (requires middleware refactoring)
+
+#### 📦 Packaging & Distribution (COMPLETE)
+**Production-ready deployment infrastructure**:
+
+**Features Implemented**:
+- ✅ **GitHub Release Workflow**: Automated multi-platform builds
+- ✅ **5 Platform Support**: Linux (x64, ARM64), Windows x64, macOS (x64, ARM64)
+- ✅ **Artifact Packaging**: ZIP/TAR.GZ with binaries, docs, config examples
+- ✅ **SHA256 Checksums**: Automatic checksum generation for verification
+- ✅ **Docker Multi-Arch**: AMD64 and ARM64 images (Docker Hub + GHCR)
+- ✅ **Helm Chart**: Production-ready Kubernetes deployment
+
+**GitHub Release Workflow** (`.github/workflows/release.yml`):
+- Builds synap-server and synap-cli for 5 platforms
+- Creates release archives with documentation
+- Generates SHA256 checksums
+- Publishes to GitHub Releases
+- Builds and pushes Docker images
+
+**Platforms Supported**:
+1. `x86_64-unknown-linux-gnu` → `synap-linux-x64.tar.gz`
+2. `aarch64-unknown-linux-gnu` → `synap-linux-arm64.tar.gz`
+3. `x86_64-pc-windows-msvc` → `synap-windows-x64.zip`
+4. `x86_64-apple-darwin` → `synap-macos-x64.tar.gz`
+5. `aarch64-apple-darwin` → `synap-macos-arm64.tar.gz`
+
+**Docker Images**:
+```bash
+# Docker Hub
+docker pull hivellm/synap:latest
+docker pull hivellm/synap:0.3.0
+
+# GitHub Container Registry
+docker pull ghcr.io/hivellm/synap:latest
+docker pull ghcr.io/hivellm/synap:0.3.0
+```
+
+**Helm Chart** (`helm/synap/`):
+- Complete Kubernetes deployment
+- Master-Replica replication support
+- Persistence with PVC
+- ServiceMonitor for Prometheus
+- Autoscaling support
+- Production-ready defaults
+
+**Installation**:
+```bash
+# Helm
+helm install synap ./helm/synap
+
+# Docker
+docker-compose up -d
+```
+
+**Documentation**:
+- `docs/RELEASE_PROCESS.md` - Complete release guide
+- `helm/synap/README.md` - Helm Chart documentation
+- Release notes auto-generated from CHANGELOG
+
+### Added - UMICP (Universal Matrix Inter-Communication Protocol) Integration ✅ NEW (October 22, 2025)
+
+#### 🌐 UMICP Bridge Integration
+Full UMICP support integrated as MCP bridge using Elixir client:
+
+**Features Implemented**:
+- ✅ **UMICP MCP Bridge**: Complete bridge between MCP and UMICP protocols
+- ✅ **4 MCP Tools**: Core operations via UMICP
+- ✅ **Connection Management**: List, stats, and connection lifecycle
+- ✅ **TLS Support**: Secure connections to UMICP servers
+- ✅ **Timeout Handling**: Configurable timeouts for reliability
+
+**MCP Tools Available**:
+1. `umicp_call` - Execute UMICP method calls (host, port, method, payload, metadata)
+2. `umicp_stats` - Get bridge statistics
+3. `umicp_connections` - List active connections
+4. `umicp_close_connection` - Close specific connection
+5. `umicp_reset_stats` - Reset statistics
+
+**Technical Details**:
+- **Protocol**: UMICP via Elixir client
+- **MCP Integration**: Native MCP server with UMICP bridge
+- **Transport**: TCP with optional TLS
+- **Connection Pooling**: Automatic connection management
+
+**Tested via Cursor AI**:
+- ✅ UMICP method calls
+- ✅ Connection management
+- ✅ Statistics tracking
+- ✅ Error handling
+- ✅ TLS connections
+
+**Configuration** (Cursor/Claude Desktop):
+```json
+{
+  "UMICP": {
+    "command": "node",
+    "args": ["/path/to/umicp/tomcp/build/index.js"],
+    "type": "stdio"
+  }
+}
+```
+
 ### Added - MCP (Model Context Protocol) Integration ✅ NEW (October 22, 2025)
 
 #### 🤖 MCP Server Integration
