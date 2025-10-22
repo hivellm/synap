@@ -315,6 +315,7 @@ impl OptimizedWAL {
             .as_secs()
     }
 
+    #[allow(clippy::while_let_loop)]
     async fn scan_for_last_offset(path: &PathBuf) -> Result<u64> {
         if tokio::fs::metadata(path).await.is_err() {
             return Ok(0);
@@ -348,6 +349,7 @@ impl OptimizedWAL {
     }
 
     /// Read all entries from WAL (for recovery)
+    #[allow(clippy::while_let_loop)]
     pub async fn read_all(&self, path: &PathBuf) -> Result<Vec<WALEntry>> {
         let mut file = File::open(path).await?;
         let mut entries = Vec::new();

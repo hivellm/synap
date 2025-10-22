@@ -210,16 +210,8 @@ impl MasterNode {
 
         // Stream replication commands
         while let Some(cmd) = rx.recv().await {
-            let data = match bincode::serialize(&cmd) {
-                Ok(d) => d,
-                Err(e) => {
-                    error!("Failed to serialize command: {}", e);
-                    break;
-                }
-            };
-
-            // Send command
-            if stream.write_all(&data).await.is_err() {
+            // Send command with length prefix
+            if Self::send_command(&mut stream, &cmd).await.is_err() {
                 warn!("Replica {} disconnected", replica_id);
                 break;
             }
@@ -233,23 +225,44 @@ impl MasterNode {
     /// Send full sync (snapshot) to replica
     async fn send_full_sync(
         stream: &mut TcpStream,
-        _kv_store: &KVStore,
+        kv_store: &KVStore,
         replication_log: &ReplicationLog,
     ) -> ReplicationResult<()> {
-        // Get snapshot data (simplified - in production, use streaming)
-        let snapshot_data = vec![]; // TODO: Implement snapshot serialization
         let current_offset = replication_log.current_offset();
+        
+        // Create snapshot
+        let snapshot_data = super::sync::create_snapshot(kv_store, current_offset)
+            .await
+            .map_err(|e| ReplicationError::SerializationError(e))?;
+
+        info!("Created snapshot: {} bytes for full sync", snapshot_data.len());
 
         let cmd = ReplicationCommand::FullSync {
             snapshot_data,
             offset: current_offset,
         };
 
-        let data = bincode::serialize(&cmd)?;
-        stream.write_all(&data).await?;
-        stream.flush().await?;
+        // Send with length prefix
+        Self::send_command(stream, &cmd).await?;
 
         debug!("Full sync sent, offset: {}", current_offset);
+        Ok(())
+    }
+    
+    /// Send command with length prefix
+    async fn send_command(
+        stream: &mut TcpStream,
+        cmd: &ReplicationCommand,
+    ) -> ReplicationResult<()> {
+        let data = bincode::serialize(cmd)?;
+        let len = data.len() as u32;
+        
+        // Send length prefix
+        stream.write_all(&len.to_be_bytes()).await?;
+        // Send data
+        stream.write_all(&data).await?;
+        stream.flush().await?;
+        
         Ok(())
     }
 

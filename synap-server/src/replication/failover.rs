@@ -51,7 +51,7 @@ impl FailoverManager {
         warn!("Replica disconnect not fully implemented - manual intervention may be needed");
 
         // Create new master configuration
-        let mut master_config = ReplicationConfig {
+        let master_config = ReplicationConfig {
             enabled: true,
             role: NodeRole::Master,
             replica_listen_address: Some("0.0.0.0:15501".parse().unwrap()),
@@ -110,7 +110,7 @@ impl FailoverManager {
         warn!("Master shutdown not fully implemented");
 
         // Create replica configuration
-        let mut replica_config = ReplicationConfig {
+        let replica_config = ReplicationConfig {
             enabled: true,
             role: NodeRole::Replica,
             master_address: Some(new_master_addr),

@@ -23,9 +23,24 @@ async
 const
 enum
 
+# Test patterns
+afterAll
+
+# Portuguese words in documentation (valid)
+Ignora
+ignora
+Cliente
+comandos
+Tunin
+essencial
+Atual
+Autor
+Adquire
+
 # Common abbreviations
 afe
 hart
 lod
 som
+Nd
 
