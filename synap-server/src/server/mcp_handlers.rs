@@ -84,12 +84,24 @@ async fn handle_kv_set(
         .ok_or_else(|| ErrorData::invalid_params("Missing value", None))?;
 
     let ttl = args.get("ttl").and_then(|v| v.as_u64());
+    
+    let value_bytes = value_str.as_bytes().to_vec();
 
     state
         .kv_store
-        .set(key, value_str.as_bytes().to_vec(), ttl)
+        .set(key, value_bytes.clone(), ttl)
         .await
         .map_err(|e| ErrorData::internal_error(format!("Set failed: {}", e), None))?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        if let Err(e) = persistence
+            .log_kv_set(key.to_string(), value_bytes, ttl)
+            .await
+        {
+            tracing::error!("Failed to log KV SET to WAL (MCP): {}", e);
+        }
+    }
 
     Ok(CallToolResult::success(vec![Content::text(
         json!({"success": true}).to_string(),
@@ -115,6 +127,15 @@ async fn handle_kv_delete(
         .delete(key)
         .await
         .map_err(|e| ErrorData::internal_error(format!("Delete failed: {}", e), None))?;
+
+    // Log to WAL if deleted
+    if deleted {
+        if let Some(ref persistence) = state.persistence {
+            if let Err(e) = persistence.log_kv_del(vec![key.to_string()]).await {
+                tracing::error!("Failed to log KV DELETE to WAL (MCP): {}", e);
+            }
+        }
+    }
 
     Ok(CallToolResult::success(vec![Content::text(
         json!({"deleted": deleted}).to_string(),

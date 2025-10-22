@@ -331,7 +331,7 @@ persistence:
     enabled: true
     path: "./data/wal/synap.wal"
     buffer_size_kb: 64
-    fsync_mode: "periodic"  # always, periodic, never
+    fsync_mode: "always"  # always, periodic, never - CHANGED TO ALWAYS FOR TESTING
     fsync_interval_ms: 1000
     max_size_mb: 1024
   
