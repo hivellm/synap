@@ -168,7 +168,7 @@ async fn test_snapshot_create_and_load() {
 
     // Create snapshot
     let snapshot_path = snapshot_mgr
-        .create_snapshot(&kv_store, None, 42)
+        .create_snapshot(&kv_store, None, None, 42)
         .await
         .unwrap();
 
@@ -214,7 +214,7 @@ async fn test_snapshot_cleanup_old() {
             .unwrap();
 
         snapshot_mgr
-            .create_snapshot(&kv_store, None, i)
+            .create_snapshot(&kv_store, None, None, i)
             .await
             .unwrap();
 

@@ -29,7 +29,7 @@ async fn create_kv_master() -> (Arc<MasterNode>, Arc<KVStore>, std::net::SocketA
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
     let master = Arc::new(
-        MasterNode::new(config.clone(), Arc::clone(&kv))
+        MasterNode::new(config.clone(), Arc::clone(&kv), None)
             .await
             .unwrap(),
     );
@@ -48,7 +48,9 @@ async fn create_kv_replica(master_addr: std::net::SocketAddr) -> (Arc<ReplicaNod
     config.reconnect_delay_ms = 100;
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let replica = ReplicaNode::new(config, Arc::clone(&kv)).await.unwrap();
+    let replica = ReplicaNode::new(config, Arc::clone(&kv), None)
+        .await
+        .unwrap();
 
     sleep(Duration::from_millis(50)).await;
 

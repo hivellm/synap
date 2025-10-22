@@ -69,7 +69,7 @@ async fn test_master_multiple_operations() {
     config.replica_listen_address = Some("127.0.0.1:25000".parse().unwrap());
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let master = Arc::new(MasterNode::new(config, kv).await.unwrap());
+    let master = Arc::new(MasterNode::new(config, kv, None).await.unwrap());
 
     // Replicate 1000 operations
     for i in 0..1000 {
@@ -92,7 +92,7 @@ async fn test_master_list_replicas_empty() {
     config.replica_listen_address = Some("127.0.0.1:25001".parse().unwrap());
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let master = Arc::new(MasterNode::new(config, kv).await.unwrap());
+    let master = Arc::new(MasterNode::new(config, kv, None).await.unwrap());
 
     let replicas = master.list_replicas();
     assert!(replicas.is_empty());
@@ -107,7 +107,7 @@ async fn test_replica_stats() {
     config.auto_reconnect = false;
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let replica = ReplicaNode::new(config, kv).await.unwrap();
+    let replica = ReplicaNode::new(config, kv, None).await.unwrap();
 
     let stats = replica.stats().await;
     assert_eq!(stats.replica_offset, 0);
@@ -125,7 +125,7 @@ async fn test_replica_lag_calculation() {
     config.auto_reconnect = false;
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let replica = ReplicaNode::new(config, kv).await.unwrap();
+    let replica = ReplicaNode::new(config, kv, None).await.unwrap();
 
     // Initially no lag
     assert_eq!(replica.lag(), 0);
@@ -271,7 +271,7 @@ async fn test_master_replication_various_operations() {
     config.replica_listen_address = Some("127.0.0.1:25004".parse().unwrap());
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let master = Arc::new(MasterNode::new(config, kv).await.unwrap());
+    let master = Arc::new(MasterNode::new(config, kv, None).await.unwrap());
 
     // SET operations
     for i in 0..10 {

@@ -147,6 +147,9 @@ pub async fn apply_snapshot_with_streams(
                 payload,
             } => {
                 if let Some(sm) = stream_manager {
+                    // Create room if it doesn't exist (idempotent)
+                    let _ = sm.create_room(&room).await;
+                    // Publish event
                     let _ = sm.publish(&room, &event_type, payload).await;
                 } else {
                     debug!("Skipping stream operation (no stream manager)");
