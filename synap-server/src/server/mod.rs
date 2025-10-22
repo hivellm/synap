@@ -2,6 +2,7 @@ pub mod handlers;
 pub mod mcp_handlers;
 pub mod mcp_server;
 pub mod mcp_tools;
+pub mod metrics_handler;
 pub mod router;
 pub mod umicp;
 

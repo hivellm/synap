@@ -1,7 +1,9 @@
 pub mod auth;
+pub mod cache;
 pub mod compression;
 pub mod config;
 pub mod core;
+pub mod metrics;
 pub mod persistence;
 pub mod protocol;
 pub mod replication;

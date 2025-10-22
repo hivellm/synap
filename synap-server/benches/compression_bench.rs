@@ -1,382 +1,199 @@
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+//! Compression Benchmarks - LZ4 vs Zstd
+//!
+//! Compares compression ratio and speed for different algorithms
+//! on typical Synap workloads (JSON, binary data, text)
+
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use synap_server::compression::{CompressionAlgorithm, Compressor};
 
-/// Generate test data with different characteristics
-fn generate_test_data(size: usize, compressibility: &str) -> Vec<u8> {
-    match compressibility {
-        "high" => {
-            // Highly compressible (repeated patterns)
-            vec![b'A'; size]
+/// Generate test data of various types
+fn generate_test_data(size: usize, data_type: &str) -> Vec<u8> {
+    match data_type {
+        "json" => {
+            // JSON-like data (typical for API responses)
+            let json = serde_json::json!({
+                "id": "user-12345",
+                "name": "Andre Silva",
+                "email": "andre@example.com",
+                "age": 30,
+                "active": true,
+                "tags": ["developer", "rust", "tokio"],
+                "metadata": {
+                    "created_at": "2025-10-22T00:00:00Z",
+                    "updated_at": "2025-10-22T00:00:00Z"
+                }
+            });
+            let json_str = serde_json::to_string(&json).unwrap();
+            json_str.as_bytes().repeat(size / json_str.len() + 1)[..size].to_vec()
         }
-        "medium" => {
-            // Medium compressibility (some repetition)
-            let pattern = b"Hello, World! This is a test message. ";
-            pattern.iter().cycle().take(size).copied().collect()
+        "text" => {
+            // Repetitive text (typical for logs)
+            let text = "INFO: User logged in successfully. Session started. Token generated.\n";
+            text.as_bytes().repeat(size / text.len() + 1)[..size].to_vec()
         }
-        "low" => {
-            // Low compressibility (random-like data)
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-
-            let mut data = Vec::with_capacity(size);
-            for i in 0..size {
-                let mut hasher = DefaultHasher::new();
-                i.hash(&mut hasher);
-                data.push((hasher.finish() % 256) as u8);
+        "binary" => {
+            // Random binary data (worst case for compression)
+            (0..size).map(|i| (i % 256) as u8).collect()
+        }
+        "sparse" => {
+            // Sparse data (mostly zeros, best case)
+            let mut data = vec![0u8; size];
+            for i in (0..size).step_by(100) {
+                data[i] = (i % 256) as u8;
             }
             data
-        }
-        "json" => {
-            // Realistic JSON data
-            let json = r#"{"user_id": 12345, "name": "John Doe", "email": "john@example.com", "tags": ["premium", "verified"], "metadata": {"last_login": "2025-10-21T10:30:00Z", "ip": "192.168.1.1"}}"#;
-            json.as_bytes().iter().cycle().take(size).copied().collect()
         }
         _ => vec![0u8; size],
     }
 }
 
-/// Benchmark: LZ4 compression across different data sizes
-fn bench_lz4_compress(c: &mut Criterion) {
-    let mut group = c.benchmark_group("lz4_compress");
+/// Benchmark compression speed
+fn bench_compression(c: &mut Criterion) {
+    let compressor = Compressor::new();
+    
+    let data_types = vec!["json", "text", "binary", "sparse"];
+    let sizes = vec![1024, 10 * 1024, 100 * 1024]; // 1KB, 10KB, 100KB
 
-    for size in [1024, 4096, 16384, 65536].iter() {
-        group.throughput(Throughput::Bytes(*size as u64));
+    for data_type in data_types {
+        for size in &sizes {
+            let data = generate_test_data(*size, data_type);
+            
+            let mut group = c.benchmark_group(format!("compress_{}", data_type));
+            group.throughput(Throughput::Bytes(*size as u64));
 
-        group.bench_with_input(
-            BenchmarkId::new("highly_compressible", size),
-            size,
-            |b, &s| {
-                let config = synap_server::compression::compressor::CompressionConfig {
-                    enabled: true,
-                    min_payload_size: 0,
-                    default_algorithm: CompressionAlgorithm::Lz4,
-                    zstd_level: 3,
-                };
-                let compressor = Compressor::new(config);
-                let data = generate_test_data(s, "high");
+            // LZ4 compression
+            group.bench_with_input(
+                BenchmarkId::new("LZ4", size),
+                &data,
+                |b, data| {
+                    b.iter(|| {
+                        compressor
+                            .compress(black_box(data), CompressionAlgorithm::Lz4)
+                            .unwrap()
+                    })
+                },
+            );
 
-                b.iter(|| {
-                    compressor
-                        .compress(black_box(&data), Some(CompressionAlgorithm::Lz4))
-                        .unwrap()
-                });
-            },
-        );
+            // Zstd compression (level 3)
+            group.bench_with_input(
+                BenchmarkId::new("Zstd", size),
+                &data,
+                |b, data| {
+                    b.iter(|| {
+                        compressor
+                            .compress(black_box(data), CompressionAlgorithm::Zstd)
+                            .unwrap()
+                    })
+                },
+            );
 
-        group.bench_with_input(
-            BenchmarkId::new("medium_compressible", size),
-            size,
-            |b, &s| {
-                let config = synap_server::compression::compressor::CompressionConfig {
-                    enabled: true,
-                    min_payload_size: 0,
-                    default_algorithm: CompressionAlgorithm::Lz4,
-                    zstd_level: 3,
-                };
-                let compressor = Compressor::new(config);
-                let data = generate_test_data(s, "medium");
-
-                b.iter(|| {
-                    compressor
-                        .compress(black_box(&data), Some(CompressionAlgorithm::Lz4))
-                        .unwrap()
-                });
-            },
-        );
-
-        group.bench_with_input(BenchmarkId::new("json_data", size), size, |b, &s| {
-            let config = synap_server::compression::compressor::CompressionConfig {
-                enabled: true,
-                min_payload_size: 0,
-                default_algorithm: CompressionAlgorithm::Lz4,
-                zstd_level: 3,
-            };
-            let compressor = Compressor::new(config);
-            let data = generate_test_data(s, "json");
-
-            b.iter(|| {
-                compressor
-                    .compress(black_box(&data), Some(CompressionAlgorithm::Lz4))
-                    .unwrap()
-            });
-        });
+            group.finish();
+        }
     }
-
-    group.finish();
 }
 
-/// Benchmark: Zstd compression across different compression levels
-fn bench_zstd_compress(c: &mut Criterion) {
-    let mut group = c.benchmark_group("zstd_compress");
+/// Benchmark decompression speed
+fn bench_decompression(c: &mut Criterion) {
+    let compressor = Compressor::new();
+    
+    let data_types = vec!["json", "text"];
+    let sizes = vec![1024, 10 * 1024, 100 * 1024];
 
-    let data_size = 16384;
-    let data = generate_test_data(data_size, "medium");
+    for data_type in data_types {
+        for size in &sizes {
+            let data = generate_test_data(*size, data_type);
+            
+            // Pre-compress data
+            let lz4_compressed = compressor
+                .compress(&data, CompressionAlgorithm::Lz4)
+                .unwrap();
+            let zstd_compressed = compressor
+                .compress(&data, CompressionAlgorithm::Zstd)
+                .unwrap();
 
-    for level in [1, 3, 6, 9].iter() {
-        group.throughput(Throughput::Bytes(data_size as u64));
+            let mut group = c.benchmark_group(format!("decompress_{}", data_type));
+            group.throughput(Throughput::Bytes(*size as u64));
 
-        group.bench_with_input(
-            BenchmarkId::new("compression_level", level),
-            level,
-            |b, &lvl| {
-                let config = synap_server::compression::compressor::CompressionConfig {
-                    enabled: true,
-                    min_payload_size: 0,
-                    default_algorithm: CompressionAlgorithm::Zstd,
-                    zstd_level: lvl,
-                };
-                let compressor = Compressor::new(config);
+            // LZ4 decompression
+            group.bench_with_input(
+                BenchmarkId::new("LZ4", size),
+                &lz4_compressed,
+                |b, compressed| {
+                    b.iter(|| {
+                        compressor
+                            .decompress(black_box(compressed), CompressionAlgorithm::Lz4)
+                            .unwrap()
+                    })
+                },
+            );
 
-                b.iter(|| {
-                    compressor
-                        .compress(black_box(&data), Some(CompressionAlgorithm::Zstd))
-                        .unwrap()
-                });
-            },
-        );
+            // Zstd decompression
+            group.bench_with_input(
+                BenchmarkId::new("Zstd", size),
+                &zstd_compressed,
+                |b, compressed| {
+                    b.iter(|| {
+                        compressor
+                            .decompress(black_box(compressed), CompressionAlgorithm::Zstd)
+                            .unwrap()
+                    })
+                },
+            );
+
+            group.finish();
+        }
     }
-
-    group.finish();
 }
 
-/// Benchmark: LZ4 decompression
-fn bench_lz4_decompress(c: &mut Criterion) {
-    let mut group = c.benchmark_group("lz4_decompress");
-
-    for size in [1024, 4096, 16384, 65536].iter() {
-        let config = synap_server::compression::compressor::CompressionConfig {
-            enabled: true,
-            min_payload_size: 0,
-            default_algorithm: CompressionAlgorithm::Lz4,
-            zstd_level: 3,
-        };
-        let compressor = Compressor::new(config);
-        let data = generate_test_data(*size, "medium");
-        let compressed = compressor
-            .compress(&data, Some(CompressionAlgorithm::Lz4))
-            .unwrap();
-
-        group.throughput(Throughput::Bytes(compressed.len() as u64));
-
-        group.bench_with_input(
-            BenchmarkId::new("size", size),
-            &compressed,
-            |b, comp_data| {
-                b.iter(|| {
-                    compressor
-                        .decompress(black_box(comp_data), CompressionAlgorithm::Lz4)
-                        .unwrap()
-                });
-            },
-        );
-    }
-
-    group.finish();
-}
-
-/// Benchmark: Zstd decompression
-fn bench_zstd_decompress(c: &mut Criterion) {
-    let mut group = c.benchmark_group("zstd_decompress");
-
-    let data_size = 16384;
-    let data = generate_test_data(data_size, "medium");
-
-    for level in [1, 3, 6, 9].iter() {
-        let config = synap_server::compression::compressor::CompressionConfig {
-            enabled: true,
-            min_payload_size: 0,
-            default_algorithm: CompressionAlgorithm::Zstd,
-            zstd_level: *level,
-        };
-        let compressor = Compressor::new(config);
-        let compressed = compressor
-            .compress(&data, Some(CompressionAlgorithm::Zstd))
-            .unwrap();
-
-        group.throughput(Throughput::Bytes(compressed.len() as u64));
-
-        group.bench_with_input(
-            BenchmarkId::new("level", level),
-            &compressed,
-            |b, comp_data| {
-                b.iter(|| {
-                    compressor
-                        .decompress(black_box(comp_data), CompressionAlgorithm::Zstd)
-                        .unwrap()
-                });
-            },
-        );
-    }
-
-    group.finish();
-}
-
-/// Benchmark: Compression ratio analysis
+/// Benchmark compression ratio
 fn bench_compression_ratio(c: &mut Criterion) {
+    let compressor = Compressor::new();
+    
     let mut group = c.benchmark_group("compression_ratio");
+    
+    let data_types = vec![
+        ("json", generate_test_data(10240, "json")),
+        ("text", generate_test_data(10240, "text")),
+        ("binary", generate_test_data(10240, "binary")),
+        ("sparse", generate_test_data(10240, "sparse")),
+    ];
 
-    let size = 65536;
-
-    for data_type in ["high", "medium", "low", "json"].iter() {
-        let data = generate_test_data(size, data_type);
-
-        group.bench_with_input(BenchmarkId::new("lz4", data_type), &data, |b, d| {
-            let config = synap_server::compression::compressor::CompressionConfig {
-                enabled: true,
-                min_payload_size: 0,
-                default_algorithm: CompressionAlgorithm::Lz4,
-                zstd_level: 3,
-            };
-            let compressor = Compressor::new(config);
-
+    for (name, data) in data_types {
+        let original_size = data.len();
+        
+        // LZ4 ratio
+        let lz4_compressed = compressor.compress(&data, CompressionAlgorithm::Lz4).unwrap();
+        let lz4_ratio = original_size as f64 / lz4_compressed.len() as f64;
+        
+        // Zstd ratio
+        let zstd_compressed = compressor.compress(&data, CompressionAlgorithm::Zstd).unwrap();
+        let zstd_ratio = original_size as f64 / zstd_compressed.len() as f64;
+        
+        println!(
+            "\n{} ({}KB): LZ4={:.2}x ({} bytes), Zstd={:.2}x ({} bytes)",
+            name,
+            original_size / 1024,
+            lz4_ratio,
+            lz4_compressed.len(),
+            zstd_ratio,
+            zstd_compressed.len()
+        );
+        
+        group.bench_function(BenchmarkId::new("ratio_check", name), |b| {
             b.iter(|| {
-                let compressed = compressor
-                    .compress(black_box(d), Some(CompressionAlgorithm::Lz4))
-                    .unwrap();
-                let ratio = compressor.compression_ratio(d.len(), compressed.len());
-                black_box(ratio);
-            });
-        });
-
-        group.bench_with_input(BenchmarkId::new("zstd", data_type), &data, |b, d| {
-            let config = synap_server::compression::compressor::CompressionConfig {
-                enabled: true,
-                min_payload_size: 0,
-                default_algorithm: CompressionAlgorithm::Zstd,
-                zstd_level: 3,
-            };
-            let compressor = Compressor::new(config);
-
-            b.iter(|| {
-                let compressed = compressor
-                    .compress(black_box(d), Some(CompressionAlgorithm::Zstd))
-                    .unwrap();
-                let ratio = compressor.compression_ratio(d.len(), compressed.len());
-                black_box(ratio);
-            });
+                let _lz4 = compressor.compress(black_box(&data), CompressionAlgorithm::Lz4);
+                let _zstd = compressor.compress(black_box(&data), CompressionAlgorithm::Zstd);
+            })
         });
     }
-
-    group.finish();
-}
-
-/// Benchmark: Round-trip (compress + decompress)
-fn bench_roundtrip(c: &mut Criterion) {
-    let mut group = c.benchmark_group("compression_roundtrip");
-
-    for size in [1024, 4096, 16384].iter() {
-        group.throughput(Throughput::Bytes(*size as u64));
-
-        group.bench_with_input(BenchmarkId::new("lz4", size), size, |b, &s| {
-            let config = synap_server::compression::compressor::CompressionConfig {
-                enabled: true,
-                min_payload_size: 0,
-                default_algorithm: CompressionAlgorithm::Lz4,
-                zstd_level: 3,
-            };
-            let compressor = Compressor::new(config);
-            let data = generate_test_data(s, "medium");
-
-            b.iter(|| {
-                let compressed = compressor
-                    .compress(black_box(&data), Some(CompressionAlgorithm::Lz4))
-                    .unwrap();
-                let decompressed = compressor
-                    .decompress(&compressed, CompressionAlgorithm::Lz4)
-                    .unwrap();
-                black_box(decompressed);
-            });
-        });
-
-        group.bench_with_input(BenchmarkId::new("zstd", size), size, |b, &s| {
-            let config = synap_server::compression::compressor::CompressionConfig {
-                enabled: true,
-                min_payload_size: 0,
-                default_algorithm: CompressionAlgorithm::Zstd,
-                zstd_level: 3,
-            };
-            let compressor = Compressor::new(config);
-            let data = generate_test_data(s, "medium");
-
-            b.iter(|| {
-                let compressed = compressor
-                    .compress(black_box(&data), Some(CompressionAlgorithm::Zstd))
-                    .unwrap();
-                let decompressed = compressor
-                    .decompress(&compressed, CompressionAlgorithm::Zstd)
-                    .unwrap();
-                black_box(decompressed);
-            });
-        });
-    }
-
-    group.finish();
-}
-
-/// Benchmark: Should compress decision
-fn bench_should_compress(c: &mut Criterion) {
-    let mut group = c.benchmark_group("should_compress");
-
-    group.bench_function("enabled_above_threshold", |b| {
-        let config = synap_server::compression::compressor::CompressionConfig {
-            enabled: true,
-            min_payload_size: 1024,
-            default_algorithm: CompressionAlgorithm::Lz4,
-            zstd_level: 3,
-        };
-        let compressor = Compressor::new(config);
-        let data = vec![0u8; 2048];
-
-        b.iter(|| {
-            let should = compressor.should_compress(black_box(&data));
-            black_box(should);
-        });
-    });
-
-    group.bench_function("enabled_below_threshold", |b| {
-        let config = synap_server::compression::compressor::CompressionConfig {
-            enabled: true,
-            min_payload_size: 1024,
-            default_algorithm: CompressionAlgorithm::Lz4,
-            zstd_level: 3,
-        };
-        let compressor = Compressor::new(config);
-        let data = vec![0u8; 512];
-
-        b.iter(|| {
-            let should = compressor.should_compress(black_box(&data));
-            black_box(should);
-        });
-    });
-
-    group.bench_function("disabled", |b| {
-        let config = synap_server::compression::compressor::CompressionConfig {
-            enabled: false,
-            min_payload_size: 1024,
-            default_algorithm: CompressionAlgorithm::Lz4,
-            zstd_level: 3,
-        };
-        let compressor = Compressor::new(config);
-        let data = vec![0u8; 2048];
-
-        b.iter(|| {
-            let should = compressor.should_compress(black_box(&data));
-            black_box(should);
-        });
-    });
-
+    
     group.finish();
 }
 
 criterion_group!(
     benches,
-    bench_lz4_compress,
-    bench_zstd_compress,
-    bench_lz4_decompress,
-    bench_zstd_decompress,
-    bench_compression_ratio,
-    bench_roundtrip,
-    bench_should_compress
+    bench_compression,
+    bench_decompression,
+    bench_compression_ratio
 );
-
 criterion_main!(benches);

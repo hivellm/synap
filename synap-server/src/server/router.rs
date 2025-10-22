@@ -34,6 +34,8 @@ pub fn create_router(
     let api_router = Router::new()
         // Health check
         .route("/health", get(handlers::health_check))
+        // Prometheus metrics
+        .route("/metrics", get(super::metrics_handler::metrics_handler))
         // KV endpoints
         .route("/kv/ws", get(handlers::kv_websocket)) // WebSocket for WATCH (future)
         .route("/kv/set", post(handlers::kv_set))

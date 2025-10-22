@@ -50,6 +50,9 @@ pub enum SynapError {
 
     #[error("Consumer not found: {0}")]
     ConsumerNotFound(String),
+
+    #[error("IO error: {0}")]
+    IoError(String),
 }
 
 impl SynapError {
@@ -71,6 +74,7 @@ impl SynapError {
                 StatusCode::NOT_FOUND
             }
             Self::QueueFull(_) => StatusCode::INSUFFICIENT_STORAGE,
+            Self::IoError(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 }

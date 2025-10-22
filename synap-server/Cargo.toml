@@ -41,6 +41,14 @@ hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
 # UMICP (Universal Matrix Intelligent Communication Protocol)
 umicp-core = { version = "0.2.3", features = ["websocket", "http2"] }
 
+# Metrics (Prometheus)
+prometheus = "0.13"
+lazy_static = "1.4"
+sys-info = "0.9"
+
+# Testing
+tempfile = "3.15"
+
 [dev-dependencies]
 criterion = { version = "0.7", features = ["async_tokio"] }
 reqwest = { version = "0.12", features = ["json"] }
@@ -49,6 +57,10 @@ tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
 
 [[bench]]
 name = "kv_bench"
+harness = false
+
+[[bench]]
+name = "compression_bench"
 harness = false
 
 [[bench]]
@@ -69,10 +81,6 @@ harness = false
 
 [[bench]]
 name = "pubsub_bench"
-harness = false
-
-[[bench]]
-name = "compression_bench"
 harness = false
 
 [[bench]]
