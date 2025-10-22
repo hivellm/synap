@@ -19,6 +19,7 @@ Synap has comprehensive test coverage across multiple layers:
 | **Replication Unit** | 25 | `src/replication/*.rs` | Log, Master, Replica, Config, Snapshot, Failover |
 | **Replication Extended** | 16 | `tests/replication_extended.rs` | Advanced replication scenarios |
 | **Replication Integration** | 10 | `tests/replication_integration.rs` | TCP communication tests |
+| **KV Replication Tests** | 16 | `tests/kv_replication_tests.rs` | All KV operations with replication |
 | **Integration Tests** | 21 | `tests/integration_*.rs` | Performance, persistence, hybrid storage |
 | **Auth & Security** | 58 | `src/auth/*.rs` | Users, Roles, API Keys, ACL |
 | **Protocol Tests** | ~150 | Various | REST, StreamableHTTP, WebSocket |
@@ -475,8 +476,8 @@ Integration Tests:        21/21  passing
 Auth & Security:          58/58  passing
 Protocol Tests:          ~150    passing
 
-Replication Subtotal:     51/52  (98% - 1 ignored)
-Total System Tests:       388+   (99.30%)
+Replication Subtotal:     67/68  (98.5% - 1 ignored)
+Total System Tests:       404+   (99.30%)
 
 Coverage: 99.30%
 Test Time: ~60s (with TCP integration tests)

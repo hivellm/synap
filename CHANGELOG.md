@@ -51,9 +51,10 @@ Full production implementation of **Redis-style replication** with master-slave 
 - **Lag Monitoring**: Real-time replication metrics and offset tracking
 - **Manual Failover**: Promote replica to master capability
 - **Auto-Reconnect**: Replicas auto-reconnect with automatic resync
-- **Tests**: 51 passing tests (25 unit + 16 extended + 10 integration)
+- **Tests**: 67 passing tests (25 unit + 16 extended + 10 integration + 16 KV replication)
 - **Benchmarks**: 5 comprehensive benchmark suites
 - **Stress Tested**: 5000 operations in single test scenario
+- **KV Operations**: All KV operations verified with replication (SET, GET, DELETE, MSET, MDEL, TTL, SCAN)
 
 ### 🎉 Full Persistence Implementation Complete - v0.2.0 ✅
 
@@ -122,7 +123,7 @@ Implementação **completa de persistência** em todos os subsistemas usando est
 - **Snapshot Creation**: 100-1,000 keys
 - **Snapshot Apply**: 100-1,000 keys
 
-#### ✅ Tests & Quality (51/52 Tests - 98% Success Rate)
+#### ✅ Tests & Quality (67/68 Tests - 98.5% Success Rate)
 
 - **25 Unit Tests** (100% passing):
   - Replication log: append, get, overflow, wraparound, concurrent
@@ -153,6 +154,24 @@ Implementação **completa de persistência** em todos os subsistemas usando est
   - ✅ **Auto-reconnect**: Replica reconnection with resync
   - ✅ **Large values**: 100KB values transfer successfully
   - ✅ **Stress test**: 5000 operations (1000 snapshot + 4000 replicated)
+
+- **16 KV Replication Tests** (100% passing - NEW):
+  - ✅ **SET/GET replication**: Basic key-value operations
+  - ✅ **DELETE replication**: Single and batch deletions
+  - ✅ **Batch operations**: MSET/MDEL with replication
+  - ✅ **TTL replication**: Expiring keys with TTL support
+  - ✅ **Update operations**: Value updates via replication log
+  - ✅ **SCAN operations**: Prefix scan on replicated data
+  - ✅ **EXISTS operations**: Key existence checks
+  - ✅ **Overwrite operations**: Multiple overwrites of same key
+  - ✅ **Large dataset**: 500 keys bulk replication
+  - ✅ **Mixed operations**: Combined SET/UPDATE/DELETE
+  - ✅ **Binary values**: Binary data integrity (JPEG, PNG headers)
+  - ✅ **Empty values**: Edge case with empty byte arrays
+  - ✅ **Unicode keys**: Multi-language key support (Japanese, Arabic, Russian, Emoji)
+  - ✅ **Stats replication**: Metadata consistency across nodes
+  - ✅ **Keys list**: Complete key enumeration on replicas
+  - ✅ **Data consistency**: Master-replica data verification
   
 - **1 Test Ignored** (flaky timing):
   - Concurrent writes during sync (complex race conditions)

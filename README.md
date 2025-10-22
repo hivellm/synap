@@ -399,7 +399,7 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - ✅ **Lag monitoring** (real-time offset tracking)
 - ✅ **Auto-reconnect** (intelligent full/partial resync)
 - ✅ **Manual failover** (promote replica to master)
-- ✅ **51 comprehensive tests** (25 unit + 16 extended + 10 integration)
+- ✅ **67 comprehensive tests** (25 unit + 16 extended + 10 integration + 16 KV operations)
 - ✅ **Stress tested** (5000 operations validated)
 - ✅ **Multiple replicas** (3+ replicas tested simultaneously)
 
@@ -412,7 +412,7 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 #### 🧪 Testing & Quality
 - ✅ **388 tests passing** (increased test coverage to 99.30%)
   - 106 library tests (KV, Queue, Streams, Persistence, Auth, Compression)
-  - 51 replication tests (25 unit + 16 extended + 10 integration TCP)
+  - 67 replication tests (25 unit + 16 extended + 10 integration TCP + 16 KV ops)
   - 21 integration tests (performance, hybrid storage, persistence e2e)
   - 58 authentication tests
   - Protocol tests across REST, StreamableHTTP, WebSocket
