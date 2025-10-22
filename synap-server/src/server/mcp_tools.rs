@@ -8,13 +8,19 @@ pub fn get_mcp_tools() -> Vec<Tool> {
         Tool {
             name: Cow::Borrowed("synap_kv_get"),
             title: Some("Get Key-Value".to_string()),
-            description: Some(Cow::Borrowed("Retrieve a value from the key-value store")),
+            description: Some(Cow::Borrowed("Retrieve a value from the key-value store (returns string by default)")),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "key": {
                         "type": "string",
                         "description": "The key to retrieve"
+                    },
+                    "type": {
+                        "type": "string",
+                        "description": "Return type: 'string' (default) or 'bytes'",
+                        "enum": ["string", "bytes"],
+                        "default": "string"
                     }
                 },
                 "required": ["key"]

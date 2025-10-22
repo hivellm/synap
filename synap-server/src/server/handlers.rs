@@ -43,10 +43,22 @@ pub struct SetResponse {
 }
 
 #[derive(Debug, Serialize)]
-pub struct GetResponse {
-    pub found: bool,
-    pub value: Option<serde_json::Value>,
-    pub ttl: Option<u64>,
+#[serde(untagged)]
+pub enum GetResponse {
+    String {
+        found: bool,
+        value: Option<String>,
+        ttl: Option<u64>,
+        #[serde(rename = "type")]
+        value_type: String,
+    },
+    Bytes {
+        found: bool,
+        value: Option<Vec<u8>>,
+        ttl: Option<u64>,
+        #[serde(rename = "type")]
+        value_type: String,
+    },
 }
 
 #[derive(Debug, Serialize)]
@@ -179,27 +191,42 @@ pub async fn kv_set(
 pub async fn kv_get(
     State(state): State<AppState>,
     Path(key): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Result<Json<GetResponse>, SynapError> {
-    debug!("REST GET key={}", key);
+    let return_type = params.get("type").map(|s| s.as_str()).unwrap_or("string");
+    debug!("REST GET key={}, type={}", key, return_type);
 
     let value_bytes = state.kv_store.get(&key).await?;
 
     if let Some(bytes) = value_bytes {
-        let value: serde_json::Value = serde_json::from_slice(&bytes)
-            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
-
         let ttl = state.kv_store.ttl(&key).await.ok().flatten();
 
-        Ok(Json(GetResponse {
-            found: true,
-            value: Some(value),
-            ttl,
-        }))
+        match return_type {
+            "bytes" => Ok(Json(GetResponse::Bytes {
+                found: true,
+                value: Some(bytes),
+                ttl,
+                value_type: "bytes".to_string(),
+            })),
+            _ => {
+                // Default: return as string
+                let value_str = String::from_utf8(bytes)
+                    .unwrap_or_else(|e| format!("<binary data: {} bytes>", e.as_bytes().len()));
+                
+                Ok(Json(GetResponse::String {
+                    found: true,
+                    value: Some(value_str),
+                    ttl,
+                    value_type: "string".to_string(),
+                }))
+            }
+        }
     } else {
-        Ok(Json(GetResponse {
+        Ok(Json(GetResponse::String {
             found: false,
             value: None,
             ttl: None,
+            value_type: "string".to_string(),
         }))
     }
 }
@@ -757,21 +784,42 @@ async fn handle_kv_get_cmd(
         .and_then(|v| v.as_str())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
 
+    let return_type = request
+        .payload
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("string");
+
     let value_bytes = store.get(key).await?;
 
     if let Some(bytes) = value_bytes {
-        let value: serde_json::Value = serde_json::from_slice(&bytes)
-            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
-
         let ttl = store.ttl(key).await.ok().flatten();
 
-        Ok(serde_json::json!({
-            "found": true,
-            "value": value,
-            "ttl": ttl
-        }))
+        match return_type {
+            "bytes" => Ok(serde_json::json!({
+                "found": true,
+                "value": bytes,
+                "type": "bytes",
+                "ttl": ttl
+            })),
+            _ => {
+                // Default: return as string
+                let value_str = String::from_utf8(bytes)
+                    .unwrap_or_else(|e| format!("<binary data: {} bytes>", e.as_bytes().len()));
+                
+                Ok(serde_json::json!({
+                    "found": true,
+                    "value": value_str,
+                    "type": "string",
+                    "ttl": ttl
+                }))
+            }
+        }
     } else {
-        Ok(serde_json::json!({ "found": false }))
+        Ok(serde_json::json!({
+            "found": false,
+            "type": "string"
+        }))
     }
 }
 

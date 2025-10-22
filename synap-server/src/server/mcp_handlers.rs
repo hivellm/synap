@@ -35,13 +35,44 @@ async fn handle_kv_get(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
 
-    let value = state
+    let return_type = args
+        .get("type")
+        .and_then(|v| v.as_str())
+        .unwrap_or("string");
+
+    let value_bytes = state
         .kv_store
         .get(key)
         .await
         .map_err(|e| ErrorData::internal_error(format!("Get failed: {}", e), None))?;
 
-    let response = json!({ "value": value });
+    let response = match value_bytes {
+        Some(bytes) => {
+            match return_type {
+                "bytes" => json!({
+                    "found": true,
+                    "value": bytes,
+                    "type": "bytes"
+                }),
+                _ => {
+                    // Default: return as string
+                    let value_str = String::from_utf8(bytes)
+                        .unwrap_or_else(|e| format!("<binary data: {} bytes>", e.as_bytes().len()));
+                    json!({
+                        "found": true,
+                        "value": value_str,
+                        "type": "string"
+                    })
+                }
+            }
+        }
+        None => json!({
+            "found": false,
+            "value": null,
+            "type": "string"
+        }),
+    };
+
     Ok(CallToolResult::success(vec![Content::text(
         response.to_string(),
     )]))
