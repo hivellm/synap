@@ -36,6 +36,7 @@ COPY synap-cli/Cargo.toml ./synap-cli/
 
 # Copy source code
 COPY synap-server/src ./synap-server/src
+COPY synap-server/benches ./synap-server/benches
 COPY synap-cli/src ./synap-cli/src
 
 # Build release binary with optimizations
