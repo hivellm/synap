@@ -1,0 +1,1698 @@
+openapi: 3.0.3
+info:
+  title: Synap API
+  description: |
+    High-Performance In-Memory Key-Value Store & Message Broker
+    
+    Synap combines Redis, RabbitMQ, and Kafka features in a single platform:
+    - **Key-Value Store**: Radix-tree based storage with TTL support
+    - **Message Queues**: RabbitMQ-style queues with ACK/NACK
+    - **Event Streams**: Kafka-style partitioned topics with consumer groups
+    - **Pub/Sub**: Topic-based messaging with wildcard support
+    
+    **Authentication**: Supports Basic Auth, Bearer Token, and API Key
+  version: 0.3.0-rc
+  contact:
+    name: Synap Team
+    url: https://github.com/hivellm/synap
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:15500
+    description: Local development server
+  - url: https://api.synap.io
+    description: Production server
+
+tags:
+  - name: Health
+    description: Health check endpoints
+  - name: Key-Value
+    description: Redis-style key-value operations
+  - name: Queue
+    description: RabbitMQ-style message queues
+  - name: Event Streams (Simple)
+    description: Room-based event streaming
+  - name: Event Streams (Partitioned)
+    description: Kafka-style partitioned topics
+  - name: Consumer Groups
+    description: Kafka-style consumer group coordination
+  - name: Pub/Sub
+    description: Topic-based publish/subscribe
+  - name: Persistence
+    description: Snapshot and persistence management
+
+paths:
+  # ==========================================
+  # Health Endpoints
+  # ==========================================
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      description: Check if the server is running and healthy
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+                  service:
+                    type: string
+                    example: synap
+                  version:
+                    type: string
+                    example: 0.3.0-rc
+
+  # ==========================================
+  # Key-Value Endpoints
+  # ==========================================
+  /kv/set:
+    post:
+      tags: [Key-Value]
+      summary: Set a key-value pair
+      description: Store a value with optional TTL
+      operationId: kvSet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [key, value]
+              properties:
+                key:
+                  type: string
+                  example: user:123
+                value:
+                  type: object
+                  example: {"name": "John Doe", "age": 30}
+                ttl:
+                  type: integer
+                  description: Time-to-live in seconds
+                  example: 3600
+      responses:
+        '200':
+          description: Key set successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  key:
+                    type: string
+                    example: user:123
+
+  /kv/get/{key}:
+    get:
+      tags: [Key-Value]
+      summary: Get a value by key
+      description: Retrieve the value associated with a key
+      operationId: kvGet
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user:123
+      responses:
+        '200':
+          description: Value retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  found:
+                    type: boolean
+                    example: true
+                  value:
+                    type: object
+                    example: {"name": "John Doe", "age": 30}
+                  ttl:
+                    type: integer
+                    nullable: true
+                    example: 3456
+
+  /kv/del/{key}:
+    delete:
+      tags: [Key-Value]
+      summary: Delete a key
+      description: Remove a key-value pair from the store
+      operationId: kvDelete
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user:123
+      responses:
+        '200':
+          description: Key deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted:
+                    type: boolean
+                    example: true
+                  key:
+                    type: string
+                    example: user:123
+
+  /kv/stats:
+    get:
+      tags: [Key-Value]
+      summary: Get store statistics
+      description: Retrieve statistics about the key-value store
+      operationId: kvStats
+      responses:
+        '200':
+          description: Statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/KVStats'
+
+  # ==========================================
+  # Queue Endpoints
+  # ==========================================
+  /queue/{name}:
+    post:
+      tags: [Queue]
+      summary: Create a queue
+      description: Create a new message queue with configuration
+      operationId: queueCreate
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          example: tasks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateQueueRequest'
+      responses:
+        '200':
+          description: Queue created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  queue:
+                    type: string
+                    example: tasks
+    delete:
+      tags: [Queue]
+      summary: Delete a queue
+      description: Delete a queue and all its messages
+      operationId: queueDelete
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          example: tasks
+      responses:
+        '200':
+          description: Queue deleted successfully
+
+  /queue/{name}/publish:
+    post:
+      tags: [Queue]
+      summary: Publish a message
+      description: Add a message to the queue
+      operationId: queuePublish
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          example: tasks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublishRequest'
+      responses:
+        '200':
+          description: Message published successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PublishResponse'
+
+  /queue/{name}/consume/{consumer_id}:
+    get:
+      tags: [Queue]
+      summary: Consume a message
+      description: Retrieve a message from the queue (one-time)
+      operationId: queueConsume
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          example: tasks
+        - name: consumer_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: worker-1
+      responses:
+        '200':
+          description: Message consumed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsumeResponse'
+
+  /queue/{name}/ack:
+    post:
+      tags: [Queue]
+      summary: Acknowledge a message
+      description: Confirm successful processing of a message
+      operationId: queueAck
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          example: tasks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message_id]
+              properties:
+                message_id:
+                  type: string
+                  example: msg_abc123xyz
+      responses:
+        '200':
+          description: Message acknowledged successfully
+
+  /queue/{name}/nack:
+    post:
+      tags: [Queue]
+      summary: Negative acknowledge
+      description: Reject a message and optionally requeue it
+      operationId: queueNack
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          example: tasks
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message_id]
+              properties:
+                message_id:
+                  type: string
+                  example: msg_abc123xyz
+                requeue:
+                  type: boolean
+                  default: true
+                  example: true
+      responses:
+        '200':
+          description: Message rejected successfully
+
+  /queue/{name}/stats:
+    get:
+      tags: [Queue]
+      summary: Get queue statistics
+      description: Retrieve statistics about a queue
+      operationId: queueStats
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          example: tasks
+      responses:
+        '200':
+          description: Statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueueStats'
+
+  /queue/list:
+    get:
+      tags: [Queue]
+      summary: List all queues
+      description: Get a list of all queues
+      operationId: queueList
+      responses:
+        '200':
+          description: Queue list retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  queues:
+                    type: array
+                    items:
+                      type: string
+                    example: [tasks, emails, notifications]
+
+  # ==========================================
+  # Event Streams (Simple)
+  # ==========================================
+  /stream/{room}:
+    post:
+      tags: [Event Streams (Simple)]
+      summary: Create a room
+      description: Create a new event stream room
+      operationId: streamCreateRoom
+      parameters:
+        - name: room
+          in: path
+          required: true
+          schema:
+            type: string
+          example: chat-room-1
+      responses:
+        '200':
+          description: Room created successfully
+    delete:
+      tags: [Event Streams (Simple)]
+      summary: Delete a room
+      description: Delete an event stream room
+      operationId: streamDeleteRoom
+      parameters:
+        - name: room
+          in: path
+          required: true
+          schema:
+            type: string
+          example: chat-room-1
+      responses:
+        '200':
+          description: Room deleted successfully
+
+  /stream/{room}/publish:
+    post:
+      tags: [Event Streams (Simple)]
+      summary: Publish an event
+      description: Publish an event to a room
+      operationId: streamPublish
+      parameters:
+        - name: room
+          in: path
+          required: true
+          schema:
+            type: string
+          example: chat-room-1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StreamPublishRequest'
+      responses:
+        '200':
+          description: Event published successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamPublishResponse'
+
+  /stream/{room}/consume/{subscriber_id}:
+    get:
+      tags: [Event Streams (Simple)]
+      summary: Consume events
+      description: Retrieve events from a room starting from an offset
+      operationId: streamConsume
+      parameters:
+        - name: room
+          in: path
+          required: true
+          schema:
+            type: string
+          example: chat-room-1
+        - name: subscriber_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user-123
+        - name: from_offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+          example: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+          example: 50
+      responses:
+        '200':
+          description: Events retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StreamConsumeResponse'
+
+  /stream/{room}/stats:
+    get:
+      tags: [Event Streams (Simple)]
+      summary: Get room statistics
+      description: Retrieve statistics about a room
+      operationId: streamRoomStats
+      parameters:
+        - name: room
+          in: path
+          required: true
+          schema:
+            type: string
+          example: chat-room-1
+      responses:
+        '200':
+          description: Statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RoomStats'
+
+  /stream/list:
+    get:
+      tags: [Event Streams (Simple)]
+      summary: List all rooms
+      description: Get a list of all event stream rooms
+      operationId: streamListRooms
+      responses:
+        '200':
+          description: Room list retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rooms:
+                    type: array
+                    items:
+                      type: string
+                    example: [chat-room-1, game-lobby-42]
+                  count:
+                    type: integer
+                    example: 2
+
+  # ==========================================
+  # Event Streams (Partitioned - Kafka-style)
+  # ==========================================
+  /topics:
+    get:
+      tags: [Event Streams (Partitioned)]
+      summary: List all topics
+      description: Get a list of all partitioned topics
+      operationId: listTopics
+      responses:
+        '200':
+          description: Topic list retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  topics:
+                    type: array
+                    items:
+                      type: string
+                    example: [orders, events, logs]
+                  count:
+                    type: integer
+                    example: 3
+
+  /topics/{topic}:
+    post:
+      tags: [Event Streams (Partitioned)]
+      summary: Create a partitioned topic
+      description: Create a new topic with partitions and retention policy
+      operationId: createPartitionedTopic
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+          example: orders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTopicRequest'
+      responses:
+        '200':
+          description: Topic created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  topic:
+                    type: string
+                    example: orders
+                  num_partitions:
+                    type: integer
+                    example: 3
+                  replication_factor:
+                    type: integer
+                    example: 1
+    delete:
+      tags: [Event Streams (Partitioned)]
+      summary: Delete a topic
+      description: Delete a partitioned topic
+      operationId: deleteTopic
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+          example: orders
+      responses:
+        '200':
+          description: Topic deleted successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  deleted:
+                    type: string
+                    example: orders
+
+  /topics/{topic}/stats:
+    get:
+      tags: [Event Streams (Partitioned)]
+      summary: Get topic statistics
+      description: Retrieve statistics for all partitions in a topic
+      operationId: getTopicStats
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+          example: orders
+      responses:
+        '200':
+          description: Statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  topic:
+                    type: string
+                    example: orders
+                  partitions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PartitionStats'
+
+  /topics/{topic}/publish:
+    post:
+      tags: [Event Streams (Partitioned)]
+      summary: Publish to topic
+      description: Publish an event to a partitioned topic (key-based or round-robin routing)
+      operationId: publishToPartition
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+          example: orders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartitionPublishRequest'
+      responses:
+        '200':
+          description: Event published successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  partition_id:
+                    type: integer
+                    example: 2
+                  offset:
+                    type: integer
+                    format: int64
+                    example: 1234
+                  topic:
+                    type: string
+                    example: orders
+
+  /topics/{topic}/partitions/{partition_id}/consume:
+    post:
+      tags: [Event Streams (Partitioned)]
+      summary: Consume from partition
+      description: Consume events from a specific partition
+      operationId: consumeFromPartition
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+          example: orders
+        - name: partition_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConsumePartitionRequest'
+      responses:
+        '200':
+          description: Events consumed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  topic:
+                    type: string
+                    example: orders
+                  partition_id:
+                    type: integer
+                    example: 2
+                  events:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PartitionEvent'
+                  next_offset:
+                    type: integer
+                    format: int64
+                    example: 1101
+                  count:
+                    type: integer
+                    example: 100
+
+  # ==========================================
+  # Consumer Groups
+  # ==========================================
+  /consumer-groups:
+    get:
+      tags: [Consumer Groups]
+      summary: List consumer groups
+      description: Get a list of all consumer groups
+      operationId: listConsumerGroups
+      responses:
+        '200':
+          description: Consumer group list retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  groups:
+                    type: array
+                    items:
+                      type: string
+                    example: [order-processors, log-aggregators]
+                  count:
+                    type: integer
+                    example: 2
+
+  /consumer-groups/{group_id}:
+    post:
+      tags: [Consumer Groups]
+      summary: Create consumer group
+      description: Create a new consumer group for a topic
+      operationId: createConsumerGroup
+      parameters:
+        - name: group_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: order-processors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConsumerGroupRequest'
+      responses:
+        '200':
+          description: Consumer group created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  group_id:
+                    type: string
+                    example: order-processors
+                  topic:
+                    type: string
+                    example: orders
+
+  /consumer-groups/{group_id}/join:
+    post:
+      tags: [Consumer Groups]
+      summary: Join consumer group
+      description: Join a consumer group and get assigned partitions
+      operationId: joinConsumerGroup
+      parameters:
+        - name: group_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: order-processors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JoinGroupRequest'
+      responses:
+        '200':
+          description: Successfully joined consumer group
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  member_id:
+                    type: string
+                    example: 550e8400-e29b-41d4-a716-446655440000
+                  group_id:
+                    type: string
+                    example: order-processors
+
+  /consumer-groups/{group_id}/members/{member_id}/leave:
+    delete:
+      tags: [Consumer Groups]
+      summary: Leave consumer group
+      description: Leave a consumer group and trigger rebalancing
+      operationId: leaveConsumerGroup
+      parameters:
+        - name: group_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: order-processors
+        - name: member_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: 550e8400-e29b-41d4-a716-446655440000
+      responses:
+        '200':
+          description: Successfully left consumer group
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  member_id:
+                    type: string
+                    example: 550e8400-e29b-41d4-a716-446655440000
+
+  /consumer-groups/{group_id}/members/{member_id}/assignment:
+    get:
+      tags: [Consumer Groups]
+      summary: Get partition assignment
+      description: Get the partition assignment for a consumer
+      operationId: getPartitionAssignment
+      parameters:
+        - name: group_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: order-processors
+        - name: member_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: 550e8400-e29b-41d4-a716-446655440000
+      responses:
+        '200':
+          description: Assignment retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  member_id:
+                    type: string
+                    example: 550e8400-e29b-41d4-a716-446655440000
+                  group_id:
+                    type: string
+                    example: order-processors
+                  partitions:
+                    type: array
+                    items:
+                      type: integer
+                    example: [0, 3]
+
+  /consumer-groups/{group_id}/members/{member_id}/heartbeat:
+    post:
+      tags: [Consumer Groups]
+      summary: Send heartbeat
+      description: Send a heartbeat to keep the consumer alive in the group
+      operationId: consumerHeartbeat
+      parameters:
+        - name: group_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: order-processors
+        - name: member_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: 550e8400-e29b-41d4-a716-446655440000
+      responses:
+        '200':
+          description: Heartbeat accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+
+  /consumer-groups/{group_id}/offsets/commit:
+    post:
+      tags: [Consumer Groups]
+      summary: Commit offset
+      description: Commit the current offset for a partition
+      operationId: commitOffset
+      parameters:
+        - name: group_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: order-processors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommitOffsetRequest'
+      responses:
+        '200':
+          description: Offset committed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  partition_id:
+                    type: integer
+                    example: 0
+                  offset:
+                    type: integer
+                    format: int64
+                    example: 1500
+
+  /consumer-groups/{group_id}/offsets/{partition_id}:
+    get:
+      tags: [Consumer Groups]
+      summary: Get committed offset
+      description: Retrieve the committed offset for a partition
+      operationId: getCommittedOffset
+      parameters:
+        - name: group_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: order-processors
+        - name: partition_id
+          in: path
+          required: true
+          schema:
+            type: integer
+          example: 0
+      responses:
+        '200':
+          description: Offset retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  group_id:
+                    type: string
+                    example: order-processors
+                  partition_id:
+                    type: integer
+                    example: 0
+                  offset:
+                    type: integer
+                    format: int64
+                    nullable: true
+                    example: 1500
+
+  /consumer-groups/{group_id}/stats:
+    get:
+      tags: [Consumer Groups]
+      summary: Get consumer group stats
+      description: Retrieve statistics about a consumer group
+      operationId: getConsumerGroupStats
+      parameters:
+        - name: group_id
+          in: path
+          required: true
+          schema:
+            type: string
+          example: order-processors
+      responses:
+        '200':
+          description: Statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConsumerGroupStats'
+
+  # ==========================================
+  # Pub/Sub Endpoints
+  # ==========================================
+  /pubsub/{topic}/publish:
+    post:
+      tags: [Pub/Sub]
+      summary: Publish message
+      description: Publish a message to a pub/sub topic
+      operationId: pubsubPublish
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+          example: notifications.email
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message:
+                  type: object
+                  example: {"to": "user@example.com", "subject": "Welcome"}
+      responses:
+        '200':
+          description: Message published successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  subscribers_notified:
+                    type: integer
+                    example: 5
+
+  /pubsub/stats:
+    get:
+      tags: [Pub/Sub]
+      summary: Get pub/sub statistics
+      description: Retrieve statistics about the pub/sub system
+      operationId: pubsubStats
+      responses:
+        '200':
+          description: Statistics retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PubSubStats'
+
+  /pubsub/topics:
+    get:
+      tags: [Pub/Sub]
+      summary: List topics
+      description: Get a list of all pub/sub topics
+      operationId: pubsubListTopics
+      responses:
+        '200':
+          description: Topic list retrieved successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  topics:
+                    type: array
+                    items:
+                      type: string
+                    example: [notifications.email, notifications.sms, events.user.login]
+
+  /pubsub/{topic}/info:
+    get:
+      tags: [Pub/Sub]
+      summary: Get topic info
+      description: Get information about a specific topic
+      operationId: pubsubTopicInfo
+      parameters:
+        - name: topic
+          in: path
+          required: true
+          schema:
+            type: string
+          example: notifications.email
+      responses:
+        '200':
+          description: Topic info retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopicInfo'
+
+  # ==========================================
+  # Persistence Endpoints
+  # ==========================================
+  /snapshot:
+    post:
+      tags: [Persistence]
+      summary: Trigger snapshot
+      description: Manually trigger a snapshot creation
+      operationId: triggerSnapshot
+      responses:
+        '200':
+          description: Snapshot created successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: Snapshot created
+
+components:
+  securitySchemes:
+    BasicAuth:
+      type: http
+      scheme: basic
+      description: HTTP Basic Authentication (username:password)
+    
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: API Key as Bearer token
+    
+    ApiKeyAuth:
+      type: apiKey
+      in: query
+      name: api_key
+      description: API Key in query parameter
+
+  schemas:
+    # KV Schemas
+    KVStats:
+      type: object
+      properties:
+        total_keys:
+          type: integer
+          example: 10000
+        total_memory_bytes:
+          type: integer
+          example: 524288
+        operations:
+          type: object
+          properties:
+            gets:
+              type: integer
+              format: int64
+              example: 50000
+            sets:
+              type: integer
+              format: int64
+              example: 10000
+            dels:
+              type: integer
+              format: int64
+              example: 1000
+            hits:
+              type: integer
+              format: int64
+              example: 45000
+            misses:
+              type: integer
+              format: int64
+              example: 5000
+        hit_rate:
+          type: number
+          format: float
+          example: 0.9
+
+    # Queue Schemas
+    CreateQueueRequest:
+      type: object
+      properties:
+        max_depth:
+          type: integer
+          default: 10000
+          example: 10000
+        ack_deadline_secs:
+          type: integer
+          format: int64
+          default: 30
+          example: 30
+        default_max_retries:
+          type: integer
+          default: 3
+          example: 3
+        default_priority:
+          type: integer
+          minimum: 0
+          maximum: 9
+          default: 5
+          example: 5
+
+    PublishRequest:
+      type: object
+      required: [payload]
+      properties:
+        payload:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+            maximum: 255
+          example: [72, 101, 108, 108, 111]
+        priority:
+          type: integer
+          minimum: 0
+          maximum: 9
+          default: 5
+          example: 9
+        max_retries:
+          type: integer
+          default: 3
+          example: 3
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          example: {"content-type": "application/json"}
+
+    PublishResponse:
+      type: object
+      properties:
+        message_id:
+          type: string
+          example: msg_abc123xyz
+        queue:
+          type: string
+          example: tasks
+
+    ConsumeResponse:
+      type: object
+      properties:
+        message_id:
+          type: string
+          nullable: true
+          example: msg_abc123xyz
+        payload:
+          type: array
+          items:
+            type: integer
+          nullable: true
+          example: [72, 101, 108, 108, 111]
+        priority:
+          type: integer
+          nullable: true
+          example: 9
+        retry_count:
+          type: integer
+          nullable: true
+          example: 0
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+          nullable: true
+
+    QueueStats:
+      type: object
+      properties:
+        name:
+          type: string
+          example: tasks
+        depth:
+          type: integer
+          example: 150
+        pending:
+          type: integer
+          example: 25
+        total_published:
+          type: integer
+          format: int64
+          example: 10000
+        total_consumed:
+          type: integer
+          format: int64
+          example: 9500
+        total_acked:
+          type: integer
+          format: int64
+          example: 9450
+        total_nacked:
+          type: integer
+          format: int64
+          example: 50
+        dlq_count:
+          type: integer
+          example: 5
+
+    # Stream Schemas
+    StreamPublishRequest:
+      type: object
+      required: [event, data]
+      properties:
+        event:
+          type: string
+          example: message
+        data:
+          type: object
+          example: {"user": "alice", "text": "Hello!"}
+
+    StreamPublishResponse:
+      type: object
+      properties:
+        offset:
+          type: integer
+          format: int64
+          example: 42
+        room:
+          type: string
+          example: chat-room-1
+
+    StreamConsumeResponse:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/StreamEvent'
+        next_offset:
+          type: integer
+          format: int64
+          example: 50
+
+    StreamEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          example: evt_abc123
+        offset:
+          type: integer
+          format: int64
+          example: 42
+        room:
+          type: string
+          example: chat-room-1
+        event:
+          type: string
+          example: message
+        data:
+          type: array
+          items:
+            type: integer
+          example: [72, 101, 108, 108, 111]
+        timestamp:
+          type: integer
+          format: int64
+          example: 1729598400
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    RoomStats:
+      type: object
+      properties:
+        name:
+          type: string
+          example: chat-room-1
+        message_count:
+          type: integer
+          example: 1500
+        min_offset:
+          type: integer
+          format: int64
+          example: 0
+        max_offset:
+          type: integer
+          format: int64
+          example: 1499
+        subscriber_count:
+          type: integer
+          example: 5
+        total_published:
+          type: integer
+          format: int64
+          example: 2000
+        total_consumed:
+          type: integer
+          format: int64
+          example: 7500
+
+    # Partitioned Streams Schemas
+    CreateTopicRequest:
+      type: object
+      properties:
+        num_partitions:
+          type: integer
+          default: 3
+          example: 3
+        replication_factor:
+          type: integer
+          default: 1
+          example: 1
+        retention_policy:
+          $ref: '#/components/schemas/RetentionPolicy'
+        segment_bytes:
+          type: integer
+          format: int64
+          default: 104857600
+          example: 104857600
+
+    RetentionPolicy:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [Time, Size, Messages, Combined, Infinite]
+          example: Combined
+        retention_secs:
+          type: integer
+          format: int64
+          nullable: true
+          example: 3600
+        max_bytes:
+          type: integer
+          format: int64
+          nullable: true
+          example: 104857600
+        max_messages:
+          type: integer
+          format: int64
+          nullable: true
+          example: 100000
+
+    PartitionPublishRequest:
+      type: object
+      required: [event_type, data]
+      properties:
+        event_type:
+          type: string
+          example: order.created
+        key:
+          type: string
+          nullable: true
+          description: Partition key for hash-based routing
+          example: customer-123
+        data:
+          type: object
+          example: {"order_id": "ORD-456", "amount": 99.99}
+
+    ConsumePartitionRequest:
+      type: object
+      properties:
+        from_offset:
+          type: integer
+          format: int64
+          default: 0
+          example: 1000
+        limit:
+          type: integer
+          default: 100
+          example: 100
+
+    PartitionEvent:
+      type: object
+      properties:
+        id:
+          type: string
+          example: evt-001
+        partition_id:
+          type: integer
+          example: 2
+        offset:
+          type: integer
+          format: int64
+          example: 1000
+        topic:
+          type: string
+          example: orders
+        event_type:
+          type: string
+          example: order.created
+        key:
+          type: array
+          items:
+            type: integer
+          nullable: true
+          example: [99, 117, 115, 116, 111, 109, 101, 114]
+        data:
+          type: array
+          items:
+            type: integer
+          example: [123, 34, 97, 109, 111, 117, 110, 116, 34, 58, 57, 57, 46, 57, 57, 125]
+        timestamp:
+          type: integer
+          format: int64
+          example: 1729598400
+        size_bytes:
+          type: integer
+          format: int64
+          example: 256
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+
+    PartitionStats:
+      type: object
+      properties:
+        partition_id:
+          type: integer
+          example: 0
+        topic:
+          type: string
+          example: orders
+        message_count:
+          type: integer
+          format: int64
+          example: 1500
+        total_bytes:
+          type: integer
+          format: int64
+          example: 384000
+        min_offset:
+          type: integer
+          format: int64
+          example: 0
+        max_offset:
+          type: integer
+          format: int64
+          example: 1499
+        last_compaction:
+          type: integer
+          format: int64
+          example: 60
+
+    # Consumer Group Schemas
+    CreateConsumerGroupRequest:
+      type: object
+      required: [topic, partition_count]
+      properties:
+        topic:
+          type: string
+          example: orders
+        partition_count:
+          type: integer
+          example: 3
+        strategy:
+          type: string
+          enum: [round_robin, range, sticky]
+          default: round_robin
+          example: round_robin
+        session_timeout_secs:
+          type: integer
+          format: int64
+          default: 30
+          example: 30
+
+    JoinGroupRequest:
+      type: object
+      properties:
+        session_timeout_secs:
+          type: integer
+          format: int64
+          default: 30
+          example: 30
+
+    CommitOffsetRequest:
+      type: object
+      required: [partition_id, offset]
+      properties:
+        partition_id:
+          type: integer
+          example: 0
+        offset:
+          type: integer
+          format: int64
+          example: 1500
+
+    ConsumerGroupStats:
+      type: object
+      properties:
+        group_id:
+          type: string
+          example: order-processors
+        topic:
+          type: string
+          example: orders
+        state:
+          type: string
+          enum: [Empty, Stable, Rebalancing, Dead]
+          example: Stable
+        member_count:
+          type: integer
+          example: 3
+        generation:
+          type: integer
+          format: int64
+          example: 5
+        partition_count:
+          type: integer
+          example: 3
+        committed_partitions:
+          type: integer
+          example: 3
+        last_rebalance_secs:
+          type: integer
+          format: int64
+          example: 120
+
+    # Pub/Sub Schemas
+    PubSubStats:
+      type: object
+      properties:
+        total_topics:
+          type: integer
+          example: 15
+        total_subscribers:
+          type: integer
+          example: 50
+        total_messages:
+          type: integer
+          format: int64
+          example: 100000
+
+    TopicInfo:
+      type: object
+      properties:
+        topic:
+          type: string
+          example: notifications.email
+        subscriber_count:
+          type: integer
+          example: 10
+        message_count:
+          type: integer
+          format: int64
+          example: 5000
+        created_at:
+          type: integer
+          format: int64
+          example: 1729598400
+
+security:
+  - BasicAuth: []
+  - BearerAuth: []
+  - ApiKeyAuth: []
+  - {}  # Allow unauthenticated access (optional auth)
+
