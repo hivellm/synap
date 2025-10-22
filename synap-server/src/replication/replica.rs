@@ -80,68 +80,68 @@ impl ReplicaNode {
         let master_addr = self.config.master_address.unwrap();
         let reconnect_delay = Duration::from_millis(self.config.reconnect_delay_ms);
 
-        eprintln!(
+        info!(
             "[REPLICA] Replication loop starting, master: {}, auto_reconnect: {}",
             master_addr, self.config.auto_reconnect
         );
 
         loop {
-            eprintln!("[REPLICA] Connecting to master at {}", master_addr);
+            info!("[REPLICA] Connecting to master at {}", master_addr);
 
             match self.connect_and_sync(master_addr).await {
                 Ok(_) => {
-                    eprintln!("[REPLICA] Replication connection closed normally");
+                    info!("[REPLICA] Replication connection closed normally");
                 }
                 Err(e) => {
-                    eprintln!("[REPLICA] Replication error: {}", e);
+                    info!("[REPLICA] Replication error: {}", e);
                     self.connected.store(false, Ordering::SeqCst);
                 }
             }
 
             if !self.config.auto_reconnect {
-                eprintln!("[REPLICA] Auto-reconnect disabled, stopping replication loop");
+                info!("[REPLICA] Auto-reconnect disabled, stopping replication loop");
                 break;
             }
 
-            eprintln!("[REPLICA] Reconnecting in {:?}", reconnect_delay);
+            info!("[REPLICA] Reconnecting in {:?}", reconnect_delay);
             tokio::time::sleep(reconnect_delay).await;
         }
 
-        eprintln!("[REPLICA] Replication loop ended");
+        info!("[REPLICA] Replication loop ended");
     }
 
     /// Connect to master and start synchronization
     async fn connect_and_sync(&self, master_addr: SocketAddr) -> ReplicationResult<()> {
-        eprintln!("[REPLICA] TCP connecting to {}...", master_addr);
+        info!("[REPLICA] TCP connecting to {}...", master_addr);
 
         // Connect to master
         let mut stream = TcpStream::connect(master_addr).await.map_err(|e| {
-            eprintln!("[REPLICA] TCP connection failed: {}", e);
+            info!("[REPLICA] TCP connection failed: {}", e);
             ReplicationError::ConnectionFailed(e.to_string())
         })?;
 
-        eprintln!("[REPLICA] TCP connected to master");
+        info!("[REPLICA] TCP connected to master");
 
         // Send handshake with current offset
         let current_offset = self.current_offset.load(Ordering::SeqCst);
         let handshake = bincode::serialize(&current_offset)?;
-        eprintln!("[REPLICA] Sending handshake, offset: {}", current_offset);
+        info!("[REPLICA] Sending handshake, offset: {}", current_offset);
         stream.write_all(&handshake).await?;
         stream.flush().await?;
 
-        eprintln!("[REPLICA] Handshake sent");
+        info!("[REPLICA] Handshake sent");
 
         // Mark as connected
         self.connected.store(true, Ordering::SeqCst);
-        eprintln!("[REPLICA] Marked as connected");
+        info!("[REPLICA] Marked as connected");
 
         // Receive sync (full or partial)
-        eprintln!("[REPLICA] Calling receive_sync...");
+        info!("[REPLICA] Calling receive_sync...");
         self.receive_sync(&mut stream).await?;
-        eprintln!("[REPLICA] receive_sync completed");
+        info!("[REPLICA] receive_sync completed");
 
         // Receive ongoing replication commands
-        eprintln!("[REPLICA] Starting to receive commands...");
+        info!("[REPLICA] Starting to receive commands...");
         self.receive_commands(&mut stream).await?;
 
         Ok(())
