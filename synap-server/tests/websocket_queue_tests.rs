@@ -125,7 +125,7 @@ async fn test_queue_websocket_consume_and_ack() {
                     "message_id": message_id
                 });
                 write
-                    .send(Message::Text(ack_cmd.to_string()))
+                    .send(Message::Text(ack_cmd.to_string().into()))
                     .await
                     .unwrap();
                 break;
@@ -191,7 +191,7 @@ async fn test_queue_websocket_nack_and_requeue() {
                     "requeue": true
                 });
                 write
-                    .send(Message::Text(nack_cmd.to_string()))
+                    .send(Message::Text(nack_cmd.to_string().into()))
                     .await
                     .unwrap();
                 break;
@@ -214,7 +214,7 @@ async fn test_queue_websocket_nack_and_requeue() {
                     "message_id": message_id
                 });
                 write
-                    .send(Message::Text(ack_cmd.to_string()))
+                    .send(Message::Text(ack_cmd.to_string().into()))
                     .await
                     .unwrap();
                 break;
@@ -279,7 +279,7 @@ async fn test_queue_websocket_multiple_messages() {
                     "message_id": msg["message_id"]
                 });
                 write
-                    .send(Message::Text(ack_cmd.to_string()))
+                    .send(Message::Text(ack_cmd.to_string().into()))
                     .await
                     .unwrap();
 

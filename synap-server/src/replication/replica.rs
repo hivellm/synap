@@ -63,11 +63,14 @@ impl ReplicaNode {
             stats: Arc::new(RwLock::new(ReplicationStats::default())),
         });
 
-        // Start replication loop
+        // Start replication loop in background task
         let replica_clone = Arc::clone(&replica);
         tokio::spawn(async move {
             replica_clone.replication_loop().await;
         });
+
+        // Small delay to let task start
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
         Ok(replica)
     }
@@ -77,53 +80,68 @@ impl ReplicaNode {
         let master_addr = self.config.master_address.unwrap();
         let reconnect_delay = Duration::from_millis(self.config.reconnect_delay_ms);
 
+        eprintln!(
+            "[REPLICA] Replication loop starting, master: {}, auto_reconnect: {}",
+            master_addr, self.config.auto_reconnect
+        );
+
         loop {
-            info!("Connecting to master at {}", master_addr);
+            eprintln!("[REPLICA] Connecting to master at {}", master_addr);
 
             match self.connect_and_sync(master_addr).await {
                 Ok(_) => {
-                    info!("Replication connection closed normally");
+                    eprintln!("[REPLICA] Replication connection closed normally");
                 }
                 Err(e) => {
-                    error!("Replication error: {}", e);
+                    eprintln!("[REPLICA] Replication error: {}", e);
                     self.connected.store(false, Ordering::SeqCst);
                 }
             }
 
             if !self.config.auto_reconnect {
-                warn!("Auto-reconnect disabled, stopping replication");
+                eprintln!("[REPLICA] Auto-reconnect disabled, stopping replication loop");
                 break;
             }
 
-            info!("Reconnecting in {:?}", reconnect_delay);
+            eprintln!("[REPLICA] Reconnecting in {:?}", reconnect_delay);
             tokio::time::sleep(reconnect_delay).await;
         }
+
+        eprintln!("[REPLICA] Replication loop ended");
     }
 
     /// Connect to master and start synchronization
     async fn connect_and_sync(&self, master_addr: SocketAddr) -> ReplicationResult<()> {
-        // Connect to master
-        let mut stream = TcpStream::connect(master_addr)
-            .await
-            .map_err(|e| ReplicationError::ConnectionFailed(e.to_string()))?;
+        eprintln!("[REPLICA] TCP connecting to {}...", master_addr);
 
-        info!("Connected to master");
+        // Connect to master
+        let mut stream = TcpStream::connect(master_addr).await.map_err(|e| {
+            eprintln!("[REPLICA] TCP connection failed: {}", e);
+            ReplicationError::ConnectionFailed(e.to_string())
+        })?;
+
+        eprintln!("[REPLICA] TCP connected to master");
 
         // Send handshake with current offset
         let current_offset = self.current_offset.load(Ordering::SeqCst);
         let handshake = bincode::serialize(&current_offset)?;
+        eprintln!("[REPLICA] Sending handshake, offset: {}", current_offset);
         stream.write_all(&handshake).await?;
         stream.flush().await?;
 
-        debug!("Sent handshake with offset {}", current_offset);
+        eprintln!("[REPLICA] Handshake sent");
 
         // Mark as connected
         self.connected.store(true, Ordering::SeqCst);
+        eprintln!("[REPLICA] Marked as connected");
 
         // Receive sync (full or partial)
+        eprintln!("[REPLICA] Calling receive_sync...");
         self.receive_sync(&mut stream).await?;
+        eprintln!("[REPLICA] receive_sync completed");
 
         // Receive ongoing replication commands
+        eprintln!("[REPLICA] Starting to receive commands...");
         self.receive_commands(&mut stream).await?;
 
         Ok(())
@@ -131,30 +149,37 @@ impl ReplicaNode {
 
     /// Receive initial sync from master
     async fn receive_sync(&self, stream: &mut TcpStream) -> ReplicationResult<()> {
-        let mut buf = vec![0u8; 1024 * 1024]; // 1MB buffer
+        info!("Waiting to receive sync command from master...");
 
-        // Read first command
-        let n = stream.read(&mut buf).await?;
-        if n == 0 {
-            return Err(ReplicationError::ConnectionFailed(
-                "Connection closed during sync".to_string(),
-            ));
-        }
+        // Read sync command with length prefix
+        let cmd = Self::read_command(stream).await.map_err(|e| {
+            error!("Failed to read sync command: {}", e);
+            e
+        })?;
 
-        let cmd: ReplicationCommand = bincode::deserialize(&buf[..n])?;
+        info!("Received sync command");
 
         match cmd {
             ReplicationCommand::FullSync {
-                snapshot_data: _,
+                snapshot_data,
                 offset,
             } => {
-                info!("Receiving full sync, offset: {}", offset);
+                info!(
+                    "Receiving full sync, offset: {}, {} bytes",
+                    offset,
+                    snapshot_data.len()
+                );
 
-                // Apply snapshot (simplified)
-                // TODO: Implement snapshot deserialization and application
+                // Apply snapshot
+                super::sync::apply_snapshot(&self.kv_store, &snapshot_data)
+                    .await
+                    .map_err(|e| {
+                        error!("Failed to apply snapshot: {}", e);
+                        ReplicationError::SerializationError(e)
+                    })?;
 
                 self.current_offset.store(offset, Ordering::SeqCst);
-                info!("Full sync complete");
+                info!("Full sync completed, data restored at offset {}", offset);
             }
             ReplicationCommand::PartialSync {
                 from_offset,
@@ -171,7 +196,7 @@ impl ReplicaNode {
                     self.apply_operation(op).await?;
                 }
 
-                info!("Partial sync complete");
+                info!("Partial sync completed");
             }
             _ => {
                 warn!("Unexpected command during sync: {:?}", cmd);
@@ -181,25 +206,41 @@ impl ReplicaNode {
         Ok(())
     }
 
+    /// Read command with length prefix
+    async fn read_command(stream: &mut TcpStream) -> ReplicationResult<ReplicationCommand> {
+        // Read length prefix (4 bytes)
+        let mut len_buf = [0u8; 4];
+        stream.read_exact(&mut len_buf).await?;
+        let len = u32::from_be_bytes(len_buf) as usize;
+
+        // Read data
+        let mut data = vec![0u8; len];
+        stream.read_exact(&mut data).await?;
+
+        // Deserialize
+        let cmd = bincode::deserialize(&data)?;
+        Ok(cmd)
+    }
+
     /// Receive ongoing replication commands
     async fn receive_commands(&self, stream: &mut TcpStream) -> ReplicationResult<()> {
-        let mut buf = vec![0u8; 64 * 1024]; // 64KB buffer
-
         loop {
-            // Read command
-            let n = match stream.read(&mut buf).await {
-                Ok(0) => {
+            // Read command with length prefix
+            let cmd = match Self::read_command(stream).await {
+                Ok(c) => c,
+                Err(ReplicationError::IOError(e))
+                    if e.kind() == std::io::ErrorKind::UnexpectedEof =>
+                {
                     info!("Master closed connection");
                     return Ok(());
                 }
-                Ok(n) => n,
                 Err(e) => {
-                    return Err(ReplicationError::IOError(e));
+                    error!("Failed to read command: {}", e);
+                    return Err(e);
                 }
             };
 
-            let cmd: ReplicationCommand = bincode::deserialize(&buf[..n])?;
-
+            // Handle command
             match cmd {
                 ReplicationCommand::Operation(op) => {
                     self.apply_operation(op).await?;
@@ -211,7 +252,7 @@ impl ReplicaNode {
                     self.handle_heartbeat(master_offset, timestamp);
                 }
                 _ => {
-                    warn!("Unexpected command: {:?}", cmd);
+                    debug!("Received unexpected command: {:?}", cmd);
                 }
             }
         }

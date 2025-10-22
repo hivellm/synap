@@ -1420,7 +1420,7 @@ async fn handle_queue_socket(
     });
 
     if ws_sender
-        .send(axum::extract::ws::Message::Text(welcome.to_string()))
+        .send(axum::extract::ws::Message::Text(welcome.to_string().into()))
         .await
         .is_err()
     {
@@ -1444,7 +1444,7 @@ async fn handle_queue_socket(
                             "headers": msg.headers
                         });
 
-                        if ws_sender.send(axum::extract::ws::Message::Text(msg_json.to_string())).await.is_err() {
+                        if ws_sender.send(axum::extract::ws::Message::Text(msg_json.to_string().into())).await.is_err() {
                             warn!("Failed to send message to consumer: {}", consumer_id);
                             break;
                         }
@@ -1453,9 +1453,9 @@ async fn handle_queue_socket(
                         // No messages available, continue waiting
                     }
                     Err(e) => {
-                        error!("Queue consume error: {}", e);
+                         error!("Queue consume error: {}", e);
                         let _ = ws_sender.send(axum::extract::ws::Message::Text(
-                            json!({"type": "error", "error": e.to_string()}).to_string()
+                            json!({"type": "error", "error": e.to_string()}).to_string().into()
                         )).await;
                         break;
                     }
@@ -1578,7 +1578,7 @@ async fn handle_stream_socket(
     });
 
     if ws_sender
-        .send(axum::extract::ws::Message::Text(welcome.to_string()))
+        .send(axum::extract::ws::Message::Text(welcome.to_string().into()))
         .await
         .is_err()
     {
@@ -1609,7 +1609,7 @@ async fn handle_stream_socket(
                                     "timestamp": event.timestamp
                                 });
 
-                                if ws_sender.send(axum::extract::ws::Message::Text(event_json.to_string())).await.is_err() {
+                                if ws_sender.send(axum::extract::ws::Message::Text(event_json.to_string().into())).await.is_err() {
                                     warn!("Failed to send event to subscriber: {}", subscriber_id);
                                     return;
                                 }
@@ -1622,7 +1622,7 @@ async fn handle_stream_socket(
                     Err(e) => {
                         error!("Stream consume error: {}", e);
                         let _ = ws_sender.send(axum::extract::ws::Message::Text(
-                            json!({"type": "error", "error": e}).to_string()
+                            json!({"type": "error", "error": e}).to_string().into()
                         )).await;
                         break;
                     }
@@ -1722,7 +1722,8 @@ async fn handle_pubsub_socket(
                     json!({
                         "error": e.to_string()
                     })
-                    .to_string(),
+                    .to_string()
+                    .into(),
                 ))
                 .await;
             return;
@@ -1751,7 +1752,9 @@ async fn handle_pubsub_socket(
 
     // Send welcome message
     if ws_sender
-        .send(axum::extract::ws::Message::Text(welcome_msg.to_string()))
+        .send(axum::extract::ws::Message::Text(
+            welcome_msg.to_string().into(),
+        ))
         .await
         .is_err()
     {
@@ -1779,7 +1782,7 @@ async fn handle_pubsub_socket(
                 .unwrap();
 
                 if ws_sender
-                    .send(axum::extract::ws::Message::Text(msg_json))
+                    .send(axum::extract::ws::Message::Text(msg_json.into()))
                     .await
                     .is_err()
                 {

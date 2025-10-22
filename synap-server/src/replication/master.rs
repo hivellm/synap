@@ -152,41 +152,79 @@ impl MasterNode {
         kv_store: Arc<KVStore>,
     ) {
         let replica_id = Uuid::new_v4().to_string();
+        eprintln!(
+            "[MASTER] New replica connection from {}, ID: {}",
+            addr, replica_id
+        );
 
         // Read replica handshake (request offset)
         let mut buf = vec![0u8; 1024];
+        eprintln!("[MASTER] Waiting for handshake from replica...");
         let requested_offset = match stream.read(&mut buf).await {
-            Ok(n) if n > 0 => bincode::deserialize::<u64>(&buf[..n]).unwrap_or_default(),
-            _ => 0,
+            Ok(n) => {
+                if n == 0 {
+                    eprintln!("[MASTER] Connection closed before handshake");
+                    return;
+                }
+                eprintln!("[MASTER] Received {} bytes handshake", n);
+                bincode::deserialize::<u64>(&buf[..n]).unwrap_or_default()
+            }
+            Err(e) => {
+                eprintln!("[MASTER] Error reading handshake: {}", e);
+                return;
+            }
         };
 
-        info!(
-            "Replica {} requesting sync from offset {}",
+        eprintln!(
+            "[MASTER] Replica {} requesting sync from offset {}",
             replica_id, requested_offset
         );
 
         // Determine sync type
         let oldest_offset = replication_log.oldest_offset();
-        let needs_full_sync = requested_offset < oldest_offset;
+        let current_offset = replication_log.current_offset();
+
+        // Full sync needed if:
+        // 1. Requested offset is older than what we have in log
+        // 2. This is a fresh connection (requested 0, replication log empty) - use snapshot
+        let needs_full_sync =
+            requested_offset < oldest_offset || (requested_offset == 0 && current_offset == 0);
+
+        eprintln!(
+            "[MASTER] oldest_offset: {}, current_offset: {}, requested: {}, needs_full_sync: {}",
+            oldest_offset, current_offset, requested_offset, needs_full_sync
+        );
 
         if needs_full_sync {
-            info!("Performing full sync for replica {}", replica_id);
+            eprintln!("[MASTER] Performing full sync for replica {}", replica_id);
 
             // Send full snapshot
+            eprintln!("[MASTER] Calling send_full_sync...");
             if let Err(e) = Self::send_full_sync(&mut stream, &kv_store, &replication_log).await {
-                error!("Full sync failed for replica {}: {}", replica_id, e);
+                eprintln!(
+                    "[MASTER] Full sync failed for replica {}: {}",
+                    replica_id, e
+                );
                 return;
             }
+            eprintln!("[MASTER] Full sync sent successfully");
         } else {
-            info!("Performing partial sync for replica {}", replica_id);
+            eprintln!(
+                "[MASTER] Performing partial sync for replica {}",
+                replica_id
+            );
 
             // Send incremental updates
             if let Err(e) =
                 Self::send_partial_sync(&mut stream, requested_offset, &replication_log).await
             {
-                error!("Partial sync failed for replica {}: {}", replica_id, e);
+                eprintln!(
+                    "[MASTER] Partial sync failed for replica {}: {}",
+                    replica_id, e
+                );
                 return;
             }
+            eprintln!("[MASTER] Partial sync sent successfully");
         }
 
         // Register replica
@@ -229,13 +267,16 @@ impl MasterNode {
         replication_log: &ReplicationLog,
     ) -> ReplicationResult<()> {
         let current_offset = replication_log.current_offset();
-        
+
         // Create snapshot
         let snapshot_data = super::sync::create_snapshot(kv_store, current_offset)
             .await
-            .map_err(|e| ReplicationError::SerializationError(e))?;
+            .map_err(ReplicationError::SerializationError)?;
 
-        info!("Created snapshot: {} bytes for full sync", snapshot_data.len());
+        info!(
+            "Created snapshot: {} bytes for full sync",
+            snapshot_data.len()
+        );
 
         let cmd = ReplicationCommand::FullSync {
             snapshot_data,
@@ -248,7 +289,7 @@ impl MasterNode {
         debug!("Full sync sent, offset: {}", current_offset);
         Ok(())
     }
-    
+
     /// Send command with length prefix
     async fn send_command(
         stream: &mut TcpStream,
@@ -256,13 +297,13 @@ impl MasterNode {
     ) -> ReplicationResult<()> {
         let data = bincode::serialize(cmd)?;
         let len = data.len() as u32;
-        
+
         // Send length prefix
         stream.write_all(&len.to_be_bytes()).await?;
         // Send data
         stream.write_all(&data).await?;
         stream.flush().await?;
-        
+
         Ok(())
     }
 
