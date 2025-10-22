@@ -19,7 +19,7 @@ tracing-subscriber = { workspace = true, features = ["json", "env-filter"] }
 thiserror.workspace = true
 anyhow.workspace = true
 tower-http.workspace = true
-tower = { version = "0.4", features = ["limit", "timeout"] }
+tower = { version = "0.5", features = ["limit", "timeout"] }
 uuid = { version = "1.6", features = ["v4", "serde"] }
 tokio-tungstenite = "0.24"
 futures-util = "0.3"
