@@ -36,14 +36,14 @@ COPY synap-cli/Cargo.toml ./synap-cli/
 
 # Copy source code
 COPY synap-server/src ./synap-server/src
-COPY synap-server/benches ./synap-server/benches
 COPY synap-cli/src ./synap-cli/src
 
 # Build release binary with optimizations
 # - Static linking for portability
 # - Strip symbols for smaller size
 # - LTO for better optimization
-RUN cargo build --release --package synap-server \
+# - --bins flag compiles only binaries (ignores benches, examples, tests)
+RUN cargo build --release --bins \
     --target x86_64-unknown-linux-musl && \
     strip /usr/src/synap/target/x86_64-unknown-linux-musl/release/synap-server
 
