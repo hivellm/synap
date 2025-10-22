@@ -188,11 +188,8 @@ impl CacheLayer {
     /// Get cache statistics
     pub fn get_stats(&self) -> CacheStats {
         let stats = self.stats.read();
-        let mut result = stats.clone();
 
-        // Calculate hit rate
-        let total = result.l1_hits + result.l1_misses;
-        result
+        stats.clone()
     }
 
     /// Get current Unix timestamp

@@ -1,0 +1,31 @@
+# Codespell ignore words for Synap project
+# Add false positives here
+
+# Technical terms
+synap
+pubsub
+axum
+tokio
+serde
+UMICP
+streamable
+WAN
+WAL
+
+# Rust specific
+mut
+Mut
+ser
+deser
+struct
+impl
+async
+const
+enum
+
+# Common abbreviations
+afe
+hart
+lod
+som
+

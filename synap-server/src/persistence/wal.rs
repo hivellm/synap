@@ -53,6 +53,7 @@ impl WriteAheadLog {
     }
 
     /// Scan WAL file to find the last valid offset
+    #[allow(clippy::while_let_loop)]
     async fn scan_for_last_offset(&mut self) -> Result<()> {
         let mut file = File::open(&self.path).await?;
         let mut max_offset = 0u64;
@@ -143,6 +144,7 @@ impl WriteAheadLog {
     }
 
     /// Replay WAL entries from a specific offset
+    #[allow(clippy::while_let_loop)]
     pub async fn replay(&self, from_offset: u64) -> Result<Vec<WALEntry>> {
         let mut file = File::open(&self.path).await?;
         let mut entries = Vec::new();

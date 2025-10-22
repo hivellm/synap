@@ -156,10 +156,7 @@ impl MasterNode {
         // Read replica handshake (request offset)
         let mut buf = vec![0u8; 1024];
         let requested_offset = match stream.read(&mut buf).await {
-            Ok(n) if n > 0 => match bincode::deserialize::<u64>(&buf[..n]) {
-                Ok(offset) => offset,
-                Err(_) => 0,
-            },
+            Ok(n) if n > 0 => bincode::deserialize::<u64>(&buf[..n]).unwrap_or_default(),
             _ => 0,
         };
 

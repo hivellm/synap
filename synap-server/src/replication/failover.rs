@@ -51,12 +51,14 @@ impl FailoverManager {
         warn!("Replica disconnect not fully implemented - manual intervention may be needed");
 
         // Create new master configuration
-        let mut master_config = ReplicationConfig::default();
-        master_config.enabled = true;
-        master_config.role = NodeRole::Master;
-        master_config.replica_listen_address = Some("0.0.0.0:15501".parse().unwrap()); // Default
-        master_config.heartbeat_interval_ms = 1000;
-        master_config.max_lag_ms = 10000;
+        let mut master_config = ReplicationConfig {
+            enabled: true,
+            role: NodeRole::Master,
+            replica_listen_address: Some("0.0.0.0:15501".parse().unwrap()),
+            heartbeat_interval_ms: 1000,
+            max_lag_ms: 10000,
+            ..Default::default()
+        };
 
         // Create new master node
         let master = MasterNode::new(master_config, kv_store).await?;
@@ -108,11 +110,13 @@ impl FailoverManager {
         warn!("Master shutdown not fully implemented");
 
         // Create replica configuration
-        let mut replica_config = ReplicationConfig::default();
-        replica_config.enabled = true;
-        replica_config.role = NodeRole::Replica;
-        replica_config.master_address = Some(new_master_addr);
-        replica_config.auto_reconnect = true;
+        let mut replica_config = ReplicationConfig {
+            enabled: true,
+            role: NodeRole::Replica,
+            master_address: Some(new_master_addr),
+            auto_reconnect: true,
+            ..Default::default()
+        };
 
         // Create new replica node
         let replica = ReplicaNode::new(replica_config, kv_store).await?;

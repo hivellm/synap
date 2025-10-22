@@ -234,7 +234,7 @@ impl PubSubRouter {
         } else {
             // Unsubscribe from all topics
             let mut topics_map = self.topics.write();
-            let all_keys: Vec<String> = topics_map.keys().map(|k| k.clone()).collect();
+            let all_keys: Vec<String> = topics_map.keys().cloned().collect();
             for key in all_keys {
                 if let Some(topic_subs) = topics_map.get_mut(&key) {
                     if topic_subs.subscribers.remove(subscriber_id) {
@@ -410,7 +410,7 @@ impl PubSubRouter {
         let topics_map = self.topics.read();
         let wildcards = self.wildcard_subs.read();
 
-        let all_keys: Vec<String> = topics_map.keys().map(|k| k.clone()).collect();
+        let all_keys: Vec<String> = topics_map.keys().cloned().collect();
         let total_exact_subscribers: usize = all_keys
             .iter()
             .filter_map(|key| topics_map.get(key))

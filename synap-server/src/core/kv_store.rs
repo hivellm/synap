@@ -27,6 +27,7 @@ impl ShardStorage {
         Self::Small(HashMap::new())
     }
 
+    #[allow(dead_code)]
     fn len(&self) -> usize {
         match self {
             Self::Small(map) => map.len(),

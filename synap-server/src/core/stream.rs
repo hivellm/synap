@@ -96,6 +96,7 @@ pub struct RoomStats {
 /// Subscriber information
 #[derive(Debug, Clone)]
 struct Subscriber {
+    #[allow(dead_code)]
     id: String,
     last_offset: u64,
     last_active: std::time::Instant,
@@ -103,6 +104,7 @@ struct Subscriber {
 
 /// Single event stream room with ring buffer
 struct Room {
+    #[allow(dead_code)]
     name: String,
     /// Ring buffer for messages (FIFO with max size)
     buffer: VecDeque<StreamEvent>,

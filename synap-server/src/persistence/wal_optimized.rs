@@ -23,11 +23,11 @@ pub struct OptimizedWAL {
 }
 
 #[derive(Debug, Default)]
-struct WALStats {
-    total_writes: u64,
-    total_bytes: u64,
-    batches_written: u64,
-    fsyncs_performed: u64,
+pub struct WALStats {
+    pub total_writes: u64,
+    pub total_bytes: u64,
+    pub batches_written: u64,
+    pub fsyncs_performed: u64,
 }
 
 enum WriteCommand {
@@ -38,6 +38,7 @@ enum WriteCommand {
     Flush {
         response_tx: oneshot::Sender<Result<()>>,
     },
+    #[allow(dead_code)]
     Shutdown,
 }
 
@@ -216,7 +217,7 @@ impl OptimizedWAL {
             };
 
             if should_fsync {
-                if let Ok(file) = writer.get_mut().sync_all().await {
+                if let Ok(_file) = writer.get_mut().sync_all().await {
                     last_fsync = std::time::Instant::now();
                     let mut stats_guard = stats.lock().await;
                     stats_guard.fsyncs_performed += 1;
@@ -271,19 +272,11 @@ impl OptimizedWAL {
                 operation,
                 response_tx,
             })
-            .map_err(|_| {
-                PersistenceError::IOError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "WAL writer closed",
-                ))
-            })?;
+            .map_err(|_| PersistenceError::IOError(std::io::Error::other("WAL writer closed")))?;
 
-        response_rx.await.map_err(|_| {
-            PersistenceError::IOError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "WAL response lost",
-            ))
-        })?
+        response_rx
+            .await
+            .map_err(|_| PersistenceError::IOError(std::io::Error::other("WAL response lost")))?
     }
 
     /// Force flush (useful for testing)
@@ -292,19 +285,11 @@ impl OptimizedWAL {
 
         self.writer_tx
             .send(WriteCommand::Flush { response_tx })
-            .map_err(|_| {
-                PersistenceError::IOError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "WAL writer closed",
-                ))
-            })?;
+            .map_err(|_| PersistenceError::IOError(std::io::Error::other("WAL writer closed")))?;
 
-        response_rx.await.map_err(|_| {
-            PersistenceError::IOError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "WAL response lost",
-            ))
-        })?
+        response_rx
+            .await
+            .map_err(|_| PersistenceError::IOError(std::io::Error::other("WAL response lost")))?
     }
 
     /// Get current offset
@@ -331,7 +316,7 @@ impl OptimizedWAL {
     }
 
     async fn scan_for_last_offset(path: &PathBuf) -> Result<u64> {
-        if !tokio::fs::metadata(path).await.is_ok() {
+        if tokio::fs::metadata(path).await.is_err() {
             return Ok(0);
         }
 

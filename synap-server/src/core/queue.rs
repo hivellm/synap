@@ -95,6 +95,7 @@ impl QueueMessage {
 #[derive(Debug, Clone)]
 struct PendingMessage {
     message: Arc<QueueMessage>,
+    #[allow(dead_code)]
     consumer_id: ConsumerId,
     ack_deadline: u32, // Unix timestamp for compact storage
 }

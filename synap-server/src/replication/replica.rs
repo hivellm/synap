@@ -299,6 +299,14 @@ impl ReplicaNode {
         self.current_offset.load(Ordering::SeqCst)
     }
 
+    /// Get replication lag (operations behind master)
+    pub fn lag(&self) -> u64 {
+        let current = self.current_offset.load(Ordering::SeqCst);
+        let master = self.master_offset.load(Ordering::SeqCst);
+
+        master.saturating_sub(current)
+    }
+
     fn current_timestamp() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)

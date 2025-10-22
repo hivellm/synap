@@ -1,0 +1,38 @@
+# typos configuration for Synap
+# See https://github.com/crate-ci/typos
+
+[default]
+extend-ignore-re = [
+  # Git SHAs
+  "[0-9a-f]{40}",
+  # UUIDs
+  "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+  # Hex colors
+  "#[0-9a-fA-F]{6}",
+]
+
+[default.extend-words]
+# Technical terms and project-specific words
+synap = "synap"
+pubsub = "pubsub"
+UMICP = "UMICP"
+streamable = "streamable"
+
+[files]
+extend-exclude = [
+  "target/",
+  "node_modules/",
+  "*.lock",
+  "data/",
+  "*.wal",
+  ".git/",
+  "*.min.js",
+  "*.min.css",
+]
+
+[type.rust]
+extend-glob = ["*.rs"]
+
+[type.markdown]
+extend-glob = ["*.md"]
+

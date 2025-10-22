@@ -30,7 +30,9 @@ pub struct StreamEvent {
 pub struct StreamPersistence {
     base_dir: PathBuf,
     writer_tx: mpsc::UnboundedSender<StreamWriteCommand>,
+    #[allow(dead_code)]
     current_offset: Arc<AtomicU64>,
+    #[allow(dead_code)]
     stats: Arc<Mutex<StreamStats>>,
 }
 
@@ -38,6 +40,7 @@ pub struct StreamPersistence {
 struct StreamStats {
     total_events: u64,
     total_bytes: u64,
+    #[allow(dead_code)]
     rooms_active: u64,
 }
 
@@ -201,19 +204,11 @@ impl StreamPersistence {
         let (response_tx, response_rx) = oneshot::channel();
         self.writer_tx
             .send(StreamWriteCommand::Append { event, response_tx })
-            .map_err(|_| {
-                PersistenceError::IOError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Writer closed",
-                ))
-            })?;
+            .map_err(|_| PersistenceError::IOError(std::io::Error::other("Writer closed")))?;
 
-        response_rx.await.map_err(|_| {
-            PersistenceError::IOError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Response lost",
-            ))
-        })?
+        response_rx
+            .await
+            .map_err(|_| PersistenceError::IOError(std::io::Error::other("Response lost")))?
     }
 
     /// Flush events for a specific room
@@ -221,19 +216,11 @@ impl StreamPersistence {
         let (response_tx, response_rx) = oneshot::channel();
         self.writer_tx
             .send(StreamWriteCommand::Flush { room, response_tx })
-            .map_err(|_| {
-                PersistenceError::IOError(std::io::Error::new(
-                    std::io::ErrorKind::Other,
-                    "Writer closed",
-                ))
-            })?;
+            .map_err(|_| PersistenceError::IOError(std::io::Error::other("Writer closed")))?;
 
-        response_rx.await.map_err(|_| {
-            PersistenceError::IOError(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Response lost",
-            ))
-        })?
+        response_rx
+            .await
+            .map_err(|_| PersistenceError::IOError(std::io::Error::other("Response lost")))?
     }
 
     /// Read events from a room's log (Kafka-style sequential read)
@@ -245,13 +232,13 @@ impl StreamPersistence {
     ) -> Result<Vec<StreamEvent>> {
         let room_path = self.base_dir.join(format!("{}.log", room));
 
-        if !tokio::fs::metadata(&room_path).await.is_ok() {
+        if tokio::fs::metadata(&room_path).await.is_err() {
             return Ok(vec![]);
         }
 
         let mut file = File::open(&room_path).await?;
         let mut events = Vec::new();
-        let mut current_offset = 0u64;
+        let mut _current_offset = 0u64;
 
         loop {
             if events.len() >= limit {
@@ -286,7 +273,7 @@ impl StreamPersistence {
                     if event_offset >= from_offset {
                         events.push(event);
                     }
-                    current_offset = event_offset;
+                    _current_offset = event_offset;
                 }
                 Err(e) => {
                     warn!("Failed to deserialize stream event: {}", e);

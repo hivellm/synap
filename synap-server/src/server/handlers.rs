@@ -1309,7 +1309,7 @@ async fn handle_queue_stats_cmd(
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'queue' field".to_string()))?;
 
     let stats = queue_manager.stats(queue).await?;
-    Ok(serde_json::to_value(stats).map_err(|e| SynapError::SerializationError(e.to_string()))?)
+    serde_json::to_value(stats).map_err(|e| SynapError::SerializationError(e.to_string()))
 }
 
 async fn handle_queue_purge_cmd(
@@ -1342,7 +1342,7 @@ async fn handle_queue_purge_cmd(
 /// WebSocket handler for KV WATCH (real-time key change notifications)
 /// GET /kv/ws?keys=key1,key2,prefix:*
 pub async fn kv_websocket(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     _ws: WebSocketUpgrade,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> AxumResponse {
@@ -2109,7 +2109,7 @@ async fn handle_pubsub_stats_cmd(
         .ok_or_else(|| SynapError::InvalidRequest("Pub/Sub system disabled".to_string()))?;
 
     let stats = pubsub_router.get_stats();
-    Ok(serde_json::to_value(stats).map_err(|e| SynapError::SerializationError(e.to_string()))?)
+    serde_json::to_value(stats).map_err(|e| SynapError::SerializationError(e.to_string()))
 }
 
 async fn handle_pubsub_topics_cmd(
@@ -2289,7 +2289,7 @@ async fn handle_stream_stats_cmd(
         .await
         .map_err(SynapError::InvalidRequest)?;
 
-    Ok(serde_json::to_value(stats).map_err(|e| SynapError::SerializationError(e.to_string()))?)
+    serde_json::to_value(stats).map_err(|e| SynapError::SerializationError(e.to_string()))
 }
 
 async fn handle_stream_list_cmd(
