@@ -207,7 +207,6 @@ async fn test_multiple_replicas_sync() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "Slow test - run manually"]
 async fn test_stress_thousands_of_operations() {
     let (master, master_kv, master_addr) = create_master().await;
 
@@ -518,8 +517,12 @@ async fn test_concurrent_writes_during_sync() {
 
     // Verify replica received significant data
     let key_count = replica_kv.keys().await.unwrap().len();
-    assert!(key_count >= 100, "Replica should have received data, has {} keys", key_count);
-    
+    assert!(
+        key_count >= 100,
+        "Replica should have received data, has {} keys",
+        key_count
+    );
+
     let replica_offset = replica.current_offset();
     assert!(
         replica_offset >= 0,
