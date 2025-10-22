@@ -2,9 +2,9 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.85%2B)-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-337%2F337%20(100%25)-brightgreen.svg)](#testing--quality)
+[![Tests](https://img.shields.io/badge/tests-359%2F359%20(100%25)-brightgreen.svg)](#testing--quality)
 [![Coverage](https://img.shields.io/badge/coverage-99.30%25-brightgreen.svg)](docs/TESTING.md)
-[![Version](https://img.shields.io/badge/version-0.2.0--beta-blue.svg)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.3.0--rc-blue.svg)](#project-status)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
 
@@ -16,7 +16,7 @@ Synap provides four core capabilities in a single, cohesive system:
 
 1. **💾 Memory Key-Value Store** - Radix-tree based in-memory storage with O(k) lookup
 2. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
-3. **📡 Event Streams** - Kafka-style room-based broadcasting with message history
+3. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
 4. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
 
 ## ✨ Key Features
@@ -65,6 +65,8 @@ Synap provides four core capabilities in a single, cohesive system:
 ### 📊 Scalability
 - **📖 Read Scaling**: Multiple replica nodes for distributed reads
 - **🏠 Event Rooms**: Isolated event streams per room/channel
+- **🎯 Partitioned Topics**: Kafka-style horizontal scaling with multiple partitions
+- **👥 Consumer Groups**: Coordinated consumption with automatic rebalancing
 - **🔀 Topic Routing**: Efficient pub/sub with wildcard matching
 - **🔗 Connection Pooling**: Client-side connection management
 
@@ -274,7 +276,7 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 | Pub/Sub Publish | < 0.5ms | 🔵 Planned |
 | Replication Lag | < 10ms | 🔵 Planned |
 
-**Test Coverage**: 337/337 tests passing (100%)
+**Test Coverage**: 359/359 tests passing (100%)
 
 **Scripts**: `./scripts/test-performance.ps1` (full suite), `./scripts/quick-test.ps1` (fast validation)
 
@@ -286,8 +288,11 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 | Queues (ACK) | ✅ | ❌ | ✅ | ❌ |
 | Priority Queues | ✅ (0-9) | ❌ | ✅ | ❌ |
 | Dead Letter Queue | ✅ | ❌ | ✅ | ❌ |
-| Event Streams | 🔄 | ✅ (Limited) | ❌ | ✅ |
-| Pub/Sub | 🔄 | ✅ | ✅ | ✅ |
+| Event Streams | ✅ | ✅ (Limited) | ❌ | ✅ |
+| Partitioned Topics | ✅ | ❌ | ❌ | ✅ |
+| Consumer Groups | ✅ | ❌ | ❌ | ✅ |
+| Retention Policies | ✅ (5 types) | ✅ (2 types) | ✅ (1 type) | ✅ (2 types) |
+| Pub/Sub | ✅ | ✅ | ✅ | ✅ |
 | Authentication | ✅ (Users+API Keys) | ✅ (ACL) | ✅ (Users) | ✅ (SASL) |
 | RBAC | ✅ | ✅ (Limited) | ✅ | ✅ |
 | API Key Expiration | ✅ | ❌ | ❌ | ❌ |
@@ -361,7 +366,7 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - ✅ Configurable thresholds
 - ✅ 6 comprehensive tests
 
-**📡 Event Streams** ✅ COMPLETE
+**📡 Event Streams** ✅ COMPLETE + KAFKA-STYLE PARTITIONING ✅ NEW
 - ✅ Ring buffer implementation (VecDeque, 10K msg/room)
 - ✅ Room-based isolation (multi-tenant)
 - ✅ Message history (offset-based replay)
@@ -369,10 +374,16 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - ✅ Automatic compaction (retention policy)
 - ✅ **Kafka-style persistence** (append-only logs per room)
 - ✅ **Stream recovery** from disk logs
-- ✅ **Master-Slave replication** (full + partial sync) ✅ NEW
-- ✅ **Snapshot integration** (stream data in full sync) ✅ NEW
-- ✅ 6 REST API endpoints
-- ✅ Performance: 12.5M msgs/s consume, 2.3 GiB/s publish
+- ✅ **Master-Slave replication** (full + partial sync)
+- ✅ **Snapshot integration** (stream data in full sync)
+- ✅ **Partitioned Topics** (multiple partitions per topic) ✅ NEW
+- ✅ **Consumer Groups** (coordinated consumption with rebalancing) ✅ NEW
+- ✅ **Key-Based Routing** (hash-based partition assignment) ✅ NEW
+- ✅ **Advanced Retention** (time, size, count, combined, infinite) ✅ NEW
+- ✅ **Assignment Strategies** (round-robin, range, sticky) ✅ NEW
+- ✅ **Offset Management** (commit/checkpoint positions) ✅ NEW
+- ✅ 6 simple stream endpoints + 17 Kafka-style endpoints
+- ✅ Performance: 12.5M msgs/s consume, 2.3 GiB/s publish, 10K+ events/sec per partition
 
 **🔔 Pub/Sub System** ✅ COMPLETE
 - ✅ Topic routing (Radix Trie)
@@ -414,10 +425,11 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - Stress test: 5000 ops in ~4-5 seconds
 
 #### 🧪 Testing & Quality
-- ✅ **388 tests passing** (increased test coverage to 99.30%)
-  - 106 library tests (KV, Queue, Streams, Persistence, Auth, Compression)
+- ✅ **410 tests passing** (increased test coverage to 99.30%)
+  - 128 library tests (KV, Queue, Streams, Partitioning, Consumer Groups, Persistence, Auth, Compression)
   - 67 replication tests (25 unit + 16 extended + 10 integration TCP + 16 KV ops)
   - 21 integration tests (performance, hybrid storage, persistence e2e)
+  - 7 Kafka-style integration tests (partition, consumer groups, retention) ✅ NEW
   - 58 authentication tests
   - Protocol tests across REST, StreamableHTTP, WebSocket
 - ✅ **9 comprehensive benchmark suites**
@@ -425,11 +437,11 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
   - `queue_bench`: Arc sharing, priority, pending messages
   - `persistence_bench`: AsyncWAL, snapshots, recovery
   - `hybrid_bench`: Adaptive storage (HashMap/RadixTrie)
-  - `stream_bench`: Publish, consume, overflow, multi-subscriber ✅ NEW
-  - `pubsub_bench`: Wildcards, fan-out, hierarchy ✅ NEW
-  - `compression_bench`: LZ4/Zstd performance ✅ NEW
-  - `kv_persistence_bench`: With disk I/O (3 fsync modes) ✅ NEW
-  - `queue_persistence_bench`: RabbitMQ-style durability ✅ NEW
+  - `stream_bench`: Publish, consume, overflow, multi-subscriber
+  - `pubsub_bench`: Wildcards, fan-out, hierarchy
+  - `compression_bench`: LZ4/Zstd performance
+  - `kv_persistence_bench`: With disk I/O (3 fsync modes)
+  - `queue_persistence_bench`: RabbitMQ-style durability
 - ✅ **99.30% test coverage**
 - ✅ Clean `cargo fmt` and `cargo clippy`
 
@@ -441,7 +453,7 @@ git clone https://github.com/hivellm/synap.git
 cd synap
 cargo build --release
 
-# Run tests (337 passing)
+# Run tests (359 passing)
 cargo test
 
 # Run server
