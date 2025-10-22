@@ -317,7 +317,12 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 
 ## 📚 Documentation
 
-### 📖 Core Documentation
+### 📖 Getting Started
+- **[User Guide](docs/guides/USER_GUIDE.md)** - Complete getting started guide (Installation, Quick Start, Operations)
+- **[Admin Guide](docs/guides/ADMIN_GUIDE.md)** - Operations handbook (Deployment, Monitoring, HA, Security)
+- **[Tutorials](docs/guides/TUTORIALS.md)** - 8 practical tutorials (Chat, Queues, Caching, Pub/Sub)
+
+### 🔧 Core Documentation
 - **[Architecture](docs/ARCHITECTURE.md)** - System architecture and components
 - **[Roadmap](docs/ROADMAP.md)** - Development roadmap and timeline
 - **[Configuration](docs/CONFIGURATION.md)** - Complete configuration reference
