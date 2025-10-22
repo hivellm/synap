@@ -5,7 +5,8 @@ use std::sync::Arc;
 use synap_server::persistence::{PersistenceLayer, recover};
 use synap_server::replication::NodeRole;
 use synap_server::{
-    AppState, KVStore, PubSubRouter, QueueManager, ServerConfig, StreamConfig, StreamManager,
+    AppState, ConsumerGroupConfig, ConsumerGroupManager, KVStore, PartitionConfig,
+    PartitionManager, PubSubRouter, QueueManager, ServerConfig, StreamConfig, StreamManager,
     create_router,
 };
 use tracing::{info, warn};
@@ -176,6 +177,24 @@ async fn main() -> Result<()> {
         Some(stream_mgr)
     };
 
+    // Initialize partitioned stream manager (Kafka-style)
+    let partition_manager = {
+        let partition_mgr = Arc::new(PartitionManager::new(PartitionConfig::default()));
+        partition_mgr.clone().start_compaction_task();
+        info!("Partitioned Stream system enabled (Kafka-style)");
+        Some(partition_mgr)
+    };
+
+    // Initialize consumer group manager
+    let consumer_group_manager = {
+        let cg_mgr = Arc::new(ConsumerGroupManager::new(
+            ConsumerGroupConfig::default(),
+        ));
+        cg_mgr.clone().start_rebalance_task();
+        info!("Consumer Group system enabled");
+        Some(cg_mgr)
+    };
+
     // Initialize Pub/Sub router (enabled by default for now)
     let pubsub_router = {
         let router = Arc::new(PubSubRouter::new());
@@ -213,6 +232,8 @@ async fn main() -> Result<()> {
         kv_store,
         queue_manager,
         stream_manager,
+        partition_manager,
+        consumer_group_manager,
         pubsub_router,
         persistence,
     };

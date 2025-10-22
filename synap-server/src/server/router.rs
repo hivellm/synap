@@ -71,6 +71,44 @@ pub fn create_router(
         .route("/pubsub/stats", get(handlers::pubsub_stats))
         .route("/pubsub/topics", get(handlers::pubsub_list_topics))
         .route("/pubsub/:topic/info", get(handlers::pubsub_topic_info))
+        // Partitioned Stream endpoints (Kafka-style)
+        .route("/topics", get(handlers::list_topics))
+        .route("/topics/:topic", post(handlers::create_partitioned_topic))
+        .route("/topics/:topic", delete(handlers::delete_topic))
+        .route("/topics/:topic/stats", get(handlers::get_topic_stats))
+        .route("/topics/:topic/publish", post(handlers::publish_to_partition))
+        .route(
+            "/topics/:topic/partitions/:partition_id/consume",
+            post(handlers::consume_from_partition),
+        )
+        // Consumer Group endpoints
+        .route("/consumer-groups", get(handlers::list_consumer_groups))
+        .route("/consumer-groups/:group_id", post(handlers::create_consumer_group))
+        .route("/consumer-groups/:group_id/join", post(handlers::join_consumer_group))
+        .route(
+            "/consumer-groups/:group_id/members/:member_id/leave",
+            delete(handlers::leave_consumer_group),
+        )
+        .route(
+            "/consumer-groups/:group_id/members/:member_id/assignment",
+            get(handlers::get_partition_assignment),
+        )
+        .route(
+            "/consumer-groups/:group_id/members/:member_id/heartbeat",
+            post(handlers::consumer_heartbeat),
+        )
+        .route(
+            "/consumer-groups/:group_id/offsets/commit",
+            post(handlers::commit_offset),
+        )
+        .route(
+            "/consumer-groups/:group_id/offsets/:partition_id",
+            get(handlers::get_committed_offset),
+        )
+        .route(
+            "/consumer-groups/:group_id/stats",
+            get(handlers::get_consumer_group_stats),
+        )
         // StreamableHTTP command endpoint
         .route("/api/v1/command", post(handlers::command_handler))
         // Add state and middleware
