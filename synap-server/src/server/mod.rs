@@ -3,6 +3,7 @@ pub mod mcp_handlers;
 pub mod mcp_server;
 pub mod mcp_tools;
 pub mod router;
+pub mod umicp;
 
 pub use handlers::AppState;
 pub use mcp_handlers::handle_mcp_tool;

@@ -38,6 +38,9 @@ rmcp = { version = "0.8.2", features = ["server", "transport-streamable-http-ser
 hyper = "1.7"
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
 
+# UMICP (Universal Matrix Intelligent Communication Protocol)
+umicp-core = { version = "0.2.3", features = ["websocket", "http2"] }
+
 [dev-dependencies]
 criterion = { version = "0.7", features = ["async_tokio"] }
 reqwest = { version = "0.12", features = ["json"] }

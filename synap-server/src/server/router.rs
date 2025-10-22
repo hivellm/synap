@@ -25,7 +25,10 @@ pub fn create_router(
 
     // Create MCP router (stateless)
     let state_arc = Arc::new(state.clone());
-    let mcp_router = create_mcp_router(state_arc);
+    let mcp_router = create_mcp_router(state_arc.clone());
+    
+    // Create UMICP router
+    let umicp_router = create_umicp_router(state_arc.clone());
 
     // Create main API router with state
     let api_router = Router::new()
@@ -121,9 +124,10 @@ pub fn create_router(
         // Add state
         .with_state(state);
 
-    // Merge MCP router (stateless) with API router (stateful)
+    // Merge all routers: MCP + UMICP + API
     mcp_router
-        .merge(api_router)
+        .merge(umicp_router)           // UMICP protocol endpoints (/umicp, /umicp/discover)
+        .merge(api_router)             // Main API endpoints
         .layer(CompressionLayer::new()) // Gzip compression for responses
         .layer(TraceLayer::new_for_http())
         .layer(cors)
@@ -166,4 +170,18 @@ fn create_mcp_router(state: Arc<AppState>) -> Router {
             }
         }),
     )
+}
+
+/// Create UMICP router with discovery and message endpoints
+fn create_umicp_router(state: Arc<AppState>) -> Router {
+    use super::umicp::{transport, UmicpState};
+    
+    let umicp_state = UmicpState {
+        app_state: state,
+    };
+    
+    Router::new()
+        .route("/umicp", post(transport::umicp_handler))
+        .route("/umicp/discover", get(transport::umicp_discover_handler))
+        .with_state(umicp_state)
 }
