@@ -2,7 +2,7 @@ use super::config::ReplicationConfig;
 use super::types::{
     ReplicationCommand, ReplicationError, ReplicationOperation, ReplicationResult, ReplicationStats,
 };
-use crate::core::KVStore;
+use crate::core::{KVStore, StreamManager};
 use crate::persistence::types::Operation;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -24,6 +24,7 @@ use tracing::{debug, error, info, warn};
 pub struct ReplicaNode {
     config: ReplicationConfig,
     kv_store: Arc<KVStore>,
+    stream_manager: Option<Arc<StreamManager>>,
 
     /// Current offset (last applied operation)
     current_offset: Arc<AtomicU64>,
@@ -46,16 +47,21 @@ impl ReplicaNode {
     pub async fn new(
         config: ReplicationConfig,
         kv_store: Arc<KVStore>,
+        stream_manager: Option<Arc<StreamManager>>,
     ) -> ReplicationResult<Arc<Self>> {
         if !config.is_replica() {
             return Err(ReplicationError::NotReplica);
         }
 
-        info!("Initializing replica node");
+        info!(
+            "Initializing replica node with stream support: {}",
+            stream_manager.is_some()
+        );
 
         let replica = Arc::new(Self {
             config,
             kv_store,
+            stream_manager,
             current_offset: Arc::new(AtomicU64::new(0)),
             master_offset: Arc::new(AtomicU64::new(0)),
             last_heartbeat: Arc::new(AtomicU64::new(0)),
@@ -170,13 +176,17 @@ impl ReplicaNode {
                     snapshot_data.len()
                 );
 
-                // Apply snapshot
-                super::sync::apply_snapshot(&self.kv_store, &snapshot_data)
-                    .await
-                    .map_err(|e| {
-                        error!("Failed to apply snapshot: {}", e);
-                        ReplicationError::SerializationError(e)
-                    })?;
+                // Apply snapshot with stream support
+                super::sync::apply_snapshot_with_streams(
+                    &self.kv_store,
+                    self.stream_manager.as_ref().map(|s| s.as_ref()),
+                    &snapshot_data,
+                )
+                .await
+                .map_err(|e| {
+                    error!("Failed to apply snapshot: {}", e);
+                    ReplicationError::SerializationError(e)
+                })?;
 
                 self.current_offset.store(offset, Ordering::SeqCst);
                 info!("Full sync completed, data restored at offset {}", offset);
@@ -272,7 +282,7 @@ impl ReplicaNode {
             // Continue anyway (idempotent operations)
         }
 
-        // Apply to KV store
+        // Apply operation based on type
         match &op.operation {
             Operation::KVSet { key, value, ttl } => {
                 let _ = self.kv_store.set(key.as_str(), value.clone(), *ttl).await;
@@ -280,9 +290,23 @@ impl ReplicaNode {
             Operation::KVDel { keys } => {
                 let _ = self.kv_store.mdel(keys).await;
             }
+            Operation::StreamPublish {
+                room,
+                event_type,
+                payload,
+            } => {
+                if let Some(sm) = &self.stream_manager {
+                    // Create room if doesn't exist
+                    let _ = sm.create_room(room).await;
+                    // Publish event
+                    let _ = sm.publish(room, event_type, payload.clone()).await;
+                } else {
+                    debug!("Skipping stream operation (no stream manager)");
+                }
+            }
             _ => {
-                // Other operations (Queue, Stream, etc.) would be handled here
-                debug!("Skipping non-KV operation");
+                // Other operations (Queue, etc.) would be handled here
+                debug!("Skipping unsupported operation");
             }
         }
 
@@ -370,7 +394,7 @@ mod tests {
         config.auto_reconnect = false; // Don't actually connect in test
 
         let kv = Arc::new(KVStore::new(KVConfig::default()));
-        let replica = ReplicaNode::new(config, kv).await;
+        let replica = ReplicaNode::new(config, kv, None).await;
 
         assert!(replica.is_ok());
     }
@@ -384,7 +408,7 @@ mod tests {
         config.auto_reconnect = false;
 
         let kv = Arc::new(KVStore::new(KVConfig::default()));
-        let replica = ReplicaNode::new(config, kv.clone()).await.unwrap();
+        let replica = ReplicaNode::new(config, kv.clone(), None).await.unwrap();
 
         // Apply SET operation
         let op = ReplicationOperation {

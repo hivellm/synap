@@ -322,6 +322,38 @@ impl StreamManager {
         }
     }
 
+    /// Get all events from all rooms (for snapshot)
+    pub async fn get_all_events(&self) -> HashMap<String, Vec<StreamEvent>> {
+        let rooms = self.rooms.read();
+        let mut all_events = HashMap::new();
+
+        for (room_name, room) in rooms.iter() {
+            let events: Vec<StreamEvent> = room.buffer.iter().cloned().collect();
+            if !events.is_empty() {
+                all_events.insert(room_name.clone(), events);
+            }
+        }
+
+        all_events
+    }
+
+    /// Restore a room from snapshot (for replication)
+    pub async fn restore_room(
+        &self,
+        room_name: &str,
+        events: Vec<StreamEvent>,
+    ) -> Result<(), String> {
+        // Create room if it doesn't exist
+        let _ = self.create_room(room_name).await;
+
+        // Publish events
+        for event in events {
+            self.publish(room_name, &event.event, event.data).await?;
+        }
+
+        Ok(())
+    }
+
     /// Start background compaction task
     pub fn start_compaction_task(self: Arc<Self>) {
         if !self.config.auto_compact {

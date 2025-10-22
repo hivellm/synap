@@ -367,8 +367,10 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - ✅ Message history (offset-based replay)
 - ✅ Offset-based consumption (Kafka-style)
 - ✅ Automatic compaction (retention policy)
-- ✅ **Kafka-style persistence** (append-only logs per room) ✅ NEW
-- ✅ **Stream recovery** from disk logs ✅ NEW
+- ✅ **Kafka-style persistence** (append-only logs per room)
+- ✅ **Stream recovery** from disk logs
+- ✅ **Master-Slave replication** (full + partial sync) ✅ NEW
+- ✅ **Snapshot integration** (stream data in full sync) ✅ NEW
 - ✅ 6 REST API endpoints
 - ✅ Performance: 12.5M msgs/s consume, 2.3 GiB/s publish
 
@@ -399,6 +401,8 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - ✅ **Lag monitoring** (real-time offset tracking)
 - ✅ **Auto-reconnect** (intelligent full/partial resync)
 - ✅ **Manual failover** (promote replica to master)
+- ✅ **Stream replication** (Event Streams included in sync) ✅ NEW
+- ✅ **Multi-subsystem sync** (KV + Queue + Streams) ✅ NEW
 - ✅ **67 comprehensive tests** (25 unit + 16 extended + 10 integration + 16 KV operations)
 - ✅ **Stress tested** (5000 operations validated)
 - ✅ **Multiple replicas** (3+ replicas tested simultaneously)

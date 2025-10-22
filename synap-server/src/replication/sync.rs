@@ -5,7 +5,7 @@
 //! - Incremental sync
 //! - Checksum verification
 
-use crate::core::KVStore;
+use crate::core::{KVStore, StreamManager};
 use crate::persistence::types::Operation;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
@@ -16,12 +16,22 @@ pub struct SnapshotMetadata {
     pub offset: u64,
     pub timestamp: u64,
     pub total_keys: usize,
+    pub total_streams: usize,
     pub compressed: bool,
     pub checksum: u32,
 }
 
-/// Create a snapshot of KV store for full sync
+/// Create a snapshot of KV store and streams for full sync
 pub async fn create_snapshot(kv_store: &KVStore, offset: u64) -> Result<Vec<u8>, String> {
+    create_snapshot_with_streams(kv_store, None, offset).await
+}
+
+/// Create a snapshot with optional stream manager
+pub async fn create_snapshot_with_streams(
+    kv_store: &KVStore,
+    stream_manager: Option<&StreamManager>,
+    offset: u64,
+) -> Result<Vec<u8>, String> {
     info!("Creating snapshot at offset {}", offset);
 
     // Get all keys
@@ -40,6 +50,23 @@ pub async fn create_snapshot(kv_store: &KVStore, offset: u64) -> Result<Vec<u8>,
         }
     }
 
+    // Add stream operations
+    let mut total_streams = 0;
+    if let Some(sm) = stream_manager {
+        let stream_data = sm.get_all_events().await;
+        total_streams = stream_data.len();
+
+        for (room, events) in stream_data {
+            for event in events {
+                operations.push(Operation::StreamPublish {
+                    room: room.clone(),
+                    event_type: event.event,
+                    payload: event.data,
+                });
+            }
+        }
+    }
+
     // Serialize operations
     let data = bincode::serialize(&operations).map_err(|e| e.to_string())?;
 
@@ -51,13 +78,15 @@ pub async fn create_snapshot(kv_store: &KVStore, offset: u64) -> Result<Vec<u8>,
         offset,
         timestamp: current_timestamp(),
         total_keys,
+        total_streams,
         compressed: false,
         checksum,
     };
 
     info!(
-        "Snapshot created: {} keys, {} bytes, checksum: {}",
+        "Snapshot created: {} keys, {} streams, {} bytes, checksum: {}",
         total_keys,
+        total_streams,
         data.len(),
         checksum
     );
@@ -69,8 +98,17 @@ pub async fn create_snapshot(kv_store: &KVStore, offset: u64) -> Result<Vec<u8>,
     Ok(result)
 }
 
-/// Apply snapshot to KV store
+/// Apply snapshot to KV store (without streams)
 pub async fn apply_snapshot(kv_store: &KVStore, snapshot: &[u8]) -> Result<u64, String> {
+    apply_snapshot_with_streams(kv_store, None, snapshot).await
+}
+
+/// Apply snapshot with optional stream manager
+pub async fn apply_snapshot_with_streams(
+    kv_store: &KVStore,
+    stream_manager: Option<&StreamManager>,
+    snapshot: &[u8],
+) -> Result<u64, String> {
     // Deserialize metadata
     let metadata: SnapshotMetadata = bincode::deserialize(snapshot).map_err(|e| e.to_string())?;
 
@@ -90,8 +128,10 @@ pub async fn apply_snapshot(kv_store: &KVStore, snapshot: &[u8]) -> Result<u64, 
     let operations: Vec<Operation> = bincode::deserialize(data).map_err(|e| e.to_string())?;
 
     info!(
-        "Applying snapshot: {} operations, offset: {}",
+        "Applying snapshot: {} operations ({} keys, {} streams), offset: {}",
         operations.len(),
+        metadata.total_keys,
+        metadata.total_streams,
         metadata.offset
     );
 
@@ -101,8 +141,19 @@ pub async fn apply_snapshot(kv_store: &KVStore, snapshot: &[u8]) -> Result<u64, 
             Operation::KVSet { key, value, ttl } => {
                 let _ = kv_store.set(&key, value, ttl).await;
             }
+            Operation::StreamPublish {
+                room,
+                event_type,
+                payload,
+            } => {
+                if let Some(sm) = stream_manager {
+                    let _ = sm.publish(&room, &event_type, payload).await;
+                } else {
+                    debug!("Skipping stream operation (no stream manager)");
+                }
+            }
             _ => {
-                debug!("Skipping non-SET operation in snapshot");
+                debug!("Skipping non-SET/StreamPublish operation in snapshot");
             }
         }
     }

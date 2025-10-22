@@ -231,7 +231,11 @@ pub async fn trigger_snapshot(
 
     if let Some(ref persistence) = state.persistence {
         persistence
-            .maybe_snapshot(&state.kv_store, state.queue_manager.as_deref())
+            .maybe_snapshot(
+                &state.kv_store,
+                state.queue_manager.as_deref(),
+                state.stream_manager.as_deref(),
+            )
             .await
             .map_err(|e| SynapError::InternalError(format!("Snapshot failed: {}", e)))?;
 

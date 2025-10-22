@@ -4,7 +4,7 @@ use super::types::{
     ReplicaInfo, ReplicationCommand, ReplicationError, ReplicationOperation, ReplicationResult,
     ReplicationStats,
 };
-use crate::core::KVStore;
+use crate::core::{KVStore, StreamManager};
 use crate::persistence::types::Operation;
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -29,6 +29,7 @@ pub struct MasterNode {
     #[allow(dead_code)]
     config: ReplicationConfig,
     replication_log: Arc<ReplicationLog>,
+    stream_manager: Option<Arc<StreamManager>>,
 
     /// Connected replicas
     replicas: Arc<RwLock<HashMap<String, ReplicaConnection>>>,
@@ -54,12 +55,19 @@ enum ReplicationMessage {
 
 impl MasterNode {
     /// Create a new master node
-    pub async fn new(config: ReplicationConfig, kv_store: Arc<KVStore>) -> ReplicationResult<Self> {
+    pub async fn new(
+        config: ReplicationConfig,
+        kv_store: Arc<KVStore>,
+        stream_manager: Option<Arc<StreamManager>>,
+    ) -> ReplicationResult<Self> {
         if !config.is_master() {
             return Err(ReplicationError::NotMaster);
         }
 
-        info!("Initializing master node");
+        info!(
+            "Initializing master node with stream support: {}",
+            stream_manager.is_some()
+        );
 
         // Create replication log (1M operations buffer, like Redis)
         let replication_log = Arc::new(ReplicationLog::new(1_000_000));
@@ -72,12 +80,14 @@ impl MasterNode {
         let replicas_clone = Arc::clone(&replicas);
         let log_clone = Arc::clone(&replication_log);
         let kv_clone = Arc::clone(&kv_store);
+        let stream_clone = stream_manager.clone();
 
         tokio::spawn(Self::listen_for_replicas(
             listen_addr,
             replicas_clone,
             log_clone,
             kv_clone,
+            stream_clone,
         ));
 
         // Spawn heartbeat task
@@ -97,6 +107,7 @@ impl MasterNode {
         Ok(Self {
             config,
             replication_log,
+            stream_manager,
             replicas,
             replication_tx,
         })
@@ -108,6 +119,7 @@ impl MasterNode {
         replicas: Arc<RwLock<HashMap<String, ReplicaConnection>>>,
         replication_log: Arc<ReplicationLog>,
         kv_store: Arc<KVStore>,
+        stream_manager: Option<Arc<StreamManager>>,
     ) {
         let listener = match TcpListener::bind(listen_addr).await {
             Ok(l) => l,
@@ -127,6 +139,7 @@ impl MasterNode {
                     let replicas_clone = Arc::clone(&replicas);
                     let log_clone = Arc::clone(&replication_log);
                     let kv_clone = Arc::clone(&kv_store);
+                    let stream_clone = stream_manager.clone();
 
                     tokio::spawn(Self::handle_replica(
                         stream,
@@ -134,6 +147,7 @@ impl MasterNode {
                         replicas_clone,
                         log_clone,
                         kv_clone,
+                        stream_clone,
                     ));
                 }
                 Err(e) => {
@@ -150,6 +164,7 @@ impl MasterNode {
         replicas: Arc<RwLock<HashMap<String, ReplicaConnection>>>,
         replication_log: Arc<ReplicationLog>,
         kv_store: Arc<KVStore>,
+        stream_manager: Option<Arc<StreamManager>>,
     ) {
         let replica_id = Uuid::new_v4().to_string();
         eprintln!(
@@ -200,7 +215,14 @@ impl MasterNode {
 
             // Send full snapshot
             eprintln!("[MASTER] Calling send_full_sync...");
-            if let Err(e) = Self::send_full_sync(&mut stream, &kv_store, &replication_log).await {
+            if let Err(e) = Self::send_full_sync(
+                &mut stream,
+                &kv_store,
+                stream_manager.as_ref().map(|s| s.as_ref()),
+                &replication_log,
+            )
+            .await
+            {
                 eprintln!(
                     "[MASTER] Full sync failed for replica {}: {}",
                     replica_id, e
@@ -264,18 +286,21 @@ impl MasterNode {
     async fn send_full_sync(
         stream: &mut TcpStream,
         kv_store: &KVStore,
+        stream_manager: Option<&StreamManager>,
         replication_log: &ReplicationLog,
     ) -> ReplicationResult<()> {
         let current_offset = replication_log.current_offset();
 
-        // Create snapshot
-        let snapshot_data = super::sync::create_snapshot(kv_store, current_offset)
-            .await
-            .map_err(ReplicationError::SerializationError)?;
+        // Create snapshot with stream support
+        let snapshot_data =
+            super::sync::create_snapshot_with_streams(kv_store, stream_manager, current_offset)
+                .await
+                .map_err(ReplicationError::SerializationError)?;
 
         info!(
-            "Created snapshot: {} bytes for full sync",
-            snapshot_data.len()
+            "Created snapshot: {} bytes for full sync (streams: {})",
+            snapshot_data.len(),
+            stream_manager.is_some()
         );
 
         let cmd = ReplicationCommand::FullSync {
@@ -455,7 +480,7 @@ mod tests {
         config.replica_listen_address = Some("127.0.0.1:0".parse().unwrap());
 
         let kv = Arc::new(KVStore::new(KVConfig::default()));
-        let master = MasterNode::new(config, kv).await;
+        let master = MasterNode::new(config, kv, None).await;
 
         assert!(master.is_ok());
     }
@@ -468,7 +493,7 @@ mod tests {
         config.replica_listen_address = Some("127.0.0.1:0".parse().unwrap());
 
         let kv = Arc::new(KVStore::new(KVConfig::default()));
-        let master = MasterNode::new(config, kv).await.unwrap();
+        let master = MasterNode::new(config, kv, None).await.unwrap();
 
         // Replicate operation
         let op = Operation::KVSet {

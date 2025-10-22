@@ -61,7 +61,7 @@ impl FailoverManager {
         };
 
         // Create new master node
-        let master = MasterNode::new(master_config, kv_store).await?;
+        let master = MasterNode::new(master_config, kv_store, None).await?;
 
         info!("Replica successfully promoted to master");
 
@@ -119,7 +119,7 @@ impl FailoverManager {
         };
 
         // Create new replica node
-        let replica = ReplicaNode::new(replica_config, kv_store).await?;
+        let replica = ReplicaNode::new(replica_config, kv_store, None).await?;
 
         info!("Master successfully demoted to replica");
 
@@ -151,7 +151,7 @@ mod tests {
         replica_config.auto_reconnect = false;
 
         let kv = Arc::new(KVStore::new(KVConfig::default()));
-        let replica = ReplicaNode::new(replica_config, Arc::clone(&kv))
+        let replica = ReplicaNode::new(replica_config, Arc::clone(&kv), None)
             .await
             .unwrap();
 

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Event Streams Replication ✅ NEW (October 22, 2025)
+
+#### 🔄 Stream Replication Integration
+Full integration of Event Streams with the master-slave replication system:
+
+**Features Implemented**:
+- ✅ **Operation::StreamPublish**: New operation type for stream events in replication protocol
+- ✅ **PersistenceLayer integration**: `log_stream_publish()` method for WAL logging
+- ✅ **MasterNode support**: Full/partial sync includes stream data
+- ✅ **ReplicaNode support**: Applies stream operations from master
+- ✅ **Snapshot integration**: Streams included in full sync snapshots
+- ✅ **Multi-subsystem sync**: KV + Queue + Streams replicated together
+
+**Technical Details**:
+- Stream events are now part of the replication log
+- Full sync transfers all stream rooms and events
+- Partial sync replicates new stream events incrementally
+- StreamManager optional parameter in master/replica constructors
+- Backward compatible with nodes not using streams
+
+**Benefits**:
+- Event Streams now survive failover scenarios
+- Read replicas can serve stream data
+- Complete data consistency across all subsystems
+- Production-ready distributed streaming
+
 ### Added - CI/CD Workflows 🚀 NEW (October 21, 2025)
 
 #### GitHub Actions Integration

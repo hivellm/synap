@@ -82,6 +82,13 @@ pub enum Operation {
         message_id: String,
         requeue: bool,
     },
+
+    /// Stream PUBLISH operation
+    StreamPublish {
+        room: String,
+        event_type: String,
+        payload: Vec<u8>,
+    },
 }
 
 /// Snapshot containing full system state
@@ -92,6 +99,18 @@ pub struct Snapshot {
     pub wal_offset: u64,
     pub kv_data: HashMap<String, Vec<u8>>, // Simplified for now
     pub queue_data: HashMap<String, Vec<QueueMessage>>, // Simplified for now
+    #[serde(default)]
+    pub stream_data: HashMap<String, Vec<StreamEvent>>, // Room -> Events
+}
+
+/// Stream event for snapshot (simplified from stream::StreamEvent)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamEvent {
+    pub id: String,
+    pub offset: u64,
+    pub event_type: String,
+    pub data: Vec<u8>,
+    pub timestamp: u64,
 }
 
 /// Persistence configuration

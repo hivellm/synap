@@ -114,6 +114,16 @@ pub async fn recover(
                 }
                 replayed += 1;
             }
+            Operation::StreamPublish {
+                room: _,
+                event_type: _,
+                payload: _,
+            } => {
+                // Stream operations are not replayed from WAL
+                // They use their own persistence layer (StreamPersistence)
+                // This is here to prevent compilation errors
+                replayed += 1;
+            }
         }
     }
 

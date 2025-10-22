@@ -26,7 +26,7 @@ async fn test_master_replica_sync() {
     master_config.replica_listen_address = Some("127.0.0.1:0".parse().unwrap());
 
     let master_kv = Arc::new(KVStore::new(KVConfig::default()));
-    let master = MasterNode::new(master_config.clone(), Arc::clone(&master_kv))
+    let master = MasterNode::new(master_config.clone(), Arc::clone(&master_kv), None)
         .await
         .unwrap();
 
@@ -67,7 +67,9 @@ async fn test_replica_initialization() {
     replica_config.auto_reconnect = false; // Don't actually connect
 
     let replica_kv = Arc::new(KVStore::new(KVConfig::default()));
-    let replica = ReplicaNode::new(replica_config, replica_kv).await.unwrap();
+    let replica = ReplicaNode::new(replica_config, replica_kv, None)
+        .await
+        .unwrap();
 
     assert!(!replica.is_connected());
     assert_eq!(replica.current_offset(), 0);

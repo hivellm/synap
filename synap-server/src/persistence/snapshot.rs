@@ -1,6 +1,7 @@
-use super::types::{PersistenceError, Result, Snapshot, SnapshotConfig};
+use super::types::{PersistenceError, Result, Snapshot, SnapshotConfig, StreamEvent};
 use crate::core::kv_store::KVStore;
 use crate::core::queue::{QueueManager, QueueMessage};
+use crate::core::stream::StreamManager;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -26,6 +27,7 @@ impl SnapshotManager {
         &self,
         kv_store: &KVStore,
         queue_manager: Option<&QueueManager>,
+        stream_manager: Option<&StreamManager>,
         wal_offset: u64,
     ) -> Result<PathBuf> {
         // Create directory if it doesn't exist
@@ -128,6 +130,57 @@ impl SnapshotManager {
             }
         }
 
+        // Stream stream data (if available)
+        let stream_data = if let Some(sm) = stream_manager {
+            sm.get_all_events().await
+        } else {
+            HashMap::new()
+        };
+
+        let stream_count = stream_data.len() as u64;
+        writer.write_u64(stream_count).await?;
+        checksum.update(&stream_count.to_le_bytes());
+
+        debug!("Streaming {} stream rooms", stream_count);
+
+        for (room_name, events) in stream_data {
+            // Write room name
+            let name_bytes = room_name.as_bytes();
+            let name_len = name_bytes.len() as u32;
+
+            writer.write_u32(name_len).await?;
+            checksum.update(&name_len.to_le_bytes());
+
+            writer.write_all(name_bytes).await?;
+            checksum.update(name_bytes);
+
+            // Write events count
+            let event_count = events.len() as u64;
+            writer.write_u64(event_count).await?;
+            checksum.update(&event_count.to_le_bytes());
+
+            // Serialize each event
+            for event in events {
+                // Convert to snapshot StreamEvent
+                let snapshot_event = StreamEvent {
+                    id: event.id,
+                    offset: event.offset,
+                    event_type: event.event,
+                    data: event.data,
+                    timestamp: event.timestamp,
+                };
+
+                let event_data = bincode::serialize(&snapshot_event)?;
+                let event_len = event_data.len() as u32;
+
+                writer.write_u32(event_len).await?;
+                checksum.update(&event_len.to_le_bytes());
+
+                writer.write_all(&event_data).await?;
+                checksum.update(&event_data);
+            }
+        }
+
         // Write checksum at end
         let final_checksum = checksum.finalize();
         writer.write_u64(final_checksum).await?;
@@ -213,21 +266,60 @@ impl SnapshotManager {
             let queue_name = String::from_utf8(queue_bytes)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-            let messages_len = reader.read_u32().await? as usize;
-            let mut messages_bytes = vec![0u8; messages_len];
-            reader.read_exact(&mut messages_bytes).await?;
+            let msg_count = reader.read_u64().await?;
+            let mut messages = Vec::new();
 
-            let messages: Vec<QueueMessage> = bincode::deserialize(&messages_bytes)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            for _ in 0..msg_count {
+                let msg_len = reader.read_u32().await? as usize;
+                let mut msg_bytes = vec![0u8; msg_len];
+                reader.read_exact(&mut msg_bytes).await?;
+
+                let message: QueueMessage = bincode::deserialize(&msg_bytes)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                messages.push(message);
+            }
+
             queue_data.insert(queue_name, messages);
+        }
+
+        // Read Stream data (optional for backward compatibility)
+        let mut stream_data = HashMap::new();
+
+        // Try to read stream data (might not exist in old snapshots)
+        if let Ok(stream_count) = reader.read_u64().await {
+            for _ in 0..stream_count {
+                let room_len = reader.read_u32().await? as usize;
+                let mut room_bytes = vec![0u8; room_len];
+                reader.read_exact(&mut room_bytes).await?;
+                let room_name = String::from_utf8(room_bytes)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+                let event_count = reader.read_u64().await?;
+                let mut events = Vec::new();
+
+                for _ in 0..event_count {
+                    let event_len = reader.read_u32().await? as usize;
+                    let mut event_bytes = vec![0u8; event_len];
+                    reader.read_exact(&mut event_bytes).await?;
+
+                    let event: StreamEvent = bincode::deserialize(&event_bytes)
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                    events.push(event);
+                }
+
+                stream_data.insert(room_name, events);
+            }
         }
 
         // Verify checksum
         let _checksum = reader.read_u64().await.unwrap_or(0); // Optional for backward compatibility
 
         info!(
-            "Snapshot loaded successfully: version={}, timestamp={}, wal_offset={}",
-            version, timestamp, wal_offset
+            "Snapshot loaded successfully: version={}, timestamp={}, wal_offset={}, streams={}",
+            version,
+            timestamp,
+            wal_offset,
+            stream_data.len()
         );
 
         // Reconstruct Snapshot struct from loaded data
@@ -237,6 +329,7 @@ impl SnapshotManager {
             wal_offset,
             kv_data,
             queue_data,
+            stream_data,
         };
 
         Ok(Some((snapshot, latest.clone())))

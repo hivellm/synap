@@ -190,9 +190,11 @@ async fn main() -> Result<()> {
                 let layer = Arc::new(layer);
 
                 // Start background snapshot task
-                layer
-                    .clone()
-                    .start_snapshot_task(kv_store.clone(), queue_manager.clone());
+                layer.clone().start_snapshot_task(
+                    kv_store.clone(),
+                    queue_manager.clone(),
+                    stream_manager.clone(),
+                );
 
                 info!("Persistence layer initialized (WAL + Snapshots)");
                 Some(layer)

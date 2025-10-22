@@ -5,10 +5,10 @@
 //! - With 1 replica
 //! - With 3 replicas
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
-use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 use synap_server::core::{KVConfig, KVStore};
 use synap_server::persistence::types::Operation;
@@ -175,9 +175,13 @@ fn bench_kv_get_baseline(c: &mut Criterion) {
     // Pre-populate
     rt.block_on(async {
         for i in 0..1000 {
-            kv.set(&format!("key_{}", i), format!("value_{}", i).into_bytes(), None)
-                .await
-                .unwrap();
+            kv.set(
+                &format!("key_{}", i),
+                format!("value_{}", i).into_bytes(),
+                None,
+            )
+            .await
+            .unwrap();
         }
     });
 
@@ -269,8 +273,7 @@ fn bench_kv_batch_operations(c: &mut Criterion) {
         // With 1 replica
         group.throughput(Throughput::Elements(*size as u64));
         group.bench_with_input(BenchmarkId::new("1_replica", size), size, |b, &size| {
-            let (master, kv, master_addr) =
-                rt.block_on(async { create_kv_with_master().await });
+            let (master, kv, master_addr) = rt.block_on(async { create_kv_with_master().await });
             let _replica1 = rt.block_on(async { create_replica(master_addr).await });
             rt.block_on(async { tokio::time::sleep(Duration::from_millis(500)).await });
 
@@ -305,9 +308,13 @@ fn bench_kv_mixed_workload(c: &mut Criterion) {
         // Pre-populate
         rt.block_on(async {
             for i in 0..1000 {
-                kv.set(&format!("key_{}", i), format!("value_{}", i).into_bytes(), None)
-                    .await
-                    .unwrap();
+                kv.set(
+                    &format!("key_{}", i),
+                    format!("value_{}", i).into_bytes(),
+                    None,
+                )
+                .await
+                .unwrap();
             }
         });
 
@@ -401,4 +408,3 @@ criterion_group!(
 );
 
 criterion_main!(benches);
-
