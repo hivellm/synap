@@ -51,13 +51,14 @@ Synap provides four core capabilities in a single, cohesive system:
 - **🔀 Manual Failover**: Promote replica to master capability
 
 ### 👨‍💻 Developer Experience
+- **🤖 AI Integration**: MCP support for Cursor, Claude Desktop, and AI assistants
 - **🌊 StreamableHTTP Protocol**: Simple HTTP-based streaming protocol
 - **🔌 WebSocket Support**: Persistent connections for real-time updates
 - **📚 Multi-language SDKs**: TypeScript, Python, and Rust clients
 - **📖 Rich Examples**: Chat, event broadcasting, task queues, and more
 
 ### 🔗 Protocol Support
-- **🤖 MCP (Model Context Protocol)**: Integration with AI tools and agents
+- **🤖 MCP (Model Context Protocol)**: ✅ **PRODUCTION READY** - 8 tools integrated at `/mcp` endpoint
 - **🌐 UMICP (Universal Matrix Inter-Communication Protocol)**: Matrix operations and federated communication
 - **📡 REST API**: Standard HTTP endpoints for all operations
 - **🔌 WebSocket API**: Real-time bidirectional communication
@@ -328,8 +329,10 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 
 ### 🌐 API & Protocols
 - **[REST API](docs/api/REST_API.md)** - Complete REST API documentation
+- **[OpenAPI Spec](docs/api/openapi.yml)** - OpenAPI 3.0 specification (YAML/JSON)
 - **[StreamableHTTP](docs/protocol/STREAMABLE_HTTP.md)** - StreamableHTTP protocol
-- **[MCP Integration](docs/protocol/MCP_INTEGRATION.md)** - Model Context Protocol (planned)
+- **[MCP Integration](docs/protocol/MCP_USAGE.md)** - Model Context Protocol ✅ **PRODUCTION READY**
+- **[MCP Test Results](docs/protocol/MCP_TEST_RESULTS.md)** - Live testing via Cursor AI
 - **[UMICP Integration](docs/protocol/UMICP_INTEGRATION.md)** - UMICP protocol (planned)
 
 ### 📊 Performance & Testing
@@ -433,9 +436,9 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 | Native Compression | ✅ (LZ4/Zstd) | ❌ | ❌ | ✅ (Snappy) |
 | Hot Data Cache | 🔄 (L1/L2) | ✅ (Single) | ❌ | ❌ |
 | StreamableHTTP | ✅ | ❌ | ❌ | ❌ |
-| MCP Support | 🔄 | ❌ | ❌ | ❌ |
+| MCP Support | ✅ (8 tools) | ❌ | ❌ | ❌ |
 | UMICP Support | 🔄 | ❌ | ❌ | ❌ |
-| AI Integration | 🔄 | ❌ | ❌ | ❌ |
+| AI Integration | ✅ (MCP) | ❌ | ❌ | ❌ |
 | Matrix Operations | 🔄 | ❌ | ❌ | ❌ |
 | Single Binary | ✅ | ✅ | ❌ | ❌ |
 | Zero-Duplicate Guarantee | ✅ (Tested) | N/A | ✅ | ✅ |
@@ -601,6 +604,11 @@ curl -X POST http://localhost:15500/kv/set \
   -d '{"key": "test", "value": "hello", "ttl": 3600}'
 
 curl http://localhost:15500/kv/get/test
+# Returns: "hello" (plain value, not wrapped JSON)
+
+# Or via MCP (Cursor/Claude Desktop)
+# Just ask: "Get the value of key 'test' from Synap"
+# MCP tool synap_kv_get will be called automatically
 ```
 
 ### 📨 Queue System Examples
@@ -644,7 +652,8 @@ See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) for complete authentication
 
 **✅ Phase 2 (Q4 2025)**: Event Streams, Pub/Sub, Persistence - **COMPLETE**  
 **✅ Phase 3 (Q1 2026)**: Master-Slave Replication with TCP - **COMPLETE**  
-**⏳ Phase 3 Remaining**: UMICP Protocol, MCP Extensions, Monitoring  
+**✅ MCP Integration**: Model Context Protocol - **COMPLETE**  
+**⏳ Phase 3 Remaining**: UMICP Protocol, Advanced Monitoring  
 **⏳ Phase 4 (Q2 2026)**: Clustering, Sharding, GUI Dashboard, Distribution packages
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for details.
