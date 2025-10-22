@@ -45,20 +45,9 @@ pub struct SetResponse {
 #[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum GetResponse {
-    String {
-        found: bool,
-        value: Option<String>,
-        ttl: Option<u64>,
-        #[serde(rename = "type")]
-        value_type: String,
-    },
-    Bytes {
-        found: bool,
-        value: Option<Vec<u8>>,
-        ttl: Option<u64>,
-        #[serde(rename = "type")]
-        value_type: String,
-    },
+    String(String),
+    Bytes(Vec<u8>),
+    NotFound(serde_json::Value),
 }
 
 #[derive(Debug, Serialize)]
@@ -199,35 +188,19 @@ pub async fn kv_get(
     let value_bytes = state.kv_store.get(&key).await?;
 
     if let Some(bytes) = value_bytes {
-        let ttl = state.kv_store.ttl(&key).await.ok().flatten();
-
         match return_type {
-            "bytes" => Ok(Json(GetResponse::Bytes {
-                found: true,
-                value: Some(bytes),
-                ttl,
-                value_type: "bytes".to_string(),
-            })),
+            "bytes" => Ok(Json(GetResponse::Bytes(bytes))),
             _ => {
                 // Default: return as string
                 let value_str = String::from_utf8(bytes)
                     .unwrap_or_else(|e| format!("<binary data: {} bytes>", e.as_bytes().len()));
                 
-                Ok(Json(GetResponse::String {
-                    found: true,
-                    value: Some(value_str),
-                    ttl,
-                    value_type: "string".to_string(),
-                }))
+                Ok(Json(GetResponse::String(value_str)))
             }
         }
     } else {
-        Ok(Json(GetResponse::String {
-            found: false,
-            value: None,
-            ttl: None,
-            value_type: "string".to_string(),
-        }))
+        // Key not found
+        Ok(Json(GetResponse::NotFound(serde_json::json!({"error": "Key not found"}))))
     }
 }
 
@@ -793,33 +766,18 @@ async fn handle_kv_get_cmd(
     let value_bytes = store.get(key).await?;
 
     if let Some(bytes) = value_bytes {
-        let ttl = store.ttl(key).await.ok().flatten();
-
         match return_type {
-            "bytes" => Ok(serde_json::json!({
-                "found": true,
-                "value": bytes,
-                "type": "bytes",
-                "ttl": ttl
-            })),
+            "bytes" => Ok(serde_json::json!(bytes)),
             _ => {
                 // Default: return as string
                 let value_str = String::from_utf8(bytes)
                     .unwrap_or_else(|e| format!("<binary data: {} bytes>", e.as_bytes().len()));
                 
-                Ok(serde_json::json!({
-                    "found": true,
-                    "value": value_str,
-                    "type": "string",
-                    "ttl": ttl
-                }))
+                Ok(serde_json::json!(value_str))
             }
         }
     } else {
-        Ok(serde_json::json!({
-            "found": false,
-            "type": "string"
-        }))
+        Ok(serde_json::json!(null))
     }
 }
 
