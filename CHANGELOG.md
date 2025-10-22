@@ -52,10 +52,20 @@ Complete Kafka-compatible partitioned streaming system with consumer groups:
 - Distributed log aggregation
 - Time-series data with retention policies
 
-**Testing**:
-- 15 unit tests (partition, consumer group, retention)
-- 7 integration tests (end-to-end scenarios)
+**Testing** (22 Total Tests - 100% Passing):
+- **15 unit tests**:
+  - 8 partition tests (creation, publish/consume, key routing, retention policies)
+  - 7 consumer group tests (join/leave, assignment strategies, offset management, rebalancing)
+- **7 integration tests** (end-to-end scenarios):
+  - Kafka-style publish-consume with consumer groups
+  - Consumer group rebalancing on member join/leave
+  - Multiple consumer groups on same topic
+  - Partition key routing consistency
+  - Time-based retention with compaction
+  - Size-based retention enforcement
+  - Combined retention policy
 - All tests passing with 100% coverage
+- Test file: `synap-server/tests/kafka_style_integration.rs`
 
 ### Added - Event Streams Replication ✅ NEW (October 22, 2025)
 
