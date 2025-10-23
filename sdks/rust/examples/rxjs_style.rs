@@ -63,32 +63,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await?;
     }
 
-    // Consume with Observable API (RxJS-style)
-    let (stream, handle) =
+    // Consume messages using StreamExt (Rust-style reactive)
+    use futures::StreamExt;
+
+    let (mut stream, handle) =
         client
             .queue()
             .observe_messages("rxjs-demo", "rxjs-worker", Duration::from_millis(100));
 
-    // Convert to Observable
-    let observable = Observable::from_stream(stream);
-
-    // Chain operators (like RxJS pipe)
-    let subscription = observable
-        .filter(|msg| msg.priority >= 7) // Only high priority
-        .map(|msg| {
-            let data = String::from_utf8_lossy(&msg.payload).to_string();
-            (msg.id, data)
-        })
-        .take(5) // Take first 5
-        .subscribe_next(|(id, data)| {
-            println!("   📨 High priority message: {} (id: {})", data, id);
-        });
-
-    // Wait for processing
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // Chain operators (similar to RxJS pipe)
+    println!("   Processing high-priority messages...");
+    let mut count = 0;
+    while let Some(msg) = stream.next().await {
+        if msg.priority >= 7 {
+            let data = String::from_utf8_lossy(&msg.payload);
+            println!("   📨 High priority message: {} (id: {})", data, msg.id);
+            count += 1;
+            if count >= 5 {
+                break;
+            }
+        }
+    }
 
     // Cleanup
-    subscription.unsubscribe();
     handle.unsubscribe();
     client.queue().delete_queue("rxjs-demo").await?;
 

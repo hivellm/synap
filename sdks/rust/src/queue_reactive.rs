@@ -49,7 +49,7 @@ impl crate::queue::QueueManager {
         queue_name: impl Into<String>,
         consumer_id: impl Into<String>,
         poll_interval: Duration,
-    ) -> (impl Stream<Item = Message>, SubscriptionHandle) {
+    ) -> (impl Stream<Item = Message> + 'static, SubscriptionHandle) {
         let queue_name = queue_name.into();
         let consumer_id = consumer_id.into();
         let client = self.client.clone();

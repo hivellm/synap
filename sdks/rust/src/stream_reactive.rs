@@ -42,7 +42,7 @@ impl crate::stream::StreamManager {
         room: impl Into<String>,
         start_offset: Option<u64>,
         poll_interval: Duration,
-    ) -> (impl Stream<Item = Event>, SubscriptionHandle) {
+    ) -> (impl Stream<Item = Event> + 'static, SubscriptionHandle) {
         let room = room.into();
         let client = self.client.clone();
         let mut current_offset = start_offset.unwrap_or(0);
@@ -91,7 +91,7 @@ impl crate::stream::StreamManager {
         event_type: impl Into<String>,
         start_offset: Option<u64>,
         poll_interval: Duration,
-    ) -> (impl Stream<Item = Event>, SubscriptionHandle) {
+    ) -> (impl Stream<Item = Event> + 'static, SubscriptionHandle) {
         let room = room.into();
         let event_type = event_type.into();
         let client = self.client.clone();
