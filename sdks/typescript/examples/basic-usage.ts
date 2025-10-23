@@ -101,7 +101,7 @@ async function main() {
 
   // Consume reactively (process for 3 seconds then stop)
   let processedCount = 0;
-  const subscription = synap.queue.process$<{ task: string; timestamp: number }>(
+  const subscription = synap.queue.processMessages<{ task: string; timestamp: number }>(
     {
       queueName: 'reactive-demo',
       consumerId: 'reactive-worker',

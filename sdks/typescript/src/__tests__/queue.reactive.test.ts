@@ -36,7 +36,7 @@ describe('QueueManager - Reactive Methods', () => {
     await synap.queue.purge(testQueue);
   });
 
-  describe('consume$() - Basic Reactive Consumer', () => {
+  describe('observeMessages() - Basic Reactive Consumer', () => {
     it('should consume messages as observables', async () => {
       // Publish test messages
       await synap.queue.publishJSON(testQueue, { task: 'task1' });
@@ -44,7 +44,7 @@ describe('QueueManager - Reactive Methods', () => {
 
       // Consume reactively
       const messages = await firstValueFrom(
-        synap.queue.consume$<{ task: string }>({
+        synap.queue.observeMessages<{ task: string }>({
           queueName: testQueue,
           consumerId: 'test-consumer-1',
           pollingInterval: 100,
@@ -71,7 +71,7 @@ describe('QueueManager - Reactive Methods', () => {
       await synap.queue.publishJSON(testQueue, { task: 'ack-test' });
 
       const msg = await firstValueFrom(
-        synap.queue.consume$<{ task: string }>({
+        synap.queue.observeMessages<{ task: string }>({
           queueName: testQueue,
           consumerId: 'test-consumer-2',
         }).pipe(timeout(5000))
@@ -92,7 +92,7 @@ describe('QueueManager - Reactive Methods', () => {
       const startTime = Date.now();
       
       const msg = await firstValueFrom(
-        synap.queue.consume$<{ task: string }>({
+        synap.queue.observeMessages<{ task: string }>({
           queueName: testQueue,
           consumerId: 'test-consumer-3',
           pollingInterval: 50, // Very fast polling
@@ -115,7 +115,7 @@ describe('QueueManager - Reactive Methods', () => {
       }
 
       const messages = await firstValueFrom(
-        synap.queue.consume$<{ task: string }>({
+        synap.queue.observeMessages<{ task: string }>({
           queueName: testQueue,
           consumerId: 'test-consumer-4',
           pollingInterval: 100,
@@ -135,7 +135,7 @@ describe('QueueManager - Reactive Methods', () => {
     }, 15000);
   });
 
-  describe('process$() - Auto-Processing Consumer', () => {
+    describe('processMessages() - Auto-Processing Consumer', () => {
     it('should process messages with auto-ACK on success', async () => {
       await synap.queue.publishJSON(testQueue, { value: 10 });
       await synap.queue.publishJSON(testQueue, { value: 20 });
@@ -143,7 +143,7 @@ describe('QueueManager - Reactive Methods', () => {
       const processedValues: number[] = [];
       
       const results = await firstValueFrom(
-        synap.queue.process$<{ value: number }>(
+        synap.queue.processMessages<{ value: number }>(
           {
             queueName: testQueue,
             consumerId: 'test-processor-1',
@@ -171,7 +171,7 @@ describe('QueueManager - Reactive Methods', () => {
       await synap.queue.publishJSON(testQueue, { shouldFail: true });
 
       const results = await firstValueFrom(
-        synap.queue.process$<{ shouldFail: boolean }>(
+        synap.queue.processMessages<{ shouldFail: boolean }>(
           {
             queueName: testQueue,
             consumerId: 'test-processor-2',
@@ -206,7 +206,7 @@ describe('QueueManager - Reactive Methods', () => {
       let maxConcurrent = 0;
 
       const results = await firstValueFrom(
-        synap.queue.process$<{ id: number }>(
+        synap.queue.processMessages<{ id: number }>(
           {
             queueName: testQueue,
             consumerId: 'test-processor-3',
@@ -246,7 +246,7 @@ describe('QueueManager - Reactive Methods', () => {
       let capturedMessage: any = null;
 
       await firstValueFrom(
-        synap.queue.process$<{ data: string }>(
+        synap.queue.processMessages<{ data: string }>(
           {
             queueName: testQueue,
             consumerId: 'test-processor-4',
@@ -270,14 +270,14 @@ describe('QueueManager - Reactive Methods', () => {
     }, 10000);
   });
 
-  describe('stats$() - Reactive Stats Monitoring', () => {
+    describe('observeStats() - Reactive Stats Monitoring', () => {
     it('should emit queue stats at regular intervals', async () => {
       // Publish some messages
       await synap.queue.publishJSON(testQueue, { data: 'msg1' });
       await synap.queue.publishJSON(testQueue, { data: 'msg2' });
 
       const stats = await firstValueFrom(
-        synap.queue.stats$(testQueue, 500).pipe(
+        synap.queue.observeStats(testQueue, 500).pipe(
           take(2),
           toArray(),
           timeout(5000)
@@ -294,7 +294,7 @@ describe('QueueManager - Reactive Methods', () => {
     it('should reflect queue changes in stats', async () => {
       // Start monitoring
       const statsPromise = firstValueFrom(
-        synap.queue.stats$(testQueue, 300).pipe(
+        synap.queue.observeStats(testQueue, 300).pipe(
           take(3),
           toArray(),
           timeout(5000)
@@ -324,7 +324,7 @@ describe('QueueManager - Reactive Methods', () => {
 
       let consumedCount = 0;
 
-      const subscription = synap.queue.consume$<{ id: number }>({
+      const subscription = synap.queue.observeMessages<{ id: number }>({
         queueName: testQueue,
         consumerId: 'test-stop-consumer',
         pollingInterval: 100,
@@ -360,12 +360,12 @@ describe('QueueManager - Reactive Methods', () => {
       let count1 = 0;
       let count2 = 0;
 
-      const sub1 = synap.queue.consume$({
+      const sub1 = synap.queue.observeMessages({
         queueName: testQueue,
         consumerId: 'consumer-1',
       }).subscribe({ next: async (msg) => { count1++; await msg.ack(); }});
 
-      const sub2 = synap.queue.consume$({
+      const sub2 = synap.queue.observeMessages({
         queueName: testQueue,
         consumerId: 'consumer-2',
       }).subscribe({ next: async (msg) => { count2++; await msg.ack(); }});
@@ -397,7 +397,7 @@ describe('QueueManager - Reactive Methods', () => {
 
       // Filter only high priority (>= 7)
       const highPriorityMessages = await firstValueFrom(
-        synap.queue.consume$<{ priority: string }>({
+        synap.queue.observeMessages<{ priority: string }>({
           queueName: testQueue,
           consumerId: 'priority-filter',
           pollingInterval: 100,
@@ -430,7 +430,7 @@ describe('QueueManager - Reactive Methods', () => {
       }
 
       const batches = await firstValueFrom(
-        synap.queue.consume$<{ id: number }>({
+        synap.queue.observeMessages<{ id: number }>({
           queueName: testQueue,
           consumerId: 'batch-processor',
           pollingInterval: 50,
@@ -454,7 +454,7 @@ describe('QueueManager - Reactive Methods', () => {
       await synap.queue.publishJSON(testQueue, { type: 'sms', content: 'sms1' });
       await synap.queue.publishJSON(testQueue, { type: 'email', content: 'email2' });
 
-      const messages$ = synap.queue.consume$<{ type: string; content: string }>({
+      const messages$ = synap.queue.observeMessages<{ type: string; content: string }>({
         queueName: testQueue,
         consumerId: 'router',
         pollingInterval: 100,
@@ -485,11 +485,11 @@ describe('QueueManager - Reactive Methods', () => {
   });
 
   describe('Error Handling', () => {
-    it('should handle errors in consume$ gracefully', async () => {
+      it('should handle errors in observeMessages gracefully', async () => {
       // Consumer should not crash on internal errors
       const messages: any[] = [];
       
-      const subscription = synap.queue.consume$({
+      const subscription = synap.queue.observeMessages({
         queueName: testQueue,
         consumerId: 'error-handler',
         pollingInterval: 100,
@@ -507,13 +507,13 @@ describe('QueueManager - Reactive Methods', () => {
       synap.queue.stopConsumer(testQueue, 'error-handler');
     }, 5000);
 
-    it('should continue consuming after handler errors in process$', async () => {
+      it('should continue consuming after handler errors in processMessages', async () => {
       await synap.queue.publishJSON(testQueue, { shouldFail: true });
       await synap.queue.publishJSON(testQueue, { shouldFail: false });
       await synap.queue.publishJSON(testQueue, { shouldFail: false });
 
       const results = await firstValueFrom(
-        synap.queue.process$<{ shouldFail: boolean }>(
+        synap.queue.processMessages<{ shouldFail: boolean }>(
           {
             queueName: testQueue,
             consumerId: 'error-recovery',

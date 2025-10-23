@@ -46,7 +46,7 @@ async function reactiveWorker() {
   let failed = 0;
 
   // Start consuming messages reactively with concurrency
-  const subscription = synap.queue.process$<EmailTask>(
+  const subscription = synap.queue.processMessages<EmailTask>(
     {
       queueName: QUEUE_NAME,
       consumerId: WORKER_ID,
@@ -94,7 +94,7 @@ async function reactiveWorker() {
   });
 
   // Monitor queue stats every 5 seconds
-  const statsSubscription = synap.queue.stats$(QUEUE_NAME, 5000)
+  const statsSubscription = synap.queue.observeStats(QUEUE_NAME, 5000)
     .subscribe({
       next: (stats) => {
         console.log(`\n📊 Queue Stats - Depth: ${stats.depth}, Consumers: ${stats.consumers}, Acked: ${stats.acked}, Nacked: ${stats.nacked}`);

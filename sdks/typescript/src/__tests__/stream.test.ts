@@ -105,7 +105,7 @@ describe('StreamManager', () => {
   });
 
   describe('Reactive Methods', () => {
-    describe('consume$() - Reactive Consumer', () => {
+    describe('observeEvents() - Reactive Consumer', () => {
       it('should consume events reactively', async () => {
         const baseOffset = (await synap.stream.stats(testRoom)).max_offset + 1;
 
@@ -115,7 +115,7 @@ describe('StreamManager', () => {
 
         // Consume reactively
         const events = await firstValueFrom(
-          synap.stream.consume$<{ value: number }>({
+          synap.stream.observeEvents<{ value: number }>({
             roomName: testRoom,
             subscriberId: 'reactive-consumer-1',
             fromOffset: baseOffset,
@@ -142,7 +142,7 @@ describe('StreamManager', () => {
         await synap.stream.publish(testRoom, 'metadata.test', { info: 'test' });
 
         const event = await firstValueFrom(
-          synap.stream.consume$({
+          synap.stream.observeEvents({
             roomName: testRoom,
             subscriberId: 'metadata-consumer',
             fromOffset: baseOffset,
@@ -165,7 +165,7 @@ describe('StreamManager', () => {
         const futureOffset = (await synap.stream.stats(testRoom)).max_offset + 100;
 
         let emittedCount = 0;
-        const subscription = synap.stream.consume$({
+        const subscription = synap.stream.observeEvents({
           roomName: testRoom,
           subscriberId: 'empty-consumer',
           fromOffset: futureOffset,
@@ -187,7 +187,7 @@ describe('StreamManager', () => {
       }, 5000);
     });
 
-    describe('consumeEvent$() - Event Filtering', () => {
+    describe('observeEvent() - Event Filtering', () => {
       it('should filter events by name', async () => {
         const baseOffset = (await synap.stream.stats(testRoom)).max_offset + 1;
 
@@ -198,7 +198,7 @@ describe('StreamManager', () => {
 
         // Filter only login events
         const loginEvents = await firstValueFrom(
-          synap.stream.consumeEvent$<{ user: string }>({
+          synap.stream.observeEvent<{ user: string }>({
             roomName: testRoom,
             subscriberId: 'filter-consumer',
             fromOffset: baseOffset,
@@ -219,10 +219,10 @@ describe('StreamManager', () => {
       }, 10000);
     });
 
-    describe('stats$() - Reactive Stats', () => {
+    describe('observeStats() - Reactive Stats', () => {
       it('should emit stats at intervals', async () => {
         const statsEmissions = await firstValueFrom(
-          synap.stream.stats$(testRoom, 500).pipe(
+          synap.stream.observeStats(testRoom, 500).pipe(
             take(2),
             toArray(),
             timeout(5000)
@@ -236,7 +236,7 @@ describe('StreamManager', () => {
 
       it('should reflect published events in stats', async () => {
         const statsPromise = firstValueFrom(
-          synap.stream.stats$(testRoom, 300).pipe(
+          synap.stream.observeStats(testRoom, 300).pipe(
             take(3),
             toArray(),
             timeout(5000)
@@ -268,7 +268,7 @@ describe('StreamManager', () => {
 
         let eventCount = 0;
 
-        const subscription = synap.stream.consume$({
+        const subscription = synap.stream.observeEvents({
           roomName: testRoom,
           subscriberId: 'stop-test-consumer',
           fromOffset: baseOffset,
@@ -301,13 +301,13 @@ describe('StreamManager', () => {
         let count1 = 0;
         let count2 = 0;
 
-        const sub1 = synap.stream.consume$({
+        const sub1 = synap.stream.observeEvents({
           roomName: testRoom,
           subscriberId: 'consumer-1',
           fromOffset: baseOffset,
         }).subscribe({ next: () => count1++ });
 
-        const sub2 = synap.stream.consume$({
+        const sub2 = synap.stream.observeEvents({
           roomName: testRoom,
           subscriberId: 'consumer-2',
           fromOffset: baseOffset,
@@ -348,7 +348,7 @@ describe('StreamManager', () => {
 
       // Filter high priority
       const highPriority = await firstValueFrom(
-        synap.stream.consume$<{ priority: number }>({
+        synap.stream.observeEvents<{ priority: number }>({
           roomName: testRoom,
           subscriberId: 'priority-filter',
           fromOffset: baseOffset,

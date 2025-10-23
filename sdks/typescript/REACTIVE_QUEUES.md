@@ -39,7 +39,7 @@ import { Synap } from '@hivellm/synap';
 const synap = new Synap({ url: 'http://localhost:15500' });
 
 // Subscribe to messages
-synap.queue.consume$({
+synap.queue.observeMessages({
   queueName: 'tasks',
   consumerId: 'worker-1',
   pollingInterval: 500,
@@ -69,7 +69,7 @@ synap.queue.consume$({
 The `process$` method provides automatic ACK/NACK handling:
 
 ```typescript
-synap.queue.process$({
+synap.queue.processMessages({
   queueName: 'emails',
   consumerId: 'email-worker',
   pollingInterval: 500,
@@ -113,7 +113,7 @@ Process only high-priority messages:
 ```typescript
 import { filter } from 'rxjs/operators';
 
-synap.queue.consume$({
+synap.queue.observeMessages({
   queueName: 'tasks',
   consumerId: 'priority-worker'
 }).pipe(
@@ -134,7 +134,7 @@ Collect and process messages in batches:
 ```typescript
 import { bufferTime, filter } from 'rxjs/operators';
 
-synap.queue.consume$({
+synap.queue.observeMessages({
   queueName: 'analytics',
   consumerId: 'batch-worker',
   pollingInterval: 100
@@ -155,7 +155,7 @@ synap.queue.consume$({
 Route messages to different handlers based on type:
 
 ```typescript
-const messages$ = synap.queue.consume$({
+const messages$ = synap.queue.observeMessages({
   queueName: 'tasks',
   consumerId: 'router'
 });
@@ -184,7 +184,7 @@ Transform messages and publish to another queue:
 ```typescript
 import { map } from 'rxjs/operators';
 
-synap.queue.consume$({
+synap.queue.observeMessages({
   queueName: 'input',
   consumerId: 'transformer'
 }).pipe(
@@ -209,7 +209,7 @@ synap.queue.consume$({
 import { retry, catchError, debounceTime } from 'rxjs/operators';
 import { of } from 'rxjs';
 
-synap.queue.consume$({
+synap.queue.observeMessages({
   queueName: 'tasks',
   consumerId: 'retry-worker'
 }).pipe(
@@ -261,7 +261,7 @@ combineLatest([
 Properly stop consumers on shutdown:
 
 ```typescript
-const subscription = synap.queue.process$({
+const subscription = synap.queue.processMessages({
   queueName: 'tasks',
   consumerId: 'worker-1',
   concurrency: 5
@@ -287,7 +287,7 @@ process.on('SIGINT', () => {
 
 ## API Reference
 
-### consume$\<T\>(options: QueueConsumerOptions): Observable\<ProcessedMessage\<T\>\>
+### observeMessages\<T\>(options: QueueConsumerOptions): Observable\<ProcessedMessage\<T\>\>
 
 Creates a reactive message consumer that emits `ProcessedMessage` objects.
 
@@ -297,7 +297,7 @@ Creates a reactive message consumer that emits `ProcessedMessage` objects.
 - `ack()`: Function to acknowledge message
 - `nack(requeue?)`: Function to negative acknowledge
 
-### process$\<T\>(options: QueueConsumerOptions, handler: Function): Observable\<Result\>
+### processMessages\<T\>(options: QueueConsumerOptions, handler: Function): Observable\<Result\>
 
 Creates a consumer with automatic ACK/NACK handling.
 
@@ -310,7 +310,7 @@ Creates a consumer with automatic ACK/NACK handling.
 - `success`: Whether processing succeeded
 - `error?`: Error if processing failed
 
-### stats$(queueName: string, interval?: number): Observable\<QueueStats\>
+### observeStats(queueName: string, interval?: number): Observable\<QueueStats\>
 
 Creates an observable that emits queue statistics at regular intervals.
 
@@ -379,7 +379,7 @@ while (running) {
 ### ✅ New Way (Reactive)
 
 ```typescript
-synap.queue.process$({
+synap.queue.processMessages({
   queueName: 'tasks',
   consumerId: 'worker-1',
   pollingInterval: 500,
@@ -388,6 +388,13 @@ synap.queue.process$({
   await processTask(data);
 }).subscribe();
 ```
+
+## Method Names
+
+All reactive methods use descriptive names instead of `$` suffix:
+- `observeMessages()` - Observe messages as Observable
+- `processMessages()` - Process with auto-ACK/NACK
+- `observeStats()` - Monitor queue statistics
 
 ## Benefits Summary
 

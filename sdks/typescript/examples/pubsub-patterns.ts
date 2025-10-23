@@ -43,7 +43,7 @@ async function basicPubSub() {
   console.log('✅ Published messages to topics');
 
   // Subscribe to topics (Note: This requires WebSocket support)
-  // synap.pubsub.subscribe$({
+  // synap.pubsub.subscribe({
   //   topics: ['user.created', 'user.updated'],
   //   subscriberId: 'user-subscriber'
   // }).subscribe({
@@ -130,7 +130,7 @@ async function wildcardTopics() {
   console.log('  app.*.event - All app events');
 
   // Subscribe with wildcard (requires WebSocket)
-  // synap.pubsub.subscribe$({
+  // synap.pubsub.subscribe({
   //   topics: ['user.*', '*.error'],
   //   subscriberId: 'wildcard-subscriber'
   // }).subscribe({
@@ -161,7 +161,7 @@ async function singleTopicSubscription() {
   console.log('✅ Published order event');
 
   // Subscribe to single topic (requires WebSocket)
-  // synap.pubsub.subscribeTopic$('orders.created').subscribe({
+  // synap.pubsub.subscribeTopic('orders.created').subscribe({
   //   next: (message) => {
   //     console.log('New order:', message.data);
   //   }

@@ -48,7 +48,7 @@ async function basicEventStream() {
   });
 
   // Consume reactively
-  synap.stream.consume$<ChatMessage>({
+  synap.stream.observeEvents<ChatMessage>({
     roomName: ROOM,
     subscriberId: 'chat-viewer',
     fromOffset: 0,
@@ -93,7 +93,7 @@ async function eventFiltering() {
   await synap.stream.publish(ROOM, 'user.login', { userId: '3', action: 'login' });
 
   // Filter only login events
-  synap.stream.consumeEvent$<UserAction>({
+  synap.stream.observeEvent<UserAction>({
     roomName: ROOM,
     subscriberId: 'login-monitor',
     fromOffset: 0,
@@ -130,7 +130,7 @@ async function eventAggregation() {
   }
 
   // Aggregate events into batches
-  synap.stream.consume$<{ page: string }>({
+  synap.stream.observeEvents<{ page: string }>({
     roomName: ROOM,
     subscriberId: 'analytics-aggregator',
     fromOffset: 0,
@@ -168,7 +168,7 @@ async function realtimeMonitoring() {
   await synap.stream.createRoom(ROOM);
 
   // Monitor stream stats
-  synap.stream.stats$(ROOM, 1000).subscribe({
+  synap.stream.observeStats(ROOM, 1000).subscribe({
     next: (stats) => {
       console.log(`Events: ${stats.event_count}, Subscribers: ${stats.subscribers}`);
     }
@@ -216,7 +216,7 @@ async function eventReplay() {
   // Replay from beginning
   console.log('\n📜 Replaying from offset 0:');
   
-  synap.stream.consume$({
+  synap.stream.observeEvents({
     roomName: ROOM,
     subscriberId: 'replay-consumer',
     fromOffset: 0, // Start from beginning
@@ -258,7 +258,7 @@ async function multiRoom() {
 
   // Consume from all rooms
   ROOMS.forEach((room) => {
-    synap.stream.consume$({
+    synap.stream.observeEvents({
       roomName: room,
       subscriberId: `consumer-${room}`,
       fromOffset: 0,
@@ -290,7 +290,7 @@ async function errorResilient() {
   await synap.stream.publish(ROOM, 'data.received', { value: 'valid' });
 
   // Consume with error handling
-  synap.stream.consume$<{ value: string }>({
+  synap.stream.observeEvents<{ value: string }>({
     roomName: ROOM,
     subscriberId: 'resilient-consumer',
     fromOffset: 0,

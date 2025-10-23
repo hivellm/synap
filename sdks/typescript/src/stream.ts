@@ -146,7 +146,7 @@ export class StreamManager {
    * 
    * @example
    * ```typescript
-   * synap.stream.consume$({
+   * synap.stream.observeEvents({
    *   roomName: 'chat-room',
    *   subscriberId: 'user-123',
    *   fromOffset: 0,
@@ -158,7 +158,7 @@ export class StreamManager {
    * });
    * ```
    */
-  consume$<T = any>(options: StreamConsumerOptions): Observable<ProcessedStreamEvent<T>> {
+  observeEvents<T = any>(options: StreamConsumerOptions): Observable<ProcessedStreamEvent<T>> {
     const {
       roomName,
       subscriberId,
@@ -206,7 +206,7 @@ export class StreamManager {
    * 
    * @example
    * ```typescript
-   * synap.stream.consumeEvent$({
+   * synap.stream.observeEvent({
    *   roomName: 'notifications',
    *   subscriberId: 'user-1',
    *   eventName: 'user.created'
@@ -215,12 +215,12 @@ export class StreamManager {
    * });
    * ```
    */
-  consumeEvent$<T = any>(
+  observeEvent<T = any>(
     options: StreamConsumerOptions & { eventName: string }
   ): Observable<ProcessedStreamEvent<T>> {
     const { eventName, ...consumeOptions } = options;
     
-    return this.consume$<T>(consumeOptions).pipe(
+    return this.observeEvents<T>(consumeOptions).pipe(
       filter((event) => event.event === eventName)
     );
   }
@@ -261,12 +261,12 @@ export class StreamManager {
    * 
    * @example
    * ```typescript
-   * synap.stream.stats$('chat-room', 3000).subscribe({
-   *   next: (stats) => console.log('Events:', stats.event_count),
+   * synap.stream.observeStats('chat-room', 3000).subscribe({
+   *   next: (stats) => console.log('Events:', stats.max_offset),
    * });
    * ```
    */
-  stats$(roomName: string, interval: number = 5000): Observable<StreamStats> {
+  observeStats(roomName: string, interval: number = 5000): Observable<StreamStats> {
     return timer(0, interval).pipe(
       switchMap(() => defer(() => this.stats(roomName))),
       retry({

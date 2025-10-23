@@ -74,7 +74,7 @@ export class PubSubManager {
    * 
    * @example
    * ```typescript
-   * synap.pubsub.subscribe$({
+   * synap.pubsub.subscribe({
    *   topics: ['user.created', 'user.updated'],
    *   subscriberId: 'subscriber-1'
    * }).subscribe({
@@ -85,7 +85,7 @@ export class PubSubManager {
    * });
    * ```
    */
-  subscribe$<T = any>(options: PubSubSubscriberOptions): Observable<ProcessedPubSubMessage<T>> {
+  subscribe<T = any>(options: PubSubSubscriberOptions): Observable<ProcessedPubSubMessage<T>> {
     const {
       topics,
       subscriberId = `subscriber-${Date.now()}`,
@@ -129,13 +129,13 @@ export class PubSubManager {
    * 
    * @example
    * ```typescript
-   * synap.pubsub.subscribeTopic$('user.created').subscribe({
+   * synap.pubsub.subscribeTopic('user.created').subscribe({
    *   next: (message) => console.log('User created:', message.data)
    * });
    * ```
    */
-  subscribeTopic$<T = any>(topic: string, subscriberId?: string): Observable<ProcessedPubSubMessage<T>> {
-    return this.subscribe$<T>({
+  subscribeTopic<T = any>(topic: string, subscriberId?: string): Observable<ProcessedPubSubMessage<T>> {
+    return this.subscribe<T>({
       topics: [topic],
       subscriberId,
     });

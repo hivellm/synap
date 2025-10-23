@@ -39,7 +39,7 @@ async function priorityProcessing() {
   });
 
   // Process only high-priority messages (priority >= 7)
-  synap.queue.consume$<Task>({
+  synap.queue.observeMessages<Task>({
     queueName: 'tasks',
     consumerId: 'priority-worker',
     pollingInterval: 500,
@@ -71,7 +71,7 @@ async function batchProcessing() {
   });
 
   // Collect messages and process in batches
-  synap.queue.consume$<Task>({
+  synap.queue.observeMessages<Task>({
     queueName: 'batch-tasks',
     consumerId: 'batch-worker',
     pollingInterval: 100,
@@ -105,7 +105,7 @@ async function typeBasedRouting() {
     max_depth: 10000,
   });
 
-  const messages$ = synap.queue.consume$<Task>({
+  const messages$ = synap.queue.observeMessages<Task>({
     queueName: 'mixed-tasks',
     consumerId: 'router-worker',
     pollingInterval: 500,
@@ -157,7 +157,7 @@ async function retryWithBackoff() {
     default_max_retries: 5,
   });
 
-  synap.queue.consume$<Task>({
+  synap.queue.observeMessages<Task>({
     queueName: 'retry-tasks',
     consumerId: 'retry-worker',
   }).pipe(
@@ -208,9 +208,9 @@ async function multiQueueMonitoring() {
 
   // Monitor multiple queues simultaneously
   combineLatest([
-    synap.queue.stats$('queue-a', 3000),
-    synap.queue.stats$('queue-b', 3000),
-    synap.queue.stats$('queue-c', 3000),
+    synap.queue.observeStats('queue-a', 3000),
+    synap.queue.observeStats('queue-b', 3000),
+    synap.queue.observeStats('queue-c', 3000),
   ]).subscribe({
     next: ([statsA, statsB, statsC]) => {
       console.log('\n📊 Multi-Queue Stats:');
@@ -235,7 +235,7 @@ async function transformAndForward() {
   await synap.queue.createQueue('output-queue', {});
 
   // Consume from one queue, transform, and publish to another
-  synap.queue.consume$<Task>({
+  synap.queue.observeMessages<Task>({
     queueName: 'input-queue',
     consumerId: 'transformer',
     pollingInterval: 500,
@@ -281,13 +281,13 @@ async function dlqProcessor() {
   await synap.queue.createQueue('dlq', {});
 
   // Monitor main queue stats for dead lettered messages
-  synap.queue.stats$('main-queue', 2000).pipe(
+  synap.queue.observeStats('main-queue', 2000).pipe(
     filter(stats => stats.dead_lettered > 0),
     tap(stats => console.log(`⚠️  Dead lettered messages: ${stats.dead_lettered}`))
   ).subscribe();
 
   // Process DLQ messages differently
-  synap.queue.consume$<Task>({
+  synap.queue.observeMessages<Task>({
     queueName: 'dlq',
     consumerId: 'dlq-processor',
     pollingInterval: 5000,

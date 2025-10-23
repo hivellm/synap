@@ -55,7 +55,7 @@ const { message, text } = await synap.queue.consumeString('jobs', 'worker-1');
 await synap.queue.ack('jobs', message.id);
 
 // Reactive queue consumption (recommended)
-synap.queue.process$({
+synap.queue.processMessages({
   queueName: 'jobs',
   consumerId: 'worker-1',
   concurrency: 5
@@ -69,7 +69,7 @@ await synap.stream.createRoom('chat-room');
 await synap.stream.publish('chat-room', 'message.sent', { text: 'Hello!' });
 
 // Reactive stream consumption
-synap.stream.consume$({
+synap.stream.observeEvents({
   roomName: 'chat-room',
   subscriberId: 'user-1',
   fromOffset: 0
@@ -305,7 +305,7 @@ Reactive consumption:
 
 ```typescript
 // Simple consumer with manual ACK/NACK
-synap.queue.consume$({
+synap.queue.observeMessages({
   queueName: 'tasks',
   consumerId: 'worker-1',
   pollingInterval: 500,
@@ -329,7 +329,7 @@ synap.queue.consume$({
 
 ```typescript
 // Automatic ACK/NACK handling
-synap.queue.process$({
+synap.queue.processMessages({
   queueName: 'emails',
   consumerId: 'email-worker',
   concurrency: 10
@@ -353,7 +353,7 @@ synap.queue.process$({
 ```typescript
 import { filter } from 'rxjs/operators';
 
-synap.queue.consume$({
+synap.queue.observeMessages({
   queueName: 'tasks',
   consumerId: 'priority-worker'
 }).pipe(
@@ -368,7 +368,7 @@ synap.queue.consume$({
 ```typescript
 import { bufferTime } from 'rxjs/operators';
 
-synap.queue.consume$({
+synap.queue.observeMessages({
   queueName: 'analytics',
   consumerId: 'batch-worker',
   pollingInterval: 100
@@ -382,7 +382,7 @@ synap.queue.consume$({
 
 **Type-based routing:**
 ```typescript
-const messages$ = synap.queue.consume$({ queueName: 'mixed', consumerId: 'router' });
+const messages$ = synap.queue.observeMessages({ queueName: 'mixed', consumerId: 'router' });
 
 // Email handler
 messages$.pipe(filter(m => m.data.type === 'email'))
@@ -396,7 +396,7 @@ messages$.pipe(filter(m => m.data.type === 'notification'))
 **Queue monitoring:**
 ```typescript
 // Monitor queue stats every 3 seconds
-synap.queue.stats$('tasks', 3000).subscribe({
+synap.queue.observeStats('tasks', 3000).subscribe({
   next: (stats) => {
     console.log(`Depth: ${stats.depth}, Acked: ${stats.acked}`);
   }
@@ -406,7 +406,7 @@ synap.queue.stats$('tasks', 3000).subscribe({
 ### Graceful Shutdown
 
 ```typescript
-const subscription = synap.queue.process$({
+const subscription = synap.queue.processMessages({
   queueName: 'tasks',
   consumerId: 'worker-1',
   concurrency: 5
@@ -477,7 +477,7 @@ console.log(`Events: ${stats.event_count}, Subscribers: ${stats.subscribers}`);
 
 ```typescript
 // Subscribe to all events
-synap.stream.consume$({
+synap.stream.observeEvents({
   roomName: 'chat-room',
   subscriberId: 'user-1',
   fromOffset: 0,
@@ -489,7 +489,7 @@ synap.stream.consume$({
 });
 
 // Filter specific event types
-synap.stream.consumeEvent$({
+synap.stream.observeEvent({
   roomName: 'notifications',
   subscriberId: 'user-1',
   eventName: 'notification.important'
@@ -498,7 +498,7 @@ synap.stream.consumeEvent$({
 });
 
 // Monitor stream stats in real-time
-synap.stream.stats$('chat-room', 3000).subscribe({
+synap.stream.observeStats('chat-room', 3000).subscribe({
   next: (stats) => console.log('Event count:', stats.event_count)
 });
 ```
@@ -507,7 +507,7 @@ synap.stream.stats$('chat-room', 3000).subscribe({
 
 ```typescript
 // Replay events from beginning
-synap.stream.consume$({
+synap.stream.observeEvents({
   roomName: 'audit-log',
   subscriberId: 'auditor',
   fromOffset: 0  // Start from beginning
@@ -517,7 +517,7 @@ synap.stream.consume$({
 
 // Resume from last known offset
 const lastOffset = 42;
-synap.stream.consume$({
+synap.stream.observeEvents({
   roomName: 'chat-room',
   subscriberId: 'user-1',
   fromOffset: lastOffset + 1
@@ -532,7 +532,7 @@ synap.stream.consume$({
 import { filter, bufferTime, map } from 'rxjs/operators';
 
 // Event aggregation
-synap.stream.consume$({ roomName: 'analytics' }).pipe(
+synap.stream.observeEvents({ roomName: 'analytics' }).pipe(
   bufferTime(5000),
   map(events => ({ count: events.length, events }))
 ).subscribe({
@@ -540,7 +540,7 @@ synap.stream.consume$({ roomName: 'analytics' }).pipe(
 });
 
 // Filter by event properties
-synap.stream.consume$<{ priority: number }>({ roomName: 'tasks' }).pipe(
+synap.stream.observeEvents<{ priority: number }>({ roomName: 'tasks' }).pipe(
   filter(event => event.data.priority > 7)
 ).subscribe({
   next: (event) => console.log('High priority:', event)
@@ -602,7 +602,7 @@ await synap.pubsub.publish('events.custom', {
 
 ```typescript
 // Subscribe to multiple topics
-synap.pubsub.subscribe$({
+synap.pubsub.subscribe({
   topics: ['user.created', 'user.updated', 'user.deleted'],
   subscriberId: 'user-service'
 }).subscribe({
@@ -613,14 +613,14 @@ synap.pubsub.subscribe$({
 });
 
 // Subscribe to single topic
-synap.pubsub.subscribeTopic$('orders.created').subscribe({
+synap.pubsub.subscribeTopic('orders.created').subscribe({
   next: (message) => {
     console.log('New order:', message.data);
   }
 });
 
 // Subscribe with wildcard
-synap.pubsub.subscribe$({
+synap.pubsub.subscribe({
   topics: ['user.*', '*.error'],
   subscriberId: 'monitor'
 }).subscribe({

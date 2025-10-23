@@ -236,7 +236,7 @@ export class QueueManager {
    * 
    * @example
    * ```typescript
-   * synap.queue.consume$({
+   * synap.queue.observeMessages({
    *   queueName: 'tasks',
    *   consumerId: 'worker-1',
    *   pollingInterval: 500,
@@ -250,7 +250,7 @@ export class QueueManager {
    * });
    * ```
    */
-  consume$<T = any>(options: QueueConsumerOptions): Observable<ProcessedMessage<T>> {
+  observeMessages<T = any>(options: QueueConsumerOptions): Observable<ProcessedMessage<T>> {
     const {
       queueName,
       consumerId,
@@ -303,7 +303,7 @@ export class QueueManager {
    * 
    * @example
    * ```typescript
-   * synap.queue.consumeAuto$({
+   * synap.queue.observeMessagesAuto({
    *   queueName: 'tasks',
    *   consumerId: 'worker-1',
    * }).subscribe({
@@ -315,14 +315,14 @@ export class QueueManager {
    * });
    * ```
    */
-  consumeAuto$<T = any>(options: QueueConsumerOptions): Observable<ProcessedMessage<T>> {
+  observeMessagesAuto<T = any>(options: QueueConsumerOptions): Observable<ProcessedMessage<T>> {
     const opts = {
       ...options,
       autoAck: true,
       autoNack: true,
     };
 
-    return this.consume$<T>(opts);
+    return this.observeMessages<T>(opts);
   }
 
   /**
@@ -330,7 +330,7 @@ export class QueueManager {
    * 
    * @example
    * ```typescript
-   * const subscription = synap.queue.process$({
+   * const subscription = synap.queue.processMessages({
    *   queueName: 'emails',
    *   consumerId: 'email-worker',
    *   concurrency: 10
@@ -342,11 +342,11 @@ export class QueueManager {
    * });
    * ```
    */
-  process$<T = any>(
+  processMessages<T = any>(
     options: QueueConsumerOptions,
     handler: (data: T, message: QueueMessage) => Promise<void>
   ): Observable<{ messageId: string; success: boolean; error?: Error }> {
-    return this.consume$<T>(options).pipe(
+    return this.observeMessages<T>(options).pipe(
       mergeMap(
         async (msg) => {
           try {
@@ -403,12 +403,12 @@ export class QueueManager {
    * 
    * @example
    * ```typescript
-   * synap.queue.stats$('tasks', 1000).subscribe({
+   * synap.queue.observeStats('tasks', 1000).subscribe({
    *   next: (stats) => console.log('Queue depth:', stats.depth),
    * });
    * ```
    */
-  stats$(queueName: string, interval: number = 5000): Observable<QueueStats> {
+  observeStats(queueName: string, interval: number = 5000): Observable<QueueStats> {
     return timer(0, interval).pipe(
       switchMap(() => defer(() => this.stats(queueName))),
       retry({
