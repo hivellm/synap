@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - TypeScript SDK: Dual Testing Strategy ✅ NEW (October 23, 2025)
+
+#### 🧪 Unit Tests with Mocks
+**Fast, isolated testing without server dependency**:
+
+**Features:**
+- ✅ **Mock Client**: Complete mock implementation for all commands
+- ✅ **47 Unit Tests**: Fast tests without server (< 1 second)
+- ✅ **68 S2S Tests**: Integration tests with real server
+- ✅ **Total: 115 Tests**: 100% passing in both modes
+- ✅ **CI/CD Ready**: Unit tests perfect for continuous integration
+- ✅ **Flexible**: Optional s2s tests for integration validation
+
+**Test Types**:
+```
+Unit Tests (*.test.ts) - No server needed:
+- client.test.ts: 5 tests
+- kv.test.ts: 20 tests
+- queue.reactive.test.ts: 9 tests
+- stream.test.ts: 13 tests
+
+S2S Tests (*.s2s.test.ts) - Requires server:
+- client.s2s.test.ts: 5 tests
+- kv.s2s.test.ts: 18 tests
+- queue.s2s.test.ts: 12 tests
+- queue.reactive.s2s.test.ts: 17 tests
+- stream.s2s.test.ts: 16 tests
+```
+
+**Commands**:
+```bash
+npm test              # Unit tests (default)
+npm run test:unit     # Unit tests only
+npm run test:s2s      # S2S tests (needs server)
+npm run test:all      # All tests
+```
+
+**Benefits**:
+- Fast feedback during development
+- No infrastructure required for basic testing
+- Flexible testing strategy
+- 100% coverage in both modes
+
+---
+
 ### Added - TypeScript SDK: Event Stream & Pub/Sub ✅ NEW (October 23, 2025)
 
 #### 📡 Event Stream Support

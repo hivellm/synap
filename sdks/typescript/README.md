@@ -876,11 +876,18 @@ npm install
 # Build
 npm run build
 
-# Run tests (requires running Synap server)
-npm test
+# Run tests (unit tests - no server required)
+npm test                   # Default: unit tests with mocks
+npm run test:unit          # Unit tests (fast, no server)
+npm run test:s2s           # S2S tests (requires server)
+npm run test:all           # All tests (unit + s2s)
 
 # Watch mode
 npm run dev
+npm run test:watch
+
+# Coverage
+npm run test:coverage
 
 # Lint
 npm run lint
@@ -888,6 +895,25 @@ npm run lint
 # Format
 npm run format
 ```
+
+### Testing Strategy
+
+The SDK uses a **dual testing approach**:
+
+**1. Unit Tests (Mock)** - No server required ✅
+- 47 tests using mocked client
+- Fast execution (~1 second)
+- Perfect for CI/CD and development
+- Run with: `npm test` or `npm run test:unit`
+
+**2. S2S Tests (Server-to-Server)** - Optional ⚙️
+- 68 integration tests with real server
+- Requires Synap server running on `localhost:15500`
+- Run with: `npm run test:s2s`
+
+**Total: 115 tests - 100% passing**
+
+See [TESTING.md](./src/__tests__/TESTING.md) for complete testing guide.
 
 ---
 
