@@ -34,12 +34,22 @@
 pub mod client;
 pub mod error;
 pub mod kv;
+#[cfg(test)]
+mod kv_test;
 pub mod pubsub;
+#[cfg(test)]
+mod pubsub_test;
 pub mod queue;
 mod queue_reactive;
+#[cfg(test)]
+mod queue_test;
 pub mod reactive;
 pub mod stream;
 mod stream_reactive;
+#[cfg(test)]
+mod stream_test;
+#[cfg(test)]
+mod tests;
 pub mod types;
 
 pub use client::{SynapClient, SynapConfig};
