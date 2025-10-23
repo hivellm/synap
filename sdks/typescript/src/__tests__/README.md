@@ -9,7 +9,9 @@ src/__tests__/
 ├── client.test.ts         - HTTP client and protocol tests (5 tests)
 ├── kv.test.ts            - Key-Value store tests (18 tests)
 ├── queue.test.ts         - Traditional queue tests (12 tests)
-└── queue.reactive.test.ts - Reactive queue tests (17 tests) ✨ NEW
+├── queue.reactive.test.ts - Reactive queue tests (17 tests) ✨
+├── stream.test.ts        - Event stream tests (16 tests) ✨ NEW
+└── README.md             - Test documentation
 ```
 
 ## Running Tests
@@ -23,6 +25,9 @@ npm test
 ```bash
 # Reactive queue tests only
 npm test -- queue.reactive
+
+# Stream tests
+npm test -- stream.test
 
 # Traditional queue tests
 npm test -- queue.test
@@ -44,11 +49,13 @@ npm run test:coverage
 npm run test:watch
 ```
 
-## Reactive Queue Tests
+## Test Suites
+
+### Reactive Queue Tests
 
 **File:** `queue.reactive.test.ts`  
 **Tests:** 17  
-**Status:** ✅ All Passing
+**Status:** ✅ All Passing (100%)
 
 ### Test Coverage
 
@@ -80,6 +87,59 @@ npm run test:watch
 #### 6. Error Handling (2 tests)
 - ✅ Should handle errors in consume$ gracefully
 - ✅ Should continue consuming after handler errors in process$
+
+---
+
+### Event Stream Tests
+
+**File:** `stream.test.ts`  
+**Tests:** 16  
+**Status:** ✅ All Passing (100%)
+
+### Test Coverage
+
+#### 1. Room Management (4 tests)
+- ✅ Should create a stream room
+- ✅ Should list stream rooms
+- ✅ Should get stream stats
+- ✅ Should delete a stream room
+
+#### 2. Publish/Consume Operations (3 tests)
+- ✅ Should publish and consume events
+- ✅ Should consume from specific offset
+- ✅ Should handle high offset
+
+#### 3. Reactive Methods - consume$() (3 tests)
+- ✅ Should consume events reactively
+- ✅ Should provide event metadata
+- ✅ Should handle empty stream gracefully
+
+#### 4. Reactive Methods - consumeEvent$() (1 test)
+- ✅ Should filter events by name
+
+#### 5. Reactive Methods - stats$() (2 tests)
+- ✅ Should emit stats at intervals
+- ✅ Should reflect published events in stats
+
+#### 6. Lifecycle Management (2 tests)
+- ✅ Should stop a specific consumer
+- ✅ Should stop all consumers
+
+#### 7. Advanced Patterns (1 test)
+- ✅ Should support custom filtering
+
+---
+
+### Test Results Summary
+
+| Test Suite | Tests | Passing | % |
+|------------|-------|---------|---|
+| **Client** | 5 | 5 | 100% ✅ |
+| **Queue (traditional)** | 12 | 12 | 100% ✅ |
+| **Queue (reactive)** | 17 | 17 | 100% ✅ |
+| **Stream (reactive)** | 16 | 16 | 100% ✅ |
+| **KV Store** | 18 | 13 | 72% ⚠️ |
+| **TOTAL** | **68** | **63** | **92.6%** |
 
 ## Test Requirements
 
