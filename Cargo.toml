@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["synap-server", "synap-cli"]
+members = ["synap-server", "synap-cli", "sdks/rust"]
 
 [workspace.lints.clippy]
 # Allow field reassignment in tests/benches (common pattern)

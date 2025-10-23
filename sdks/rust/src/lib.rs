@@ -1,0 +1,47 @@
+//! # Synap Rust SDK
+//!
+//! Official Rust client for Synap - High-Performance In-Memory Key-Value Store & Message Broker
+//!
+//! ## Features
+//!
+//! - 💾 **Key-Value Store**: Fast in-memory KV operations with TTL support
+//! - 📨 **Message Queues**: RabbitMQ-style queues with ACK/NACK
+//! - 📡 **Event Streams**: Kafka-style event streams with offset tracking
+//! - 🔔 **Pub/Sub**: Topic-based publish/subscribe with wildcards
+//! - 🔄 **Async/Await**: Built on Tokio for high-performance async I/O
+//! - 🛡️ **Type-Safe**: Leverages Rust's type system for correctness
+//!
+//! ## Quick Start
+//!
+//! ```rust,no_run
+//! use synap_sdk::{SynapClient, SynapConfig};
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     // Create client
+//!     let config = SynapConfig::new("http://localhost:15500");
+//!     let client = SynapClient::new(config)?;
+//!
+//!     // Key-Value operations
+//!     client.kv().set("user:1", "John Doe", None).await?;
+//!     let value: Option<String> = client.kv().get("user:1").await?;
+//!     println!("Value: {:?}", value);
+//!
+//!     Ok(())
+//! }
+//! ```
+
+pub mod client;
+pub mod error;
+pub mod kv;
+pub mod pubsub;
+pub mod queue;
+pub mod stream;
+pub mod types;
+
+pub use client::{SynapClient, SynapConfig};
+pub use error::{Result, SynapError};
+pub use kv::KVStore;
+pub use pubsub::PubSubManager;
+pub use queue::QueueManager;
+pub use stream::StreamManager;

@@ -29,7 +29,8 @@
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
-    "prepublishOnly": "npm run build && npm run test:unit"
+    "prepublishOnly": "npm run build && npm run test:unit",
+    "publish:wsl": "export BROWSER=wslview && npm publish --tag beta"
   },
   "keywords": [
     "synap",
@@ -49,7 +50,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/hivellm/synap.git",
+    "url": "git+https://github.com/hivellm/synap.git",
     "directory": "sdks/typescript"
   },
   "bugs": {
@@ -74,6 +75,9 @@
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
 

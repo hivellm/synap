@@ -1,0 +1,48 @@
+[package]
+name = "synap-sdk"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+authors = ["HiveLLM Team"]
+license = "MIT"
+description = "Rust SDK for Synap - High-Performance In-Memory Key-Value Store & Message Broker"
+repository = "https://github.com/hivellm/synap"
+keywords = ["synap", "kv-store", "message-queue", "event-stream", "pubsub"]
+categories = ["database", "network-programming", "asynchronous"]
+
+[dependencies]
+tokio = { version = "1.48", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+tracing = "0.1"
+async-trait = "0.1"
+futures = "0.3"
+url = "2.5"
+uuid = { version = "1.11", features = ["v4"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+mockito = "1.6"
+tracing-subscriber = "0.3"
+
+[lib]
+name = "synap_sdk"
+path = "src/lib.rs"
+
+[[example]]
+name = "basic"
+path = "examples/basic.rs"
+
+[[example]]
+name = "queue"
+path = "examples/queue.rs"
+
+[[example]]
+name = "stream"
+path = "examples/stream.rs"
+
+[[example]]
+name = "pubsub"
+path = "examples/pubsub.rs"
