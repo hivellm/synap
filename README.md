@@ -94,25 +94,46 @@ Synap provides four core capabilities in a single, cohesive system:
 
 ### 📦 Installation
 
-**From Package Managers**:
+**From GitHub Releases** (Recommended):
 
 ```bash
-# Windows (MSI Installer)
-# Download from https://github.com/hivellm/synap/releases
-synap-0.1.0-x86_64.msi
+# Download pre-built binaries from GitHub Releases
+# https://github.com/hivellm/synap/releases
 
-# Linux (Debian/Ubuntu)
-curl -fsSL https://packages.synap.io/gpg.key | sudo apt-key add -
-echo "deb https://packages.synap.io/apt stable main" | sudo tee /etc/apt/sources.list.d/synap.list
-sudo apt-get update && sudo apt-get install synap
+# Linux (x86_64)
+wget https://github.com/hivellm/synap/releases/download/v0.3.0/synap-linux-x86_64.tar.gz
+tar -xzf synap-linux-x86_64.tar.gz
+cd synap-linux-x86_64
+./synap-server --config config.yml
 
-# macOS (Homebrew)
-brew tap hivellm/synap
-brew install synap
+# macOS (Intel)
+wget https://github.com/hivellm/synap/releases/download/v0.3.0/synap-macos-x86_64.tar.gz
+tar -xzf synap-macos-x86_64.tar.gz
+cd synap-macos-x86_64
+./synap-server --config config.yml
 
-# Docker
-docker pull hivellm/synap:latest
-docker run -d -p 15500:15500 hivellm/synap:latest
+# macOS (Apple Silicon)
+wget https://github.com/hivellm/synap/releases/download/v0.3.0/synap-macos-aarch64.tar.gz
+tar -xzf synap-macos-aarch64.tar.gz
+cd synap-macos-aarch64
+./synap-server --config config.yml
+
+# Windows (x86_64)
+# Download synap-windows-x86_64.zip from releases page
+# Extract and run synap-server.exe
+```
+
+**🐳 Docker**:
+
+```bash
+# Build Docker image locally
+git clone https://github.com/hivellm/synap.git
+cd synap
+docker build -t synap:latest .
+docker run -d -p 15500:15500 synap:latest
+
+# Or use docker-compose for replication setup
+docker-compose up -d
 ```
 
 **🛠️ From Source**:
@@ -122,14 +143,14 @@ docker run -d -p 15500:15500 hivellm/synap:latest
 git clone https://github.com/hivellm/synap.git
 cd synap
 
-# Build from source
-cargo build --release --features full
+# Build from source (requires Rust nightly 1.85+)
+cargo build --release
 
 # Run server
 ./target/release/synap-server --config config.yml
 ```
 
-See [Packaging & Distribution](docs/PACKAGING_AND_DISTRIBUTION.md) for detailed installation instructions.
+See [Development Guide](docs/DEVELOPMENT.md) for detailed build instructions.
 
 ### 💻 Basic Usage
 
