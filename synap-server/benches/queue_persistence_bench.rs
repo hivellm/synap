@@ -40,8 +40,10 @@ fn bench_queue_with_persistence(c: &mut Criterion) {
                 };
 
                 let rt = Runtime::new().unwrap();
-                let mut queue_config = QueueConfig::default();
-                queue_config.max_depth = 1_000_000; // Large queue for benchmarks
+                let queue_config = QueueConfig {
+                    max_depth: 1_000_000, // Large queue for benchmarks
+                    ..Default::default()
+                };
                 let queue_manager = Arc::new(QueueManager::new(queue_config));
                 let persistence = rt.block_on(async {
                     Arc::new(PersistenceLayer::new(persist_config).await.unwrap())

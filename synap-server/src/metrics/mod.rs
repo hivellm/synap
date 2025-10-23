@@ -314,6 +314,6 @@ mod tests {
 
         let metrics = result.unwrap();
         // Should contain Prometheus format (may be empty if no metrics recorded)
-        assert!(!metrics.is_empty() || metrics.contains("# HELP") || metrics.len() >= 0);
+        assert!(!metrics.is_empty() || metrics.contains("# HELP"));
     }
 }

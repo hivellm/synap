@@ -162,7 +162,7 @@ mod tests {
 
         // Verify master is created
         let stats = master.stats();
-        // Offset is always >= 0 for u64
-        assert!(stats.master_offset == 0 || stats.master_offset > 0);
+        // Offset should be valid (always true for u64, but serves as a sanity check)
+        let _offset_valid = stats.master_offset; // Consume the value to avoid unused warning
     }
 }

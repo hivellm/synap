@@ -9,8 +9,10 @@ use synap_server::{AppState, KVConfig, KVStore, create_router};
 use tokio::net::TcpListener;
 
 async fn spawn_test_server() -> String {
-    let mut config = KVConfig::default();
-    config.allow_flush_commands = true; // Enable FLUSHDB for tests
+    let config = KVConfig {
+        allow_flush_commands: true, // Enable FLUSHDB for tests
+        ..Default::default()
+    };
     let kv_store = Arc::new(KVStore::new(config));
     let state = AppState {
         kv_store,

@@ -210,7 +210,7 @@ async fn test_pubsub_websocket_multiple_topics() {
 
     // Skip welcome
     let welcome = read.next().await.unwrap().unwrap();
-    let welcome_msg: serde_json::Value = serde_json::from_str(&welcome.to_text().unwrap()).unwrap();
+    let welcome_msg: serde_json::Value = serde_json::from_str(welcome.to_text().unwrap()).unwrap();
     assert_eq!(welcome_msg["subscription_count"], 3);
 
     let client = reqwest::Client::new();

@@ -2,7 +2,6 @@
 use std::time::Duration;
 use synap_server::core::{KVConfig, KVStore, QueueConfig, QueueManager};
 use synap_server::persistence::AsyncWAL;
-use tokio;
 
 #[tokio::test]
 async fn test_compact_stored_value_persistence() {

@@ -54,7 +54,7 @@ async fn test_compression_layer_enabled() {
 
     // Verify server handles requests normally with compression layer
     let response = client
-        .get(&format!("{}/health", base_url))
+        .get(format!("{}/health", base_url))
         .send()
         .await
         .unwrap();
@@ -72,7 +72,7 @@ async fn test_compression_with_large_response() {
     // Create many keys
     for i in 0..100 {
         client
-            .post(&format!("{}/kv/set", base_url))
+            .post(format!("{}/kv/set", base_url))
             .json(&json!({
                 "key": format!("key_{}", i),
                 "value": format!("Value {}", i)
@@ -84,7 +84,7 @@ async fn test_compression_with_large_response() {
 
     // Request stats (will be compressed if large enough)
     let response = client
-        .get(&format!("{}/kv/stats", base_url))
+        .get(format!("{}/kv/stats", base_url))
         .send()
         .await
         .unwrap();
@@ -101,7 +101,7 @@ async fn test_compression_transparent_to_client() {
 
     // reqwest automatically handles compression/decompression
     let response = client
-        .get(&format!("{}/health", base_url))
+        .get(format!("{}/health", base_url))
         .send()
         .await
         .unwrap();
@@ -119,7 +119,7 @@ async fn test_compression_with_queue_operations() {
     // Create multiple queues
     for i in 0..50 {
         client
-            .post(&format!("{}/queue/queue_{}", base_url, i))
+            .post(format!("{}/queue/queue_{}", base_url, i))
             .json(&json!({}))
             .send()
             .await
@@ -128,7 +128,7 @@ async fn test_compression_with_queue_operations() {
 
     // List queues (auto-compressed by tower-http if large)
     let response = client
-        .get(&format!("{}/queue/list", base_url))
+        .get(format!("{}/queue/list", base_url))
         .send()
         .await
         .unwrap();
@@ -158,7 +158,7 @@ async fn test_compression_preserves_complex_json() {
     });
 
     client
-        .post(&format!("{}/kv/set", base_url))
+        .post(format!("{}/kv/set", base_url))
         .json(&json!({
             "key": "complex_data",
             "value": complex_value
@@ -169,7 +169,7 @@ async fn test_compression_preserves_complex_json() {
 
     // Get (compression handled transparently)
     let response = client
-        .get(&format!("{}/kv/get/complex_data", base_url))
+        .get(format!("{}/kv/get/complex_data", base_url))
         .send()
         .await
         .unwrap();
@@ -198,7 +198,7 @@ async fn test_compression_with_concurrent_requests() {
 
         let handle = tokio::spawn(async move {
             let response = client
-                .post(&format!("{}/kv/set", url))
+                .post(format!("{}/kv/set", url))
                 .json(&json!({
                     "key": format!("comp_key_{}", i),
                     "value": format!("Value {}", i)
@@ -230,7 +230,7 @@ async fn test_compression_with_large_payload() {
     let large_value = "Large data content that will be compressed by gzip. ".repeat(200);
 
     let response = client
-        .post(&format!("{}/kv/set", base_url))
+        .post(format!("{}/kv/set", base_url))
         .json(&json!({
             "key": "large_key",
             "value": large_value
@@ -245,7 +245,7 @@ async fn test_compression_with_large_payload() {
 
     // Retrieve the large value (compressed by server, decompressed by client)
     let response = client
-        .get(&format!("{}/kv/get/large_key", base_url))
+        .get(format!("{}/kv/get/large_key", base_url))
         .send()
         .await
         .unwrap();

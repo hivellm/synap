@@ -51,7 +51,7 @@ async fn test_kv_set_returns_200_ok() {
     let client = Client::new();
 
     let response = client
-        .post(&format!("{}/kv/set", base_url))
+        .post(format!("{}/kv/set", base_url))
         .json(&json!({
             "key": "test",
             "value": "hello"
@@ -74,7 +74,7 @@ async fn test_kv_get_returns_200_when_found() {
 
     // Set a key first
     client
-        .post(&format!("{}/kv/set", base_url))
+        .post(format!("{}/kv/set", base_url))
         .json(&json!({"key": "existing", "value": "data"}))
         .send()
         .await
@@ -82,7 +82,7 @@ async fn test_kv_get_returns_200_when_found() {
 
     // Get the key
     let response = client
-        .get(&format!("{}/kv/get/existing", base_url))
+        .get(format!("{}/kv/get/existing", base_url))
         .send()
         .await
         .unwrap();
@@ -100,7 +100,7 @@ async fn test_kv_get_returns_200_when_not_found() {
     let client = Client::new();
 
     let response = client
-        .get(&format!("{}/kv/get/nonexistent", base_url))
+        .get(format!("{}/kv/get/nonexistent", base_url))
         .send()
         .await
         .unwrap();
@@ -120,7 +120,7 @@ async fn test_kv_delete_returns_200() {
 
     // Set a key
     client
-        .post(&format!("{}/kv/set", base_url))
+        .post(format!("{}/kv/set", base_url))
         .json(&json!({"key": "to_delete", "value": "temp"}))
         .send()
         .await
@@ -128,7 +128,7 @@ async fn test_kv_delete_returns_200() {
 
     // Delete it
     let response = client
-        .delete(&format!("{}/kv/del/to_delete", base_url))
+        .delete(format!("{}/kv/del/to_delete", base_url))
         .send()
         .await
         .unwrap();
@@ -145,7 +145,7 @@ async fn test_kv_delete_nonexistent_returns_200_with_false() {
     let client = Client::new();
 
     let response = client
-        .delete(&format!("{}/kv/del/nonexistent", base_url))
+        .delete(format!("{}/kv/del/nonexistent", base_url))
         .send()
         .await
         .unwrap();
@@ -162,7 +162,7 @@ async fn test_kv_stats_returns_200() {
     let client = Client::new();
 
     let response = client
-        .get(&format!("{}/kv/stats", base_url))
+        .get(format!("{}/kv/stats", base_url))
         .send()
         .await
         .unwrap();
@@ -180,7 +180,7 @@ async fn test_invalid_json_returns_400() {
     let client = Client::new();
 
     let response = client
-        .post(&format!("{}/kv/set", base_url))
+        .post(format!("{}/kv/set", base_url))
         .header("Content-Type", "application/json")
         .body("invalid json {")
         .send()
@@ -199,7 +199,7 @@ async fn test_queue_create_returns_200() {
     let client = Client::new();
 
     let response = client
-        .post(&format!("{}/queue/test_queue", base_url))
+        .post(format!("{}/queue/test_queue", base_url))
         .json(&json!({}))
         .send()
         .await
@@ -219,7 +219,7 @@ async fn test_queue_publish_returns_200() {
 
     // Create queue first
     client
-        .post(&format!("{}/queue/pub_queue", base_url))
+        .post(format!("{}/queue/pub_queue", base_url))
         .json(&json!({}))
         .send()
         .await
@@ -227,7 +227,7 @@ async fn test_queue_publish_returns_200() {
 
     // Publish message
     let response = client
-        .post(&format!("{}/queue/pub_queue/publish", base_url))
+        .post(format!("{}/queue/pub_queue/publish", base_url))
         .json(&json!({
             "payload": [72, 101, 108, 108, 111], // "Hello" in bytes
             "priority": 5
@@ -248,7 +248,7 @@ async fn test_queue_publish_to_nonexistent_returns_404() {
     let client = Client::new();
 
     let response = client
-        .post(&format!("{}/queue/nonexistent_queue/publish", base_url))
+        .post(format!("{}/queue/nonexistent_queue/publish", base_url))
         .json(&json!({
             "payload": [1, 2, 3]
         }))
@@ -269,13 +269,13 @@ async fn test_queue_consume_returns_200_with_message() {
 
     // Create queue and publish
     client
-        .post(&format!("{}/queue/consume_queue", base_url))
+        .post(format!("{}/queue/consume_queue", base_url))
         .json(&json!({}))
         .send()
         .await
         .unwrap();
     client
-        .post(&format!("{}/queue/consume_queue/publish", base_url))
+        .post(format!("{}/queue/consume_queue/publish", base_url))
         .json(&json!({"payload": [1, 2, 3]}))
         .send()
         .await
@@ -283,7 +283,7 @@ async fn test_queue_consume_returns_200_with_message() {
 
     // Consume
     let response = client
-        .get(&format!(
+        .get(format!(
             "{}/queue/consume_queue/consume/worker-1",
             base_url
         ))
@@ -305,7 +305,7 @@ async fn test_queue_consume_empty_returns_200_null() {
 
     // Create empty queue
     client
-        .post(&format!("{}/queue/empty_queue", base_url))
+        .post(format!("{}/queue/empty_queue", base_url))
         .json(&json!({}))
         .send()
         .await
@@ -313,7 +313,7 @@ async fn test_queue_consume_empty_returns_200_null() {
 
     // Consume from empty queue
     let response = client
-        .get(&format!("{}/queue/empty_queue/consume/worker-1", base_url))
+        .get(format!("{}/queue/empty_queue/consume/worker-1", base_url))
         .send()
         .await
         .unwrap();
@@ -330,7 +330,7 @@ async fn test_queue_consume_nonexistent_returns_404() {
     let client = Client::new();
 
     let response = client
-        .get(&format!("{}/queue/nonexistent/consume/worker-1", base_url))
+        .get(format!("{}/queue/nonexistent/consume/worker-1", base_url))
         .send()
         .await
         .unwrap();
@@ -345,20 +345,20 @@ async fn test_queue_ack_valid_returns_200() {
 
     // Create queue, publish, consume
     client
-        .post(&format!("{}/queue/ack_queue", base_url))
+        .post(format!("{}/queue/ack_queue", base_url))
         .json(&json!({}))
         .send()
         .await
         .unwrap();
     client
-        .post(&format!("{}/queue/ack_queue/publish", base_url))
+        .post(format!("{}/queue/ack_queue/publish", base_url))
         .json(&json!({"payload": [1, 2, 3]}))
         .send()
         .await
         .unwrap();
 
     let consume_resp = client
-        .get(&format!("{}/queue/ack_queue/consume/worker-1", base_url))
+        .get(format!("{}/queue/ack_queue/consume/worker-1", base_url))
         .send()
         .await
         .unwrap();
@@ -367,7 +367,7 @@ async fn test_queue_ack_valid_returns_200() {
 
     // ACK
     let response = client
-        .post(&format!("{}/queue/ack_queue/ack", base_url))
+        .post(format!("{}/queue/ack_queue/ack", base_url))
         .json(&json!({"message_id": message_id}))
         .send()
         .await
@@ -385,14 +385,14 @@ async fn test_queue_ack_invalid_message_returns_404() {
     let client = Client::new();
 
     client
-        .post(&format!("{}/queue/ack_test", base_url))
+        .post(format!("{}/queue/ack_test", base_url))
         .json(&json!({}))
         .send()
         .await
         .unwrap();
 
     let response = client
-        .post(&format!("{}/queue/ack_test/ack", base_url))
+        .post(format!("{}/queue/ack_test/ack", base_url))
         .json(&json!({"message_id": "invalid-message-id"}))
         .send()
         .await
@@ -416,20 +416,20 @@ async fn test_queue_nack_returns_200() {
 
     // Create queue, publish, consume
     client
-        .post(&format!("{}/queue/nack_queue", base_url))
+        .post(format!("{}/queue/nack_queue", base_url))
         .json(&json!({}))
         .send()
         .await
         .unwrap();
     client
-        .post(&format!("{}/queue/nack_queue/publish", base_url))
+        .post(format!("{}/queue/nack_queue/publish", base_url))
         .json(&json!({"payload": [1, 2, 3], "max_retries": 3}))
         .send()
         .await
         .unwrap();
 
     let consume_resp = client
-        .get(&format!("{}/queue/nack_queue/consume/worker-1", base_url))
+        .get(format!("{}/queue/nack_queue/consume/worker-1", base_url))
         .send()
         .await
         .unwrap();
@@ -438,7 +438,7 @@ async fn test_queue_nack_returns_200() {
 
     // NACK with requeue
     let response = client
-        .post(&format!("{}/queue/nack_queue/nack", base_url))
+        .post(format!("{}/queue/nack_queue/nack", base_url))
         .json(&json!({"message_id": message_id, "requeue": true}))
         .send()
         .await
@@ -456,14 +456,14 @@ async fn test_queue_stats_returns_200() {
     let client = Client::new();
 
     client
-        .post(&format!("{}/queue/stats_queue", base_url))
+        .post(format!("{}/queue/stats_queue", base_url))
         .json(&json!({}))
         .send()
         .await
         .unwrap();
 
     let response = client
-        .get(&format!("{}/queue/stats_queue/stats", base_url))
+        .get(format!("{}/queue/stats_queue/stats", base_url))
         .send()
         .await
         .unwrap();
@@ -481,7 +481,7 @@ async fn test_queue_stats_nonexistent_returns_404() {
     let client = Client::new();
 
     let response = client
-        .get(&format!("{}/queue/nonexistent_queue/stats", base_url))
+        .get(format!("{}/queue/nonexistent_queue/stats", base_url))
         .send()
         .await
         .unwrap();
@@ -496,20 +496,20 @@ async fn test_queue_list_returns_200() {
 
     // Create some queues
     client
-        .post(&format!("{}/queue/q1", base_url))
+        .post(format!("{}/queue/q1", base_url))
         .json(&json!({}))
         .send()
         .await
         .unwrap();
     client
-        .post(&format!("{}/queue/q2", base_url))
+        .post(format!("{}/queue/q2", base_url))
         .json(&json!({}))
         .send()
         .await
         .unwrap();
 
     let response = client
-        .get(&format!("{}/queue/list", base_url))
+        .get(format!("{}/queue/list", base_url))
         .send()
         .await
         .unwrap();
@@ -529,14 +529,14 @@ async fn test_queue_purge_returns_200() {
 
     // Create queue and add messages
     client
-        .post(&format!("{}/queue/purge_queue", base_url))
+        .post(format!("{}/queue/purge_queue", base_url))
         .json(&json!({}))
         .send()
         .await
         .unwrap();
     for i in 0..5 {
         client
-            .post(&format!("{}/queue/purge_queue/publish", base_url))
+            .post(format!("{}/queue/purge_queue/publish", base_url))
             .json(&json!({"payload": [i]}))
             .send()
             .await
@@ -545,7 +545,7 @@ async fn test_queue_purge_returns_200() {
 
     // Purge
     let response = client
-        .post(&format!("{}/queue/purge_queue/purge", base_url))
+        .post(format!("{}/queue/purge_queue/purge", base_url))
         .send()
         .await
         .unwrap();
@@ -564,7 +564,7 @@ async fn test_queue_delete_returns_200() {
 
     // Create queue
     client
-        .post(&format!("{}/queue/del_queue", base_url))
+        .post(format!("{}/queue/del_queue", base_url))
         .json(&json!({}))
         .send()
         .await
@@ -572,7 +572,7 @@ async fn test_queue_delete_returns_200() {
 
     // Delete
     let response = client
-        .delete(&format!("{}/queue/del_queue", base_url))
+        .delete(format!("{}/queue/del_queue", base_url))
         .send()
         .await
         .unwrap();
@@ -590,7 +590,7 @@ async fn test_queue_delete_nonexistent_returns_200_false() {
     let client = Client::new();
 
     let response = client
-        .delete(&format!("{}/queue/nonexistent_delete", base_url))
+        .delete(format!("{}/queue/nonexistent_delete", base_url))
         .send()
         .await
         .unwrap();
@@ -609,7 +609,7 @@ async fn test_health_check_returns_200() {
     let client = Client::new();
 
     let response = client
-        .get(&format!("{}/health", base_url))
+        .get(format!("{}/health", base_url))
         .send()
         .await
         .unwrap();
@@ -630,14 +630,14 @@ async fn test_error_response_has_correct_format() {
 
     // Try to ACK a message that doesn't exist
     client
-        .post(&format!("{}/queue/error_test", base_url))
+        .post(format!("{}/queue/error_test", base_url))
         .json(&json!({}))
         .send()
         .await
         .unwrap();
 
     let response = client
-        .post(&format!("{}/queue/error_test/ack", base_url))
+        .post(format!("{}/queue/error_test/ack", base_url))
         .json(&json!({"message_id": "invalid-id"}))
         .send()
         .await
@@ -657,7 +657,7 @@ async fn test_queue_not_found_error_format() {
     let client = Client::new();
 
     let response = client
-        .post(&format!("{}/queue/missing_queue/publish", base_url))
+        .post(format!("{}/queue/missing_queue/publish", base_url))
         .json(&json!({"payload": [1, 2, 3]}))
         .send()
         .await
@@ -678,7 +678,7 @@ async fn test_streamable_unknown_command_returns_200_with_error() {
     let client = Client::new();
 
     let response = client
-        .post(&format!("{}/api/v1/command", base_url))
+        .post(format!("{}/api/v1/command", base_url))
         .json(&json!({
             "request_id": "test-req-1",
             "command": "unknown.command",
@@ -703,7 +703,7 @@ async fn test_streamable_missing_params_returns_200_with_error() {
     let client = Client::new();
 
     let response = client
-        .post(&format!("{}/api/v1/command", base_url))
+        .post(format!("{}/api/v1/command", base_url))
         .json(&json!({
             "request_id": "test-req-2",
             "command": "kv.set",
@@ -726,7 +726,7 @@ async fn test_streamable_successful_returns_200() {
     let client = Client::new();
 
     let response = client
-        .post(&format!("{}/api/v1/command", base_url))
+        .post(format!("{}/api/v1/command", base_url))
         .json(&json!({
             "request_id": "test-req-3",
             "command": "kv.set",
@@ -764,7 +764,7 @@ async fn test_concurrent_requests_all_return_200() {
 
         let handle = tokio::spawn(async move {
             let response = client
-                .post(&format!("{}/kv/set", url))
+                .post(format!("{}/kv/set", url))
                 .json(&json!({
                     "key": format!("concurrent-{}", i),
                     "value": format!("value-{}", i)
@@ -795,7 +795,7 @@ async fn test_json_content_type_required() {
 
     // Send plain text instead of JSON
     let response = client
-        .post(&format!("{}/kv/set", base_url))
+        .post(format!("{}/kv/set", base_url))
         .header("Content-Type", "text/plain")
         .body("not json")
         .send()
@@ -812,7 +812,7 @@ async fn test_response_is_json() {
     let client = Client::new();
 
     let response = client
-        .get(&format!("{}/health", base_url))
+        .get(format!("{}/health", base_url))
         .send()
         .await
         .unwrap();
@@ -829,7 +829,7 @@ async fn test_nonexistent_route_returns_404() {
     let client = Client::new();
 
     let response = client
-        .get(&format!("{}/nonexistent/route", base_url))
+        .get(format!("{}/nonexistent/route", base_url))
         .send()
         .await
         .unwrap();
@@ -844,7 +844,7 @@ async fn test_wrong_http_method_returns_405() {
 
     // health check expects GET, send POST
     let response = client
-        .post(&format!("{}/health", base_url))
+        .post(format!("{}/health", base_url))
         .send()
         .await
         .unwrap();
@@ -861,7 +861,7 @@ async fn test_queue_full_returns_507() {
 
     // Create queue with max_depth = 5
     client
-        .post(&format!("{}/queue/small_queue", base_url))
+        .post(format!("{}/queue/small_queue", base_url))
         .json(&json!({
             "max_depth": 5
         }))
@@ -872,7 +872,7 @@ async fn test_queue_full_returns_507() {
     // Fill the queue
     for i in 0..5 {
         client
-            .post(&format!("{}/queue/small_queue/publish", base_url))
+            .post(format!("{}/queue/small_queue/publish", base_url))
             .json(&json!({"payload": [i]}))
             .send()
             .await
@@ -881,7 +881,7 @@ async fn test_queue_full_returns_507() {
 
     // Try to publish one more (should fail)
     let response = client
-        .post(&format!("{}/queue/small_queue/publish", base_url))
+        .post(format!("{}/queue/small_queue/publish", base_url))
         .json(&json!({"payload": [99]}))
         .send()
         .await
@@ -902,7 +902,7 @@ async fn test_all_status_codes_comprehensive() {
 
     // 200 OK
     let resp = client
-        .get(&format!("{}/health", base_url))
+        .get(format!("{}/health", base_url))
         .send()
         .await
         .unwrap();
@@ -910,7 +910,7 @@ async fn test_all_status_codes_comprehensive() {
 
     // 404 Not Found
     let resp = client
-        .get(&format!("{}/nonexistent", base_url))
+        .get(format!("{}/nonexistent", base_url))
         .send()
         .await
         .unwrap();
@@ -918,7 +918,7 @@ async fn test_all_status_codes_comprehensive() {
 
     // 405 Method Not Allowed
     let resp = client
-        .post(&format!("{}/health", base_url))
+        .post(format!("{}/health", base_url))
         .send()
         .await
         .unwrap();
@@ -926,7 +926,7 @@ async fn test_all_status_codes_comprehensive() {
 
     // 400 Bad Request (invalid JSON)
     let resp = client
-        .post(&format!("{}/kv/set", base_url))
+        .post(format!("{}/kv/set", base_url))
         .header("Content-Type", "application/json")
         .body("{invalid json}")
         .send()

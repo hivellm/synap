@@ -9,7 +9,7 @@ fn test_request_new() {
     let req = Request::new("kv.set", json!({"key": "test", "value": "data"}));
 
     assert_eq!(req.command, "kv.set");
-    assert!(req.request_id.len() > 0);
+    assert!(!req.request_id.is_empty());
     assert_eq!(req.payload["key"], "test");
     assert_eq!(req.payload["value"], "data");
 }

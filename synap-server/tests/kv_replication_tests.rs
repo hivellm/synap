@@ -40,12 +40,14 @@ async fn create_kv_master() -> (Arc<MasterNode>, Arc<KVStore>, std::net::SocketA
 }
 
 async fn create_kv_replica(master_addr: std::net::SocketAddr) -> (Arc<ReplicaNode>, Arc<KVStore>) {
-    let mut config = ReplicationConfig::default();
-    config.enabled = true;
-    config.role = NodeRole::Replica;
-    config.master_address = Some(master_addr);
-    config.auto_reconnect = true;
-    config.reconnect_delay_ms = 100;
+    let config = ReplicationConfig {
+        enabled: true,
+        role: NodeRole::Replica,
+        master_address: Some(master_addr),
+        auto_reconnect: true,
+        reconnect_delay_ms: 100,
+        ..Default::default()
+    };
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
     let replica = ReplicaNode::new(config, Arc::clone(&kv), None)
@@ -135,7 +137,7 @@ async fn test_kv_delete_replication() {
     // Delete some keys via replication
     for i in 0..10 {
         let key = format!("delete_test_{}", i);
-        master_kv.mdel(&[key.clone()]).await.unwrap();
+        master_kv.mdel(std::slice::from_ref(&key)).await.unwrap();
         master.replicate(Operation::KVDel { keys: vec![key] });
     }
 
@@ -572,7 +574,7 @@ async fn test_kv_mixed_operations_replication() {
     // Delete some keys
     for i in 10..15 {
         let key = format!("mixed_{}", i);
-        master_kv.mdel(&[key.clone()]).await.unwrap();
+        master_kv.mdel(std::slice::from_ref(&key)).await.unwrap();
         master.replicate(Operation::KVDel { keys: vec![key] });
     }
 

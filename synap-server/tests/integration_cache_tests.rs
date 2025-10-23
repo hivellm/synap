@@ -60,7 +60,7 @@ async fn test_kv_cache_invalidation_on_delete() {
 
     // Delete - should invalidate cache
     let deleted = store.delete("to_delete").await.unwrap();
-    assert_eq!(deleted, true);
+    assert!(deleted);
 
     // Get again - should not find in cache or storage
     let value = store.get("to_delete").await.unwrap();
@@ -134,5 +134,5 @@ async fn test_kv_without_cache() {
     assert_eq!(value, Some(vec![1, 2, 3]));
 
     let deleted = store.delete("key1").await.unwrap();
-    assert_eq!(deleted, true);
+    assert!(deleted);
 }

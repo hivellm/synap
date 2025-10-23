@@ -2,7 +2,6 @@
 use std::path::PathBuf;
 use synap_server::core::{KVConfig, KVStore};
 use synap_server::persistence::{PersistenceConfig, PersistenceLayer};
-use tokio;
 
 #[tokio::test]
 async fn test_e2e_persistence_layer_initialization() {

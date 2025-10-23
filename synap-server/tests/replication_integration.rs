@@ -527,7 +527,7 @@ async fn test_concurrent_writes_during_sync() {
 
     let replica_offset = replica.current_offset();
     assert!(
-        replica_offset >= 0,
+        replica_offset < i64::MAX,
         "Replica offset should be tracked: offset = {}",
         replica_offset
     );

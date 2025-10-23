@@ -1,6 +1,5 @@
 use reqwest::Client;
 use serde_json::json;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use synap_server::{AppState, KVStore, PubSubRouter, ServerConfig, create_router};
 use tokio::net::TcpListener;

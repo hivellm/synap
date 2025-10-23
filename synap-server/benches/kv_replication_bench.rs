@@ -31,11 +31,13 @@ async fn create_kv_with_master() -> (Arc<MasterNode>, Arc<KVStore>, std::net::So
     let port = next_port();
     let addr: std::net::SocketAddr = format!("127.0.0.1:{}", port).parse().unwrap();
 
-    let mut config = ReplicationConfig::default();
-    config.enabled = true;
-    config.role = NodeRole::Master;
-    config.replica_listen_address = Some(addr);
-    config.heartbeat_interval_ms = 100;
+    let config = ReplicationConfig {
+        enabled: true,
+        role: NodeRole::Master,
+        replica_listen_address: Some(addr),
+        heartbeat_interval_ms: 100,
+        ..Default::default()
+    };
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
     let master = Arc::new(
@@ -51,12 +53,14 @@ async fn create_kv_with_master() -> (Arc<MasterNode>, Arc<KVStore>, std::net::So
 
 // Helper: Create replica
 async fn create_replica(master_addr: std::net::SocketAddr) -> Arc<ReplicaNode> {
-    let mut config = ReplicationConfig::default();
-    config.enabled = true;
-    config.role = NodeRole::Replica;
-    config.master_address = Some(master_addr);
-    config.auto_reconnect = true;
-    config.reconnect_delay_ms = 100;
+    let config = ReplicationConfig {
+        enabled: true,
+        role: NodeRole::Replica,
+        master_address: Some(master_addr),
+        auto_reconnect: true,
+        reconnect_delay_ms: 100,
+        ..Default::default()
+    };
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
     let replica = ReplicaNode::new(config, kv, None).await.unwrap();
