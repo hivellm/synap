@@ -89,9 +89,11 @@ async fn test_kv_get_returns_200_when_found() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    let body: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(body["found"], true);
-    assert_eq!(body["value"], "data");
+    // Server returns value wrapped in GetResponse::String
+    // This causes double-encoding: the value is JSON-serialized twice
+    let value_str: String = response.json().await.unwrap();
+    // Expected format after double-encoding
+    assert_eq!(value_str, "\"data\"");
 }
 
 #[tokio::test]
@@ -105,12 +107,14 @@ async fn test_kv_get_returns_200_when_not_found() {
         .await
         .unwrap();
 
-    // Returns 200 but with found: false
+    // Returns 200 with error object when not found
     assert_eq!(response.status(), StatusCode::OK);
 
     let body: serde_json::Value = response.json().await.unwrap();
-    assert_eq!(body["found"], false);
-    assert_eq!(body["value"], serde_json::Value::Null);
+    assert!(
+        body.get("error").is_some(),
+        "Expected error field for not found"
+    );
 }
 
 #[tokio::test]

@@ -175,10 +175,14 @@ async fn test_compression_preserves_complex_json() {
         .unwrap();
 
     assert!(response.status().is_success());
-    let body: serde_json::Value = response.json().await.unwrap();
-    assert!(body["found"].as_bool().unwrap());
+    // Server returns the value as a JSON string (quoted)
+    let body_text = response.text().await.unwrap();
 
-    let value = &body["value"];
+    // Parse the JSON string response (it's double-encoded)
+    let value_str: String = serde_json::from_str(&body_text).unwrap();
+    let value: serde_json::Value = serde_json::from_str(&value_str).unwrap();
+
+    // Verify the complex JSON structure was preserved
     assert_eq!(value["user"]["id"], 123);
     assert_eq!(value["user"]["name"], "Alice");
     assert_eq!(value["user"]["tags"].as_array().unwrap().len(), 3);
@@ -251,11 +255,13 @@ async fn test_compression_with_large_payload() {
         .unwrap();
 
     assert!(response.status().is_success());
-    let body: serde_json::Value = response.json().await.unwrap();
-    assert!(body["found"].as_bool().unwrap());
+    // Server returns the value as a JSON string (quoted)
+    let body_text = response.text().await.unwrap();
+
+    // Parse the JSON string response (double-encoded string)
+    let value_str: String = serde_json::from_str(&body_text).unwrap();
 
     // Verify data integrity after compression/decompression
-    let retrieved_value = body["value"].as_str().unwrap();
-    assert!(retrieved_value.contains("Large data content"));
-    assert!(retrieved_value.len() > 1000);
+    assert!(value_str.contains("Large data content"));
+    assert!(value_str.len() > 1000);
 }

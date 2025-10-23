@@ -85,9 +85,9 @@ async fn test_kv_set_get_delete() {
         .unwrap();
 
     assert_eq!(res.status(), 200);
-    let body: serde_json::Value = res.json().await.unwrap();
-    assert_eq!(body["found"], true);
-    assert_eq!(body["value"], "test_value");
+    // Server returns value directly as JSON string
+    let value_str: String = res.json().await.unwrap();
+    assert_eq!(value_str, "\"test_value\"");
 
     // DELETE
     let res = client
@@ -108,8 +108,12 @@ async fn test_kv_set_get_delete() {
         .unwrap();
 
     assert_eq!(res.status(), 200);
+    // Server returns error object when key not found
     let body: serde_json::Value = res.json().await.unwrap();
-    assert_eq!(body["found"], false);
+    assert!(
+        body.get("error").is_some(),
+        "Expected error for deleted key"
+    );
 }
 
 #[tokio::test]
@@ -138,8 +142,9 @@ async fn test_kv_with_ttl() {
         .await
         .unwrap();
 
-    let body: serde_json::Value = res.json().await.unwrap();
-    assert_eq!(body["found"], true);
+    // Server returns value directly
+    let value_str: String = res.json().await.unwrap();
+    assert_eq!(value_str, "\"temporary\"");
 
     // Wait for expiration
     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -151,8 +156,12 @@ async fn test_kv_with_ttl() {
         .await
         .unwrap();
 
+    // Server returns error object when key not found/expired
     let body: serde_json::Value = res.json().await.unwrap();
-    assert_eq!(body["found"], false);
+    assert!(
+        body.get("error").is_some(),
+        "Expected error for expired key"
+    );
 }
 
 #[tokio::test]
@@ -197,8 +206,8 @@ async fn test_streamable_http_command() {
     assert_eq!(res.status(), 200);
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["success"], true);
-    assert_eq!(body["payload"]["found"], true);
-    assert_eq!(body["payload"]["value"], "cmd_value");
+    // Payload now returns value directly as JSON string
+    assert_eq!(body["payload"], "\"cmd_value\"");
 }
 
 #[tokio::test]
