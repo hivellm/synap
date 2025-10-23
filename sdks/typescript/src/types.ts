@@ -203,6 +203,124 @@ export interface ProcessedMessage<T = any> {
   nack: (requeue?: boolean) => Promise<void>;
 }
 
+// ==================== EVENT STREAM ====================
+
+/**
+ * Event Stream event
+ */
+export interface StreamEvent {
+  /** Event offset in stream */
+  offset: number;
+  /** Event name/type */
+  event: string;
+  /** Event data */
+  data: any;
+  /** Event timestamp */
+  timestamp?: string;
+}
+
+/**
+ * Stream publish options
+ */
+export interface StreamPublishOptions {
+  /** Custom metadata */
+  metadata?: Record<string, string>;
+}
+
+/**
+ * Stream consumer options for reactive consumption
+ */
+export interface StreamConsumerOptions {
+  /** Room name to consume from */
+  roomName: string;
+  /** Subscriber identifier */
+  subscriberId: string;
+  /** Start offset (default: 0) */
+  fromOffset?: number;
+  /** Polling interval in milliseconds (default: 1000) */
+  pollingInterval?: number;
+}
+
+/**
+ * Stream room statistics
+ */
+export interface StreamStats {
+  /** Current event count */
+  event_count: number;
+  /** Number of subscribers */
+  subscribers: number;
+  /** Buffer size */
+  buffer_size: number;
+}
+
+/**
+ * Processed stream event with metadata
+ */
+export interface ProcessedStreamEvent<T = any> {
+  /** Event offset */
+  offset: number;
+  /** Event name */
+  event: string;
+  /** Decoded event data */
+  data: T;
+  /** Event timestamp */
+  timestamp?: string;
+}
+
+// ==================== PUB/SUB ====================
+
+/**
+ * Pub/Sub message
+ */
+export interface PubSubMessage<T = any> {
+  /** Topic the message was published to */
+  topic: string;
+  /** Message data */
+  data: T;
+  /** Message timestamp */
+  timestamp?: string;
+  /** Message ID */
+  id?: string;
+}
+
+/**
+ * Pub/Sub publish options
+ */
+export interface PubSubPublishOptions {
+  /** Message priority */
+  priority?: number;
+  /** Custom headers */
+  headers?: Record<string, string>;
+}
+
+/**
+ * Pub/Sub subscriber options for reactive consumption
+ */
+export interface PubSubSubscriberOptions {
+  /** Topics to subscribe to (supports wildcards: user.*, *.created) */
+  topics: string[];
+  /** Subscriber identifier */
+  subscriberId?: string;
+  /** Auto-reconnect on disconnect (default: true) */
+  autoReconnect?: boolean;
+  /** Reconnect interval in ms (default: 1000) */
+  reconnectInterval?: number;
+}
+
+/**
+ * Processed pub/sub message with metadata
+ */
+export interface ProcessedPubSubMessage<T = any> {
+  /** Topic */
+  topic: string;
+  /** Decoded message data */
+  data: T;
+  /** Message timestamp */
+  timestamp?: string;
+  /** Message ID */
+  id?: string;
+}
+
 // ==================== ERROR TYPES ====================
 
 /**

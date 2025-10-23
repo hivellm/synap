@@ -8,7 +8,9 @@ Official TypeScript/JavaScript SDK for [Synap](https://github.com/hivellm/synap)
 ✅ **StreamableHTTP protocol** implementation  
 ✅ **Key-Value operations** (GET, SET, DELETE, INCR, SCAN, etc.)  
 ✅ **Queue system** (publish, consume, ACK/NACK)  
-✅ **Reactive Queues** with RxJS - Observable-based message consumption  
+✅ **Event Streams** - Append-only event logs with replay ✨ NEW  
+✅ **Pub/Sub** - Topic-based message routing ✨ NEW  
+✅ **Reactive Patterns** with RxJS - Observable-based consumption  
 ✅ **Authentication** (Basic Auth + API Keys)  
 ✅ **Gzip compression** support  
 ✅ **Modern ESM/CJS** dual package  
@@ -61,6 +63,22 @@ synap.queue.process$({
   console.log('Processing:', data);
   // Auto-ACK on success, auto-NACK on error
 }).subscribe();
+
+// Event Stream operations
+await synap.stream.createRoom('chat-room');
+await synap.stream.publish('chat-room', 'message.sent', { text: 'Hello!' });
+
+// Reactive stream consumption
+synap.stream.consume$({
+  roomName: 'chat-room',
+  subscriberId: 'user-1',
+  fromOffset: 0
+}).subscribe({
+  next: (event) => console.log(event.event, event.data)
+});
+
+// Pub/Sub operations
+await synap.pubsub.publish('user.created', { id: 123, name: 'Alice' });
 ```
 
 ---
@@ -424,6 +442,210 @@ interface QueueConsumerOptions {
 ```
 
 📖 **See [REACTIVE_QUEUES.md](./REACTIVE_QUEUES.md) for complete reactive patterns guide**
+
+---
+
+## Event Streams
+
+Event Streams provide append-only event logs with the ability to replay events from any offset.
+
+### Basic Operations
+
+```typescript
+// Create a stream room
+await synap.stream.createRoom('chat-room');
+
+// Publish events
+const offset1 = await synap.stream.publish('chat-room', 'message.sent', {
+  user: 'Alice',
+  text: 'Hello!',
+  timestamp: Date.now()
+});
+
+// Consume events from offset
+const events = await synap.stream.consume('chat-room', 'subscriber-1', 0);
+events.forEach(event => {
+  console.log(`[${event.offset}] ${event.event}:`, event.data);
+});
+
+// Get stream statistics
+const stats = await synap.stream.stats('chat-room');
+console.log(`Events: ${stats.event_count}, Subscribers: ${stats.subscribers}`);
+```
+
+### Reactive Stream Consumption
+
+```typescript
+// Subscribe to all events
+synap.stream.consume$({
+  roomName: 'chat-room',
+  subscriberId: 'user-1',
+  fromOffset: 0,
+  pollingInterval: 500
+}).subscribe({
+  next: (event) => {
+    console.log(`[${event.offset}] ${event.event}:`, event.data);
+  }
+});
+
+// Filter specific event types
+synap.stream.consumeEvent$({
+  roomName: 'notifications',
+  subscriberId: 'user-1',
+  eventName: 'notification.important'
+}).subscribe({
+  next: (event) => console.log('Important:', event.data)
+});
+
+// Monitor stream stats in real-time
+synap.stream.stats$('chat-room', 3000).subscribe({
+  next: (stats) => console.log('Event count:', stats.event_count)
+});
+```
+
+### Event Replay
+
+```typescript
+// Replay events from beginning
+synap.stream.consume$({
+  roomName: 'audit-log',
+  subscriberId: 'auditor',
+  fromOffset: 0  // Start from beginning
+}).subscribe({
+  next: (event) => console.log('Replaying:', event)
+});
+
+// Resume from last known offset
+const lastOffset = 42;
+synap.stream.consume$({
+  roomName: 'chat-room',
+  subscriberId: 'user-1',
+  fromOffset: lastOffset + 1
+}).subscribe({
+  next: (event) => console.log('New event:', event)
+});
+```
+
+### Stream Patterns
+
+```typescript
+import { filter, bufferTime, map } from 'rxjs/operators';
+
+// Event aggregation
+synap.stream.consume$({ roomName: 'analytics' }).pipe(
+  bufferTime(5000),
+  map(events => ({ count: events.length, events }))
+).subscribe({
+  next: (batch) => console.log(`Batch: ${batch.count} events`)
+});
+
+// Filter by event properties
+synap.stream.consume$<{ priority: number }>({ roomName: 'tasks' }).pipe(
+  filter(event => event.data.priority > 7)
+).subscribe({
+  next: (event) => console.log('High priority:', event)
+});
+```
+
+---
+
+## Pub/Sub
+
+Pub/Sub provides topic-based message routing with support for wildcard subscriptions.
+
+### Publishing
+
+```typescript
+// Publish to a topic
+await synap.pubsub.publish('user.created', {
+  userId: '123',
+  name: 'Alice',
+  email: 'alice@example.com'
+});
+
+// Publish with priority
+await synap.pubsub.publish('alerts.critical', {
+  message: 'System down!'
+}, { priority: 9 });
+
+// Publish with headers
+await synap.pubsub.publish('events.custom', {
+  data: 'value'
+}, {
+  headers: {
+    'content-type': 'application/json',
+    'source': 'api-gateway'
+  }
+});
+```
+
+### Topic Patterns
+
+```typescript
+// Simple topics
+'user.created'
+'order.completed'
+'payment.failed'
+
+// Hierarchical topics
+'app.users.created'
+'app.orders.completed'
+'app.payments.failed'
+
+// Wildcard patterns (subscription)
+'user.*'           // Matches: user.created, user.updated, user.deleted
+'*.error'          // Matches: app.error, db.error, api.error
+'app.*.event'      // Matches: app.user.event, app.order.event
+```
+
+### Reactive Subscription
+
+```typescript
+// Subscribe to multiple topics
+synap.pubsub.subscribe$({
+  topics: ['user.created', 'user.updated', 'user.deleted'],
+  subscriberId: 'user-service'
+}).subscribe({
+  next: (message) => {
+    console.log(`Topic: ${message.topic}`);
+    console.log(`Data:`, message.data);
+  }
+});
+
+// Subscribe to single topic
+synap.pubsub.subscribeTopic$('orders.created').subscribe({
+  next: (message) => {
+    console.log('New order:', message.data);
+  }
+});
+
+// Subscribe with wildcard
+synap.pubsub.subscribe$({
+  topics: ['user.*', '*.error'],
+  subscriberId: 'monitor'
+}).subscribe({
+  next: (message) => {
+    if (message.topic.endsWith('.error')) {
+      console.error('Error event:', message.data);
+    }
+  }
+});
+```
+
+### Unsubscribing
+
+```typescript
+const subscriberId = 'my-subscriber';
+const topics = ['user.*', 'order.*'];
+
+// Unsubscribe from specific topics
+synap.pubsub.unsubscribe(subscriberId, topics);
+
+// Unsubscribe from all topics
+synap.pubsub.unsubscribeAll();
+```
+
+📖 **See [examples/stream-patterns.ts](./examples/stream-patterns.ts) and [examples/pubsub-patterns.ts](./examples/pubsub-patterns.ts) for more patterns**
 
 ---
 

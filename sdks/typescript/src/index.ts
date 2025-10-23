@@ -18,12 +18,21 @@
  * const msgId = await synap.queue.publishString('jobs', 'process-video');
  * const { message, text } = await synap.queue.consumeString('jobs', 'worker-1');
  * await synap.queue.ack('jobs', message.id);
+ * 
+ * // Event Stream operations
+ * await synap.stream.createRoom('chat-room');
+ * await synap.stream.publish('chat-room', 'message.sent', { text: 'Hello!' });
+ * 
+ * // Pub/Sub operations
+ * await synap.pubsub.publish('user.created', { id: 123, name: 'Alice' });
  * ```
  */
 
 import { SynapClient } from './client';
 import { KVStore } from './kv';
 import { QueueManager } from './queue';
+import { StreamManager } from './stream';
+import { PubSubManager } from './pubsub';
 
 export type { SynapClientOptions, AuthOptions, RetryOptions } from './types';
 export type {
@@ -34,6 +43,15 @@ export type {
   QueueMessage,
   PublishOptions,
   QueueStats,
+  StreamEvent,
+  StreamPublishOptions,
+  StreamStats,
+  StreamConsumerOptions,
+  ProcessedStreamEvent,
+  PubSubMessage,
+  PubSubPublishOptions,
+  PubSubSubscriberOptions,
+  ProcessedPubSubMessage,
   JSONValue,
 } from './types';
 
@@ -47,11 +65,13 @@ export {
 export { SynapClient } from './client';
 export { KVStore } from './kv';
 export { QueueManager } from './queue';
+export { StreamManager } from './stream';
+export { PubSubManager } from './pubsub';
 
 /**
  * Main Synap client class
  * 
- * Provides access to all Synap subsystems (KV, Queue, etc.)
+ * Provides access to all Synap subsystems (KV, Queue, Stream, PubSub)
  */
 export class Synap {
   private client: SynapClient;
@@ -62,10 +82,18 @@ export class Synap {
   /** Queue system operations */
   public readonly queue: QueueManager;
 
+  /** Event Stream operations */
+  public readonly stream: StreamManager;
+
+  /** Pub/Sub operations */
+  public readonly pubsub: PubSubManager;
+
   constructor(options: import('./types').SynapClientOptions = {}) {
     this.client = new SynapClient(options);
     this.kv = new KVStore(this.client);
     this.queue = new QueueManager(this.client);
+    this.stream = new StreamManager(this.client);
+    this.pubsub = new PubSubManager(this.client);
   }
 
   /**
