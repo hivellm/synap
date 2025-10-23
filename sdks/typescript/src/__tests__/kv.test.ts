@@ -1,178 +1,259 @@
 /**
- * KV Store Module Tests
+ * KV Store Unit Tests (Mock)
+ * Unit tests using mocked client - no server required
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { Synap } from '../index';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { KVStore } from '../kv';
+import { createMockClient } from './__mocks__/client.mock';
+import type { SynapClient } from '../client';
 
-describe('KVStore', () => {
-  let synap: Synap;
+describe('KVStore (Unit Tests)', () => {
+  let mockClient: SynapClient;
+  let kv: KVStore;
 
-  beforeAll(() => {
-    synap = new Synap({
-      url: process.env.SYNAP_URL || 'http://localhost:15500',
-    });
+  beforeEach(() => {
+    mockClient = createMockClient();
+    kv = new KVStore(mockClient);
   });
 
-  afterAll(() => {
-    synap.close();
-  });
+  describe('SET/GET', () => {
+    it('should set and get string value', async () => {
+      vi.mocked(mockClient.sendCommand)
+        .mockResolvedValueOnce({ success: true })
+        .mockResolvedValueOnce(JSON.stringify('hello'));
 
-  describe('SET/GET operations', () => {
-    it('should set and get a string value', async () => {
-      await synap.kv.set('test:string', 'hello world');
-      const value = await synap.kv.get('test:string');
-      expect(value).toBe('hello world');
+      await kv.set('key', 'hello');
+      const value = await kv.get('key');
+
+      expect(value).toBe('hello');
+      expect(mockClient.sendCommand).toHaveBeenCalledWith('kv.set', {
+        key: 'key',
+        value: 'hello',
+      });
     });
 
-    it('should set and get a number value', async () => {
-      await synap.kv.set('test:number', 42);
-      const value = await synap.kv.get<number>('test:number');
+    it('should set and get number value', async () => {
+      vi.mocked(mockClient.sendCommand)
+        .mockResolvedValueOnce({ success: true })
+        .mockResolvedValueOnce(JSON.stringify(42));
+
+      await kv.set('num', 42);
+      const value = await kv.get<number>('num');
+
       expect(value).toBe(42);
     });
 
-    it('should set and get an object', async () => {
-      const obj = { name: 'Alice', age: 30, tags: ['admin', 'user'] };
-      await synap.kv.set('test:object', obj);
-      const value = await synap.kv.get<typeof obj>('test:object');
+    it('should set and get object', async () => {
+      const obj = { name: 'Alice', age: 30 };
+      
+      vi.mocked(mockClient.sendCommand)
+        .mockResolvedValueOnce({ success: true })
+        .mockResolvedValueOnce(JSON.stringify(obj));
+
+      await kv.set('user', obj);
+      const value = await kv.get<typeof obj>('user');
+
       expect(value).toEqual(obj);
     });
 
     it('should return null for non-existent key', async () => {
-      const value = await synap.kv.get('nonexistent:key');
+      vi.mocked(mockClient.sendCommand).mockResolvedValue(null);
+
+      const value = await kv.get('nonexistent');
+      
       expect(value).toBeNull();
     });
 
     it('should set with TTL', async () => {
-      await synap.kv.set('test:ttl', 'temporary', { ttl: 1 });
-      const exists = await synap.kv.exists('test:ttl');
-      expect(exists).toBe(true);
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({ success: true });
+
+      await kv.set('session', { userId: 123 }, { ttl: 60 });
+
+      expect(mockClient.sendCommand).toHaveBeenCalledWith('kv.set', {
+        key: 'session',
+        value: { userId: 123 },
+        ttl: 60,
+      });
     });
   });
 
-  describe('DELETE operations', () => {
-    it('should delete an existing key', async () => {
-      await synap.kv.set('test:delete', 'value');
-      const deleted = await synap.kv.del('test:delete');
-      expect(deleted).toBe(true);
+  describe('DELETE', () => {
+    it('should delete existing key', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({ deleted: true });
 
-      const value = await synap.kv.get('test:delete');
-      expect(value).toBeNull();
+      const result = await kv.del('key');
+      
+      expect(result).toBe(true);
     });
 
-    it('should return false when deleting non-existent key', async () => {
-      const deleted = await synap.kv.del('nonexistent:key');
-      expect(deleted).toBe(false);
+    it('should return false for non-existent key', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({ deleted: false });
+
+      const result = await kv.del('nonexistent');
+      
+      expect(result).toBe(false);
     });
   });
 
-  describe('EXISTS operation', () => {
-    it('should return true for existing key', async () => {
-      await synap.kv.set('test:exists', 'value');
-      const exists = await synap.kv.exists('test:exists');
+  describe('EXISTS', () => {
+    it('should check if key exists', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({ exists: true });
+
+      const exists = await kv.exists('key');
+      
       expect(exists).toBe(true);
     });
 
     it('should return false for non-existent key', async () => {
-      const exists = await synap.kv.exists('nonexistent:key');
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({ exists: false });
+
+      const exists = await kv.exists('nonexistent');
+      
       expect(exists).toBe(false);
     });
   });
 
-  describe('INCR/DECR operations', () => {
-    it('should increment a value', async () => {
-      await synap.kv.set('test:counter', 10);
-      const newValue = await synap.kv.incr('test:counter', 5);
-      expect(newValue).toBe(15);
+  describe('INCR/DECR', () => {
+    it('should increment value', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({ value: 10 });
+
+      const result = await kv.incr('counter', 10);
+      
+      expect(result).toBe(10);
     });
 
-    it('should decrement a value', async () => {
-      await synap.kv.set('test:counter2', 20);
-      const newValue = await synap.kv.decr('test:counter2', 3);
-      expect(newValue).toBe(17);
+    it('should decrement value', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({ value: 5 });
+
+      const result = await kv.decr('counter', 5);
+      
+      expect(result).toBe(5);
     });
   });
 
-  describe('Batch operations', () => {
+  describe('Batch Operations', () => {
     it('should MSET multiple keys', async () => {
-      const success = await synap.kv.mset({
-        'batch:1': 'value1',
-        'batch:2': 'value2',
-        'batch:3': 'value3',
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({ success: true });
+
+      const entries = {
+        'key1': 'value1',
+        'key2': 'value2',
+        'key3': 'value3',
+      };
+
+      const result = await kv.mset(entries);
+      
+      expect(result).toBe(true);
+      // KVStore converts entries to pairs array
+      expect(mockClient.sendCommand).toHaveBeenCalledWith('kv.mset', {
+        pairs: [
+          { key: 'key1', value: 'value1' },
+          { key: 'key2', value: 'value2' },
+          { key: 'key3', value: 'value3' },
+        ],
       });
-      expect(success).toBe(true);
     });
 
     it('should MGET multiple keys', async () => {
-      await synap.kv.mset({
-        'multi:a': 'A',
-        'multi:b': 'B',
-        'multi:c': 'C',
+      // MGET returns array in same order as keys
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({
+        values: ['value1', 'value2']
       });
 
-      const values = await synap.kv.mget(['multi:a', 'multi:b', 'multi:c']);
+      const values = await kv.mget(['key1', 'key2']);
+      
       expect(values).toEqual({
-        'multi:a': 'A',
-        'multi:b': 'B',
-        'multi:c': 'C',
+        'key1': 'value1',
+        'key2': 'value2',
       });
     });
 
     it('should MDEL multiple keys', async () => {
-      await synap.kv.mset({
-        'del:1': 'v1',
-        'del:2': 'v2',
-        'del:3': 'v3',
-      });
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({ deleted: 3 });
 
-      const deleted = await synap.kv.mdel(['del:1', 'del:2', 'del:3']);
-      expect(deleted).toBe(3);
+      const count = await kv.mdel(['key1', 'key2', 'key3']);
+      
+      expect(count).toBe(3);
     });
   });
 
-  describe('SCAN operation', () => {
+  describe('SCAN', () => {
     it('should scan with prefix', async () => {
-      await synap.kv.mset({
-        'scan:user:1': 'Alice',
-        'scan:user:2': 'Bob',
-        'scan:product:1': 'Widget',
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({
+        keys: ['user:1', 'user:2', 'user:3'],
+        count: 3,
       });
 
-      const result = await synap.kv.scan('scan:user:');
-      expect(result.keys.length).toBe(2);
-      expect(result.keys).toContain('scan:user:1');
-      expect(result.keys).toContain('scan:user:2');
+      const result = await kv.scan('user:');
+      
+      expect(result.keys).toEqual(['user:1', 'user:2', 'user:3']);
+      expect(result.count).toBe(3);
+    });
+
+    it('should scan with limit', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({
+        keys: ['key1', 'key2'],
+        count: 2,
+      });
+
+      const result = await kv.scan('', 2);
+      
+      expect(result.count).toBe(2);
+      // Empty prefix is not sent
+      expect(mockClient.sendCommand).toHaveBeenCalledWith('kv.scan', {
+        limit: 2,
+      });
     });
   });
 
-  describe('TTL operations', () => {
+  describe('TTL Operations', () => {
     it('should set expiration', async () => {
-      await synap.kv.set('test:expire', 'temp');
-      await synap.kv.expire('test:expire', 60);
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({ result: true });
+
+      const result = await kv.expire('key', 60);
       
-      const ttl = await synap.kv.ttl('test:expire');
-      expect(ttl).toBeGreaterThan(0);
-      expect(ttl).toBeLessThanOrEqual(60);
+      expect(result).toBe(true);
     });
 
-    it('should persist (remove expiration)', async () => {
-      await synap.kv.set('test:persist', 'value', { ttl: 60 });
-      await synap.kv.persist('test:persist');
+    it('should get TTL', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({ ttl: 120 });
+
+      const ttl = await kv.ttl('key');
       
-      const ttl = await synap.kv.ttl('test:persist');
-      expect(ttl).toBeNull();
+      expect(ttl).toBe(120);
+    });
+
+    it('should persist key', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({ result: true });
+
+      const result = await kv.persist('key');
+      
+      expect(result).toBe(true);
     });
   });
 
   describe('Stats', () => {
-    it('should get store statistics', async () => {
-      const stats = await synap.kv.stats();
+    it('should get statistics', async () => {
+      const mockStats = {
+        total_keys: 100,
+        total_memory_bytes: 1024000,
+        operations: {
+          gets: 500,
+          sets: 300,
+          dels: 50,
+          hits: 400,
+          misses: 100,
+        },
+        hit_rate: 0.8,
+      };
+
+      vi.mocked(mockClient.sendCommand).mockResolvedValue(mockStats);
+
+      const stats = await kv.stats();
       
-      expect(stats).toHaveProperty('total_keys');
-      expect(stats).toHaveProperty('total_memory_bytes');
-      expect(stats).toHaveProperty('operations');
-      expect(stats).toHaveProperty('hit_rate');
-      expect(typeof stats.total_keys).toBe('number');
+      expect(stats).toEqual(mockStats);
+      expect(stats.hit_rate).toBe(0.8);
     });
   });
 });

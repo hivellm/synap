@@ -21,12 +21,15 @@
     "build": "tsup src/index.ts --format cjs,esm --dts --clean",
     "dev": "tsup src/index.ts --format cjs,esm --dts --watch",
     "test": "vitest run",
+    "test:unit": "vitest run --exclude '**/*.s2s.test.ts'",
+    "test:s2s": "RUN_S2S=true vitest run src/__tests__/*.s2s.test.ts",
+    "test:all": "npm run test:unit && npm run test:s2s",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run build && npm run test:unit"
   },
   "keywords": [
     "synap",
