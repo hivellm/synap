@@ -7,7 +7,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <AnalysisMode>All</AnalysisMode>
     <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
-    
+
     <!-- Package Metadata -->
     <PackageId>HiveLLM.Synap.SDK</PackageId>
     <Version>0.1.0</Version>
@@ -20,7 +20,7 @@
     <RepositoryType>git</RepositoryType>
     <PackageTags>synap;kv-store;message-queue;pubsub;event-stream;redis;rabbitmq;kafka</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    
+
     <!-- Documentation -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);1591</NoWarn>
