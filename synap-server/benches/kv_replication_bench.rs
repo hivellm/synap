@@ -38,7 +38,7 @@ async fn create_kv_with_master() -> (Arc<MasterNode>, Arc<KVStore>, std::net::So
     config.heartbeat_interval_ms = 100;
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let master = Arc::new(MasterNode::new(config, Arc::clone(&kv)).await.unwrap());
+    let master = Arc::new(MasterNode::new(config, Arc::clone(&kv), None).await.unwrap());
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -55,7 +55,7 @@ async fn create_replica(master_addr: std::net::SocketAddr) -> Arc<ReplicaNode> {
     config.reconnect_delay_ms = 100;
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let replica = ReplicaNode::new(config, kv).await.unwrap();
+    let replica = ReplicaNode::new(config, kv, None).await.unwrap();
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
@@ -116,8 +116,7 @@ fn bench_kv_set_with_1_replica(c: &mut Criterion) {
                 master.replicate(Operation::KVSet {
                     key,
                     value,
-                    ttl: None,
-                });
+                    ttl: None});
             }
         });
     });
@@ -159,8 +158,7 @@ fn bench_kv_set_with_3_replicas(c: &mut Criterion) {
                 master.replicate(Operation::KVSet {
                     key,
                     value,
-                    ttl: None,
-                });
+                    ttl: None});
             }
         });
     });
@@ -221,8 +219,7 @@ fn bench_kv_get_with_1_replica(c: &mut Criterion) {
             master.replicate(Operation::KVSet {
                 key,
                 value,
-                ttl: None,
-            });
+                ttl: None});
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     });
@@ -285,8 +282,7 @@ fn bench_kv_batch_operations(c: &mut Criterion) {
                     master.replicate(Operation::KVSet {
                         key,
                         value,
-                        ttl: None,
-                    });
+                        ttl: None});
                 }
             });
         });
@@ -359,8 +355,7 @@ fn bench_kv_mixed_workload(c: &mut Criterion) {
                 master.replicate(Operation::KVSet {
                     key,
                     value,
-                    ttl: None,
-                });
+                    ttl: None});
             }
             tokio::time::sleep(Duration::from_secs(2)).await;
         });
@@ -385,8 +380,7 @@ fn bench_kv_mixed_workload(c: &mut Criterion) {
                         master.replicate(Operation::KVSet {
                             key,
                             value,
-                            ttl: None,
-                        });
+                            ttl: None});
                     }
                 }
             }

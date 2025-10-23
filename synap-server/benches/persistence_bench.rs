@@ -1,6 +1,6 @@
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::path::PathBuf;
-use synap_server::core::{KVConfig, KVStore, QueueConfig, QueueManager};
+use synap_server::core::{KVConfig, KVStore};
 use synap_server::persistence::{AsyncWAL, Operation, PersistenceConfig, SnapshotManager};
 use tokio::runtime::Runtime;
 
@@ -29,8 +29,7 @@ fn bench_wal_throughput(c: &mut Criterion) {
                         let op = Operation::KVSet {
                             key: format!("key_{}", i),
                             value: vec![0u8; 64],
-                            ttl: None,
-                        };
+                            ttl: None};
                         wal.append(op).await.unwrap();
                     }
                 });
@@ -77,7 +76,7 @@ fn bench_snapshot_memory(c: &mut Criterion) {
                     snapshot_config.enabled = true;
 
                     let snapshot_mgr = SnapshotManager::new(snapshot_config);
-                    snapshot_mgr.create_snapshot(&store, None, 0).await.unwrap()
+                    snapshot_mgr.create_snapshot(&store, None, None, 0).await.unwrap()
                 });
             },
         );
@@ -108,7 +107,7 @@ fn bench_snapshot_load(c: &mut Criterion) {
         snapshot_config.enabled = true;
 
         let snapshot_mgr = SnapshotManager::new(snapshot_config);
-        snapshot_mgr.create_snapshot(&store, None, 0).await.unwrap();
+        snapshot_mgr.create_snapshot(&store, None, None, 0).await.unwrap();
     });
 
     group.bench_function("load_snapshot", |b| {
@@ -146,7 +145,7 @@ fn bench_recovery(c: &mut Criterion) {
         let mut snapshot_config = synap_server::persistence::types::SnapshotConfig::default();
         snapshot_config.directory = PathBuf::from("./target/bench_recovery");
         let snapshot_mgr = SnapshotManager::new(snapshot_config);
-        snapshot_mgr.create_snapshot(&store, None, 0).await.unwrap();
+        snapshot_mgr.create_snapshot(&store, None, None, 0).await.unwrap();
 
         // Add more data to WAL
         let mut wal_config = synap_server::persistence::types::WALConfig::default();
@@ -157,8 +156,7 @@ fn bench_recovery(c: &mut Criterion) {
             let op = Operation::KVSet {
                 key: format!("key_{:08}", i),
                 value: vec![0u8; 64],
-                ttl: None,
-            };
+                ttl: None};
             wal.append(op).await.unwrap();
         }
     });
@@ -173,8 +171,8 @@ fn bench_recovery(c: &mut Criterion) {
             let snapshot = snapshot_mgr.load_latest().await.unwrap();
 
             // Load WAL entries
-            let wal_config = synap_server::persistence::types::WALConfig::default();
-            let path = PathBuf::from("./target/bench_recovery/recovery.wal");
+            let _wal_config = synap_server::persistence::types::WALConfig::default();
+            let _path = PathBuf::from("./target/bench_recovery/recovery.wal");
 
             snapshot
         });
@@ -213,8 +211,7 @@ fn bench_concurrent_wal(c: &mut Criterion) {
                                 let op = Operation::KVSet {
                                     key: format!("writer_{}_key_{}", writer_id, i),
                                     value: vec![0u8; 64],
-                                    ttl: None,
-                                };
+                                    ttl: None};
                                 wal_clone.append(op).await.unwrap();
                             }
                         });

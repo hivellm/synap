@@ -3,8 +3,10 @@
 //! Compares compression ratio and speed for different algorithms
 //! on typical Synap workloads (JSON, binary data, text)
 
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
 use synap_server::compression::{CompressionAlgorithm, Compressor};
+use synap_server::compression::compressor::CompressionConfig;
 
 /// Generate test data of various types
 fn generate_test_data(size: usize, data_type: &str) -> Vec<u8> {
@@ -43,13 +45,12 @@ fn generate_test_data(size: usize, data_type: &str) -> Vec<u8> {
             }
             data
         }
-        _ => vec![0u8; size],
-    }
+        _ => vec![0u8; size]}
 }
 
 /// Benchmark compression speed
 fn bench_compression(c: &mut Criterion) {
-    let compressor = Compressor::new();
+    let compressor = Compressor::new(CompressionConfig::default());
 
     let data_types = vec!["json", "text", "binary", "sparse"];
     let sizes = vec![1024, 10 * 1024, 100 * 1024]; // 1KB, 10KB, 100KB
@@ -65,7 +66,7 @@ fn bench_compression(c: &mut Criterion) {
             group.bench_with_input(BenchmarkId::new("LZ4", size), &data, |b, data| {
                 b.iter(|| {
                     compressor
-                        .compress(black_box(data), CompressionAlgorithm::Lz4)
+                        .compress(black_box(data), Some(CompressionAlgorithm::Lz4))
                         .unwrap()
                 })
             });
@@ -74,7 +75,7 @@ fn bench_compression(c: &mut Criterion) {
             group.bench_with_input(BenchmarkId::new("Zstd", size), &data, |b, data| {
                 b.iter(|| {
                     compressor
-                        .compress(black_box(data), CompressionAlgorithm::Zstd)
+                        .compress(black_box(data), Some(CompressionAlgorithm::Zstd))
                         .unwrap()
                 })
             });
@@ -86,7 +87,7 @@ fn bench_compression(c: &mut Criterion) {
 
 /// Benchmark decompression speed
 fn bench_decompression(c: &mut Criterion) {
-    let compressor = Compressor::new();
+    let compressor = Compressor::new(CompressionConfig::default());
 
     let data_types = vec!["json", "text"];
     let sizes = vec![1024, 10 * 1024, 100 * 1024];
@@ -97,10 +98,10 @@ fn bench_decompression(c: &mut Criterion) {
 
             // Pre-compress data
             let lz4_compressed = compressor
-                .compress(&data, CompressionAlgorithm::Lz4)
+                .compress(&data, Some(CompressionAlgorithm::Lz4))
                 .unwrap();
             let zstd_compressed = compressor
-                .compress(&data, CompressionAlgorithm::Zstd)
+                .compress(&data, Some(CompressionAlgorithm::Zstd))
                 .unwrap();
 
             let mut group = c.benchmark_group(format!("decompress_{}", data_type));
@@ -139,7 +140,7 @@ fn bench_decompression(c: &mut Criterion) {
 
 /// Benchmark compression ratio
 fn bench_compression_ratio(c: &mut Criterion) {
-    let compressor = Compressor::new();
+    let compressor = Compressor::new(CompressionConfig::default());
 
     let mut group = c.benchmark_group("compression_ratio");
 
@@ -155,13 +156,13 @@ fn bench_compression_ratio(c: &mut Criterion) {
 
         // LZ4 ratio
         let lz4_compressed = compressor
-            .compress(&data, CompressionAlgorithm::Lz4)
+            .compress(&data, Some(CompressionAlgorithm::Lz4))
             .unwrap();
         let lz4_ratio = original_size as f64 / lz4_compressed.len() as f64;
 
         // Zstd ratio
         let zstd_compressed = compressor
-            .compress(&data, CompressionAlgorithm::Zstd)
+            .compress(&data, Some(CompressionAlgorithm::Zstd))
             .unwrap();
         let zstd_ratio = original_size as f64 / zstd_compressed.len() as f64;
 
@@ -177,8 +178,8 @@ fn bench_compression_ratio(c: &mut Criterion) {
 
         group.bench_function(BenchmarkId::new("ratio_check", name), |b| {
             b.iter(|| {
-                let _lz4 = compressor.compress(black_box(&data), CompressionAlgorithm::Lz4);
-                let _zstd = compressor.compress(black_box(&data), CompressionAlgorithm::Zstd);
+                let _lz4 = compressor.compress(black_box(&data), Some(CompressionAlgorithm::Lz4));
+                let _zstd = compressor.compress(black_box(&data), Some(CompressionAlgorithm::Zstd));
             })
         });
     }

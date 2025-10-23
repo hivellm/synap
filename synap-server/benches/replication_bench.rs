@@ -1,4 +1,5 @@
-use criterion::{BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main};
+use std::hint::black_box;
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::sync::Arc;
 use synap_server::persistence::types::Operation;
 use synap_server::{KVConfig, KVStore, MasterNode, NodeRole, ReplicationConfig, ReplicationLog};
@@ -20,8 +21,7 @@ fn bench_replication_log_append(c: &mut Criterion) {
                     let op = Operation::KVSet {
                         key: format!("key_{}", i),
                         value: vec![i as u8],
-                        ttl: None,
-                    };
+                        ttl: None};
                     black_box(log.append(op));
                 }
             });
@@ -42,8 +42,7 @@ fn bench_replication_log_get_from_offset(c: &mut Criterion) {
         log.append(Operation::KVSet {
             key: format!("key_{}", i),
             value: vec![i as u8],
-            ttl: None,
-        });
+            ttl: None});
     }
 
     for offset in [0, 5_000, 9_000] {
@@ -82,15 +81,14 @@ fn bench_master_replication(c: &mut Criterion) {
                     config.replica_listen_address = Some("127.0.0.1:0".parse().unwrap());
 
                     let kv = Arc::new(KVStore::new(KVConfig::default()));
-                    let master = MasterNode::new(config, kv).await.unwrap();
+                    let master = MasterNode::new(config, kv, None).await.unwrap();
 
                     // Replicate operations
                     for i in 0..batch_size {
                         let op = Operation::KVSet {
                             key: format!("key_{}", i),
                             value: vec![i as u8],
-                            ttl: None,
-                        };
+                            ttl: None};
                         black_box(master.replicate(op));
                     }
                 });
