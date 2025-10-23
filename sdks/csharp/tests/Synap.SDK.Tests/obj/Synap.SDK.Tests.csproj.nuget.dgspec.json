@@ -1,0 +1,158 @@
+{
+  "format": 1,
+  "restore": {
+    "/mnt/f/Node/hivellm/synap/sdks/csharp/tests/Synap.SDK.Tests/Synap.SDK.Tests.csproj": {}
+  },
+  "projects": {
+    "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/Synap.SDK.csproj": {
+      "version": "0.1.0",
+      "restore": {
+        "projectUniqueName": "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/Synap.SDK.csproj",
+        "projectName": "HiveLLM.Synap.SDK",
+        "projectPath": "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/Synap.SDK.csproj",
+        "packagesPath": "/home/andre/.nuget/packages/",
+        "outputPath": "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/obj/",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/home/andre/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {}
+          }
+        },
+        "warningProperties": {
+          "allWarningsAsErrors": true,
+          "warnAsError": [
+            "NU1605"
+          ]
+        }
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "dependencies": {
+            "Microsoft.CodeAnalysis.NetAnalyzers": {
+              "include": "Runtime, Build, Native, ContentFiles, Analyzers",
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
+            "System.Text.Json": {
+              "target": "Package",
+              "version": "[8.0.5, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/8.0.117/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    },
+    "/mnt/f/Node/hivellm/synap/sdks/csharp/tests/Synap.SDK.Tests/Synap.SDK.Tests.csproj": {
+      "version": "1.0.0",
+      "restore": {
+        "projectUniqueName": "/mnt/f/Node/hivellm/synap/sdks/csharp/tests/Synap.SDK.Tests/Synap.SDK.Tests.csproj",
+        "projectName": "Synap.SDK.Tests",
+        "projectPath": "/mnt/f/Node/hivellm/synap/sdks/csharp/tests/Synap.SDK.Tests/Synap.SDK.Tests.csproj",
+        "packagesPath": "/home/andre/.nuget/packages/",
+        "outputPath": "/mnt/f/Node/hivellm/synap/sdks/csharp/tests/Synap.SDK.Tests/obj/",
+        "projectStyle": "PackageReference",
+        "configFilePaths": [
+          "/home/andre/.nuget/NuGet/NuGet.Config"
+        ],
+        "originalTargetFrameworks": [
+          "net8.0"
+        ],
+        "sources": {
+          "https://api.nuget.org/v3/index.json": {}
+        },
+        "frameworks": {
+          "net8.0": {
+            "targetAlias": "net8.0",
+            "projectReferences": {
+              "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/Synap.SDK.csproj": {
+                "projectPath": "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/Synap.SDK.csproj"
+              }
+            }
+          }
+        },
+        "warningProperties": {
+          "allWarningsAsErrors": true,
+          "warnAsError": [
+            "NU1605"
+          ]
+        }
+      },
+      "frameworks": {
+        "net8.0": {
+          "targetAlias": "net8.0",
+          "dependencies": {
+            "Microsoft.NET.Test.Sdk": {
+              "target": "Package",
+              "version": "[17.11.1, )"
+            },
+            "Moq": {
+              "target": "Package",
+              "version": "[4.20.72, )"
+            },
+            "coverlet.collector": {
+              "include": "Runtime, Build, Native, ContentFiles, Analyzers, BuildTransitive",
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[6.0.2, )"
+            },
+            "xunit": {
+              "target": "Package",
+              "version": "[2.9.2, )"
+            },
+            "xunit.runner.visualstudio": {
+              "include": "Runtime, Build, Native, ContentFiles, Analyzers, BuildTransitive",
+              "suppressParent": "All",
+              "target": "Package",
+              "version": "[2.8.2, )"
+            }
+          },
+          "imports": [
+            "net461",
+            "net462",
+            "net47",
+            "net471",
+            "net472",
+            "net48",
+            "net481"
+          ],
+          "assetTargetFallback": true,
+          "warn": true,
+          "frameworkReferences": {
+            "Microsoft.NETCore.App": {
+              "privateAssets": "all"
+            }
+          },
+          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/8.0.117/PortableRuntimeIdentifierGraph.json"
+        }
+      }
+    }
+  }
+}

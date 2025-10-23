@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "pHW4tnI603qDGgiRhyOlii8xKSiViCDfaQaxuTbxhDZyLHg31f1yCkZ8n6d6KOCw5BbOcXu8rO6fId2WcXWWTw==",
+  "success": true,
+  "projectFilePath": "/mnt/f/Node/hivellm/synap/sdks/csharp/examples/BasicUsage/BasicUsage.csproj",
+  "expectedPackageFiles": [
+    "/home/andre/.nuget/packages/system.text.json/8.0.5/system.text.json.8.0.5.nupkg.sha512"
+  ],
+  "logs": []
+}

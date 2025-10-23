@@ -1,0 +1,494 @@
+<?xml version="1.0"?>
+<doc>
+    <assembly>
+        <name>Synap.SDK</name>
+    </assembly>
+    <members>
+        <member name="T:Synap.SDK.Exceptions.SynapException">
+            <summary>
+            Base exception for all Synap SDK errors.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Exceptions.SynapException.#ctor">
+            <summary>
+            Initializes a new instance of the <see cref="T:Synap.SDK.Exceptions.SynapException"/> class.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Exceptions.SynapException.#ctor(System.String)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Synap.SDK.Exceptions.SynapException"/> class.
+            </summary>
+            <param name="message">The error message.</param>
+        </member>
+        <member name="M:Synap.SDK.Exceptions.SynapException.#ctor(System.String,System.Exception)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Synap.SDK.Exceptions.SynapException"/> class.
+            </summary>
+            <param name="message">The error message.</param>
+            <param name="innerException">The inner exception.</param>
+        </member>
+        <member name="M:Synap.SDK.Exceptions.SynapException.HttpError(System.String,System.Int32)">
+            <summary>
+            Creates an HTTP error exception.
+            </summary>
+            <param name="message">The error message.</param>
+            <param name="statusCode">The HTTP status code.</param>
+            <returns>A new <see cref="T:Synap.SDK.Exceptions.SynapException"/> instance.</returns>
+        </member>
+        <member name="M:Synap.SDK.Exceptions.SynapException.ServerError(System.String)">
+            <summary>
+            Creates a server error exception.
+            </summary>
+            <param name="message">The error message.</param>
+            <returns>A new <see cref="T:Synap.SDK.Exceptions.SynapException"/> instance.</returns>
+        </member>
+        <member name="M:Synap.SDK.Exceptions.SynapException.NetworkError(System.String)">
+            <summary>
+            Creates a network error exception.
+            </summary>
+            <param name="message">The error message.</param>
+            <returns>A new <see cref="T:Synap.SDK.Exceptions.SynapException"/> instance.</returns>
+        </member>
+        <member name="M:Synap.SDK.Exceptions.SynapException.InvalidResponse(System.String)">
+            <summary>
+            Creates an invalid response exception.
+            </summary>
+            <param name="message">The error message.</param>
+            <returns>A new <see cref="T:Synap.SDK.Exceptions.SynapException"/> instance.</returns>
+        </member>
+        <member name="M:Synap.SDK.Exceptions.SynapException.InvalidConfig(System.String)">
+            <summary>
+            Creates an invalid configuration exception.
+            </summary>
+            <param name="message">The error message.</param>
+            <returns>A new <see cref="T:Synap.SDK.Exceptions.SynapException"/> instance.</returns>
+        </member>
+        <member name="T:Synap.SDK.Modules.KVStore">
+            <summary>
+            Key-Value Store operations.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.KVStore.SetAsync(System.String,System.Object,System.Nullable{System.Int32},System.Threading.CancellationToken)">
+            <summary>
+            Sets a key-value pair.
+            </summary>
+            <param name="key">The key to set.</param>
+            <param name="value">The value to store.</param>
+            <param name="ttl">Optional time-to-live in seconds.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+        </member>
+        <member name="M:Synap.SDK.Modules.KVStore.GetAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Gets a value by key.
+            </summary>
+            <param name="key">The key to get.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The value as a JSON element, or null if not found.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.KVStore.GetAsync``1(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Gets a strongly-typed value by key.
+            </summary>
+            <typeparam name="T">The type to deserialize to.</typeparam>
+            <param name="key">The key to get.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The deserialized value, or default if not found.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.KVStore.DeleteAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Deletes a key.
+            </summary>
+            <param name="key">The key to delete.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+        </member>
+        <member name="M:Synap.SDK.Modules.KVStore.ExistsAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Checks if a key exists.
+            </summary>
+            <param name="key">The key to check.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>True if the key exists, false otherwise.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.KVStore.IncrAsync(System.String,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Increments a numeric value.
+            </summary>
+            <param name="key">The key to increment.</param>
+            <param name="delta">The amount to increment by.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The new value after incrementing.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.KVStore.DecrAsync(System.String,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Decrements a numeric value.
+            </summary>
+            <param name="key">The key to decrement.</param>
+            <param name="delta">The amount to decrement by.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The new value after decrementing.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.KVStore.StatsAsync(System.Threading.CancellationToken)">
+            <summary>
+            Gets KV store statistics.
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Statistics as a dictionary.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.KVStore.ScanAsync(System.String,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Scans keys by prefix.
+            </summary>
+            <param name="prefix">The prefix to search for.</param>
+            <param name="limit">Maximum number of keys to return.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>List of matching keys.</returns>
+        </member>
+        <member name="T:Synap.SDK.Modules.PubSubManager">
+            <summary>
+            Pub/Sub operations.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.PubSubManager.SubscribeTopicsAsync(System.String,System.Collections.Generic.IEnumerable{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Subscribes to topics for a subscriber.
+            </summary>
+            <param name="subscriberId">The subscriber ID.</param>
+            <param name="topics">List of topic patterns (supports wildcards like 'user.*').</param>
+            <param name="cancellationToken">Cancellation token.</param>
+        </member>
+        <member name="M:Synap.SDK.Modules.PubSubManager.UnsubscribeTopicsAsync(System.String,System.Collections.Generic.IEnumerable{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Unsubscribes from topics for a subscriber.
+            </summary>
+            <param name="subscriberId">The subscriber ID.</param>
+            <param name="topics">List of topic patterns to unsubscribe from.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+        </member>
+        <member name="M:Synap.SDK.Modules.PubSubManager.PublishAsync(System.String,System.Object,System.Threading.CancellationToken)">
+            <summary>
+            Publishes a message to a topic.
+            </summary>
+            <param name="topic">The topic name.</param>
+            <param name="message">The message payload.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Number of subscribers that received the message.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.PubSubManager.StatsAsync(System.Threading.CancellationToken)">
+            <summary>
+            Gets Pub/Sub statistics.
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Statistics as a dictionary.</returns>
+        </member>
+        <member name="T:Synap.SDK.Modules.QueueManager">
+            <summary>
+            Message Queue operations.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.QueueManager.CreateQueueAsync(System.String,System.Nullable{System.Int32},System.Nullable{System.Int32},System.Threading.CancellationToken)">
+            <summary>
+            Creates a new queue.
+            </summary>
+            <param name="name">The queue name.</param>
+            <param name="maxSize">Optional maximum queue size.</param>
+            <param name="messageTtl">Optional message TTL in seconds.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+        </member>
+        <member name="M:Synap.SDK.Modules.QueueManager.DeleteQueueAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Deletes a queue.
+            </summary>
+            <param name="name">The queue name.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+        </member>
+        <member name="M:Synap.SDK.Modules.QueueManager.PublishAsync(System.String,System.Object,System.Nullable{System.Int32},System.Nullable{System.Int32},System.Threading.CancellationToken)">
+            <summary>
+            Publishes a message to a queue.
+            </summary>
+            <param name="queue">The queue name.</param>
+            <param name="message">The message payload.</param>
+            <param name="priority">Message priority (0-9, higher is more important).</param>
+            <param name="maxRetries">Maximum retry attempts.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The message ID.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.QueueManager.ConsumeAsync(System.String,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Consumes a message from a queue.
+            </summary>
+            <param name="queue">The queue name.</param>
+            <param name="consumerId">The consumer ID.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The queue message, or null if no message is available.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.QueueManager.AckAsync(System.String,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Acknowledges successful message processing.
+            </summary>
+            <param name="queue">The queue name.</param>
+            <param name="messageId">The message ID to acknowledge.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+        </member>
+        <member name="M:Synap.SDK.Modules.QueueManager.NackAsync(System.String,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Negative acknowledges a message (requeues it for retry).
+            </summary>
+            <param name="queue">The queue name.</param>
+            <param name="messageId">The message ID to requeue.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+        </member>
+        <member name="M:Synap.SDK.Modules.QueueManager.StatsAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Gets queue statistics.
+            </summary>
+            <param name="queue">The queue name.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Statistics as a dictionary.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.QueueManager.ListAsync(System.Threading.CancellationToken)">
+            <summary>
+            Lists all queues.
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>List of queue names.</returns>
+        </member>
+        <member name="T:Synap.SDK.Modules.StreamManager">
+            <summary>
+            Event Stream operations.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.StreamManager.CreateRoomAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Creates a new stream room.
+            </summary>
+            <param name="room">The room name.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+        </member>
+        <member name="M:Synap.SDK.Modules.StreamManager.DeleteRoomAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Deletes a stream room.
+            </summary>
+            <param name="room">The room name.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+        </member>
+        <member name="M:Synap.SDK.Modules.StreamManager.PublishAsync(System.String,System.String,System.Object,System.Threading.CancellationToken)">
+            <summary>
+            Publishes an event to a stream room.
+            </summary>
+            <param name="room">The room name.</param>
+            <param name="event">The event type/name.</param>
+            <param name="data">The event data.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The event offset in the stream.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.StreamManager.ReadAsync(System.String,System.Int64,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Reads events from a stream.
+            </summary>
+            <param name="room">The room name.</param>
+            <param name="offset">Starting offset (0 for beginning).</param>
+            <param name="limit">Maximum number of events to read.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>List of stream events.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.StreamManager.StatsAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Gets stream statistics.
+            </summary>
+            <param name="room">The room name.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Statistics as a dictionary.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.StreamManager.ListRoomsAsync(System.Threading.CancellationToken)">
+            <summary>
+            Lists all stream rooms.
+            </summary>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>List of room names.</returns>
+        </member>
+        <member name="T:Synap.SDK.SynapClient">
+            <summary>
+            Main Synap SDK client for interacting with the Synap server.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.SynapClient.#ctor(Synap.SDK.SynapConfig)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Synap.SDK.SynapClient"/> class.
+            </summary>
+            <param name="config">The client configuration.</param>
+        </member>
+        <member name="M:Synap.SDK.SynapClient.#ctor(Synap.SDK.SynapConfig,System.Net.Http.HttpClient)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Synap.SDK.SynapClient"/> class.
+            </summary>
+            <param name="config">The client configuration.</param>
+            <param name="httpClient">Optional custom HTTP client. If null, a new one will be created.</param>
+        </member>
+        <member name="P:Synap.SDK.SynapClient.KV">
+            <summary>
+            Gets the Key-Value Store operations.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapClient.Queue">
+            <summary>
+            Gets the Queue operations.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapClient.Stream">
+            <summary>
+            Gets the Stream operations.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapClient.PubSub">
+            <summary>
+            Gets the Pub/Sub operations.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapClient.Config">
+            <summary>
+            Gets the client configuration.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.SynapClient.ExecuteAsync(System.String,System.String,System.Collections.Generic.Dictionary{System.String,System.Object},System.Threading.CancellationToken)">
+            <summary>
+            Executes a StreamableHTTP operation on the Synap server.
+            </summary>
+            <param name="operation">The operation type (e.g., 'kv.set', 'queue.publish').</param>
+            <param name="target">The target resource (e.g., key name, queue name).</param>
+            <param name="data">The operation data.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>The response as a JSON document.</returns>
+            <exception cref="T:Synap.SDK.Exceptions.SynapException">Thrown when the operation fails.</exception>
+        </member>
+        <member name="M:Synap.SDK.SynapClient.Dispose">
+            <summary>
+            Disposes the client and releases resources.
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.SynapConfig">
+            <summary>
+            Configuration for the Synap client.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapConfig.BaseUrl">
+            <summary>
+            Gets the base URL of the Synap server.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapConfig.Timeout">
+            <summary>
+            Gets the request timeout in seconds.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapConfig.AuthToken">
+            <summary>
+            Gets the authentication token for requests.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapConfig.MaxRetries">
+            <summary>
+            Gets the maximum number of retries for failed requests.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.SynapConfig.#ctor(System.String)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Synap.SDK.SynapConfig"/> class.
+            </summary>
+            <param name="baseUrl">The base URL of the Synap server.</param>
+            <exception cref="T:Synap.SDK.Exceptions.SynapException">Thrown when the base URL is null or empty.</exception>
+        </member>
+        <member name="M:Synap.SDK.SynapConfig.Create(System.String)">
+            <summary>
+            Creates a new configuration with the specified base URL.
+            </summary>
+            <param name="baseUrl">The base URL of the Synap server.</param>
+            <returns>A new <see cref="T:Synap.SDK.SynapConfig"/> instance.</returns>
+        </member>
+        <member name="M:Synap.SDK.SynapConfig.WithTimeout(System.Int32)">
+            <summary>
+            Creates a copy of this configuration with the specified timeout.
+            </summary>
+            <param name="timeout">The timeout in seconds.</param>
+            <returns>A new <see cref="T:Synap.SDK.SynapConfig"/> instance with the updated timeout.</returns>
+        </member>
+        <member name="M:Synap.SDK.SynapConfig.WithAuthToken(System.String)">
+            <summary>
+            Creates a copy of this configuration with the specified authentication token.
+            </summary>
+            <param name="token">The authentication token.</param>
+            <returns>A new <see cref="T:Synap.SDK.SynapConfig"/> instance with the updated token.</returns>
+        </member>
+        <member name="M:Synap.SDK.SynapConfig.WithMaxRetries(System.Int32)">
+            <summary>
+            Creates a copy of this configuration with the specified maximum retries.
+            </summary>
+            <param name="retries">The maximum number of retries.</param>
+            <returns>A new <see cref="T:Synap.SDK.SynapConfig"/> instance with the updated max retries.</returns>
+        </member>
+        <member name="T:Synap.SDK.Types.QueueMessage">
+            <summary>
+            Represents a message from a queue.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Types.QueueMessage.Id">
+            <summary>
+            Gets the message ID.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Types.QueueMessage.Payload">
+            <summary>
+            Gets the message payload.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Types.QueueMessage.Priority">
+            <summary>
+            Gets the message priority (0-9, higher is more important).
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Types.QueueMessage.Retries">
+            <summary>
+            Gets the number of times this message has been retried.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Types.QueueMessage.MaxRetries">
+            <summary>
+            Gets the maximum number of retries allowed.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Types.QueueMessage.Timestamp">
+            <summary>
+            Gets the message timestamp (Unix timestamp in seconds).
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.Types.StreamEvent">
+            <summary>
+            Represents an event from a stream.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Types.StreamEvent.Offset">
+            <summary>
+            Gets the event offset in the stream.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Types.StreamEvent.Event">
+            <summary>
+            Gets the event type/name.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Types.StreamEvent.Data">
+            <summary>
+            Gets the event data.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Types.StreamEvent.Timestamp">
+            <summary>
+            Gets the event timestamp (Unix timestamp in seconds).
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Types.StreamEvent.Room">
+            <summary>
+            Gets the room name.
+            </summary>
+        </member>
+    </members>
+</doc>

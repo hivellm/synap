@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <AnalysisMode>All</AnalysisMode>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+    
+    <!-- Package Metadata -->
+    <PackageId>HiveLLM.Synap.SDK</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>HiveLLM</Authors>
+    <Company>HiveLLM</Company>
+    <Description>Official C# SDK for Synap - High-Performance In-Memory Key-Value Store &amp; Message Broker</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/hivellm/hivellm</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/hivellm/hivellm</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>synap;kv-store;message-queue;pubsub;event-stream;redis;rabbitmq;kafka</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    
+    <!-- Documentation -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.NetAnalyzers" Version="8.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="System.Text.Json" Version="8.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+</Project>
+
