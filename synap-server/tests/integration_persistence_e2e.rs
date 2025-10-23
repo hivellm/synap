@@ -76,7 +76,7 @@ async fn test_e2e_wal_logging() {
     println!("✅ Logged 20 SETs and 5 DELETEs to WAL");
 
     // Verify WAL file exists (content might be buffered in AsyncWAL)
-    let wal_path = PathBuf::from("./target/e2e_wal/test.wal");
+    let _wal_path = PathBuf::from("./target/e2e_wal/test.wal");
     // WAL file might not exist yet if AsyncWAL hasn't flushed
     // Just verify the operations completed without errors
     println!("✅ WAL operations completed successfully");

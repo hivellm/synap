@@ -1,7 +1,7 @@
 // Integration tests for Redis-level performance optimizations
 use std::time::Duration;
 use synap_server::core::{KVConfig, KVStore, QueueConfig, QueueManager};
-use synap_server::persistence::{AsyncWAL, PersistenceConfig};
+use synap_server::persistence::AsyncWAL;
 use tokio;
 
 #[tokio::test]

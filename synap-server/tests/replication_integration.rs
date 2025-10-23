@@ -164,7 +164,7 @@ async fn test_partial_sync_after_disconnect() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_multiple_replicas_sync() {
-    let (master, master_kv, master_addr) = create_master().await;
+    let (_master, master_kv, master_addr) = create_master().await;
 
     // Populate master first
     for i in 0..200 {
@@ -221,7 +221,7 @@ async fn test_stress_thousands_of_operations() {
             .unwrap();
     }
 
-    let (replica, replica_kv) = create_replica(master_addr, true).await;
+    let (_replica, replica_kv) = create_replica(master_addr, true).await;
     sleep(Duration::from_secs(1)).await;
 
     // Add more data via replication log
@@ -315,7 +315,7 @@ async fn test_delete_operations_sync() {
             .unwrap();
     }
 
-    let (replica, replica_kv) = create_replica(master_addr, true).await;
+    let (_replica, replica_kv) = create_replica(master_addr, true).await;
     sleep(Duration::from_secs(1)).await;
 
     // Verify all 50 keys synced
@@ -352,7 +352,7 @@ async fn test_delete_operations_sync() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_batch_operations_sync() {
-    let (master, master_kv, master_addr) = create_master().await;
+    let (_master, master_kv, master_addr) = create_master().await;
 
     // Batch set to KV store
     for i in 0..100 {
@@ -361,7 +361,7 @@ async fn test_batch_operations_sync() {
         master_kv.set(&key, value, None).await.unwrap();
     }
 
-    let (replica, replica_kv) = create_replica(master_addr, true).await;
+    let (_replica, replica_kv) = create_replica(master_addr, true).await;
     sleep(Duration::from_secs(1)).await;
 
     // Verify all replicated via snapshot

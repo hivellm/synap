@@ -135,7 +135,7 @@ mod tests {
     #[tokio::test]
     async fn test_failover_manager_creation() {
         let config = ReplicationConfig::default();
-        let manager = FailoverManager::new(config);
+        let _manager = FailoverManager::new(config);
 
         // Basic test - just verify creation
         assert!(true);

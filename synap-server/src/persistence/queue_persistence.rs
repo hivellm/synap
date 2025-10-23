@@ -181,7 +181,7 @@ mod tests {
 
             // Publish 5 messages
             for i in 0..5 {
-                let msg_id = queue_manager
+                let _msg_id = queue_manager
                     .publish("test_queue", format!("msg_{}", i).into_bytes(), None, None)
                     .await
                     .unwrap();

@@ -16,9 +16,15 @@ async fn spawn_test_server() -> String {
         stream_manager: None,
         pubsub_router: Some(Arc::new(PubSubRouter::new())),
         persistence: None,
+    consumer_group_manager: None,
+    partition_manager: None,
     };
 
-    let app = create_router(app_state, false, 100);
+    let app = create_router(app_state, synap_server::config::RateLimitConfig {
+            enabled: false,
+            requests_per_second: 100,
+            burst_size: 10,
+        });
 
     // Bind to random port
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

@@ -436,7 +436,7 @@ async fn test_kv_scan_operations_replication() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_kv_exists_replication() {
-    let (master, master_kv, master_addr) = create_kv_master().await;
+    let (_master, master_kv, master_addr) = create_kv_master().await;
 
     master_kv
         .set("exists_key", b"value".to_vec(), None)
@@ -498,7 +498,7 @@ async fn test_kv_overwrite_replication() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_kv_large_dataset_replication() {
-    let (master, master_kv, master_addr) = create_kv_master().await;
+    let (_master, master_kv, master_addr) = create_kv_master().await;
 
     // Create 500 keys on master
     for i in 0..500 {
@@ -613,7 +613,7 @@ async fn test_kv_mixed_operations_replication() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_kv_binary_values_replication() {
-    let (master, master_kv, master_addr) = create_kv_master().await;
+    let (_master, master_kv, master_addr) = create_kv_master().await;
 
     // Set binary data (images, serialized data, etc.)
     let binary_data1 = vec![0xFF, 0xD8, 0xFF, 0xE0]; // JPEG header
@@ -653,7 +653,7 @@ async fn test_kv_binary_values_replication() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_kv_empty_values_replication() {
-    let (master, master_kv, master_addr) = create_kv_master().await;
+    let (_master, master_kv, master_addr) = create_kv_master().await;
 
     // Set empty values (valid use case)
     master_kv.set("empty_key", vec![], None).await.unwrap();
@@ -675,7 +675,7 @@ async fn test_kv_empty_values_replication() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_kv_unicode_keys_replication() {
-    let (master, master_kv, master_addr) = create_kv_master().await;
+    let (_master, master_kv, master_addr) = create_kv_master().await;
 
     // Unicode keys
     master_kv
@@ -719,7 +719,7 @@ async fn test_kv_unicode_keys_replication() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_kv_stats_replication() {
-    let (master, master_kv, master_addr) = create_kv_master().await;
+    let (_master, master_kv, master_addr) = create_kv_master().await;
 
     // Add various keys
     for i in 0..100 {
@@ -746,7 +746,7 @@ async fn test_kv_stats_replication() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_kv_keys_list_replication() {
-    let (master, master_kv, master_addr) = create_kv_master().await;
+    let (_master, master_kv, master_addr) = create_kv_master().await;
 
     // Add keys
     let expected_keys = vec!["alpha", "beta", "gamma", "delta", "epsilon"];
