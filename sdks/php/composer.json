@@ -1,0 +1,54 @@
+{
+    "name": "hivellm/synap-sdk",
+    "description": "PHP SDK for Synap - High-Performance In-Memory Key-Value Store & Message Broker",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["synap", "kv-store", "message-queue", "event-stream", "pubsub", "cache", "async"],
+    "authors": [
+        {
+            "name": "HiveLLM Team",
+            "email": "contact@hivellm.com"
+        }
+    ],
+    "require": {
+        "php": "^8.2",
+        "guzzlehttp/guzzle": "^7.8",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.0",
+        "phpstan/phpstan": "^2.0",
+        "squizlabs/php_codesniffer": "^3.10",
+        "friendsofphp/php-cs-fixer": "^3.64"
+    },
+    "autoload": {
+        "psr-4": {
+            "Synap\\SDK\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Synap\\SDK\\Tests\\": "tests/"
+        }
+    },
+    "scripts": {
+        "test": "phpunit --testdox --colors=always",
+        "test:coverage": "phpunit --coverage-text --coverage-html coverage",
+        "phpstan": "phpstan analyse src tests --level=max",
+        "cs-check": "php-cs-fixer fix --dry-run --diff",
+        "cs-fix": "php-cs-fixer fix",
+        "quality": [
+            "@cs-fix",
+            "@phpstan",
+            "@test"
+        ]
+    },
+    "config": {
+        "sort-packages": true,
+        "optimize-autoloader": true,
+        "preferred-install": "dist"
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
+
