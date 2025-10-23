@@ -137,8 +137,7 @@ mod tests {
         let config = ReplicationConfig::default();
         let _manager = FailoverManager::new(config);
 
-        // Basic test - just verify creation
-        assert!(true);
+        // Basic test - just verify creation without panic
     }
 
     #[tokio::test]

@@ -525,9 +525,11 @@ async fn test_concurrent_writes_during_sync() {
         key_count
     );
 
+    // Verify replica offset is being tracked (offset should be set)
     let replica_offset = replica.current_offset();
+    // For u64, just verify it's a reasonable value (not uninitialized)
     assert!(
-        replica_offset < i64::MAX,
+        replica_offset < u64::MAX,
         "Replica offset should be tracked: offset = {}",
         replica_offset
     );

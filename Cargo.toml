@@ -2,6 +2,10 @@
 resolver = "2"
 members = ["synap-server", "synap-cli"]
 
+[workspace.lints.clippy]
+# Allow field reassignment in tests/benches (common pattern)
+field_reassign_with_default = "allow"
+
 [workspace.package]
 version = "0.1.0-alpha"
 edition = "2024"
