@@ -133,7 +133,7 @@ mod tests {
         use futures::StreamExt;
         let buffers: Vec<_> = buffered.into_stream().collect().await;
         assert!(!buffers.is_empty());
-        assert!(buffers[0].len() > 0);
+        assert!(!buffers[0].is_empty());
     }
 
     #[tokio::test]

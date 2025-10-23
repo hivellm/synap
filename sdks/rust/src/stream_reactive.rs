@@ -76,7 +76,8 @@ impl crate::stream::StreamManager {
             }
         });
 
-        let stream: MessageStream<Event> = Box::pin(tokio_stream::wrappers::UnboundedReceiverStream::new(rx));
+        let stream: MessageStream<Event> =
+            Box::pin(tokio_stream::wrappers::UnboundedReceiverStream::new(rx));
         let handle = SubscriptionHandle::new(cancel_tx);
 
         (stream, handle)
@@ -127,7 +128,8 @@ impl crate::stream::StreamManager {
             }
         });
 
-        let stream: MessageStream<Event> = Box::pin(tokio_stream::wrappers::UnboundedReceiverStream::new(rx));
+        let stream: MessageStream<Event> =
+            Box::pin(tokio_stream::wrappers::UnboundedReceiverStream::new(rx));
         let handle = SubscriptionHandle::new(cancel_tx);
 
         (stream, handle)

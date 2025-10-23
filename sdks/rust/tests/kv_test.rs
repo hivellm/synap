@@ -117,7 +117,7 @@ mod tests {
             .await;
 
         let result = client.kv().delete("test_key").await.unwrap();
-        assert_eq!(result, true);
+        assert!(result);
 
         mock.assert_async().await;
     }
@@ -138,7 +138,7 @@ mod tests {
             .await;
 
         let result = client.kv().exists("test_key").await.unwrap();
-        assert_eq!(result, true);
+        assert!(result);
 
         mock.assert_async().await;
     }

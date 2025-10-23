@@ -39,7 +39,7 @@ mod tests {
     async fn test_subscription_handle() {
         let (tx, mut rx) = mpsc::unbounded_channel();
         let handle = SubscriptionHandle::new(tx);
-        
+
         assert!(handle.is_active());
         handle.unsubscribe();
         assert!(rx.recv().await.is_some());

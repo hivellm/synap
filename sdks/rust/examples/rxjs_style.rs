@@ -6,7 +6,7 @@
 //!   cargo run --example rxjs_style
 
 use std::time::Duration;
-use synap_sdk::rx::{Observable, Subject};
+use synap_sdk::rx::Subject;
 use synap_sdk::{SynapClient, SynapConfig};
 
 #[tokio::main]
