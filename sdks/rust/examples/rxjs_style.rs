@@ -64,9 +64,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Consume with Observable API (RxJS-style)
-    let queue_mgr = client.queue();
     let (stream, handle) =
-        queue_mgr.observe_messages("rxjs-demo", "rxjs-worker", Duration::from_millis(100));
+        client
+            .queue()
+            .observe_messages("rxjs-demo", "rxjs-worker", Duration::from_millis(100));
 
     // Convert to Observable
     let observable = Observable::from_stream(stream);

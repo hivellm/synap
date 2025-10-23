@@ -82,7 +82,7 @@ mod tests {
             .create_async()
             .await;
 
-        let events: Vec<crate::types::Event> = client
+        let events: Vec<synap_sdk::types::Event> = client
             .stream()
             .consume("chat-1", Some(0), Some(10))
             .await
