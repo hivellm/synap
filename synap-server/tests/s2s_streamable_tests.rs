@@ -101,8 +101,9 @@ async fn test_streamable_kv_get() {
     let res = send_command(&client, &base_url, "kv.get", json!({"key": "test"})).await;
 
     assert_eq!(res["success"], true);
-    assert_eq!(res["payload"]["found"], true);
-    assert_eq!(res["payload"]["value"], "hello");
+    // Payload now returns value directly as JSON string
+    let value_str = res["payload"].as_str().unwrap();
+    assert_eq!(value_str, "\"hello\"");
 }
 
 #[tokio::test]
@@ -457,7 +458,10 @@ async fn test_streamable_complete_workflow() {
             json!({"key": format!("item:{}", i)}),
         )
         .await;
-        assert_eq!(res["payload"]["value"], i * 10);
+        // Payload returns value directly as JSON string
+        let value_str = res["payload"].as_str().unwrap();
+        let value: i64 = serde_json::from_str(value_str).unwrap();
+        assert_eq!(value, i * 10);
     }
 
     // 3. SCAN with prefix
@@ -601,14 +605,17 @@ async fn test_streamable_ttl_workflow() {
 
     // GET immediately
     let res = send_command(&client, &base_url, "kv.get", json!({"key": "ttl_test"})).await;
-    assert_eq!(res["payload"]["found"], true);
+    // Payload returns value directly
+    let value_str = res["payload"].as_str().unwrap();
+    assert!(!value_str.is_empty(), "Expected value to be found");
 
     // Wait for expiration
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // GET after expiration
     let res = send_command(&client, &base_url, "kv.get", json!({"key": "ttl_test"})).await;
-    assert_eq!(res["payload"]["found"], false);
+    // Payload returns null for not found
+    assert_eq!(res["payload"], serde_json::Value::Null);
 }
 
 #[tokio::test]
