@@ -2,20 +2,35 @@
  * Synap TypeScript SDK - Queue System Module
  * 
  * Message queue operations with ACK/NACK support.
+ * Includes reactive consumer patterns using RxJS.
  */
 
+import { Observable, Subject, timer, EMPTY, defer } from 'rxjs';
+import { 
+  switchMap, 
+  retry, 
+  catchError, 
+  filter, 
+  takeUntil,
+  share,
+  mergeMap
+} from 'rxjs/operators';
 import type { SynapClient } from './client';
 import type {
   QueueConfig,
   QueueMessage,
   PublishOptions,
   QueueStats,
+  QueueConsumerOptions,
+  ProcessedMessage,
 } from './types';
 
 /**
- * Queue System client
+ * Queue System client with reactive support
  */
 export class QueueManager {
+  private stopSignals = new Map<string, Subject<void>>();
+
   constructor(private client: SynapClient) {}
 
   /**
@@ -212,6 +227,200 @@ export class QueueManager {
     } catch (error) {
       throw new Error(`Failed to parse JSON: ${error}`);
     }
+  }
+
+  // ==================== REACTIVE METHODS ====================
+
+  /**
+   * Create a reactive message consumer as an Observable
+   * 
+   * @example
+   * ```typescript
+   * synap.queue.consume$({
+   *   queueName: 'tasks',
+   *   consumerId: 'worker-1',
+   *   pollingInterval: 500,
+   *   concurrency: 5
+   * }).subscribe({
+   *   next: async (msg) => {
+   *     await processMessage(msg.data);
+   *     await msg.ack();
+   *   },
+   *   error: (err) => console.error('Error:', err)
+   * });
+   * ```
+   */
+  consume$<T = any>(options: QueueConsumerOptions): Observable<ProcessedMessage<T>> {
+    const {
+      queueName,
+      consumerId,
+      pollingInterval = 1000,
+      concurrency = 1,
+      requeueOnNack = true,
+    } = options;
+
+    const stopKey = `${queueName}:${consumerId}`;
+    const stopSignal = new Subject<void>();
+    this.stopSignals.set(stopKey, stopSignal);
+
+    return timer(0, pollingInterval).pipe(
+      takeUntil(stopSignal),
+      mergeMap(
+        async () => {
+          try {
+            const result = await this.consumeJSON<T>(queueName, consumerId);
+            
+            if (!result.message || !result.data) {
+              return null;
+            }
+
+            const processedMessage: ProcessedMessage<T> = {
+              message: result.message,
+              data: result.data,
+              ack: async () => {
+                await this.ack(queueName, result.message!.id);
+              },
+              nack: async (requeue: boolean = requeueOnNack) => {
+                await this.nack(queueName, result.message!.id, requeue);
+              },
+            };
+
+            return processedMessage;
+          } catch (error) {
+            console.error(`Error consuming from ${queueName}:`, error);
+            return null;
+          }
+        },
+        concurrency
+      ),
+      filter((msg): msg is ProcessedMessage<T> => msg !== null),
+      share()
+    ) as Observable<ProcessedMessage<T>>;
+  }
+
+  /**
+   * Create a reactive message consumer with automatic ACK/NACK handling
+   * 
+   * @example
+   * ```typescript
+   * synap.queue.consumeAuto$({
+   *   queueName: 'tasks',
+   *   consumerId: 'worker-1',
+   * }).subscribe({
+   *   next: async (msg) => {
+   *     // Process message - will auto-ACK on success
+   *     await processMessage(msg.data);
+   *   },
+   *   error: (err) => console.error('Error:', err)
+   * });
+   * ```
+   */
+  consumeAuto$<T = any>(options: QueueConsumerOptions): Observable<ProcessedMessage<T>> {
+    const opts = {
+      ...options,
+      autoAck: true,
+      autoNack: true,
+    };
+
+    return this.consume$<T>(opts);
+  }
+
+  /**
+   * Create a reactive consumer that processes messages with a handler function
+   * 
+   * @example
+   * ```typescript
+   * const subscription = synap.queue.process$({
+   *   queueName: 'emails',
+   *   consumerId: 'email-worker',
+   *   concurrency: 10
+   * }, async (data) => {
+   *   await sendEmail(data);
+   * }).subscribe({
+   *   next: (result) => console.log('Processed:', result),
+   *   error: (err) => console.error('Error:', err)
+   * });
+   * ```
+   */
+  process$<T = any>(
+    options: QueueConsumerOptions,
+    handler: (data: T, message: QueueMessage) => Promise<void>
+  ): Observable<{ messageId: string; success: boolean; error?: Error }> {
+    return this.consume$<T>(options).pipe(
+      mergeMap(
+        async (msg) => {
+          try {
+            await handler(msg.data, msg.message);
+            await msg.ack();
+            return { messageId: msg.message.id, success: true };
+          } catch (error) {
+            await msg.nack();
+            return { 
+              messageId: msg.message.id, 
+              success: false, 
+              error: error as Error 
+            };
+          }
+        },
+        options.concurrency || 1
+      )
+    );
+  }
+
+  /**
+   * Stop a reactive consumer
+   * 
+   * @param queueName - Queue name
+   * @param consumerId - Consumer ID
+   */
+  stopConsumer(queueName: string, consumerId: string): void {
+    const stopKey = `${queueName}:${consumerId}`;
+    const stopSignal = this.stopSignals.get(stopKey);
+    
+    if (stopSignal) {
+      stopSignal.next();
+      stopSignal.complete();
+      this.stopSignals.delete(stopKey);
+    }
+  }
+
+  /**
+   * Stop all reactive consumers
+   */
+  stopAllConsumers(): void {
+    this.stopSignals.forEach((signal) => {
+      signal.next();
+      signal.complete();
+    });
+    this.stopSignals.clear();
+  }
+
+  /**
+   * Create an observable that emits queue statistics at regular intervals
+   * 
+   * @param queueName - Queue name
+   * @param interval - Polling interval in milliseconds (default: 5000)
+   * 
+   * @example
+   * ```typescript
+   * synap.queue.stats$('tasks', 1000).subscribe({
+   *   next: (stats) => console.log('Queue depth:', stats.depth),
+   * });
+   * ```
+   */
+  stats$(queueName: string, interval: number = 5000): Observable<QueueStats> {
+    return timer(0, interval).pipe(
+      switchMap(() => defer(() => this.stats(queueName))),
+      retry({
+        count: 3,
+        delay: 1000,
+      }),
+      catchError((error: unknown) => {
+        console.error(`Error fetching stats for ${queueName}:`, error);
+        return EMPTY;
+      }),
+      share()
+    );
   }
 }
 

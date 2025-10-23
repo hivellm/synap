@@ -86,9 +86,53 @@ async function main() {
     published: queueStats.published,
   });
 
+  // 6. Reactive Queue Operations (RxJS)
+  console.log('\n=== Reactive Queue Operations ===');
+  
+  // Publish some test messages
+  await synap.queue.createQueue('reactive-demo');
+  for (let i = 1; i <= 5; i++) {
+    await synap.queue.publishJSON('reactive-demo', {
+      task: `Task ${i}`,
+      timestamp: Date.now(),
+    }, { priority: i });
+  }
+  console.log('✅ Published 5 messages to reactive-demo queue');
+
+  // Consume reactively (process for 3 seconds then stop)
+  let processedCount = 0;
+  const subscription = synap.queue.process$<{ task: string; timestamp: number }>(
+    {
+      queueName: 'reactive-demo',
+      consumerId: 'reactive-worker',
+      pollingInterval: 500,
+      concurrency: 2,
+    },
+    async (data, message) => {
+      console.log(`  📨 Processing: ${data.task} (priority: ${message.priority})`);
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+  ).subscribe({
+    next: (result) => {
+      if (result.success) {
+        processedCount++;
+        console.log(`  ✅ Processed ${processedCount} messages`);
+      }
+    },
+    error: (err) => console.error('Error:', err)
+  });
+
+  // Stop after 3 seconds
+  await new Promise(resolve => setTimeout(resolve, 3000));
+  subscription.unsubscribe();
+  synap.queue.stopConsumer('reactive-demo', 'reactive-worker');
+  console.log(`✅ Reactive processing complete (${processedCount} messages processed)`);
+
   // Cleanup
   await synap.queue.purge('demo-queue');
   await synap.queue.deleteQueue('demo-queue');
+  await synap.queue.purge('reactive-demo');
+  await synap.queue.deleteQueue('reactive-demo');
   console.log('\n✅ Cleanup complete');
 
   synap.close();

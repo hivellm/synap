@@ -55,43 +55,7 @@ reqwest = { version = "0.12", features = ["json"] }
 tokio-test = "0.4"
 tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
 
-[[bench]]
-name = "kv_bench"
-harness = false
-
-[[bench]]
-name = "compression_bench"
-harness = false
-
-[[bench]]
-name = "queue_bench"
-harness = false
-
-[[bench]]
-name = "persistence_bench"
-harness = false
-
-[[bench]]
-name = "hybrid_bench"
-harness = false
-
-[[bench]]
-name = "stream_bench"
-harness = false
-
-[[bench]]
-name = "pubsub_bench"
-harness = false
-
-[[bench]]
-name = "replication_bench"
-harness = false
-
-[[bench]]
-name = "kv_persistence_bench"
-harness = false
-
-[[bench]]
-name = "queue_persistence_bench"
-harness = false
+# NOTE: Benchmark declarations removed to allow Docker builds without copying benchmark files
+# Cargo auto-detects benchmarks in benches/ directory, so they still work with `cargo bench`
+# Explicit [[bench]] declarations only needed for custom configurations
 

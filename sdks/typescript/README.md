@@ -8,10 +8,11 @@ Official TypeScript/JavaScript SDK for [Synap](https://github.com/hivellm/synap)
 ✅ **StreamableHTTP protocol** implementation  
 ✅ **Key-Value operations** (GET, SET, DELETE, INCR, SCAN, etc.)  
 ✅ **Queue system** (publish, consume, ACK/NACK)  
+✅ **Reactive Queues** with RxJS - Observable-based message consumption  
 ✅ **Authentication** (Basic Auth + API Keys)  
 ✅ **Gzip compression** support  
 ✅ **Modern ESM/CJS** dual package  
-✅ **Zero dependencies** (except uuid)  
+✅ **Minimal dependencies** (uuid + RxJS)  
 ✅ **Node.js 18+** and browser compatible  
 
 ---
@@ -45,11 +46,21 @@ await synap.kv.set('user:1', { name: 'Alice', age: 30 });
 const user = await synap.kv.get('user:1');
 console.log(user); // { name: 'Alice', age: 30 }
 
-// Queue operations
+// Queue operations (traditional)
 await synap.queue.createQueue('jobs');
 const msgId = await synap.queue.publishString('jobs', 'process-video');
 const { message, text } = await synap.queue.consumeString('jobs', 'worker-1');
 await synap.queue.ack('jobs', message.id);
+
+// Reactive queue consumption (recommended)
+synap.queue.process$({
+  queueName: 'jobs',
+  consumerId: 'worker-1',
+  concurrency: 5
+}, async (data) => {
+  console.log('Processing:', data);
+  // Auto-ACK on success, auto-NACK on error
+}).subscribe();
 ```
 
 ---
@@ -250,6 +261,169 @@ console.log(`Purged ${purged} messages`);
 // Delete queue
 await synap.queue.deleteQueue('tasks');
 ```
+
+---
+
+## Reactive Queues (RxJS)
+
+The SDK provides reactive queue consumption patterns using RxJS for better composability, error handling, and concurrency control.
+
+### Why Reactive?
+
+Traditional polling-based consumption:
+- ❌ Requires manual polling loops
+- ❌ Limited concurrency control
+- ❌ Complex error handling
+- ❌ Hard to compose with other operations
+
+Reactive consumption:
+- ✅ Event-driven, non-blocking
+- ✅ Built-in concurrency support
+- ✅ Rich operator library (retry, filter, map, etc.)
+- ✅ Easy to compose and test
+- ✅ Better observability
+
+### Basic Reactive Consumer
+
+```typescript
+// Simple consumer with manual ACK/NACK
+synap.queue.consume$({
+  queueName: 'tasks',
+  consumerId: 'worker-1',
+  pollingInterval: 500,
+  concurrency: 5
+}).subscribe({
+  next: async (msg) => {
+    console.log('Processing:', msg.data);
+    
+    try {
+      await processTask(msg.data);
+      await msg.ack();  // Acknowledge success
+    } catch (error) {
+      await msg.nack(); // Negative acknowledge (will retry)
+    }
+  },
+  error: (err) => console.error('Error:', err)
+});
+```
+
+### Auto-Processing with Handler
+
+```typescript
+// Automatic ACK/NACK handling
+synap.queue.process$({
+  queueName: 'emails',
+  consumerId: 'email-worker',
+  concurrency: 10
+}, async (data, message) => {
+  // Process message - auto-ACK on success, auto-NACK on error
+  await sendEmail(data);
+}).subscribe({
+  next: (result) => {
+    if (result.success) {
+      console.log('✅ Processed:', result.messageId);
+    } else {
+      console.error('❌ Failed:', result.messageId);
+    }
+  }
+});
+```
+
+### Advanced Reactive Patterns
+
+**Priority-based processing:**
+```typescript
+import { filter } from 'rxjs/operators';
+
+synap.queue.consume$({
+  queueName: 'tasks',
+  consumerId: 'priority-worker'
+}).pipe(
+  filter(msg => msg.message.priority >= 7) // Only high-priority
+).subscribe(async (msg) => {
+  await processFast(msg.data);
+  await msg.ack();
+});
+```
+
+**Batch processing:**
+```typescript
+import { bufferTime } from 'rxjs/operators';
+
+synap.queue.consume$({
+  queueName: 'analytics',
+  consumerId: 'batch-worker',
+  pollingInterval: 100
+}).pipe(
+  bufferTime(5000) // Collect messages for 5 seconds
+).subscribe(async (batch) => {
+  await processBatch(batch.map(m => m.data));
+  await Promise.all(batch.map(m => m.ack()));
+});
+```
+
+**Type-based routing:**
+```typescript
+const messages$ = synap.queue.consume$({ queueName: 'mixed', consumerId: 'router' });
+
+// Email handler
+messages$.pipe(filter(m => m.data.type === 'email'))
+  .subscribe(async (msg) => { await sendEmail(msg.data); await msg.ack(); });
+
+// Notification handler  
+messages$.pipe(filter(m => m.data.type === 'notification'))
+  .subscribe(async (msg) => { await sendNotification(msg.data); await msg.ack(); });
+```
+
+**Queue monitoring:**
+```typescript
+// Monitor queue stats every 3 seconds
+synap.queue.stats$('tasks', 3000).subscribe({
+  next: (stats) => {
+    console.log(`Depth: ${stats.depth}, Acked: ${stats.acked}`);
+  }
+});
+```
+
+### Graceful Shutdown
+
+```typescript
+const subscription = synap.queue.process$({
+  queueName: 'tasks',
+  consumerId: 'worker-1',
+  concurrency: 5
+}, processTask).subscribe();
+
+process.on('SIGINT', () => {
+  console.log('Shutting down...');
+  
+  // Stop consuming new messages
+  synap.queue.stopConsumer('tasks', 'worker-1');
+  
+  // Wait for current messages to finish
+  setTimeout(() => {
+    subscription.unsubscribe();
+    synap.close();
+    process.exit(0);
+  }, 2000);
+});
+```
+
+### Consumer Options
+
+```typescript
+interface QueueConsumerOptions {
+  queueName: string;       // Queue to consume from
+  consumerId: string;      // Unique consumer ID
+  pollingInterval?: number; // Poll interval in ms (default: 1000)
+  concurrency?: number;     // Max concurrent messages (default: 1)
+  autoAck?: boolean;        // Auto-acknowledge (default: false)
+  autoNack?: boolean;       // Auto-nack on error (default: false)
+  requeueOnNack?: boolean;  // Requeue on nack (default: true)
+}
+```
+
+📖 **See [REACTIVE_QUEUES.md](./REACTIVE_QUEUES.md) for complete reactive patterns guide**
 
 ---
 

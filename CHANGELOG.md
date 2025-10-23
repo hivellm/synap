@@ -7,6 +7,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - TypeScript SDK: Reactive Queue Patterns ✅ NEW (October 23, 2025)
+
+#### 🔄 RxJS-Based Reactive Queue Consumption
+**Event-driven, observable-based message processing for better composability and control**:
+
+**Features Implemented**:
+- ✅ **Reactive Consumers**: Observable-based message consumption with `consume$()` and `process$()`
+- ✅ **Built-in Concurrency**: Configure parallel message processing with `concurrency` option
+- ✅ **Auto ACK/NACK**: Automatic acknowledgment on success/failure
+- ✅ **Rich Operators**: Full RxJS operator support (filter, map, bufferTime, retry, etc.)
+- ✅ **Queue Monitoring**: Real-time stats with `stats$()` observable
+- ✅ **Graceful Shutdown**: Proper consumer lifecycle management with `stopConsumer()`
+
+**API Methods**:
+```typescript
+// Basic reactive consumer
+consume$<T>(options: QueueConsumerOptions): Observable<ProcessedMessage<T>>
+
+// Auto-processing with handler
+process$<T>(options, handler): Observable<{success, messageId, error?}>
+
+// Stats monitoring
+stats$(queueName: string, interval?: number): Observable<QueueStats>
+
+// Lifecycle management
+stopConsumer(queueName: string, consumerId: string): void
+stopAllConsumers(): void
+```
+
+**Usage Examples**:
+```typescript
+// Simple consumer with concurrency
+synap.queue.process$({
+  queueName: 'tasks',
+  consumerId: 'worker-1',
+  concurrency: 10
+}, async (data) => {
+  await processTask(data);
+}).subscribe();
+
+// Advanced patterns with RxJS operators
+synap.queue.consume$({ queueName: 'events' })
+  .pipe(
+    filter(msg => msg.message.priority >= 7),
+    bufferTime(5000)
+  )
+  .subscribe(batch => processBatch(batch));
+```
+
+**Benefits Over While Loop**:
+- Non-blocking event-driven architecture
+- Built-in concurrency and backpressure control
+- Rich operator library for complex workflows
+- Better error handling and retry logic
+- Improved observability and monitoring
+
+**Documentation**:
+- 📖 `sdks/typescript/REACTIVE_QUEUES.md` - Complete reactive patterns guide
+- 📝 `sdks/typescript/examples/queue-worker.ts` - Production-ready worker
+- 🎯 `sdks/typescript/examples/reactive-patterns.ts` - 7 advanced patterns
+
+**Dependencies**: Added RxJS 7.8.1
+
+---
+
 ### Added - Phase 4 Features: Monitoring & Security ✅ NEW (October 22, 2025)
 
 #### 📊 Prometheus Metrics (COMPLETE)

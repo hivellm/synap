@@ -169,6 +169,40 @@ export interface QueueStats {
   dead_lettered: number;
 }
 
+/**
+ * Consumer options for reactive queue consumption
+ */
+export interface QueueConsumerOptions {
+  /** Queue name to consume from */
+  queueName: string;
+  /** Consumer identifier */
+  consumerId: string;
+  /** Polling interval in milliseconds (default: 1000) */
+  pollingInterval?: number;
+  /** Maximum concurrent messages to process (default: 1) */
+  concurrency?: number;
+  /** Auto-acknowledge messages on success (default: true) */
+  autoAck?: boolean;
+  /** Auto-nack messages on error (default: true) */
+  autoNack?: boolean;
+  /** Requeue on nack (default: true) */
+  requeueOnNack?: boolean;
+}
+
+/**
+ * Processed message with metadata
+ */
+export interface ProcessedMessage<T = any> {
+  /** Original queue message */
+  message: QueueMessage;
+  /** Decoded payload */
+  data: T;
+  /** Acknowledge the message */
+  ack: () => Promise<void>;
+  /** Negative acknowledge the message */
+  nack: (requeue?: boolean) => Promise<void>;
+}
+
 // ==================== ERROR TYPES ====================
 
 /**
