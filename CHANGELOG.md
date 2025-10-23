@@ -7,6 +7,80 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - TypeScript SDK: Event Stream & Pub/Sub ✅ NEW (October 23, 2025)
+
+#### 📡 Event Stream Support
+**Append-only event logs with reactive consumption and replay capability**:
+
+**Features Implemented**:
+- ✅ **StreamManager**: Complete event stream operations
+- ✅ **Reactive Consumption**: Observable-based event consumption with `consume$()`
+- ✅ **Event Replay**: Consume from any offset for event sourcing
+- ✅ **Event Filtering**: Filter by event name with `consumeEvent$()`
+- ✅ **Stats Monitoring**: Real-time stats with `stats$()` observable
+- ✅ **Room Management**: Create, delete, list stream rooms
+
+**API Methods**:
+```typescript
+// Basic operations
+createRoom(name): Promise<boolean>
+publish(room, event, data): Promise<offset>
+consume(room, subscriber, offset): Promise<events[]>
+stats(room): Promise<StreamStats>
+
+// Reactive methods
+consume$<T>(options): Observable<ProcessedStreamEvent<T>>
+consumeEvent$<T>(options): Observable<ProcessedStreamEvent<T>>
+stats$(room, interval): Observable<StreamStats>
+stopConsumer(room, subscriber): void
+```
+
+**Use Cases**:
+- Event sourcing and CQRS
+- Audit logging with replay
+- Chat applications
+- Real-time analytics
+- Activity feeds
+
+#### 📢 Pub/Sub Support
+**Topic-based message routing with wildcard subscriptions**:
+
+**Features Implemented**:
+- ✅ **PubSubManager**: Complete pub/sub operations
+- ✅ **Topic Publishing**: Publish to hierarchical topics
+- ✅ **Priority Messages**: Priority-based message delivery
+- ✅ **Wildcard Subscriptions**: Pattern matching (user.*, *.error)
+- ✅ **Message Headers**: Custom metadata support
+- ✅ **Reactive Subscription**: Observable-based topic subscription
+
+**API Methods**:
+```typescript
+// Publishing
+publish(topic, data, options): Promise<boolean>
+publishMessage<T>(topic, data): Promise<boolean>
+
+// Subscribing (requires WebSocket)
+subscribe$<T>(options): Observable<ProcessedPubSubMessage<T>>
+subscribeTopic$<T>(topic): Observable<ProcessedPubSubMessage<T>>
+unsubscribe(subscriber, topics): void
+```
+
+**Topic Patterns**:
+- Simple: `user.created`, `order.completed`
+- Hierarchical: `app.users.created`
+- Wildcards: `user.*`, `*.error`, `app.*.event`
+
+**Examples Created**:
+- 📝 `examples/stream-patterns.ts` - 7 event stream patterns
+- 📝 `examples/pubsub-patterns.ts` - 7 pub/sub patterns
+
+**Documentation**:
+- ✅ README updated with Stream and Pub/Sub sections
+- ✅ 16 comprehensive stream tests
+- ✅ Complete API examples
+
+---
+
 ### Added - TypeScript SDK: Reactive Queue Patterns ✅ NEW (October 23, 2025)
 
 #### 🔄 RxJS-Based Reactive Queue Consumption
