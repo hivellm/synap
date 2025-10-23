@@ -12,15 +12,19 @@ categories = ["database", "network-programming", "asynchronous"]
 
 [dependencies]
 tokio = { version = "1.48", features = ["full"] }
-reqwest = { version = "0.12", features = ["json"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
 async-trait = "0.1"
 futures = "0.3"
+futures-util = "0.3"
 url = "2.5"
 uuid = { version = "1.11", features = ["v4"] }
+async-stream = "0.3"
+pin-project = "1.1"
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -46,3 +50,11 @@ path = "examples/stream.rs"
 [[example]]
 name = "pubsub"
 path = "examples/pubsub.rs"
+
+[[example]]
+name = "reactive_queue"
+path = "examples/reactive_queue.rs"
+
+[[example]]
+name = "reactive_stream"
+path = "examples/reactive_stream.rs"

@@ -36,7 +36,10 @@ pub mod error;
 pub mod kv;
 pub mod pubsub;
 pub mod queue;
+mod queue_reactive;
+pub mod reactive;
 pub mod stream;
+mod stream_reactive;
 pub mod types;
 
 pub use client::{SynapClient, SynapConfig};
@@ -44,4 +47,5 @@ pub use error::{Result, SynapError};
 pub use kv::KVStore;
 pub use pubsub::PubSubManager;
 pub use queue::QueueManager;
+pub use reactive::{MessageStream, SubscriptionHandle};
 pub use stream::StreamManager;

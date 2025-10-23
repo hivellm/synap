@@ -8,7 +8,7 @@ use serde_json::json;
 /// Stream Manager interface
 #[derive(Clone)]
 pub struct StreamManager {
-    client: SynapClient,
+    pub(crate) client: SynapClient,
 }
 
 impl StreamManager {

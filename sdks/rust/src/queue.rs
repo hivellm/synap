@@ -5,10 +5,13 @@ use crate::error::{Result, SynapError};
 use crate::types::{Message, QueueStats};
 use serde_json::json;
 
+// Re-export for convenience
+pub use crate::reactive::{MessageStream, SubscriptionHandle};
+
 /// Queue Manager interface
 #[derive(Clone)]
 pub struct QueueManager {
-    client: SynapClient,
+    pub(crate) client: SynapClient,
 }
 
 impl QueueManager {
