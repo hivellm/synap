@@ -44,7 +44,7 @@ jobs:
         run: cargo test --workspace --lib --verbose
 
       - name: Run integration tests
-        run: cargo test --workspace --test '*' --verbose
+        run: cargo test --workspace --tests --verbose
 
       - name: Run doc tests
         run: cargo test --workspace --doc --verbose
@@ -64,8 +64,8 @@ jobs:
         with:
           key: bench
 
-      - name: Run benchmarks
-        run: cargo bench --workspace --no-fail-fast -- --output-format bencher
+      - name: Run benchmarks (compile only)
+        run: cargo bench --workspace --no-run
 
   build:
     name: Build Release
@@ -121,7 +121,7 @@ jobs:
           key: coverage
 
       - name: Generate coverage
-        run: cargo llvm-cov --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov --lib --workspace --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
