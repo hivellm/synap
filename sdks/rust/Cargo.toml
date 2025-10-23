@@ -60,3 +60,7 @@ path = "examples/reactive_queue.rs"
 [[example]]
 name = "reactive_stream"
 path = "examples/reactive_stream.rs"
+
+[[example]]
+name = "rxjs_style"
+path = "examples/rxjs_style.rs"

@@ -38,6 +38,7 @@ pub mod pubsub;
 pub mod queue;
 mod queue_reactive;
 pub mod reactive;
+pub mod rx; // RxJS-style reactive programming
 pub mod stream;
 mod stream_reactive;
 pub mod types;

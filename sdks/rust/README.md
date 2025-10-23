@@ -265,6 +265,31 @@ match client.kv().get::<String>("key").await {
 }
 ```
 
+## Reactive Programming (RxJS-style)
+
+The SDK now includes **RxJS-style reactive patterns** via the `rx` module:
+
+```rust
+use synap_sdk::rx::{Observable, Subject};
+
+// Observable with operators (like RxJS pipe)
+let obs = Observable::from_stream(stream);
+obs.filter(|x| *x > 2)
+   .map(|x| x * 2)
+   .take(10)
+   .subscribe_next(|value| {
+       println!("Value: {}", value);
+   });
+
+// Subject for multicasting
+let subject = Subject::new();
+subject.subscribe(|msg| println!("Sub 1: {}", msg));
+subject.subscribe(|msg| println!("Sub 2: {}", msg));
+subject.next("Hello");  // Both subscribers receive it
+```
+
+See [`src/rx/README.md`](src/rx/README.md) for complete guide.
+
 ## Examples
 
 See the [`examples/`](examples/) directory for more examples:
@@ -275,6 +300,7 @@ See the [`examples/`](examples/) directory for more examples:
 - [`stream.rs`](examples/stream.rs) - Event stream (traditional)
 - [`reactive_stream.rs`](examples/reactive_stream.rs) - Reactive event consumption 🔥
 - [`pubsub.rs`](examples/pubsub.rs) - Pub/Sub messaging
+- [`rxjs_style.rs`](examples/rxjs_style.rs) - RxJS-style patterns ⭐ NEW
 
 Run an example:
 
@@ -283,6 +309,7 @@ cargo run --example basic
 cargo run --example queue
 cargo run --example reactive_queue    # Recommended for queues
 cargo run --example reactive_stream   # Recommended for streams
+cargo run --example rxjs_style        # RxJS-style API
 cargo run --example pubsub
 ```
 
