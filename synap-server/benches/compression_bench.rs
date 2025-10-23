@@ -5,8 +5,8 @@
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
-use synap_server::compression::{CompressionAlgorithm, Compressor};
 use synap_server::compression::compressor::CompressionConfig;
+use synap_server::compression::{CompressionAlgorithm, Compressor};
 
 /// Generate test data of various types
 fn generate_test_data(size: usize, data_type: &str) -> Vec<u8> {
@@ -45,7 +45,8 @@ fn generate_test_data(size: usize, data_type: &str) -> Vec<u8> {
             }
             data
         }
-        _ => vec![0u8; size]}
+        _ => vec![0u8; size],
+    }
 }
 
 /// Benchmark compression speed

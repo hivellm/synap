@@ -1,7 +1,7 @@
-use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use serde_json::json;
 use std::collections::HashMap;
+use std::hint::black_box;
 use std::sync::Arc;
 use synap_server::core::PubSubRouter;
 

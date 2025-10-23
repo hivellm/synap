@@ -1,5 +1,5 @@
-use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
 use std::sync::Arc;
 use synap_server::persistence::types::Operation;
 use synap_server::{KVConfig, KVStore, MasterNode, NodeRole, ReplicationConfig, ReplicationLog};
@@ -21,7 +21,8 @@ fn bench_replication_log_append(c: &mut Criterion) {
                     let op = Operation::KVSet {
                         key: format!("key_{}", i),
                         value: vec![i as u8],
-                        ttl: None};
+                        ttl: None,
+                    };
                     black_box(log.append(op));
                 }
             });
@@ -42,7 +43,8 @@ fn bench_replication_log_get_from_offset(c: &mut Criterion) {
         log.append(Operation::KVSet {
             key: format!("key_{}", i),
             value: vec![i as u8],
-            ttl: None});
+            ttl: None,
+        });
     }
 
     for offset in [0, 5_000, 9_000] {
@@ -88,7 +90,8 @@ fn bench_master_replication(c: &mut Criterion) {
                         let op = Operation::KVSet {
                             key: format!("key_{}", i),
                             value: vec![i as u8],
-                            ttl: None};
+                            ttl: None,
+                        };
                         black_box(master.replicate(op));
                     }
                 });

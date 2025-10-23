@@ -1,5 +1,5 @@
-use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
 use std::path::PathBuf;
 use std::sync::Arc;
 use synap_server::core::KVStore;
@@ -30,14 +30,17 @@ fn bench_kv_with_persistence(c: &mut Criterion) {
             buffer_size_kb: 64,
             fsync_mode: FsyncMode::Always,
             fsync_interval_ms: 10,
-            max_size_mb: 100},
+            max_size_mb: 100,
+        },
         snapshot: SnapshotConfig {
             enabled: true,
             directory: snapshot_path,
             interval_secs: 3600,
             operation_threshold: 10000,
             max_snapshots: 3,
-            compression: false}};
+            compression: false,
+        },
+    };
 
     let rt = Runtime::new().unwrap();
 
@@ -47,7 +50,8 @@ fn bench_kv_with_persistence(c: &mut Criterion) {
             max_memory_mb: 1024,
             eviction_policy: EvictionPolicy::Lru,
             ttl_cleanup_interval_ms: 1000,
-            allow_flush_commands: false}));
+            allow_flush_commands: false,
+        }));
 
         let persist = Arc::new(PersistenceLayer::new(persist_config.clone()).await.unwrap());
 
@@ -155,8 +159,10 @@ fn bench_fsync_modes(c: &mut Criterion) {
                         buffer_size_kb: 64,
                         fsync_mode: *mode,
                         fsync_interval_ms: 10,
-                        max_size_mb: 100},
-                    snapshot: SnapshotConfig::default()};
+                        max_size_mb: 100,
+                    },
+                    snapshot: SnapshotConfig::default(),
+                };
 
                 let rt = Runtime::new().unwrap();
                 let kv_store = Arc::new(KVStore::new(KVConfig::default()));
@@ -212,14 +218,17 @@ fn bench_recovery(c: &mut Criterion) {
             buffer_size_kb: 64,
             fsync_mode: FsyncMode::Always,
             fsync_interval_ms: 10,
-            max_size_mb: 100},
+            max_size_mb: 100,
+        },
         snapshot: SnapshotConfig {
             enabled: true,
             directory: snapshot_path.clone(),
             interval_secs: 3600,
             operation_threshold: 10000,
             max_snapshots: 3,
-            compression: false}};
+            compression: false,
+        },
+    };
 
     let rt = Runtime::new().unwrap();
 
@@ -286,7 +295,9 @@ fn bench_snapshot_creation(c: &mut Criterion) {
                         interval_secs: 3600,
                         operation_threshold: 10000,
                         max_snapshots: 3,
-                        compression: false}};
+                        compression: false,
+                    },
+                };
 
                 let rt = Runtime::new().unwrap();
                 let kv = Arc::new(KVStore::new(KVConfig::default()));
@@ -305,7 +316,10 @@ fn bench_snapshot_creation(c: &mut Criterion) {
 
                 b.iter(|| {
                     rt.block_on(async {
-                        persistence.maybe_snapshot(black_box(&*kv), None, None).await.ok();
+                        persistence
+                            .maybe_snapshot(black_box(&*kv), None, None)
+                            .await
+                            .ok();
                     })
                 });
 

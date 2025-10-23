@@ -1,5 +1,5 @@
-use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use std::path::PathBuf;
 use std::sync::Arc;
 use synap_server::core::{QueueConfig, QueueManager};
@@ -34,8 +34,10 @@ fn bench_queue_with_persistence(c: &mut Criterion) {
                         buffer_size_kb: 64,
                         fsync_mode: *mode,
                         fsync_interval_ms: 10,
-                        max_size_mb: 100},
-                    snapshot: SnapshotConfig::default()};
+                        max_size_mb: 100,
+                    },
+                    snapshot: SnapshotConfig::default(),
+                };
 
                 let rt = Runtime::new().unwrap();
                 let mut queue_config = QueueConfig::default();
@@ -99,8 +101,10 @@ fn bench_queue_consume_with_persist(c: &mut Criterion) {
             buffer_size_kb: 64,
             fsync_mode: FsyncMode::Always,
             fsync_interval_ms: 10,
-            max_size_mb: 100},
-        snapshot: SnapshotConfig::default()};
+            max_size_mb: 100,
+        },
+        snapshot: SnapshotConfig::default(),
+    };
 
     let rt = Runtime::new().unwrap();
     let queue_manager = Arc::new(QueueManager::new(QueueConfig::default()));
@@ -166,8 +170,10 @@ fn bench_concurrent_with_persist(c: &mut Criterion) {
             buffer_size_kb: 256,
             fsync_mode: FsyncMode::Always,
             fsync_interval_ms: 10,
-            max_size_mb: 100},
-        snapshot: SnapshotConfig::default()};
+            max_size_mb: 100,
+        },
+        snapshot: SnapshotConfig::default(),
+    };
 
     group.bench_function("10_concurrent_publishers", |b| {
         let rt = Runtime::new().unwrap();

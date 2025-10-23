@@ -16,14 +16,17 @@ async fn spawn_test_server() -> String {
         stream_manager: None,
         pubsub_router: None,
         persistence: None,
-    consumer_group_manager: None,
-    partition_manager: None,
+        consumer_group_manager: None,
+        partition_manager: None,
     };
-    let app = create_router(state, synap_server::config::RateLimitConfig {
+    let app = create_router(
+        state,
+        synap_server::config::RateLimitConfig {
             enabled: false,
             requests_per_second: 100,
             burst_size: 10,
-        });
+        },
+    );
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

@@ -1,5 +1,5 @@
-use std::hint::black_box;
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
+use std::hint::black_box;
 use synap_server::core::{QueueConfig, QueueManager};
 use tokio::runtime::Runtime;
 
@@ -97,7 +97,8 @@ fn bench_concurrent_queue(c: &mut Criterion) {
                                         consumed += 1;
                                     }
                                     Ok(None) => break,
-                                    Err(_) => break}
+                                    Err(_) => break,
+                                }
                             }
                             consumed
                         });
