@@ -74,4 +74,3 @@ class SynapConfig
         return $this->maxRetries;
     }
 }
-

@@ -36,4 +36,3 @@ class SynapException extends Exception
         return new self("Invalid Configuration: {$message}");
     }
 }
-

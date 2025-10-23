@@ -5,5 +5,4 @@ parameters:
         - tests
     ignoreErrors:
         # Add any necessary ignores here
-    checkMissingIterableValueType: false
 

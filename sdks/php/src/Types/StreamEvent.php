@@ -30,4 +30,3 @@ readonly class StreamEvent
         ];
     }
 }
-

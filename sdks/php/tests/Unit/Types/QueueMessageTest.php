@@ -48,4 +48,3 @@ final class QueueMessageTest extends TestCase
         ], $array);
     }
 }
-

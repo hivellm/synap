@@ -63,8 +63,11 @@ class QueueManager
         }
 
         $response = $this->client->execute('queue.publish', $queue, $data);
+        $messageId = $response['message_id'] ?? '';
 
-        return $response['message_id'] ?? '';
+        assert(is_string($messageId));
+
+        return $messageId;
     }
 
     /**
@@ -76,19 +79,31 @@ class QueueManager
             'consumer_id' => $consumerId,
         ]);
 
-        if (!isset($response['message'])) {
+        if (! isset($response['message']) || ! is_array($response['message'])) {
             return null;
         }
 
         $msg = $response['message'];
 
+        $id = $msg['id'] ?? '';
+        $priority = $msg['priority'] ?? 0;
+        $retries = $msg['retries'] ?? 0;
+        $maxRetries = $msg['max_retries'] ?? 3;
+        $timestamp = $msg['timestamp'] ?? 0;
+
+        assert(is_string($id));
+        assert(is_int($priority) || is_numeric($priority));
+        assert(is_int($retries) || is_numeric($retries));
+        assert(is_int($maxRetries) || is_numeric($maxRetries));
+        assert(is_int($timestamp) || is_numeric($timestamp));
+
         return new QueueMessage(
-            id: $msg['id'] ?? '',
+            id: $id,
             payload: $msg['payload'] ?? null,
-            priority: $msg['priority'] ?? 0,
-            retries: $msg['retries'] ?? 0,
-            maxRetries: $msg['max_retries'] ?? 3,
-            timestamp: $msg['timestamp'] ?? 0
+            priority: (int) $priority,
+            retries: (int) $retries,
+            maxRetries: (int) $maxRetries,
+            timestamp: (int) $timestamp
         );
     }
 
@@ -126,8 +141,11 @@ class QueueManager
     public function list(): array
     {
         $response = $this->client->execute('queue.list', '*');
+        $queues = $response['queues'] ?? [];
 
-        return $response['queues'] ?? [];
+        assert(is_array($queues));
+
+        /** @var array<string> */
+        return $queues;
     }
 }
-

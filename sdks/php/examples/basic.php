@@ -71,4 +71,3 @@ $delivered = $client->pubsub()->publish('notifications.email', [
 echo "  - Published to {$delivered} subscribers\n";
 
 echo "\n✅ All operations completed successfully!\n";
-

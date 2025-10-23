@@ -18,6 +18,8 @@ class PubSubManager
 
     /**
      * Publish a message to topic
+     *
+     * @param array<string, mixed>|null $headers
      */
     public function publish(
         string $topic,
@@ -36,8 +38,11 @@ class PubSubManager
         }
 
         $response = $this->client->execute('pubsub.publish', $topic, $data);
+        $delivered = $response['delivered'] ?? 0;
 
-        return (int) ($response['delivered'] ?? 0);
+        assert(is_int($delivered) || is_numeric($delivered));
+
+        return (int) $delivered;
     }
 
     /**
@@ -51,7 +56,11 @@ class PubSubManager
             'topics' => $topics,
         ]);
 
-        return $response['subscription_id'] ?? '';
+        $subId = $response['subscription_id'] ?? '';
+
+        assert(is_string($subId));
+
+        return $subId;
     }
 
     /**
@@ -74,8 +83,12 @@ class PubSubManager
     public function listTopics(): array
     {
         $response = $this->client->execute('pubsub.list_topics', '*');
+        $topics = $response['topics'] ?? [];
 
-        return $response['topics'] ?? [];
+        assert(is_array($topics));
+
+        /** @var array<string> */
+        return $topics;
     }
 
     /**
@@ -88,4 +101,3 @@ class PubSubManager
         return $this->client->execute('pubsub.get_subscriber', $subscriberId);
     }
 }
-

@@ -34,4 +34,3 @@ readonly class QueueMessage
         ];
     }
 }
-

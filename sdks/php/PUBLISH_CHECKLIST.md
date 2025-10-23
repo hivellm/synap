@@ -11,7 +11,7 @@
 ### 📦 Estrutura do Projeto
 
 - ✅ **composer.json** configurado corretamente
-  - ✅ Nome: `hivellm/synap-sdk`
+  - ✅ Name: `hivellm/synap-sdk`
   - ✅ Versão: Usa git tags
   - ✅ PHP: `^8.2`
   - ✅ Licença: `MIT`
@@ -82,7 +82,7 @@
 
 ---
 
-### 📋 Comandos para Publicação
+### 📋 Commands for Publication
 
 ### 1. Instalar Dependências
 

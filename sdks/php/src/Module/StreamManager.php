@@ -49,7 +49,11 @@ class StreamManager
             'data' => $data,
         ]);
 
-        return (int) ($response['offset'] ?? 0);
+        $offset = $response['offset'] ?? 0;
+
+        assert(is_int($offset) || is_numeric($offset));
+
+        return (int) $offset;
     }
 
     /**
@@ -65,14 +69,31 @@ class StreamManager
         ]);
 
         $events = $response['events'] ?? [];
+
+        if (! is_array($events)) {
+            return [];
+        }
+
         $result = [];
 
         foreach ($events as $event) {
+            if (! is_array($event)) {
+                continue;
+            }
+
+            $eventOffset = $event['offset'] ?? 0;
+            $eventName = $event['event'] ?? '';
+            $eventTimestamp = $event['timestamp'] ?? 0;
+
+            assert(is_int($eventOffset) || is_numeric($eventOffset));
+            assert(is_string($eventName));
+            assert(is_int($eventTimestamp) || is_numeric($eventTimestamp));
+
             $result[] = new StreamEvent(
-                offset: $event['offset'] ?? 0,
-                event: $event['event'] ?? '',
+                offset: (int) $eventOffset,
+                event: $eventName,
                 data: $event['data'] ?? null,
-                timestamp: $event['timestamp'] ?? 0
+                timestamp: (int) $eventTimestamp
             );
         }
 
@@ -97,8 +118,11 @@ class StreamManager
     public function list(): array
     {
         $response = $this->client->execute('stream.list', '*');
+        $rooms = $response['rooms'] ?? [];
 
-        return $response['rooms'] ?? [];
+        assert(is_array($rooms));
+
+        /** @var array<string> */
+        return $rooms;
     }
 }
-

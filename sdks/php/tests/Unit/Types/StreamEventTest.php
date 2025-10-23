@@ -42,4 +42,3 @@ final class StreamEventTest extends TestCase
         ], $array);
     }
 }
-

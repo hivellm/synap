@@ -55,7 +55,7 @@ class KVStore
     {
         $response = $this->client->execute('kv.exists', $key);
 
-        return $response['exists'] ?? false;
+        return (bool) ($response['exists'] ?? false);
     }
 
     /**
@@ -64,8 +64,11 @@ class KVStore
     public function incr(string $key, int $delta = 1): int
     {
         $response = $this->client->execute('kv.incr', $key, ['delta' => $delta]);
+        $value = $response['value'] ?? 0;
 
-        return (int) ($response['value'] ?? 0);
+        assert(is_int($value) || is_numeric($value));
+
+        return (int) $value;
     }
 
     /**
@@ -74,8 +77,11 @@ class KVStore
     public function decr(string $key, int $delta = 1): int
     {
         $response = $this->client->execute('kv.decr', $key, ['delta' => $delta]);
+        $value = $response['value'] ?? 0;
 
-        return (int) ($response['value'] ?? 0);
+        assert(is_int($value) || is_numeric($value));
+
+        return (int) $value;
     }
 
     /**
@@ -96,8 +102,11 @@ class KVStore
     public function scan(string $prefix, int $limit = 100): array
     {
         $response = $this->client->execute('kv.scan', $prefix, ['limit' => $limit]);
+        $keys = $response['keys'] ?? [];
 
-        return $response['keys'] ?? [];
+        assert(is_array($keys));
+
+        /** @var array<string> */
+        return $keys;
     }
 }
-

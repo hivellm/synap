@@ -106,15 +106,21 @@ class SynapClient
                 throw SynapException::invalidResponse('Failed to parse JSON response');
             }
 
-            if (!is_array($result)) {
+            if (! is_array($result)) {
                 return [];
             }
 
             // Check for server error in response
             if (isset($result['error'])) {
-                throw SynapException::serverError($result['error']);
+                $error = $result['error'];
+                $errorMessage = is_string($error) ? $error : json_encode($error);
+
+                assert(is_string($errorMessage));
+
+                throw SynapException::serverError($errorMessage);
             }
 
+            /** @var array<string, mixed> $result */
             return $result;
         } catch (GuzzleException $e) {
             throw SynapException::networkError($e->getMessage());
@@ -143,4 +149,3 @@ class SynapClient
         return $this->config;
     }
 }
-

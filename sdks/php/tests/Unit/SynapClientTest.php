@@ -62,4 +62,3 @@ final class SynapClientTest extends TestCase
         $this->assertSame('http://localhost:15500', $config->getBaseUrl());
     }
 }
-
