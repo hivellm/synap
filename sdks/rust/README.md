@@ -5,12 +5,13 @@ Official Rust client library for [Synap](https://github.com/hivellm/synap) - Hig
 ## Features
 
 - 💾 **Key-Value Store**: Fast async KV operations with TTL support
-- 📨 **Message Queues**: RabbitMQ-style queues with ACK/NACK
-- 📡 **Event Streams**: Kafka-style event streams with offset tracking
-- 🔔 **Pub/Sub**: Topic-based messaging with wildcard support
-- 🔄 **Async/Await**: Built on Tokio for high-performance async I/O
+- 📨 **Message Queues**: RabbitMQ-style queues with ACK/NACK + reactive consumption
+- 📡 **Event Streams**: Kafka-style event streams **reactive by default** 🔥
+- 🔔 **Pub/Sub**: Topic-based messaging **reactive by default** 🔥
+- 🔄 **Reactive Patterns**: `futures::Stream` for event-driven consumption
+- ⚡ **StreamableHTTP Protocol**: Single unified endpoint for all operations
 - 🛡️ **Type-Safe**: Leverages Rust's type system for correctness
-- 📦 **Zero-Copy**: Efficient serialization with serde
+- 📦 **Async/Await**: Built on Tokio for high-performance async I/O
 
 ## Installation
 
@@ -49,18 +50,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         client.queue().ack("tasks", &msg.id).await?;
     }
 
-    // Event Stream operations
+    // Event Stream (reactive by default)
     client.stream().create_room("chat-room-1", None).await?;
-    let offset = client.stream().publish(
+    client.stream().publish(
         "chat-room-1",
         "message",
         json!({"user": "alice", "text": "Hello!"})
     ).await?;
     
-    let events = client.stream().consume("chat-room-1", Some(0), Some(10)).await?;
-    println!("Events: {:?}", events);
+    // Reactive event consumption
+    use futures::StreamExt;
+    let (mut events, handle) = client.stream()
+        .observe_events("chat-room-1", Some(0), Duration::from_millis(500));
+    
+    while let Some(event) = events.next().await {
+        println!("Event {}: {:?}", event.offset, event.data);
+        if event.offset > 10 { break; }
+    }
+    handle.unsubscribe();
 
-    // Pub/Sub operations
+    // Pub/Sub (reactive by default)
     let count = client.pubsub().publish(
         "notifications.email",
         json!({"to": "user@example.com", "subject": "Welcome"}),
@@ -140,9 +149,14 @@ let queues = client.queue().list().await?;
 client.queue().delete_queue("tasks").await?;
 ```
 
-### Event Streams
+### Event Streams (Reactive by Default)
+
+Event streams are **reactive by default** - use `observe_events()` or `observe_event()` for continuous event consumption.
 
 ```rust
+use futures::StreamExt;
+use std::time::Duration;
+
 // Create a stream room
 client.stream().create_room("chat-room-1", Some(10000)).await?;
 
@@ -153,16 +167,27 @@ let offset = client.stream().publish(
     json!({"user": "alice", "text": "Hello!"})
 ).await?;
 
-// Consume events
-let events = client.stream().consume(
-    "chat-room-1",
-    Some(0),    // from offset (None = from beginning)
-    Some(100)   // limit
-).await?;
+// ✨ Reactive: Observe ALL events
+let (mut events, handle) = client.stream()
+    .observe_events("chat-room-1", Some(0), Duration::from_millis(500));
 
-for event in events {
-    println!("Event {}: {:?}", event.offset, event.data);
+tokio::spawn(async move {
+    while let Some(event) = events.next().await {
+        println!("Event {}: {:?}", event.offset, event.data);
+    }
+});
+
+// ✨ Reactive: Observe SPECIFIC event type
+let (mut messages, handle2) = client.stream()
+    .observe_event("chat-room-1", "message", Some(0), Duration::from_millis(500));
+
+while let Some(event) = messages.next().await {
+    println!("Message: {:?}", event.data);
 }
+
+// Stop observing
+handle.unsubscribe();
+handle2.unsubscribe();
 
 // Get room stats
 let stats = client.stream().stats("chat-room-1").await?;
@@ -174,9 +199,13 @@ let rooms = client.stream().list().await?;
 client.stream().delete_room("chat-room-1").await?;
 ```
 
-### Pub/Sub
+### Pub/Sub (Reactive by Default)
+
+Pub/Sub is **reactive by default** - use `subscribe()` for event-driven message consumption.
 
 ```rust
+use std::collections::HashMap;
+
 // Publish to a topic
 let delivered_count = client.pubsub().publish(
     "notifications.email",
@@ -185,14 +214,24 @@ let delivered_count = client.pubsub().publish(
     None        // headers
 ).await?;
 
-// Subscribe to topics (with wildcards)
-let sub_id = client.pubsub().subscribe(vec![
-    "events.user.*".to_string(),      // single-level wildcard
-    "notifications.#".to_string(),    // multi-level wildcard
-]).await?;
+// ✨ Subscribe to topics (with wildcards)
+let sub_id = client.pubsub().subscribe_topics(
+    "user-123",  // subscriber ID
+    vec![
+        "events.user.*".to_string(),      // single-level wildcard
+        "notifications.#".to_string(),    // multi-level wildcard
+    ]
+).await?;
+
+// TODO: Reactive subscription (coming soon)
+// let (mut messages, handle) = client.pubsub()
+//     .observe("user-123", vec!["events.*"]);
 
 // Unsubscribe
-client.pubsub().unsubscribe(&sub_id).await?;
+client.pubsub().unsubscribe("user-123", vec![
+    "events.user.*".to_string(),
+    "notifications.#".to_string(),
+]).await?;
 
 // List active topics
 let topics = client.pubsub().list_topics().await?;
@@ -231,16 +270,19 @@ match client.kv().get::<String>("key").await {
 See the [`examples/`](examples/) directory for more examples:
 
 - [`basic.rs`](examples/basic.rs) - Basic KV operations
-- [`queue.rs`](examples/queue.rs) - Task queue pattern
-- [`stream.rs`](examples/stream.rs) - Real-time chat
-- [`pubsub.rs`](examples/pubsub.rs) - Event broadcasting
+- [`queue.rs`](examples/queue.rs) - Task queue pattern (traditional)
+- [`reactive_queue.rs`](examples/reactive_queue.rs) - Reactive queue consumption 🔥
+- [`stream.rs`](examples/stream.rs) - Event stream (traditional)
+- [`reactive_stream.rs`](examples/reactive_stream.rs) - Reactive event consumption 🔥
+- [`pubsub.rs`](examples/pubsub.rs) - Pub/Sub messaging
 
 Run an example:
 
 ```bash
 cargo run --example basic
 cargo run --example queue
-cargo run --example stream
+cargo run --example reactive_queue    # Recommended for queues
+cargo run --example reactive_stream   # Recommended for streams
 cargo run --example pubsub
 ```
 
