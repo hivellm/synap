@@ -324,7 +324,7 @@ async fn test_delete_operations_sync() {
     // Delete half of them via replication
     for i in 0..25 {
         let key = format!("del_key_{}", i);
-        master_kv.mdel(&[key.clone()]).await.unwrap();
+        master_kv.mdel(std::slice::from_ref(&key)).await.unwrap();
         master.replicate(Operation::KVDel { keys: vec![key] });
     }
 

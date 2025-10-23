@@ -283,10 +283,7 @@ async fn test_queue_consume_returns_200_with_message() {
 
     // Consume
     let response = client
-        .get(format!(
-            "{}/queue/consume_queue/consume/worker-1",
-            base_url
-        ))
+        .get(format!("{}/queue/consume_queue/consume/worker-1", base_url))
         .send()
         .await
         .unwrap();
