@@ -31,8 +31,25 @@ export class KVStore {
    * Get a value by key
    */
   async get<T = JSONValue>(key: string): Promise<T | null> {
-    const result = await this.client.sendCommand<{ found: boolean; value?: T }>('kv.get', { key });
-    return result.found && result.value !== undefined ? result.value : null;
+    const result = await this.client.sendCommand<any>('kv.get', { key });
+    
+    // Server returns the value directly as a string (JSON stringified)
+    // or null if not found
+    if (result === null || result === undefined) {
+      return null;
+    }
+
+    // If result is a string, parse it as JSON
+    if (typeof result === 'string') {
+      try {
+        return JSON.parse(result) as T;
+      } catch (error) {
+        // If not valid JSON, return as-is
+        return result as T;
+      }
+    }
+
+    return result as T;
   }
 
   /**
