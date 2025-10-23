@@ -2,7 +2,6 @@
 //!
 //! Provides Stream-based event consumption for event streams.
 
-use crate::client::SynapClient;
 use crate::reactive::{MessageStream, SubscriptionHandle};
 use crate::types::StreamEvent;
 use futures::Stream;

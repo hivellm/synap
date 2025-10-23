@@ -54,6 +54,7 @@ impl SynapConfig {
 /// Main Synap client
 #[derive(Clone)]
 pub struct SynapClient {
+    #[allow(dead_code)]
     config: Arc<SynapConfig>,
     http_client: Client,
     base_url: Url,

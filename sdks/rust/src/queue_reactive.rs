@@ -2,7 +2,6 @@
 //!
 //! Provides Stream-based message consumption for queues.
 
-use crate::client::SynapClient;
 use crate::error::Result;
 use crate::reactive::{MessageStream, SubscriptionHandle};
 use crate::types::Message;
