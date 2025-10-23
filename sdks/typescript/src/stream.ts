@@ -76,7 +76,7 @@ export class StreamManager {
     subscriberId: string,
     fromOffset: number = 0
   ): Promise<StreamEvent[]> {
-    const result = await this.client.sendCommand<{ events: StreamEvent[] }>(
+    const result = await this.client.sendCommand<{ events: any[] }>(
       'stream.consume',
       {
         room: roomName,
@@ -85,7 +85,30 @@ export class StreamManager {
       }
     );
 
-    return result.events || [];
+    const events = result.events || [];
+    
+    // Parse events - convert byte array data to objects
+    return events.map(event => ({
+      ...event,
+      data: this.parseEventData(event.data),
+    }));
+  }
+
+  /**
+   * Parse event data - handle both byte arrays and objects
+   */
+  private parseEventData(data: any): any {
+    if (Array.isArray(data)) {
+      // Convert byte array to string and parse as JSON
+      try {
+        const text = new TextDecoder().decode(new Uint8Array(data));
+        return JSON.parse(text);
+      } catch (error) {
+        console.error('Failed to parse event data:', error);
+        return data;
+      }
+    }
+    return data;
   }
 
   /**
@@ -109,10 +132,11 @@ export class StreamManager {
    * Delete a stream room
    */
   async deleteRoom(roomName: string): Promise<boolean> {
-    const result = await this.client.sendCommand<{ deleted: boolean }>('stream.delete', {
+    const result = await this.client.sendCommand<{ deleted: any }>('stream.delete', {
       room: roomName,
     });
-    return result.deleted;
+    // Server returns room name as confirmation, treat as success
+    return !!result.deleted;
   }
 
   // ==================== REACTIVE METHODS ====================

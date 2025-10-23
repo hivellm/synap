@@ -245,12 +245,20 @@ export interface StreamConsumerOptions {
  * Stream room statistics
  */
 export interface StreamStats {
-  /** Current event count */
-  event_count: number;
+  /** Maximum offset in stream */
+  max_offset: number;
   /** Number of subscribers */
   subscribers: number;
-  /** Buffer size */
-  buffer_size: number;
+  /** Total events published */
+  total_events: number;
+  /** Total events consumed */
+  total_consumed: number;
+  /** Room name */
+  room: string;
+  /** Created timestamp */
+  created_at: number;
+  /** Last activity timestamp */
+  last_activity: number;
 }
 
 /**
