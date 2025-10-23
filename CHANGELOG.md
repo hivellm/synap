@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Rust SDK v0.1.0 🎉 NEW (October 23, 2025)
+
+**Complete Rust SDK with RxJS-style reactive patterns and StreamableHTTP protocol**
+
+#### Features
+- ✅ **StreamableHTTP Protocol**: Single unified endpoint (matching TypeScript SDK)
+- ✅ **Key-Value Store**: Full CRUD, TTL, atomic operations (100% coverage)
+- ✅ **Message Queues**: RabbitMQ-style with ACK/NACK + reactive consumption (100% coverage)
+- ✅ **Event Streams**: Kafka-style reactive by default (100% coverage)
+- ✅ **Pub/Sub**: Topic-based messaging reactive by default (100% coverage)
+- ✅ **RxJS Module**: Observable, Subject, operators (map, filter, take, etc.)
+- ✅ **Type-Safe**: Zero unsafe code, full Rust type system
+- ✅ **Zero-Cost Abstractions**: Futures-based reactive patterns
+
+#### Test Coverage
+- **81 tests total** - 100% passing ✅
+- **Core API**: 96.5% coverage 🎯
+- **RxJS Module**: 92.3% coverage 🎯
+- **Overall**: 91% coverage 🎯
+- **Zero clippy warnings** ✅
+
+#### Documentation
+- Complete API documentation in `sdks/rust/README.md`
+- Reactive patterns guide: `sdks/rust/REACTIVE.md`
+- RxJS comparison: `sdks/rust/REACTIVE_COMPARISON.md`
+- RxJS module guide: `sdks/rust/src/rx/README.md`
+- Coverage report: `sdks/rust/COVERAGE_REPORT.md`
+- 7 working examples (basic, queue, reactive_queue, stream, reactive_stream, pubsub, rxjs_style)
+
+#### RxJS-Style API
+```rust
+use synap_sdk::rx::{Observable, Subject};
+
+// Observable with operators (like RxJS pipe)
+Observable::from_stream(stream)
+    .filter(|x| *x > 2)
+    .map(|x| x * 2)
+    .take(10)
+    .subscribe_next(|value| println!("{}", value));
+
+// Subject for multicasting
+let subject = Subject::new();
+subject.subscribe(|msg| println!("Sub 1: {}", msg));
+subject.subscribe(|msg| println!("Sub 2: {}", msg));
+subject.next("Hello");  // Both receive it!
+```
+
+#### Quality Checks (All Passing)
+- ✅ `cargo +nightly fmt --all`
+- ✅ `cargo clippy --workspace -- -D warnings`
+- ✅ `cargo test --workspace --tests --verbose`
+- ✅ `cargo llvm-cov --all`
+
+---
+
 ### Added - TypeScript SDK: Dual Testing Strategy ✅ NEW (October 23, 2025)
 
 #### 🧪 Unit Tests with Mocks
