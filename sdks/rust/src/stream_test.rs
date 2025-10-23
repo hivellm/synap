@@ -70,7 +70,7 @@ mod tests {
                 "events": [
                     {
                         "offset": 0,
-                        "event_type": "message",
+                        "event": "message",
                         "data": {"text": "hello"},
                         "timestamp": 1234567890
                     }
@@ -80,14 +80,14 @@ mod tests {
             .create_async()
             .await;
 
-        let events = client
+        let events: Vec<crate::types::Event> = client
             .stream()
             .consume("chat-1", Some(0), Some(10))
             .await
             .unwrap();
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].offset, 0);
-        assert_eq!(events[0].event_type, "message");
+        assert_eq!(events[0].event, "message");
 
         mock.assert_async().await;
     }

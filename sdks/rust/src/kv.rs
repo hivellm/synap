@@ -1,12 +1,14 @@
 //! Key-Value Store operations
 
 use crate::client::SynapClient;
-use crate::error::{Result, SynapError};
+use crate::error::Result;
 use crate::types::KVStats;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 /// Key-Value Store interface
+///
+/// Uses StreamableHTTP protocol for all operations.
 #[derive(Clone)]
 pub struct KVStore {
     client: SynapClient,
@@ -41,18 +43,13 @@ impl KVStore {
         K: AsRef<str>,
         V: Serialize,
     {
-        let body = json!({
+        let payload = json!({
             "key": key.as_ref(),
             "value": value,
             "ttl": ttl,
         });
 
-        let response = self.client.post("kv/set", body).await?;
-
-        if response["success"].as_bool() != Some(true) {
-            return Err(SynapError::ServerError("Failed to set key".to_string()));
-        }
-
+        self.client.send_command("kv.set", payload).await?;
         Ok(())
     }
 
@@ -75,22 +72,17 @@ impl KVStore {
         K: AsRef<str>,
         V: for<'de> Deserialize<'de>,
     {
-        let path = format!("kv/get/{}", key.as_ref());
-        let response = self.client.get(&path).await?;
+        let payload = json!({"key": key.as_ref()});
+        let response = self.client.send_command("kv.get", payload).await?;
 
-        // Check if it's an error response
-        if response.get("error").is_some() {
+        // StreamableHTTP returns null for not found
+        if response.is_null() {
             return Ok(None);
         }
 
-        // Server returns value directly as JSON string
-        if let Some(value_str) = response.as_str() {
-            // Double-encoded: parse the string to get the actual value
-            let value: V = serde_json::from_str(value_str)?;
-            return Ok(Some(value));
-        }
-
-        Ok(None)
+        // Parse the value
+        let value: V = serde_json::from_value(response)?;
+        Ok(Some(value))
     }
 
     /// Delete a key
@@ -109,8 +101,8 @@ impl KVStore {
     where
         K: AsRef<str>,
     {
-        let path = format!("kv/del/{}", key.as_ref());
-        let response = self.client.delete(&path).await?;
+        let payload = json!({"key": key.as_ref()});
+        let response = self.client.send_command("kv.del", payload).await?;
 
         Ok(response["deleted"].as_bool().unwrap_or(false))
     }
@@ -120,20 +112,10 @@ impl KVStore {
     where
         K: AsRef<str>,
     {
-        let body = json!({"key": key.as_ref()});
-        let response = self
-            .client
-            .post(
-                "api/v1/command",
-                json!({
-                    "command": "kv.exists",
-                    "request_id": uuid::Uuid::new_v4().to_string(),
-                    "payload": body,
-                }),
-            )
-            .await?;
+        let payload = json!({"key": key.as_ref()});
+        let response = self.client.send_command("kv.exists", payload).await?;
 
-        Ok(response["payload"]["exists"].as_bool().unwrap_or(false))
+        Ok(response["exists"].as_bool().unwrap_or(false))
     }
 
     /// Increment a numeric value
@@ -141,8 +123,8 @@ impl KVStore {
     where
         K: AsRef<str>,
     {
-        let body = json!({"key": key.as_ref()});
-        let response = self.client.post("kv/incr", body).await?;
+        let payload = json!({"key": key.as_ref()});
+        let response = self.client.send_command("kv.incr", payload).await?;
 
         Ok(response["value"].as_i64().unwrap_or(0))
     }
@@ -152,15 +134,15 @@ impl KVStore {
     where
         K: AsRef<str>,
     {
-        let body = json!({"key": key.as_ref()});
-        let response = self.client.post("kv/decr", body).await?;
+        let payload = json!({"key": key.as_ref()});
+        let response = self.client.send_command("kv.decr", payload).await?;
 
         Ok(response["value"].as_i64().unwrap_or(0))
     }
 
     /// Get KV store statistics
     pub async fn stats(&self) -> Result<KVStats> {
-        let response = self.client.get("kv/stats").await?;
+        let response = self.client.send_command("kv.stats", json!({})).await?;
         Ok(serde_json::from_value(response)?)
     }
 
@@ -169,25 +151,12 @@ impl KVStore {
     where
         P: AsRef<str>,
     {
-        let body = json!({"prefix": prefix.as_ref()});
-        let response = self
-            .client
-            .post(
-                "api/v1/command",
-                json!({
-                    "command": "kv.keys",
-                    "request_id": uuid::Uuid::new_v4().to_string(),
-                    "payload": body,
-                }),
-            )
-            .await?;
+        let payload = json!({"prefix": prefix.as_ref()});
+        let response = self.client.send_command("kv.keys", payload).await?;
 
-        Ok(serde_json::from_value(response["payload"]["keys"].clone())?)
+        Ok(serde_json::from_value(response["keys"].clone())?)
     }
 }
-
-// Add uuid to dependencies
-use uuid;
 
 #[cfg(test)]
 mod tests {

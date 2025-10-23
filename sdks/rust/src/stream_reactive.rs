@@ -3,7 +3,7 @@
 //! Provides Stream-based event consumption for event streams.
 
 use crate::reactive::{MessageStream, SubscriptionHandle};
-use crate::types::StreamEvent;
+use crate::types::Event;
 use futures::Stream;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -42,12 +42,12 @@ impl crate::stream::StreamManager {
         room: impl Into<String>,
         start_offset: Option<u64>,
         poll_interval: Duration,
-    ) -> (impl Stream<Item = StreamEvent>, SubscriptionHandle) {
+    ) -> (impl Stream<Item = Event>, SubscriptionHandle) {
         let room = room.into();
         let client = self.client.clone();
         let mut current_offset = start_offset.unwrap_or(0);
 
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::unbounded_channel::<Event>();
         let (cancel_tx, mut cancel_rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
@@ -91,13 +91,13 @@ impl crate::stream::StreamManager {
         event_type: impl Into<String>,
         start_offset: Option<u64>,
         poll_interval: Duration,
-    ) -> (impl Stream<Item = StreamEvent>, SubscriptionHandle) {
+    ) -> (impl Stream<Item = Event>, SubscriptionHandle) {
         let room = room.into();
         let event_type = event_type.into();
         let client = self.client.clone();
         let mut current_offset = start_offset.unwrap_or(0);
 
-        let (tx, rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::unbounded_channel::<Event>();
         let (cancel_tx, mut cancel_rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
@@ -113,7 +113,7 @@ impl crate::stream::StreamManager {
                                     current_offset = event.offset + 1;
 
                                     // Filter by event type
-                                    if event.event_type == event_type {
+                                    if event.event == event_type {
                                         if tx.send(event).is_err() {
                                             return;
                                         }

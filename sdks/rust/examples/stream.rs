@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for event in &events {
         println!(
             "   - Offset {}: {} = {:?}",
-            event.offset, event.event_type, event.data
+            event.offset, event.event, event.data
         );
     }
     println!();
@@ -80,7 +80,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for event in &events {
         println!(
             "   - Offset {}: {} = {:?}",
-            event.offset, event.event_type, event.data
+            event.offset, event.event, event.data
         );
     }
     println!();

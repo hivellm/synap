@@ -29,11 +29,12 @@ pub struct QueueStats {
 
 /// Stream event
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StreamEvent {
+pub struct Event {
     pub offset: u64,
-    pub event_type: String,
+    #[serde(rename = "event_type")]
+    pub event: String,
     pub data: serde_json::Value,
-    pub timestamp: u64,
+    pub timestamp: Option<u64>,
 }
 
 /// Stream statistics

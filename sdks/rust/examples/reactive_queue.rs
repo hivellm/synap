@@ -6,7 +6,6 @@
 //!   cargo run --example reactive_queue
 
 use futures::StreamExt;
-use serde_json::json;
 use std::time::Duration;
 use synap_sdk::{SynapClient, SynapConfig};
 
@@ -46,10 +45,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. Observe messages reactively (manual ACK)
     println!("3. Consuming messages reactively (with Stream)");
+    let queue = client.queue();
     let (mut stream, handle) =
-        client
-            .queue()
-            .observe_messages("reactive-tasks", "worker-1", Duration::from_millis(100));
+        queue.observe_messages("reactive-tasks", "worker-1", Duration::from_millis(100));
 
     let mut count = 0;
     while let Some(message) = stream.next().await {

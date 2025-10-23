@@ -49,7 +49,10 @@ mod tests {
 
         let sub_id = client
             .pubsub()
-            .subscribe(vec!["events.*".to_string(), "notifications.#".to_string()])
+            .subscribe_topics(
+                "sub-123",
+                vec!["events.*".to_string(), "notifications.#".to_string()],
+            )
             .await
             .unwrap();
         assert_eq!(sub_id, "sub-123");
@@ -69,7 +72,10 @@ mod tests {
             .create_async()
             .await;
 
-        let result = client.pubsub().unsubscribe("sub-123").await;
+        let result = client
+            .pubsub()
+            .unsubscribe("sub-123", vec!["topic.test".to_string()])
+            .await;
         assert!(result.is_ok());
 
         mock.assert_async().await;

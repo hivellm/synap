@@ -23,10 +23,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("1. Subscribing to topics");
     let sub_id = client
         .pubsub()
-        .subscribe(vec![
-            "events.user.*".to_string(),   // Single-level wildcard
-            "notifications.#".to_string(), // Multi-level wildcard
-        ])
+        .subscribe_topics(
+            "user-123",
+            vec![
+                "events.user.*".to_string(),   // Single-level wildcard
+                "notifications.#".to_string(), // Multi-level wildcard
+            ],
+        )
         .await?;
     println!("   Subscription ID: {}\n", sub_id);
 
@@ -82,7 +85,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Unsubscribe
     println!("4. Unsubscribing");
-    client.pubsub().unsubscribe(&sub_id).await?;
+    client
+        .pubsub()
+        .unsubscribe(
+            &sub_id,
+            vec!["events.user.*".to_string(), "notifications.#".to_string()],
+        )
+        .await?;
     println!("   ✅ Unsubscribed from topics");
 
     println!("\n✅ Example completed successfully!");

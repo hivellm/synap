@@ -56,10 +56,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3. Observe ALL events reactively
     println!("2. Observing all events (reactive Stream)\n");
+    let stream_mgr = client.stream();
     let (mut stream, handle) =
-        client
-            .stream()
-            .observe_events("reactive-chat", Some(0), Duration::from_millis(150));
+        stream_mgr.observe_events("reactive-chat", Some(0), Duration::from_millis(150));
 
     let mut event_count = 0;
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -83,7 +82,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 4. Observe specific event type
     println!("3. Observing only 'message' events (filtered)\n");
-    let (mut stream, handle) = client.stream().observe_event(
+    let stream_mgr2 = client.stream();
+    let (mut stream, handle) = stream_mgr2.observe_event(
         "reactive-chat",
         "message",
         Some(0),

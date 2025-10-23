@@ -105,9 +105,27 @@ impl SynapClient {
         PubSubManager::new(self.clone())
     }
 
-    /// Send a POST request
-    pub(crate) async fn post(&self, path: &str, body: Value) -> Result<Value> {
-        let url = self.base_url.join(path)?;
+    /// Send a StreamableHTTP command
+    ///
+    /// This is the primary method for communicating with Synap server.
+    /// All commands use the StreamableHTTP protocol format:
+    /// ```json
+    /// {
+    ///   "command": "kv.get",
+    ///   "request_id": "uuid",
+    ///   "payload": { ... }
+    /// }
+    /// ```
+    pub(crate) async fn send_command(&self, command: &str, payload: Value) -> Result<Value> {
+        let request_id = uuid::Uuid::new_v4().to_string();
+
+        let body = serde_json::json!({
+            "command": command,
+            "request_id": request_id,
+            "payload": payload,
+        });
+
+        let url = self.base_url.join("api/v1/command")?;
 
         let response = self.http_client.post(url).json(&body).send().await?;
 
@@ -116,38 +134,19 @@ impl SynapClient {
             return Err(SynapError::ServerError(error_text));
         }
 
-        let result = response.json().await?;
-        Ok(result)
-    }
+        let result: Value = response.json().await?;
 
-    /// Send a GET request
-    pub(crate) async fn get(&self, path: &str) -> Result<Value> {
-        let url = self.base_url.join(path)?;
-
-        let response = self.http_client.get(url).send().await?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(SynapError::ServerError(error_text));
+        // Check if command succeeded
+        if !result["success"].as_bool().unwrap_or(false) {
+            let error_msg = result["error"]
+                .as_str()
+                .unwrap_or("Unknown error")
+                .to_string();
+            return Err(SynapError::ServerError(error_msg));
         }
 
-        let result = response.json().await?;
-        Ok(result)
-    }
-
-    /// Send a DELETE request
-    pub(crate) async fn delete(&self, path: &str) -> Result<Value> {
-        let url = self.base_url.join(path)?;
-
-        let response = self.http_client.delete(url).send().await?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await.unwrap_or_default();
-            return Err(SynapError::ServerError(error_text));
-        }
-
-        let result = response.json().await?;
-        Ok(result)
+        // Return the payload
+        Ok(result["payload"].clone())
     }
 
     /// Get the base URL

@@ -1,7 +1,7 @@
 //! Queue operations
 
 use crate::client::SynapClient;
-use crate::error::{Result, SynapError};
+use crate::error::Result;
 use crate::types::{Message, QueueStats};
 use serde_json::json;
 
@@ -9,6 +9,8 @@ use serde_json::json;
 pub use crate::reactive::{MessageStream, SubscriptionHandle};
 
 /// Queue Manager interface
+///
+/// Uses StreamableHTTP protocol for all operations.
 #[derive(Clone)]
 pub struct QueueManager {
     pub(crate) client: SynapClient,
@@ -32,23 +34,15 @@ impl QueueManager {
         max_depth: Option<usize>,
         ack_deadline_secs: Option<u64>,
     ) -> Result<()> {
-        let mut body = json!({});
+        let mut payload = json!({"queue_name": queue_name});
         if let Some(depth) = max_depth {
-            body["max_depth"] = json!(depth);
+            payload["max_depth"] = json!(depth);
         }
         if let Some(deadline) = ack_deadline_secs {
-            body["ack_deadline_secs"] = json!(deadline);
+            payload["ack_deadline_secs"] = json!(deadline);
         }
 
-        let path = format!("queue/{}", queue_name);
-        let response = self.client.post(&path, body).await?;
-
-        if response["success"].as_bool() != Some(true) {
-            return Err(SynapError::ServerError(
-                "Failed to create queue".to_string(),
-            ));
-        }
-
+        self.client.send_command("queue.create", payload).await?;
         Ok(())
     }
 
@@ -71,14 +65,14 @@ impl QueueManager {
         priority: Option<u8>,
         max_retries: Option<u32>,
     ) -> Result<String> {
-        let path = format!("queue/{}/publish", queue_name);
         let body = json!({
+            "queue_name": queue_name,
             "payload": payload,
             "priority": priority,
             "max_retries": max_retries,
         });
 
-        let response = self.client.post(&path, body).await?;
+        let response = self.client.send_command("queue.publish", body).await?;
 
         Ok(response["message_id"]
             .as_str()
@@ -88,8 +82,12 @@ impl QueueManager {
 
     /// Consume a message from a queue
     pub async fn consume(&self, queue_name: &str, consumer_id: &str) -> Result<Option<Message>> {
-        let path = format!("queue/{}/consume/{}", queue_name, consumer_id);
-        let response = self.client.get(&path).await?;
+        let payload = json!({
+            "queue_name": queue_name,
+            "consumer_id": consumer_id,
+        });
+
+        let response = self.client.send_command("queue.consume", payload).await?;
 
         if response.is_null() {
             return Ok(None);
@@ -100,58 +98,43 @@ impl QueueManager {
 
     /// Acknowledge a message
     pub async fn ack(&self, queue_name: &str, message_id: &str) -> Result<()> {
-        let path = format!("queue/{}/ack", queue_name);
-        let body = json!({"message_id": message_id});
+        let payload = json!({
+            "queue_name": queue_name,
+            "message_id": message_id
+        });
 
-        let response = self.client.post(&path, body).await?;
-
-        if response["success"].as_bool() != Some(true) {
-            return Err(SynapError::ServerError("Failed to ACK message".to_string()));
-        }
-
+        self.client.send_command("queue.ack", payload).await?;
         Ok(())
     }
 
     /// Negative acknowledge a message (requeue)
     pub async fn nack(&self, queue_name: &str, message_id: &str) -> Result<()> {
-        let path = format!("queue/{}/nack", queue_name);
-        let body = json!({"message_id": message_id});
+        let payload = json!({
+            "queue_name": queue_name,
+            "message_id": message_id
+        });
 
-        let response = self.client.post(&path, body).await?;
-
-        if response["success"].as_bool() != Some(true) {
-            return Err(SynapError::ServerError(
-                "Failed to NACK message".to_string(),
-            ));
-        }
-
+        self.client.send_command("queue.nack", payload).await?;
         Ok(())
     }
 
     /// Get queue statistics
     pub async fn stats(&self, queue_name: &str) -> Result<QueueStats> {
-        let path = format!("queue/{}/stats", queue_name);
-        let response = self.client.get(&path).await?;
+        let payload = json!({"queue_name": queue_name});
+        let response = self.client.send_command("queue.stats", payload).await?;
         Ok(serde_json::from_value(response)?)
     }
 
     /// List all queues
     pub async fn list(&self) -> Result<Vec<String>> {
-        let response = self.client.get("queue/list").await?;
+        let response = self.client.send_command("queue.list", json!({})).await?;
         Ok(serde_json::from_value(response["queues"].clone())?)
     }
 
     /// Delete a queue
     pub async fn delete_queue(&self, queue_name: &str) -> Result<()> {
-        let path = format!("queue/{}", queue_name);
-        let response = self.client.delete(&path).await?;
-
-        if response["success"].as_bool() != Some(true) {
-            return Err(SynapError::ServerError(
-                "Failed to delete queue".to_string(),
-            ));
-        }
-
+        let payload = json!({"queue_name": queue_name});
+        self.client.send_command("queue.delete", payload).await?;
         Ok(())
     }
 }

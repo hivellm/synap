@@ -5,7 +5,6 @@
 //! Usage:
 //!   cargo run --example queue
 
-use std::time::Duration;
 use synap_sdk::{SynapClient, SynapConfig};
 
 #[tokio::main]

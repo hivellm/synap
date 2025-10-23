@@ -1,10 +1,14 @@
 //! Pub/Sub operations
 
 use crate::client::SynapClient;
-use crate::error::{Result, SynapError};
-use serde_json::json;
+use crate::error::Result;
+use serde_json::{Value, json};
+use std::collections::HashMap;
 
 /// Pub/Sub Manager interface
+///
+/// Uses StreamableHTTP protocol for all operations.
+/// Pub/Sub is **reactive by default** - use `subscribe()` and `subscribe_topic()`.
 #[derive(Clone)]
 pub struct PubSubManager {
     client: SynapClient,
@@ -18,6 +22,9 @@ impl PubSubManager {
 
     /// Publish a message to a topic
     ///
+    /// # Returns
+    /// Returns the number of subscribers that received the message
+    ///
     /// # Example
     /// ```no_run
     /// # use synap_sdk::{SynapClient, SynapConfig};
@@ -25,10 +32,10 @@ impl PubSubManager {
     /// # #[tokio::main]
     /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// # let client = SynapClient::new(SynapConfig::new("http://localhost:15500"))?;
-    /// client.pubsub().publish(
-    ///     "notifications.email",
-    ///     json!({"to": "user@example.com", "subject": "Hello"}),
-    ///     None,
+    /// let count = client.pubsub().publish(
+    ///     "user.created",
+    ///     json!({"id": 123, "name": "Alice"}),
+    ///     Some(5),
     ///     None
     /// ).await?;
     /// # Ok(())
@@ -37,42 +44,44 @@ impl PubSubManager {
     pub async fn publish(
         &self,
         topic: &str,
-        message: serde_json::Value,
+        data: Value,
         priority: Option<u8>,
-        headers: Option<std::collections::HashMap<String, String>>,
+        headers: Option<HashMap<String, String>>,
     ) -> Result<usize> {
-        let body = json!({
+        let payload = json!({
             "topic": topic,
-            "message": message,
+            "data": data,
             "priority": priority,
             "headers": headers,
         });
 
-        let response = self.client.post("pubsub/publish", body).await?;
+        let response = self.client.send_command("pubsub.publish", payload).await?;
 
         Ok(response["delivered_count"].as_u64().unwrap_or(0) as usize)
     }
 
     /// Subscribe to topics
     ///
-    /// Returns a subscription ID that can be used to unsubscribe.
+    /// Supports wildcard patterns:
+    /// - `user.*` - single-level wildcard
+    /// - `user.#` - multi-level wildcard
     ///
-    /// # Example
-    /// ```no_run
-    /// # use synap_sdk::{SynapClient, SynapConfig};
-    /// # #[tokio::main]
-    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// # let client = SynapClient::new(SynapConfig::new("http://localhost:15500"))?;
-    /// let sub_id = client.pubsub().subscribe(vec![
-    ///     "events.user.*".to_string(),
-    ///     "notifications.#".to_string(),
-    /// ]).await?;
-    /// # Ok(())
-    /// # }
-    /// ```
-    pub async fn subscribe(&self, topics: Vec<String>) -> Result<String> {
-        let body = json!({"topics": topics});
-        let response = self.client.post("pubsub/subscribe", body).await?;
+    /// # Returns
+    /// Returns a subscription ID
+    pub async fn subscribe_topics(
+        &self,
+        subscriber_id: &str,
+        topics: Vec<String>,
+    ) -> Result<String> {
+        let payload = json!({
+            "subscriber_id": subscriber_id,
+            "topics": topics,
+        });
+
+        let response = self
+            .client
+            .send_command("pubsub.subscribe", payload)
+            .await?;
 
         Ok(response["subscription_id"]
             .as_str()
@@ -81,20 +90,21 @@ impl PubSubManager {
     }
 
     /// Unsubscribe from topics
-    pub async fn unsubscribe(&self, subscription_id: &str) -> Result<()> {
-        let body = json!({"subscription_id": subscription_id});
-        let response = self.client.post("pubsub/unsubscribe", body).await?;
+    pub async fn unsubscribe(&self, subscriber_id: &str, topics: Vec<String>) -> Result<()> {
+        let payload = json!({
+            "subscriber_id": subscriber_id,
+            "topics": topics,
+        });
 
-        if response["success"].as_bool() != Some(true) {
-            return Err(SynapError::ServerError("Failed to unsubscribe".to_string()));
-        }
-
+        self.client
+            .send_command("pubsub.unsubscribe", payload)
+            .await?;
         Ok(())
     }
 
     /// List all active topics
     pub async fn list_topics(&self) -> Result<Vec<String>> {
-        let response = self.client.get("pubsub/topics").await?;
+        let response = self.client.send_command("pubsub.topics", json!({})).await?;
         Ok(serde_json::from_value(response["topics"].clone())?)
     }
 }
