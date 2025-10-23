@@ -42,7 +42,7 @@ hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
 umicp-core = { version = "0.2.3", features = ["websocket", "http2"] }
 
 # Metrics (Prometheus)
-prometheus = "0.13"
+prometheus = "0.14"
 lazy_static = "1.4"
 sys-info = "0.9"
 
