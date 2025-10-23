@@ -1,10 +1,10 @@
 //! UMICP Transport - Simple HTTP handler
 //! Updated for v0.2.3: Native JSON types + Tool Discovery
 
+use axum::Json;
 use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde_json::json;
 use tracing::{debug, error, info};
 use umicp_core::{DiscoverableService, Envelope};
@@ -125,5 +125,3 @@ pub async fn umicp_discover_handler(State(_state): State<UmicpState>) -> Json<se
         "total_operations": operations.len(),
     }))
 }
-
-

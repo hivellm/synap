@@ -3,14 +3,14 @@
 //! Persistent disk-backed cache for overflow from L1 memory cache
 //! Uses memory-mapped files for fast access
 
+use crate::core::error::{Result, SynapError};
+use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use parking_lot::RwLock;
-use serde::{Deserialize, Serialize};
-use crate::core::error::{Result, SynapError};
 
 /// L2 cache entry metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,13 +53,13 @@ impl L2DiskCache {
     /// Create or open L2 cache
     pub fn new(config: L2CacheConfig) -> Result<Self> {
         // Create cache directory
-        fs::create_dir_all(&config.directory)
-            .map_err(|e| SynapError::IoError(e.to_string()))?;
+        fs::create_dir_all(&config.directory).map_err(|e| SynapError::IoError(e.to_string()))?;
 
         // Open or create data file
         let data_path = config.directory.join("cache.dat");
         let data_file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(&data_path)
@@ -67,12 +67,9 @@ impl L2DiskCache {
 
         // Load index
         let index = Self::load_index(&config.directory)?;
-        
+
         // Calculate current offset
-        let current_offset = data_file
-            .metadata()
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let current_offset = data_file.metadata().map(|m| m.len()).unwrap_or(0);
 
         Ok(Self {
             config,
@@ -86,14 +83,13 @@ impl L2DiskCache {
     /// Load index from disk
     fn load_index(directory: &Path) -> Result<HashMap<String, CacheEntry>> {
         let index_path = directory.join("index.json");
-        
+
         if !index_path.exists() {
             return Ok(HashMap::new());
         }
 
-        let mut file = File::open(&index_path)
-            .map_err(|e| SynapError::IoError(e.to_string()))?;
-        
+        let mut file = File::open(&index_path).map_err(|e| SynapError::IoError(e.to_string()))?;
+
         let mut contents = String::new();
         file.read_to_string(&mut contents)
             .map_err(|e| SynapError::IoError(e.to_string()))?;
@@ -106,12 +102,11 @@ impl L2DiskCache {
     fn save_index(&self) -> Result<()> {
         let index_path = self.config.directory.join("index.json");
         let index = self.index.read();
-        
+
         let json = serde_json::to_string_pretty(&*index)
             .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize index: {}", e)))?;
 
-        fs::write(&index_path, json)
-            .map_err(|e| SynapError::IoError(e.to_string()))?;
+        fs::write(&index_path, json).map_err(|e| SynapError::IoError(e.to_string()))?;
 
         Ok(())
     }
@@ -150,11 +145,11 @@ impl L2DiskCache {
     /// Insert value into L2 cache
     pub async fn insert(&self, key: String, value: Vec<u8>) -> Result<()> {
         let size = value.len() as u64;
-        
+
         // Check if we need to evict
         let current_size = *self.current_size.read();
         let max_size = (self.config.max_size_mb * 1024 * 1024) as u64;
-        
+
         if current_size + size > max_size || self.index.read().len() >= self.config.max_entries {
             self.evict_lfu().await?;
         }
@@ -163,13 +158,13 @@ impl L2DiskCache {
         let offset = {
             let mut file = self.data_file.write();
             let offset = *self.current_offset.read();
-            
+
             file.seek(SeekFrom::Start(offset))
                 .map_err(|e| SynapError::IoError(e.to_string()))?;
-            
+
             file.write_all(&value)
                 .map_err(|e| SynapError::IoError(e.to_string()))?;
-            
+
             file.flush()
                 .map_err(|e| SynapError::IoError(e.to_string()))?;
 
@@ -206,7 +201,7 @@ impl L2DiskCache {
     async fn evict_lfu(&self) -> Result<()> {
         let evict_key = {
             let index = self.index.read();
-            
+
             index
                 .iter()
                 .min_by_key(|(_, entry)| entry.frequency)
@@ -215,7 +210,7 @@ impl L2DiskCache {
 
         if let Some(key) = evict_key {
             let entry = self.index.write().remove(&key);
-            
+
             if let Some(entry) = entry {
                 let current_size = *self.current_size.read();
                 *self.current_size.write() = current_size.saturating_sub(entry.size);
@@ -230,14 +225,14 @@ impl L2DiskCache {
         self.index.write().clear();
         *self.current_offset.write() = 0;
         *self.current_size.write() = 0;
-        
+
         // Truncate data file
-        let mut file = self.data_file.write();
+        let file = self.data_file.write();
         file.set_len(0)
             .map_err(|e| SynapError::IoError(e.to_string()))?;
-        
+
         self.save_index()?;
-        
+
         Ok(())
     }
 
@@ -245,13 +240,14 @@ impl L2DiskCache {
     pub fn stats(&self) -> L2CacheStats {
         let index = self.index.read();
         let current_size = *self.current_size.read();
-        
+
         L2CacheStats {
             entries: index.len(),
             size_bytes: current_size,
             size_mb: current_size as f64 / (1024.0 * 1024.0),
             capacity_mb: self.config.max_size_mb,
-            utilization: (current_size as f64 / (self.config.max_size_mb * 1024 * 1024) as f64) * 100.0,
+            utilization: (current_size as f64 / (self.config.max_size_mb * 1024 * 1024) as f64)
+                * 100.0,
         }
     }
 }
@@ -281,18 +277,24 @@ mod tests {
         };
 
         let cache = L2DiskCache::new(config).unwrap();
-        
+
         // Insert
-        cache.insert("key1".to_string(), b"value1".to_vec()).await.unwrap();
-        cache.insert("key2".to_string(), b"value2".to_vec()).await.unwrap();
-        
+        cache
+            .insert("key1".to_string(), b"value1".to_vec())
+            .await
+            .unwrap();
+        cache
+            .insert("key2".to_string(), b"value2".to_vec())
+            .await
+            .unwrap();
+
         // Get
         let val1 = cache.get("key1").await.unwrap();
         assert_eq!(val1, Some(b"value1".to_vec()));
-        
+
         let val2 = cache.get("key2").await.unwrap();
         assert_eq!(val2, Some(b"value2".to_vec()));
-        
+
         // Stats
         let stats = cache.stats();
         assert_eq!(stats.entries, 2);
@@ -308,14 +310,21 @@ mod tests {
         };
 
         let cache = L2DiskCache::new(config).unwrap();
-        
+
         // Fill cache
-        cache.insert("a".to_string(), vec![0u8; 1024]).await.unwrap();
-        cache.insert("b".to_string(), vec![0u8; 1024]).await.unwrap();
-        cache.insert("c".to_string(), vec![0u8; 1024]).await.unwrap();
-        
+        cache
+            .insert("a".to_string(), vec![0u8; 1024])
+            .await
+            .unwrap();
+        cache
+            .insert("b".to_string(), vec![0u8; 1024])
+            .await
+            .unwrap();
+        cache
+            .insert("c".to_string(), vec![0u8; 1024])
+            .await
+            .unwrap();
+
         assert_eq!(cache.stats().entries, 3);
     }
 }
-
-

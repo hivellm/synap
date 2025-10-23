@@ -84,22 +84,20 @@ mod tests {
     #[test]
     fn test_lfu_basic() {
         let mut cache = LfuCache::new(3);
-        
+
         cache.insert("a", 1);
         cache.insert("b", 2);
         cache.insert("c", 3);
-        
+
         assert_eq!(cache.get(&"a"), Some(1)); // freq=2
         assert_eq!(cache.get(&"a"), Some(1)); // freq=3
         assert_eq!(cache.get(&"b"), Some(2)); // freq=2
-        
+
         // Insert d, should evict c (freq=1, least frequent)
         cache.insert("d", 4);
-        
+
         assert_eq!(cache.get(&"c"), None);
         assert_eq!(cache.get(&"a"), Some(1)); // freq=4, most frequent
         assert_eq!(cache.get(&"d"), Some(4));
     }
 }
-
-

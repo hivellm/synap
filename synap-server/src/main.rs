@@ -187,9 +187,7 @@ async fn main() -> Result<()> {
 
     // Initialize consumer group manager
     let consumer_group_manager = {
-        let cg_mgr = Arc::new(ConsumerGroupManager::new(
-            ConsumerGroupConfig::default(),
-        ));
+        let cg_mgr = Arc::new(ConsumerGroupManager::new(ConsumerGroupConfig::default()));
         cg_mgr.clone().start_rebalance_task();
         info!("Consumer Group system enabled");
         Some(cg_mgr)
@@ -240,12 +238,9 @@ async fn main() -> Result<()> {
 
     // Initialize Prometheus metrics
     init_metrics();
-    
+
     // Create router with rate limiting
-    let app = create_router(
-        app_state,
-        config.rate_limit.clone(),
-    );
+    let app = create_router(app_state, config.rate_limit.clone());
 
     if config.rate_limit.enabled {
         info!(

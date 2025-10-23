@@ -48,20 +48,15 @@ impl ConsumerMember {
 }
 
 /// Partition assignment strategy
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub enum AssignmentStrategy {
     /// Round-robin assignment
+    #[default]
     RoundRobin,
     /// Range-based assignment (partitions 0-2 to consumer 1, 3-5 to consumer 2, etc.)
     Range,
     /// Sticky assignment (minimize partition movement on rebalance)
     Sticky,
-}
-
-impl Default for AssignmentStrategy {
-    fn default() -> Self {
-        AssignmentStrategy::RoundRobin
-    }
 }
 
 /// Consumer group configuration
@@ -136,7 +131,12 @@ pub struct ConsumerGroup {
 }
 
 impl ConsumerGroup {
-    pub fn new(id: String, topic: String, partition_count: usize, config: ConsumerGroupConfig) -> Self {
+    pub fn new(
+        id: String,
+        topic: String,
+        partition_count: usize,
+        config: ConsumerGroupConfig,
+    ) -> Self {
         Self {
             id,
             topic,
@@ -312,14 +312,12 @@ impl ConsumerGroup {
                 }
 
                 // Find underloaded member
-                let underloaded = member_ids
-                    .iter()
-                    .find(|id| {
-                        self.members
-                            .get(*id)
-                            .map(|m| m.partitions.len() < target)
-                            .unwrap_or(false)
-                    });
+                let underloaded = member_ids.iter().find(|id| {
+                    self.members
+                        .get(*id)
+                        .map(|m| m.partitions.len() < target)
+                        .unwrap_or(false)
+                });
 
                 if let Some(underloaded_id) = underloaded {
                     if let Some(member) = self.members.get_mut(underloaded_id) {
@@ -431,7 +429,12 @@ impl ConsumerGroupManager {
         let group_config = config.unwrap_or_else(|| self.default_config.clone());
         groups.insert(
             group_id.to_string(),
-            ConsumerGroup::new(group_id.to_string(), topic.to_string(), partition_count, group_config),
+            ConsumerGroup::new(
+                group_id.to_string(),
+                topic.to_string(),
+                partition_count,
+                group_config,
+            ),
         );
 
         Ok(())
@@ -486,7 +489,11 @@ impl ConsumerGroupManager {
     }
 
     /// Get partition assignment for a member
-    pub async fn get_assignment(&self, group_id: &str, member_id: &str) -> Result<Vec<usize>, String> {
+    pub async fn get_assignment(
+        &self,
+        group_id: &str,
+        member_id: &str,
+    ) -> Result<Vec<usize>, String> {
         let groups = self.groups.read();
 
         let group = groups
@@ -514,7 +521,11 @@ impl ConsumerGroupManager {
     }
 
     /// Get committed offset
-    pub async fn get_offset(&self, group_id: &str, partition_id: usize) -> Result<Option<u64>, String> {
+    pub async fn get_offset(
+        &self,
+        group_id: &str,
+        partition_id: usize,
+    ) -> Result<Option<u64>, String> {
         let groups = self.groups.read();
 
         let group = groups
@@ -621,7 +632,10 @@ mod tests {
         };
 
         let manager = ConsumerGroupManager::new(config);
-        manager.create_group("rr-group", "topic", 6, None).await.unwrap();
+        manager
+            .create_group("rr-group", "topic", 6, None)
+            .await
+            .unwrap();
 
         // Join 3 members
         let m1 = manager.join_group("rr-group", 30).await.unwrap();
@@ -649,7 +663,10 @@ mod tests {
         };
 
         let manager = ConsumerGroupManager::new(config);
-        manager.create_group("range-group", "topic", 7, None).await.unwrap();
+        manager
+            .create_group("range-group", "topic", 7, None)
+            .await
+            .unwrap();
 
         // Join 3 members
         let m1 = manager.join_group("range-group", 30).await.unwrap();
@@ -669,7 +686,10 @@ mod tests {
     #[tokio::test]
     async fn test_offset_commit() {
         let manager = ConsumerGroupManager::new(ConsumerGroupConfig::default());
-        manager.create_group("offset-group", "topic", 3, None).await.unwrap();
+        manager
+            .create_group("offset-group", "topic", 3, None)
+            .await
+            .unwrap();
 
         // Commit offsets
         manager.commit_offset("offset-group", 0, 100).await.unwrap();
@@ -686,7 +706,10 @@ mod tests {
     #[tokio::test]
     async fn test_heartbeat() {
         let manager = ConsumerGroupManager::new(ConsumerGroupConfig::default());
-        manager.create_group("hb-group", "topic", 3, None).await.unwrap();
+        manager
+            .create_group("hb-group", "topic", 3, None)
+            .await
+            .unwrap();
 
         let member = manager.join_group("hb-group", 30).await.unwrap();
 
@@ -697,7 +720,10 @@ mod tests {
     #[tokio::test]
     async fn test_rebalance_on_member_leave() {
         let manager = ConsumerGroupManager::new(ConsumerGroupConfig::default());
-        manager.create_group("rb-group", "topic", 6, None).await.unwrap();
+        manager
+            .create_group("rb-group", "topic", 6, None)
+            .await
+            .unwrap();
 
         let m1 = manager.join_group("rb-group", 30).await.unwrap();
         let m2 = manager.join_group("rb-group", 30).await.unwrap();
@@ -713,4 +739,3 @@ mod tests {
         assert_eq!(assignment.len(), 6);
     }
 }
-

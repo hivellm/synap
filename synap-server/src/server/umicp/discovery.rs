@@ -150,5 +150,3 @@ mod tests {
         assert!(properties.contains_key("key"));
     }
 }
-
-

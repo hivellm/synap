@@ -49,8 +49,7 @@ async fn handle_kv_get(
     let response = match value_bytes {
         Some(bytes) => {
             match return_type {
-                "bytes" => serde_json::to_string(&bytes)
-                    .unwrap_or_else(|_| "[]".to_string()),
+                "bytes" => serde_json::to_string(&bytes).unwrap_or_else(|_| "[]".to_string()),
                 _ => {
                     // Default: return as string
                     String::from_utf8(bytes)
@@ -84,7 +83,7 @@ async fn handle_kv_set(
         .ok_or_else(|| ErrorData::invalid_params("Missing value", None))?;
 
     let ttl = args.get("ttl").and_then(|v| v.as_u64());
-    
+
     let value_bytes = value_str.as_bytes().to_vec();
 
     state

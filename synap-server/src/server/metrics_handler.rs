@@ -6,7 +6,7 @@ use axum::{http::StatusCode, response::IntoResponse};
 pub async fn metrics_handler() -> impl IntoResponse {
     // Update system metrics before encoding
     update_system_metrics().await;
-    
+
     match crate::metrics::encode_metrics() {
         Ok(metrics) => (
             StatusCode::OK,
@@ -48,7 +48,7 @@ pub fn init_metrics() {
     let _ = &*crate::metrics::HTTP_CONNECTIONS;
     let _ = &*crate::metrics::PROCESS_MEMORY_BYTES;
     let _ = &*crate::metrics::PROCESS_CPU_USAGE;
-    
+
     tracing::info!("Prometheus metrics initialized (17 metric types registered)");
 }
 
@@ -74,5 +74,3 @@ pub async fn update_system_metrics() {
             .set((load.five * 100.0) as i64);
     }
 }
-
-

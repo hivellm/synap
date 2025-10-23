@@ -194,13 +194,15 @@ pub async fn kv_get(
                 // Default: return as string
                 let value_str = String::from_utf8(bytes)
                     .unwrap_or_else(|e| format!("<binary data: {} bytes>", e.as_bytes().len()));
-                
+
                 Ok(Json(GetResponse::String(value_str)))
             }
         }
     } else {
         // Key not found
-        Ok(Json(GetResponse::NotFound(serde_json::json!({"error": "Key not found"}))))
+        Ok(Json(GetResponse::NotFound(
+            serde_json::json!({"error": "Key not found"}),
+        )))
     }
 }
 
@@ -772,7 +774,7 @@ async fn handle_kv_get_cmd(
                 // Default: return as string
                 let value_str = String::from_utf8(bytes)
                     .unwrap_or_else(|e| format!("<binary data: {} bytes>", e.as_bytes().len()));
-                
+
                 Ok(serde_json::json!(value_str))
             }
         }
@@ -2365,9 +2367,15 @@ pub struct CreateTopicRequest {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
 pub enum RetentionPolicyRequest {
-    Time { retention_secs: u64 },
-    Size { max_bytes: u64 },
-    Messages { max_messages: u64 },
+    Time {
+        retention_secs: u64,
+    },
+    Size {
+        max_bytes: u64,
+    },
+    Messages {
+        max_messages: u64,
+    },
     Combined {
         retention_secs: Option<u64>,
         max_bytes: Option<u64>,
@@ -2458,8 +2466,8 @@ pub async fn publish_to_partition(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Partition system disabled".to_string()))?;
 
-    let data = serde_json::to_vec(&req.data)
-        .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    let data =
+        serde_json::to_vec(&req.data).map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
     let key = req.key.map(|k| k.into_bytes());
 
@@ -2600,7 +2608,11 @@ pub async fn create_consumer_group(
             "round_robin" => crate::core::AssignmentStrategy::RoundRobin,
             "range" => crate::core::AssignmentStrategy::Range,
             "sticky" => crate::core::AssignmentStrategy::Sticky,
-            _ => return Err(SynapError::InvalidRequest("Invalid assignment strategy".to_string())),
+            _ => {
+                return Err(SynapError::InvalidRequest(
+                    "Invalid assignment strategy".to_string(),
+                ));
+            }
         };
     }
 

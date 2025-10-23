@@ -4,7 +4,7 @@ use synap_server::{
     AssignmentStrategy, ConsumerGroupConfig, ConsumerGroupManager, PartitionConfig,
     PartitionManager, RetentionPolicy,
 };
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 #[tokio::test]
 async fn test_kafka_style_publish_consume_with_consumer_group() {
@@ -229,9 +229,7 @@ async fn test_consumer_group_rebalancing() {
         .await
         .expect("Failed to create topic");
 
-    let cg_manager = Arc::new(ConsumerGroupManager::new(
-        ConsumerGroupConfig::default(),
-    ));
+    let cg_manager = Arc::new(ConsumerGroupManager::new(ConsumerGroupConfig::default()));
 
     cg_manager
         .create_group("rebalance-group", "rebalance-test", 6, None)
@@ -379,14 +377,17 @@ async fn test_multiple_consumer_groups_same_topic() {
     // Publish events
     for i in 0..15 {
         partition_manager
-            .publish("shared-topic", "event", None, format!("data-{}", i).into_bytes())
+            .publish(
+                "shared-topic",
+                "event",
+                None,
+                format!("data-{}", i).into_bytes(),
+            )
             .await
             .expect("Failed to publish");
     }
 
-    let cg_manager = Arc::new(ConsumerGroupManager::new(
-        ConsumerGroupConfig::default(),
-    ));
+    let cg_manager = Arc::new(ConsumerGroupManager::new(ConsumerGroupConfig::default()));
 
     // Create two consumer groups for same topic
     cg_manager
@@ -434,5 +435,3 @@ async fn test_multiple_consumer_groups_same_topic() {
     assert_eq!(assignment_a.len(), 3);
     assert_eq!(assignment_b.len(), 3);
 }
-
-

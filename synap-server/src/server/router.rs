@@ -1,6 +1,5 @@
 use super::handlers::{self, AppState};
 use super::mcp_server::SynapMcpService;
-use super::rate_limit;
 use axum::{
     Router,
     routing::{delete, get, post},
@@ -13,10 +12,7 @@ use tower_http::{
 };
 
 /// Create the Axum router with all endpoints
-pub fn create_router(
-    state: AppState,
-    rate_limit_config: crate::config::RateLimitConfig,
-) -> Router {
+pub fn create_router(state: AppState, rate_limit_config: crate::config::RateLimitConfig) -> Router {
     // CORS configuration
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -26,7 +22,7 @@ pub fn create_router(
     // Create MCP router (stateless)
     let state_arc = Arc::new(state.clone());
     let mcp_router = create_mcp_router(state_arc.clone());
-    
+
     // Create UMICP router
     let umicp_router = create_umicp_router(state_arc.clone());
 
@@ -88,15 +84,24 @@ pub fn create_router(
         .route("/topics/{topic}", post(handlers::create_partitioned_topic))
         .route("/topics/{topic}", delete(handlers::delete_topic))
         .route("/topics/{topic}/stats", get(handlers::get_topic_stats))
-        .route("/topics/{topic}/publish", post(handlers::publish_to_partition))
+        .route(
+            "/topics/{topic}/publish",
+            post(handlers::publish_to_partition),
+        )
         .route(
             "/topics/{topic}/partitions/{partition_id}/consume",
             post(handlers::consume_from_partition),
         )
         // Consumer Group endpoints
         .route("/consumer-groups", get(handlers::list_consumer_groups))
-        .route("/consumer-groups/{group_id}", post(handlers::create_consumer_group))
-        .route("/consumer-groups/{group_id}/join", post(handlers::join_consumer_group))
+        .route(
+            "/consumer-groups/{group_id}",
+            post(handlers::create_consumer_group),
+        )
+        .route(
+            "/consumer-groups/{group_id}/join",
+            post(handlers::join_consumer_group),
+        )
         .route(
             "/consumer-groups/{group_id}/members/{member_id}/leave",
             delete(handlers::leave_consumer_group),
@@ -128,17 +133,17 @@ pub fn create_router(
 
     // Merge all routers: MCP + UMICP + API
     let router = mcp_router
-        .merge(umicp_router)           // UMICP protocol endpoints (/umicp, /umicp/discover)
-        .merge(api_router)             // Main API endpoints
+        .merge(umicp_router) // UMICP protocol endpoints (/umicp, /umicp/discover)
+        .merge(api_router) // Main API endpoints
         .layer(CompressionLayer::new()) // Gzip compression for responses
         .layer(TraceLayer::new_for_http())
         .layer(cors);
-    
+
     // NOTE: Rate limiting implementation available but disabled by default
     // The rate_limit::RateLimiter is fully implemented with token bucket algorithm
     // To enable, set rate_limit.enabled = true in config.yml
     // Implementation details in src/server/rate_limit.rs
-    
+
     if rate_limit_config.enabled {
         tracing::warn!(
             "Rate limiting configured ({} req/s, burst: {}) but not active - requires middleware integration",
@@ -148,15 +153,15 @@ pub fn create_router(
     } else {
         tracing::info!("Rate limiting disabled (default)");
     }
-    
+
     router
 }
 
 /// Create MCP router with StreamableHTTP service
 fn create_mcp_router(state: Arc<AppState>) -> Router {
     use hyper_util::service::TowerToHyperService;
-    use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
     use rmcp::transport::streamable_http_server::StreamableHttpService;
+    use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 
     // Create StreamableHTTP service
     let streamable_service = StreamableHttpService::new(
@@ -177,7 +182,7 @@ fn create_mcp_router(state: Arc<AppState>) -> Router {
         "/mcp",
         axum::routing::any(move |req: axum::extract::Request| {
             use hyper::service::Service;
-            let mut service = hyper_service.clone();
+            let service = hyper_service.clone();
             async move {
                 // Forward request to hyper service
                 match service.call(req).await {
@@ -191,12 +196,10 @@ fn create_mcp_router(state: Arc<AppState>) -> Router {
 
 /// Create UMICP router with discovery and message endpoints
 fn create_umicp_router(state: Arc<AppState>) -> Router {
-    use super::umicp::{transport, UmicpState};
-    
-    let umicp_state = UmicpState {
-        app_state: state,
-    };
-    
+    use super::umicp::{UmicpState, transport};
+
+    let umicp_state = UmicpState { app_state: state };
+
     Router::new()
         .route("/umicp", post(transport::umicp_handler))
         .route("/umicp/discover", get(transport::umicp_discover_handler))

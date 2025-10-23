@@ -8,7 +8,5 @@
 pub mod adaptive;
 pub mod l2_disk;
 
-pub use adaptive::{AdaptiveCache, CacheStrategy, CacheStats};
+pub use adaptive::{AdaptiveCache, CacheStats, CacheStrategy};
 pub use l2_disk::{L2CacheConfig, L2CacheStats, L2DiskCache};
-
-

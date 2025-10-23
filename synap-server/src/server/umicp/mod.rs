@@ -31,4 +31,3 @@ pub async fn health_check() -> Json<Value> {
         "synap_version": env!("CARGO_PKG_VERSION")
     }))
 }
-

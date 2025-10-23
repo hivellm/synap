@@ -10,15 +10,15 @@
 
 use lazy_static::lazy_static;
 use prometheus::{
-    register_histogram_vec, register_int_counter_vec, register_int_gauge_vec, HistogramVec,
-    IntCounterVec, IntGaugeVec, TextEncoder, Encoder,
+    Encoder, HistogramVec, IntCounterVec, IntGaugeVec, TextEncoder, register_histogram_vec,
+    register_int_counter_vec, register_int_gauge_vec,
 };
 
 lazy_static! {
     // ============================================================================
     // KV Store Metrics
     // ============================================================================
-    
+
     /// Total KV operations by type (get, set, delete, scan)
     pub static ref KV_OPS_TOTAL: IntCounterVec = register_int_counter_vec!(
         "synap_kv_operations_total",
@@ -219,9 +219,7 @@ pub fn encode_metrics() -> Result<String, Box<dyn std::error::Error>> {
 
 /// Record KV operation
 pub fn record_kv_op(operation: &str, status: &str, duration_secs: f64) {
-    KV_OPS_TOTAL
-        .with_label_values(&[operation, status])
-        .inc();
+    KV_OPS_TOTAL.with_label_values(&[operation, status]).inc();
     KV_OP_DURATION
         .with_label_values(&[operation])
         .observe(duration_secs);
@@ -260,9 +258,7 @@ pub fn record_pubsub_op(operation: &str, status: &str) {
 
 /// Record pub/sub message
 pub fn record_pubsub_message(topic: &str) {
-    PUBSUB_MESSAGES_TOTAL
-        .with_label_values(&[topic])
-        .inc();
+    PUBSUB_MESSAGES_TOTAL.with_label_values(&[topic]).inc();
 }
 
 /// Record HTTP request
@@ -277,19 +273,13 @@ pub fn record_http_request(method: &str, path: &str, status: u16, duration_secs:
 
 /// Update replication lag
 pub fn update_replication_lag(replica_id: &str, lag: i64) {
-    REPL_LAG
-        .with_label_values(&[replica_id])
-        .set(lag);
+    REPL_LAG.with_label_values(&[replica_id]).set(lag);
 }
 
 /// Record replication operation
 pub fn record_replication_op(op_type: &str, status: &str, bytes: u64) {
-    REPL_OPS_TOTAL
-        .with_label_values(&[op_type, status])
-        .inc();
-    REPL_BYTES_TOTAL
-        .with_label_values(&["sent"])
-        .inc_by(bytes);
+    REPL_OPS_TOTAL.with_label_values(&[op_type, status]).inc();
+    REPL_BYTES_TOTAL.with_label_values(&["sent"]).inc_by(bytes);
 }
 
 #[cfg(test)]
@@ -300,7 +290,7 @@ mod tests {
     fn test_record_kv_op() {
         record_kv_op("get", "success", 0.001);
         record_kv_op("set", "success", 0.002);
-        
+
         let metrics = encode_metrics().unwrap();
         assert!(metrics.contains("synap_kv_operations_total"));
         assert!(metrics.contains("synap_kv_operation_duration_seconds"));
@@ -309,7 +299,7 @@ mod tests {
     #[test]
     fn test_record_queue_op() {
         record_queue_op("test-queue", "publish", "success", 0.005);
-        
+
         let metrics = encode_metrics().unwrap();
         assert!(metrics.contains("synap_queue_operations_total"));
     }
@@ -318,13 +308,12 @@ mod tests {
     fn test_encode_metrics() {
         // Record some metrics first
         record_kv_op("get", "success", 0.001);
-        
+
         let result = encode_metrics();
         assert!(result.is_ok());
-        
+
         let metrics = result.unwrap();
         // Should contain Prometheus format (may be empty if no metrics recorded)
         assert!(!metrics.is_empty() || metrics.contains("# HELP") || metrics.len() >= 0);
     }
 }
-

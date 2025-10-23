@@ -161,7 +161,7 @@ impl Partition {
     pub fn append(&mut self, mut event: PartitionEvent) -> u64 {
         event.partition_id = self.id;
         event.offset = self.next_offset;
-        
+
         self.total_bytes += event.size_bytes;
         self.buffer.push_back(event);
         self.next_offset += 1;
@@ -334,6 +334,7 @@ pub struct CompactionResult {
 pub struct PartitionedTopic {
     name: String,
     partitions: Vec<Partition>,
+    #[allow(dead_code)]
     config: PartitionConfig,
 }
 
@@ -615,7 +616,12 @@ mod tests {
 
         // Publish with key
         let (partition_id, offset) = manager
-            .publish("events", "update", Some(b"user123".to_vec()), b"data".to_vec())
+            .publish(
+                "events",
+                "update",
+                Some(b"user123".to_vec()),
+                b"data".to_vec(),
+            )
             .await
             .unwrap();
 
@@ -643,12 +649,22 @@ mod tests {
 
         // Same key should go to same partition
         let (p1, _) = manager
-            .publish("orders", "create", Some(b"key1".to_vec()), b"data1".to_vec())
+            .publish(
+                "orders",
+                "create",
+                Some(b"key1".to_vec()),
+                b"data1".to_vec(),
+            )
             .await
             .unwrap();
 
         let (p2, _) = manager
-            .publish("orders", "create", Some(b"key1".to_vec()), b"data2".to_vec())
+            .publish(
+                "orders",
+                "create",
+                Some(b"key1".to_vec()),
+                b"data2".to_vec(),
+            )
             .await
             .unwrap();
 
@@ -792,4 +808,3 @@ mod tests {
         assert_eq!(events.len(), 9);
     }
 }
-

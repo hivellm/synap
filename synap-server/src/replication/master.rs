@@ -29,6 +29,7 @@ pub struct MasterNode {
     #[allow(dead_code)]
     config: ReplicationConfig,
     replication_log: Arc<ReplicationLog>,
+    #[allow(dead_code)]
     stream_manager: Option<Arc<StreamManager>>,
 
     /// Connected replicas

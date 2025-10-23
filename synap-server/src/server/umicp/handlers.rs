@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 
 use rmcp::model::{CallToolRequestParam, Content};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use tracing::{debug, error};
 use umicp_core::{Envelope, OperationType};
 
@@ -139,4 +139,3 @@ fn create_error_response(request: Envelope, error_message: &str) -> Result<Envel
 
     Ok(response)
 }
-

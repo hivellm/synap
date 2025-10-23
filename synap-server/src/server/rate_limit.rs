@@ -5,17 +5,12 @@
 //! - Configurable requests per second
 //! - Burst capacity
 
-use axum::{
-    extract::ConnectInfo,
-    http::StatusCode,
-    middleware::Next,
-    response::{IntoResponse, Response},
-};
+use axum::{extract::ConnectInfo, http::StatusCode, middleware::Next, response::Response};
+use parking_lot::RwLock;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use parking_lot::RwLock;
-use std::collections::HashMap;
 
 use crate::config::RateLimitConfig;
 
@@ -43,7 +38,7 @@ impl TokenBucket {
         let now = Instant::now();
         let elapsed = now.duration_since(self.last_refill).as_secs_f64();
         let new_tokens = elapsed * self.refill_rate;
-        
+
         self.tokens = (self.tokens + new_tokens).min(self.capacity);
         self.last_refill = now;
 
@@ -73,7 +68,7 @@ impl RateLimiter {
 
     pub fn check_rate_limit(&self, ip: &str) -> bool {
         let mut buckets = self.buckets.write();
-        
+
         let bucket = buckets.entry(ip.to_string()).or_insert_with(|| {
             TokenBucket::new(self.config.burst_size, self.config.requests_per_second)
         });
@@ -128,15 +123,15 @@ mod tests {
     #[test]
     fn test_token_bucket() {
         let mut bucket = TokenBucket::new(10, 100);
-        
+
         // Should allow first request
         assert!(bucket.try_consume(1.0));
-        
+
         // Should allow up to capacity
         for _ in 0..9 {
             assert!(bucket.try_consume(1.0));
         }
-        
+
         // Should deny when empty
         assert!(!bucket.try_consume(1.0));
     }
@@ -148,17 +143,17 @@ mod tests {
             requests_per_second: 100,
             burst_size: 10,
         };
-        
+
         let limiter = RateLimiter::new(config);
-        
+
         // Should allow requests up to burst size
         for _ in 0..10 {
             assert!(limiter.check_rate_limit("192.168.1.1"));
         }
-        
+
         // Should deny after burst
         assert!(!limiter.check_rate_limit("192.168.1.1"));
-        
+
         // Different IP should have own bucket
         assert!(limiter.check_rate_limit("192.168.1.2"));
     }
@@ -170,16 +165,16 @@ mod tests {
             requests_per_second: 100,
             burst_size: 10,
         };
-        
+
         let limiter = RateLimiter::new(config);
-        
+
         // Add some entries
         limiter.check_rate_limit("192.168.1.1");
         limiter.check_rate_limit("192.168.1.2");
-        
+
         // Cleanup shouldn't remove recent entries
         limiter.cleanup();
-        
+
         assert_eq!(limiter.buckets.read().len(), 2);
     }
 }

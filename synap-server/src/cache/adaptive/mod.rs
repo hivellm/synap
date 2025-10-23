@@ -11,11 +11,11 @@ use std::collections::{HashMap, VecDeque};
 use std::hash::Hash;
 use std::time::Instant;
 
-pub mod lfu;
 pub mod arc;
+pub mod lfu;
 
-pub use lfu::LfuCache;
 pub use arc::ArcCache;
+pub use lfu::LfuCache;
 
 /// Cache eviction strategy
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -77,18 +77,19 @@ impl CacheStats {
 pub struct AdaptiveCache<K: Hash + Eq + Clone, V: Clone> {
     current_strategy: CacheStrategy,
     capacity: usize,
-    
+
     // Strategy implementations
     lru_cache: HashMap<K, (V, Instant)>,
     lru_order: VecDeque<K>,
     lfu_cache: Option<LfuCache<K, V>>,
     arc_cache: Option<ArcCache<K, V>>,
-    
+
     // Statistics for each strategy
     stats: HashMap<CacheStrategy, CacheStats>,
-    
+
     // Adaptation parameters
     evaluation_window: u64,
+    #[allow(dead_code)]
     last_evaluation: Instant,
 }
 
@@ -106,12 +107,12 @@ impl<K: Hash + Eq + Clone, V: Clone> AdaptiveCache<K, V> {
             evaluation_window: 10000, // Evaluate every 10K ops
             last_evaluation: Instant::now(),
         };
-        
+
         // Initialize stats for all strategies
         cache.stats.insert(CacheStrategy::Lru, CacheStats::new());
         cache.stats.insert(CacheStrategy::Lfu, CacheStats::new());
         cache.stats.insert(CacheStrategy::Arc, CacheStats::new());
-        
+
         // Initialize the selected strategy
         match initial_strategy {
             CacheStrategy::Lfu => {
@@ -122,7 +123,7 @@ impl<K: Hash + Eq + Clone, V: Clone> AdaptiveCache<K, V> {
             }
             _ => {} // LRU is default
         }
-        
+
         cache
     }
 
@@ -174,11 +175,11 @@ impl<K: Hash + Eq + Clone, V: Clone> AdaptiveCache<K, V> {
     fn get_lru(&mut self, key: &K) -> Option<V> {
         if let Some((value, _)) = self.lru_cache.get(key) {
             let value = value.clone();
-            
+
             // Move to end (most recently used)
             self.lru_order.retain(|k| k != key);
             self.lru_order.push_back(key.clone());
-            
+
             Some(value)
         } else {
             None
@@ -198,7 +199,7 @@ impl<K: Hash + Eq + Clone, V: Clone> AdaptiveCache<K, V> {
 
         // Insert or update
         self.lru_cache.insert(key.clone(), (value, Instant::now()));
-        
+
         // Update LRU order
         self.lru_order.retain(|k| k != &key);
         self.lru_order.push_back(key);
@@ -207,11 +208,7 @@ impl<K: Hash + Eq + Clone, V: Clone> AdaptiveCache<K, V> {
     /// Evaluate and potentially switch strategies
     fn maybe_adapt(&mut self) {
         // Check if evaluation window has passed
-        let total_ops: u64 = self
-            .stats
-            .values()
-            .map(|s| s.hits + s.misses)
-            .sum();
+        let total_ops: u64 = self.stats.values().map(|s| s.hits + s.misses).sum();
 
         if total_ops < self.evaluation_window {
             return;
@@ -255,7 +252,7 @@ impl<K: Hash + Eq + Clone, V: Clone> AdaptiveCache<K, V> {
         // For simplicity, we'll just clear and start fresh
         // In production, you'd want to migrate data
         self.current_strategy = new_strategy;
-        
+
         match new_strategy {
             CacheStrategy::Lru => {
                 self.lfu_cache = None;
@@ -307,15 +304,15 @@ mod tests {
     #[test]
     fn test_adaptive_cache_lru() {
         let mut cache = AdaptiveCache::new(3, CacheStrategy::Lru);
-        
+
         cache.insert("a", 1);
         cache.insert("b", 2);
         cache.insert("c", 3);
-        
+
         assert_eq!(cache.get(&"a"), Some(1));
         assert_eq!(cache.get(&"b"), Some(2));
         assert_eq!(cache.get(&"c"), Some(3));
-        
+
         // Insert d, should evict a (least recently used)
         cache.insert("d", 4);
         assert_eq!(cache.get(&"a"), None);
@@ -325,15 +322,14 @@ mod tests {
     #[test]
     fn test_cache_stats() {
         let mut cache = AdaptiveCache::new(10, CacheStrategy::Lru);
-        
+
         cache.insert("key1", "value1");
         assert_eq!(cache.get(&"key1"), Some("value1")); // Hit
         assert_eq!(cache.get(&"key2"), None); // Miss
-        
+
         let stats = cache.get_stats();
         assert_eq!(stats.hits, 1);
         assert_eq!(stats.misses, 1);
         assert_eq!(stats.hit_rate, 0.5);
     }
 }
-

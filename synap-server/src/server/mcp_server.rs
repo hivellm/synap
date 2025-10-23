@@ -1,6 +1,9 @@
-use std::sync::Arc;
-use rmcp::model::{CallToolRequestParam, CallToolResult, ErrorData, Implementation, ProtocolVersion, ServerCapabilities, ServerInfo};
 use super::{AppState, get_mcp_tools, handle_mcp_tool};
+use rmcp::model::{
+    CallToolRequestParam, CallToolResult, ErrorData, Implementation, ProtocolVersion,
+    ServerCapabilities, ServerInfo,
+};
+use std::sync::Arc;
 
 /// MCP Service implementation
 #[derive(Clone)]
@@ -26,37 +29,26 @@ impl rmcp::ServerHandler for SynapMcpService {
         }
     }
 
-    fn list_tools(
+    async fn list_tools(
         &self,
         _request: Option<rmcp::model::PaginatedRequestParam>,
         _context: rmcp::service::RequestContext<rmcp::RoleServer>,
-    ) -> impl std::future::Future<
-        Output = Result<rmcp::model::ListToolsResult, ErrorData>,
-    > + Send
-    + '_ {
-        async move {
-            use rmcp::model::ListToolsResult;
+    ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
+        use rmcp::model::ListToolsResult;
 
-            let tools = get_mcp_tools();
+        let tools = get_mcp_tools();
 
-            Ok(ListToolsResult {
-                tools,
-                next_cursor: None,
-            })
-        }
+        Ok(ListToolsResult {
+            tools,
+            next_cursor: None,
+        })
     }
 
-    fn call_tool(
+    async fn call_tool(
         &self,
         request: CallToolRequestParam,
         _context: rmcp::service::RequestContext<rmcp::RoleServer>,
-    ) -> impl std::future::Future<
-        Output = Result<CallToolResult, ErrorData>,
-    > + Send
-    + '_ {
-        async move {
-            handle_mcp_tool(request, self.state.clone()).await
-        }
+    ) -> Result<CallToolResult, ErrorData> {
+        handle_mcp_tool(request, self.state.clone()).await
     }
 }
-
