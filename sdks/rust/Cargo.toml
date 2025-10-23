@@ -19,10 +19,12 @@ serde_json = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
 async-trait = "0.1"
-futures = "0.3"
-futures-util = "0.3"
 url = "2.5"
 uuid = { version = "1.11", features = ["v4"] }
+
+# RxJS-style reactive programming
+futures = "0.3"
+futures-util = "0.3"
 async-stream = "0.3"
 pin-project = "1.1"
 

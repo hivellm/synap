@@ -1,8 +1,10 @@
 //! Tests for KV Store operations
 
+mod common;
+
 #[cfg(test)]
 mod tests {
-    use crate::tests::helpers::setup_test_client;
+    use super::common::setup_test_client;
     use mockito::Matcher;
     use serde_json::json;
 
@@ -11,15 +13,18 @@ mod tests {
         let (client, mut server) = setup_test_client().await;
 
         let mock = server
-            .mock("POST", "/kv/set")
-            .match_body(Matcher::Json(json!({
-                "key": "test_key",
-                "value": "test_value",
-                "ttl": null
+            .mock("POST", "/api/v1/command")
+            .match_body(Matcher::PartialJson(json!({
+                "command": "kv.set",
+                "payload": {
+                    "key": "test_key",
+                    "value": "test_value",
+                    "ttl": null
+                }
             })))
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#"{"success": true, "key": "test_key"}"#)
+            .with_body(r#"{"success": true, "payload": {}}"#)
             .create_async()
             .await;
 
@@ -41,7 +46,7 @@ mod tests {
                 "ttl": 3600
             })))
             .with_status(200)
-            .with_body(r#"{"success": true, "key": "session"}"#)
+            .with_body(r#"{"success": true, "payload": {}}"#)
             .create_async()
             .await;
 
@@ -56,10 +61,14 @@ mod tests {
         let (client, mut server) = setup_test_client().await;
 
         let mock = server
-            .mock("GET", "/kv/get/test_key")
+            .mock("POST", "/api/v1/command")
+            .match_body(Matcher::PartialJson(json!({
+                "command": "kv.get",
+                "payload": {"key": "test_key"}
+            })))
             .with_status(200)
             .with_header("content-type", "application/json")
-            .with_body(r#""\"test_value\""#) // Double-encoded string
+            .with_body(r#""{"success": true, "payload": "test_value"}"#) // Double-encoded string
             .create_async()
             .await;
 
@@ -74,9 +83,13 @@ mod tests {
         let (client, mut server) = setup_test_client().await;
 
         let mock = server
-            .mock("GET", "/kv/get/nonexistent")
+            .mock("POST", "/api/v1/command")
+            .match_body(Matcher::PartialJson(json!({
+                "command": "kv.get",
+                "payload": {"key": "nonexistent"}
+            })))
             .with_status(200)
-            .with_body(r#"{"error": "Key not found"}"#)
+            .with_body(r#"{"success": false, "error": "Key not found"}"#)
             .create_async()
             .await;
 
@@ -91,7 +104,11 @@ mod tests {
         let (client, mut server) = setup_test_client().await;
 
         let mock = server
-            .mock("DELETE", "/kv/del/test_key")
+            .mock("POST", "/api/v1/command")
+            .match_body(Matcher::PartialJson(json!({
+                "command": "kv.del",
+                "payload": {"key": "test_key"}
+            })))
             .with_status(200)
             .with_body(r#"{"deleted": true, "key": "test_key"}"#)
             .create_async()
@@ -108,10 +125,13 @@ mod tests {
         let (client, mut server) = setup_test_client().await;
 
         let mock = server
-            .mock("POST", "/kv/incr")
-            .match_body(Matcher::Json(json!({"key": "counter"})))
+            .mock("POST", "/api/v1/command")
+            .match_body(Matcher::PartialJson(json!({
+                "command": "kv.incr",
+                "payload": {"key": "counter"}
+            })))
             .with_status(200)
-            .with_body(r#"{"value": 1}"#)
+            .with_body(r#"{"success": true, "payload": {"value": 1}}"#)
             .create_async()
             .await;
 
@@ -126,8 +146,11 @@ mod tests {
         let (client, mut server) = setup_test_client().await;
 
         let mock = server
-            .mock("POST", "/kv/decr")
-            .match_body(Matcher::Json(json!({"key": "counter"})))
+            .mock("POST", "/api/v1/command")
+            .match_body(Matcher::PartialJson(json!({
+                "command": "kv.decr",
+                "payload": {"key": "counter"}
+            })))
             .with_status(200)
             .with_body(r#"{"value": -1}"#)
             .create_async()
@@ -144,7 +167,10 @@ mod tests {
         let (client, mut server) = setup_test_client().await;
 
         let mock = server
-            .mock("GET", "/kv/stats")
+            .mock("POST", "/api/v1/command")
+            .match_body(Matcher::PartialJson(
+                json!({"command": "kv.stats", "payload": {}}),
+            ))
             .with_status(200)
             .with_body(
                 r#"{

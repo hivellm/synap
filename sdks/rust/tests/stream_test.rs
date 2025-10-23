@@ -1,8 +1,10 @@
 //! Tests for Stream operations
 
+mod common;
+
 #[cfg(test)]
 mod tests {
-    use crate::tests::helpers::setup_test_client;
+    use super::common::setup_test_client;
     use mockito::Matcher;
     use serde_json::json;
 
