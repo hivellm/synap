@@ -76,7 +76,7 @@ impl crate::stream::StreamManager {
             }
         });
 
-        let stream = MessageStream::new(rx);
+        let stream: MessageStream<Event> = Box::pin(tokio_stream::wrappers::UnboundedReceiverStream::new(rx));
         let handle = SubscriptionHandle::new(cancel_tx);
 
         (stream, handle)
@@ -113,10 +113,8 @@ impl crate::stream::StreamManager {
                                     current_offset = event.offset + 1;
 
                                     // Filter by event type
-                                    if event.event == event_type {
-                                        if tx.send(event).is_err() {
-                                            return;
-                                        }
+                                    if event.event == event_type && tx.send(event).is_err() {
+                                        return;
                                     }
                                 }
                             }
@@ -129,7 +127,7 @@ impl crate::stream::StreamManager {
             }
         });
 
-        let stream = MessageStream::new(rx);
+        let stream: MessageStream<Event> = Box::pin(tokio_stream::wrappers::UnboundedReceiverStream::new(rx));
         let handle = SubscriptionHandle::new(cancel_tx);
 
         (stream, handle)

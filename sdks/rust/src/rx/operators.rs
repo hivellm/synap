@@ -13,7 +13,7 @@ use tokio::time::{sleep, timeout};
 /// let obs = Observable::from_stream(stream::iter(vec![1, 2, 3]));
 /// let with_retry = retry(obs, 3);
 /// ```
-pub fn retry<T: Send + 'static>(observable: Observable<T>, count: usize) -> Observable<T> {
+pub fn retry<T: Send + 'static>(observable: Observable<T>, _count: usize) -> Observable<T> {
     // For now, just pass through - full retry logic would need error handling in Stream
     observable
 }
@@ -88,7 +88,7 @@ pub fn buffer_time<T: Send + 'static>(
 pub fn merge<T: Send + 'static>(observables: Vec<Observable<T>>) -> Observable<T> {
     let stream = async_stream::stream! {
         use futures::StreamExt;
-        let mut streams: Vec<_> = observables.into_iter()
+        let streams: Vec<_> = observables.into_iter()
             .map(|o| o.into_stream())
             .collect();
 
@@ -101,4 +101,48 @@ pub fn merge<T: Send + 'static>(observables: Vec<Observable<T>>) -> Observable<T
     };
 
     Observable::from_stream(stream)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream;
+
+    #[tokio::test]
+    async fn test_retry() {
+        let obs = Observable::from_stream(stream::iter(vec![1, 2, 3]));
+        let with_retry = retry(obs, 3);
+        use futures::StreamExt;
+        let values: Vec<_> = with_retry.into_stream().collect().await;
+        assert_eq!(values, vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_debounce() {
+        let obs = Observable::from_stream(stream::iter(vec![1, 2, 3]));
+        let debounced = debounce(obs, Duration::from_millis(10));
+        use futures::StreamExt;
+        let values: Vec<_> = debounced.into_stream().collect().await;
+        assert_eq!(values, vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_buffer_time() {
+        let obs = Observable::from_stream(stream::iter(vec![1, 2, 3, 4, 5]));
+        let buffered = buffer_time(obs, Duration::from_millis(10));
+        use futures::StreamExt;
+        let buffers: Vec<_> = buffered.into_stream().collect().await;
+        assert!(!buffers.is_empty());
+        assert!(buffers[0].len() > 0);
+    }
+
+    #[tokio::test]
+    async fn test_merge() {
+        let obs1 = Observable::from_stream(stream::iter(vec![1, 2]));
+        let obs2 = Observable::from_stream(stream::iter(vec![3, 4]));
+        let merged = merge(vec![obs1, obs2]);
+        use futures::StreamExt;
+        let values: Vec<_> = merged.into_stream().collect().await;
+        assert_eq!(values.len(), 4);
+    }
 }

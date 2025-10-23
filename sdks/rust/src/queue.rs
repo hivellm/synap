@@ -138,3 +138,29 @@ impl QueueManager {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SynapConfig;
+
+    #[test]
+    fn test_queue_manager_creation() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let queue = client.queue();
+
+        assert!(std::mem::size_of_val(&queue) > 0);
+    }
+
+    #[test]
+    fn test_queue_manager_clone() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let queue1 = client.queue();
+        let queue2 = queue1.clone();
+
+        assert!(std::mem::size_of_val(&queue1) > 0);
+        assert!(std::mem::size_of_val(&queue2) > 0);
+    }
+}

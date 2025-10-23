@@ -4,7 +4,6 @@ use futures::Stream;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
-use tokio::sync::mpsc;
 
 /// Observer trait - similar to RxJS Observer
 pub trait Observer<T>: Send {
@@ -172,5 +171,108 @@ impl<T> Stream for Observable<T> {
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         Pin::new(&mut self.stream).poll_next(cx)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use futures::stream;
+
+    #[test]
+    fn test_subscription_creation() {
+        let sub = Subscription::new();
+        assert!(sub.is_active());
+    }
+
+    #[test]
+    fn test_subscription_unsubscribe() {
+        let sub = Subscription::new();
+        sub.unsubscribe();
+        assert!(!sub.is_active());
+    }
+
+    #[test]
+    fn test_subscription_default() {
+        let sub = Subscription::default();
+        assert!(sub.is_active());
+    }
+
+    #[test]
+    fn test_subscription_clone() {
+        let sub1 = Subscription::new();
+        let sub2 = sub1.clone();
+        assert!(sub1.is_active());
+        assert!(sub2.is_active());
+        sub1.unsubscribe();
+        assert!(!sub1.is_active());
+        assert!(!sub2.is_active());
+    }
+
+    #[tokio::test]
+    async fn test_observable_from_stream() {
+        let obs = Observable::from_stream(stream::iter(vec![1, 2, 3]));
+        let stream = obs.into_stream();
+        use futures::StreamExt;
+        let values: Vec<_> = stream.collect().await;
+        assert_eq!(values, vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_observable_map() {
+        let obs = Observable::from_stream(stream::iter(vec![1, 2, 3]));
+        let mapped = obs.map(|x| x * 2);
+        use futures::StreamExt;
+        let values: Vec<_> = mapped.into_stream().collect().await;
+        assert_eq!(values, vec![2, 4, 6]);
+    }
+
+    #[tokio::test]
+    async fn test_observable_filter() {
+        let obs = Observable::from_stream(stream::iter(vec![1, 2, 3, 4, 5]));
+        let filtered = obs.filter(|x| *x > 2);
+        use futures::StreamExt;
+        let values: Vec<_> = filtered.into_stream().collect().await;
+        assert_eq!(values, vec![3, 4, 5]);
+    }
+
+    #[tokio::test]
+    async fn test_observable_take() {
+        let obs = Observable::from_stream(stream::iter(vec![1, 2, 3, 4, 5]));
+        let taken = obs.take(3);
+        use futures::StreamExt;
+        let values: Vec<_> = taken.into_stream().collect().await;
+        assert_eq!(values, vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_observable_skip() {
+        let obs = Observable::from_stream(stream::iter(vec![1, 2, 3, 4, 5]));
+        let skipped = obs.skip(2);
+        use futures::StreamExt;
+        let values: Vec<_> = skipped.into_stream().collect().await;
+        assert_eq!(values, vec![3, 4, 5]);
+    }
+
+    #[tokio::test]
+    async fn test_observable_take_while() {
+        let obs = Observable::from_stream(stream::iter(vec![1, 2, 3, 4, 5]));
+        let taken = obs.take_while(|x| *x < 4);
+        use futures::StreamExt;
+        let values: Vec<_> = taken.into_stream().collect().await;
+        assert_eq!(values, vec![1, 2, 3]);
+    }
+
+    #[tokio::test]
+    async fn test_observable_chaining() {
+        let obs = Observable::from_stream(stream::iter(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]));
+        let result = obs
+            .filter(|x| *x % 2 == 0) // Only even numbers
+            .map(|x| x * 2) // Double them
+            .take(3); // Take first 3
+
+        use futures::StreamExt;
+        let values: Vec<_> = result.into_stream().collect().await;
+        assert_eq!(values, vec![4, 8, 12]);
     }
 }

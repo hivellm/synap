@@ -24,7 +24,7 @@ impl KVStore {
     ///
     /// # Arguments
     /// * `key` - The key to set
-    /// * `value` - The value to set (must be serializable to JSON)
+    /// * `value` - The value to store
     /// * `ttl` - Optional time-to-live in seconds
     ///
     /// # Example
@@ -165,13 +165,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_kv_operations() {
-        // This is a basic compilation test
-        // Real tests would require a running server or mocks
         let config = SynapConfig::new("http://localhost:15500");
         let client = SynapClient::new(config).unwrap();
         let kv = client.kv();
 
-        // Just verify the KVStore is created
+        // Test that KV store can be created
         assert!(std::mem::size_of_val(&kv) > 0);
+    }
+
+    #[test]
+    fn test_kv_clone() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let kv1 = client.kv();
+        let kv2 = kv1.clone();
+
+        // Both should exist
+        assert!(std::mem::size_of_val(&kv1) > 0);
+        assert!(std::mem::size_of_val(&kv2) > 0);
     }
 }

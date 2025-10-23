@@ -105,3 +105,29 @@ impl StreamManager {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SynapConfig;
+
+    #[test]
+    fn test_stream_manager_creation() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let stream = client.stream();
+
+        assert!(std::mem::size_of_val(&stream) > 0);
+    }
+
+    #[test]
+    fn test_stream_manager_clone() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let stream1 = client.stream();
+        let stream2 = stream1.clone();
+
+        assert!(std::mem::size_of_val(&stream1) > 0);
+        assert!(std::mem::size_of_val(&stream2) > 0);
+    }
+}

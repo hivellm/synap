@@ -1,4 +1,4 @@
-//! Tests for Pub/Sub operations
+//! Comprehensive tests for Pub/Sub operations
 
 mod common;
 
@@ -13,21 +13,56 @@ mod tests {
         let (client, mut server) = setup_test_client().await;
 
         let mock = server
-            .mock("POST", "/pubsub/publish")
-            .match_body(Matcher::Json(json!({
-                "topic": "events.user.login",
-                "message": {"user_id": 123},
-                "priority": 5,
-                "headers": null
+            .mock("POST", "/api/v1/command")
+            .match_body(Matcher::PartialJson(json!({
+                "command": "pubsub.publish",
+                "payload": {
+                    "topic": "user.created",
+                    "data": {"id": 123}
+                }
             })))
             .with_status(200)
-            .with_body(r#"{"delivered_count": 3}"#)
+            .with_body(r#"{"success": true, "payload": {"delivered_count": 5}}"#)
             .create_async()
             .await;
 
         let count = client
             .pubsub()
-            .publish("events.user.login", json!({"user_id": 123}), Some(5), None)
+            .publish("user.created", json!({"id": 123}), None, None)
+            .await
+            .unwrap();
+        assert_eq!(count, 5);
+
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_pubsub_publish_with_priority() {
+        let (client, mut server) = setup_test_client().await;
+
+        let mock = server
+            .mock("POST", "/api/v1/command")
+            .match_body(Matcher::PartialJson(json!({
+                "command": "pubsub.publish",
+                "payload": {
+                    "topic": "alerts.critical",
+                    "data": {"message": "Server down"},
+                    "priority": 9
+                }
+            })))
+            .with_status(200)
+            .with_body(r#"{"success": true, "payload": {"delivered_count": 3}}"#)
+            .create_async()
+            .await;
+
+        let count = client
+            .pubsub()
+            .publish(
+                "alerts.critical",
+                json!({"message": "Server down"}),
+                Some(9),
+                None,
+            )
             .await
             .unwrap();
         assert_eq!(count, 3);
@@ -40,12 +75,16 @@ mod tests {
         let (client, mut server) = setup_test_client().await;
 
         let mock = server
-            .mock("POST", "/pubsub/subscribe")
-            .match_body(Matcher::Json(json!({
-                "topics": ["events.*", "notifications.#"]
+            .mock("POST", "/api/v1/command")
+            .match_body(Matcher::PartialJson(json!({
+                "command": "pubsub.subscribe",
+                "payload": {
+                    "subscriber_id": "sub-123",
+                    "topics": ["events.*", "notifications.#"]
+                }
             })))
             .with_status(200)
-            .with_body(r#"{"subscription_id": "sub-123"}"#)
+            .with_body(r#"{"success": true, "payload": {"subscription_id": "sub-123"}}"#)
             .create_async()
             .await;
 
@@ -67,10 +106,16 @@ mod tests {
         let (client, mut server) = setup_test_client().await;
 
         let mock = server
-            .mock("POST", "/pubsub/unsubscribe")
-            .match_body(Matcher::Json(json!({"subscription_id": "sub-123"})))
+            .mock("POST", "/api/v1/command")
+            .match_body(Matcher::PartialJson(json!({
+                "command": "pubsub.unsubscribe",
+                "payload": {
+                    "subscriber_id": "sub-123",
+                    "topics": ["topic.test"]
+                }
+            })))
             .with_status(200)
-            .with_body(r#"{"success": true}"#)
+            .with_body(r#"{"success": true, "payload": {}}"#)
             .create_async()
             .await;
 
@@ -88,17 +133,21 @@ mod tests {
         let (client, mut server) = setup_test_client().await;
 
         let mock = server
-            .mock("GET", "/pubsub/topics")
+            .mock("POST", "/api/v1/command")
+            .match_body(Matcher::PartialJson(json!({
+                "command": "pubsub.topics",
+                "payload": {}
+            })))
             .with_status(200)
             .with_body(
-                r#"{"topics": ["events.user.login", "events.user.logout", "notifications.email"]}"#,
+                r#"{"success": true, "payload": {"topics": ["user.created", "order.completed"]}}"#,
             )
             .create_async()
             .await;
 
         let topics = client.pubsub().list_topics().await.unwrap();
-        assert_eq!(topics.len(), 3);
-        assert!(topics.contains(&"events.user.login".to_string()));
+        assert_eq!(topics.len(), 2);
+        assert_eq!(topics[0], "user.created");
 
         mock.assert_async().await;
     }

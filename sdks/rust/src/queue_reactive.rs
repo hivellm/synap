@@ -84,7 +84,7 @@ impl crate::queue::QueueManager {
             }
         });
 
-        let stream = MessageStream::new(rx);
+        let stream: MessageStream<Message> = Box::pin(tokio_stream::wrappers::UnboundedReceiverStream::new(rx));
         let handle = SubscriptionHandle::new(cancel_tx);
 
         (stream, handle)

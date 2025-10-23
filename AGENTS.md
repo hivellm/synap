@@ -84,10 +84,30 @@ Only these 3 files are allowed in the project root:
 ## Code Quality
 
 - **Rust Edition**: 2024 (nightly 1.85+)
-- **Format**: Always run `cargo fmt` before committing
-- **Lint**: Code must pass `cargo clippy` with no warnings
+- **Format**: Always run `cargo +nightly fmt --all` before committing
+- **Lint**: Code must pass `cargo clippy --workspace -- -D warnings` with no warnings
 - **Tests**: Maintain >80% coverage, all tests must pass
 - **Async**: Use Tokio patterns, avoid blocking in async contexts
+
+### Mandatory Quality Checks
+
+**CRITICAL**: After implementing ANY feature, you MUST run these commands in order:
+
+```bash
+# 1. Format code
+cargo +nightly fmt --all
+
+# 2. Check for warnings (MUST pass with no warnings)
+cargo clippy --workspace -- -D warnings
+
+# 3. Run all tests (MUST pass 100%)
+cargo test --workspace --tests --verbose
+
+# 4. Check coverage (MUST be >80%)
+cargo llvm-cov --all --ignore-filename-regex 'examples'
+```
+
+**If ANY of these fail, you MUST fix the issues before committing.**
 
 See `.cursorrules` for complete coding standards.
 

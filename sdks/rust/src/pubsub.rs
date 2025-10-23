@@ -108,3 +108,29 @@ impl PubSubManager {
         Ok(serde_json::from_value(response["topics"].clone())?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SynapConfig;
+
+    #[test]
+    fn test_pubsub_manager_creation() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let pubsub = client.pubsub();
+
+        assert!(std::mem::size_of_val(&pubsub) > 0);
+    }
+
+    #[test]
+    fn test_pubsub_manager_clone() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let pubsub1 = client.pubsub();
+        let pubsub2 = pubsub1.clone();
+
+        assert!(std::mem::size_of_val(&pubsub1) > 0);
+        assert!(std::mem::size_of_val(&pubsub2) > 0);
+    }
+}

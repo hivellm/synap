@@ -1,33 +1,15 @@
-//! Reactive utilities for Synap SDK
+//! Reactive streaming primitives
 //!
-//! Provides Stream-based reactive patterns similar to RxJS.
+//! Provides base types for reactive message/event consumption.
 
 use futures::Stream;
 use std::pin::Pin;
-use std::task::{Context, Poll};
 use tokio::sync::mpsc;
 
-/// Message stream for reactive consumption
-pub struct MessageStream<T> {
-    receiver: mpsc::UnboundedReceiver<T>,
-}
+/// A stream of messages
+pub type MessageStream<T> = Pin<Box<dyn Stream<Item = T> + Send + 'static>>;
 
-impl<T> MessageStream<T> {
-    /// Create a new message stream from a receiver
-    pub(crate) fn new(receiver: mpsc::UnboundedReceiver<T>) -> Self {
-        Self { receiver }
-    }
-}
-
-impl<T> Stream for MessageStream<T> {
-    type Item = T;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.receiver.poll_recv(cx)
-    }
-}
-
-/// Handle for stopping a reactive subscription
+/// Subscription handle for controlling message streams
 pub struct SubscriptionHandle {
     cancel_tx: mpsc::UnboundedSender<()>,
 }
@@ -38,16 +20,28 @@ impl SubscriptionHandle {
         Self { cancel_tx }
     }
 
-    /// Stop the subscription
-    pub fn unsubscribe(self) {
+    /// Unsubscribe from the stream
+    pub fn unsubscribe(&self) {
         let _ = self.cancel_tx.send(());
+    }
+
+    /// Check if subscription is still active
+    pub fn is_active(&self) -> bool {
+        !self.cancel_tx.is_closed()
     }
 }
 
-impl Drop for SubscriptionHandle {
-    fn drop(&mut self) {
-        // Automatically unsubscribe when handle is dropped
-        // Note: send() fails if receiver is already dropped, which is fine
-        let _ = self.cancel_tx.send(());
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_subscription_handle() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let handle = SubscriptionHandle::new(tx);
+        
+        assert!(handle.is_active());
+        handle.unsubscribe();
+        assert!(rx.recv().await.is_some());
     }
 }

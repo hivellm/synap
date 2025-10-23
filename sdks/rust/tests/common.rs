@@ -11,7 +11,7 @@ pub async fn create_mock_server() -> ServerGuard {
 /// Setup a test client pointing to a mock server
 pub async fn setup_test_client() -> (SynapClient, ServerGuard) {
     let server = create_mock_server().await;
-    let config = SynapConfig::new(server.url());
+    let config = SynapConfig::new(server.url()).with_timeout(std::time::Duration::from_secs(5)); // Timeout adequado para testes
     let client = SynapClient::new(config).unwrap();
     (client, server)
 }
