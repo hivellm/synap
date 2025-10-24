@@ -3,7 +3,7 @@ use crate::protocol::{Request, Response};
 use axum::{
     Json,
     extract::{
-        Path, State,
+        Path, Query, State,
         ws::{WebSocket, WebSocketUpgrade},
     },
     response::{IntoResponse, Response as AxumResponse},
@@ -3497,4 +3497,396 @@ pub async fn consumer_heartbeat(
     Ok(Json(json!({
         "success": true
     })))
+}
+
+// ============================================================================
+// List Handlers
+// ============================================================================
+
+// Request/Response types for List operations
+#[derive(Debug, Deserialize)]
+pub struct ListPushRequest {
+    pub values: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListPushResponse {
+    pub length: usize,
+    pub key: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListPopRequest {
+    pub count: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListPopResponse {
+    pub values: Vec<serde_json::Value>,
+    pub key: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListRangeResponse {
+    pub values: Vec<serde_json::Value>,
+    pub key: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListSetRequest {
+    pub index: i64,
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListRemRequest {
+    pub count: i64,
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ListInsertRequest {
+    pub before: bool,
+    pub pivot: serde_json::Value,
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListStatsResponse {
+    pub total_lists: usize,
+    pub total_elements: usize,
+    pub operations: ListOperationStats,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListOperationStats {
+    pub lpush_count: u64,
+    pub rpush_count: u64,
+    pub lpop_count: u64,
+    pub rpop_count: u64,
+    pub lrange_count: u64,
+    pub llen_count: u64,
+    pub lindex_count: u64,
+    pub lset_count: u64,
+    pub ltrim_count: u64,
+    pub lrem_count: u64,
+    pub linsert_count: u64,
+    pub rpoplpush_count: u64,
+    pub blpop_count: u64,
+    pub brpop_count: u64,
+}
+
+/// POST /list/:key/lpush - Push element(s) to left (front)
+pub async fn list_lpush(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ListPushRequest>,
+) -> Result<Json<ListPushResponse>, SynapError> {
+    debug!("REST LPUSH key={} count={}", key, req.values.len());
+
+    let values: Result<Vec<Vec<u8>>, _> = req
+        .values
+        .into_iter()
+        .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
+        .collect();
+
+    let length = state.list_store.lpush(&key, values?, false)?;
+
+    Ok(Json(ListPushResponse { length, key }))
+}
+
+/// POST /list/:key/lpushx - Push element(s) to left only if key exists
+pub async fn list_lpushx(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ListPushRequest>,
+) -> Result<Json<ListPushResponse>, SynapError> {
+    debug!("REST LPUSHX key={} count={}", key, req.values.len());
+
+    let values: Result<Vec<Vec<u8>>, _> = req
+        .values
+        .into_iter()
+        .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
+        .collect();
+
+    let length = state.list_store.lpush(&key, values?, true)?;
+
+    Ok(Json(ListPushResponse { length, key }))
+}
+
+/// POST /list/:key/rpush - Push element(s) to right (back)
+pub async fn list_rpush(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ListPushRequest>,
+) -> Result<Json<ListPushResponse>, SynapError> {
+    debug!("REST RPUSH key={} count={}", key, req.values.len());
+
+    let values: Result<Vec<Vec<u8>>, _> = req
+        .values
+        .into_iter()
+        .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
+        .collect();
+
+    let length = state.list_store.rpush(&key, values?, false)?;
+
+    Ok(Json(ListPushResponse { length, key }))
+}
+
+/// POST /list/:key/rpushx - Push element(s) to right only if key exists
+pub async fn list_rpushx(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ListPushRequest>,
+) -> Result<Json<ListPushResponse>, SynapError> {
+    debug!("REST RPUSHX key={} count={}", key, req.values.len());
+
+    let values: Result<Vec<Vec<u8>>, _> = req
+        .values
+        .into_iter()
+        .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
+        .collect();
+
+    let length = state.list_store.rpush(&key, values?, true)?;
+
+    Ok(Json(ListPushResponse { length, key }))
+}
+
+/// POST /list/:key/lpop - Pop element(s) from left (front)
+pub async fn list_lpop(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ListPopRequest>,
+) -> Result<Json<ListPopResponse>, SynapError> {
+    debug!("REST LPOP key={} count={:?}", key, req.count);
+
+    let values = state.list_store.lpop(&key, req.count)?;
+
+    let json_values: Result<Vec<serde_json::Value>, _> = values
+        .into_iter()
+        .map(|v| {
+            serde_json::from_slice(&v).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&v).to_string())
+            })
+        })
+        .map(Ok)
+        .collect();
+
+    Ok(Json(ListPopResponse {
+        values: json_values?,
+        key,
+    }))
+}
+
+/// POST /list/:key/rpop - Pop element(s) from right (back)
+pub async fn list_rpop(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ListPopRequest>,
+) -> Result<Json<ListPopResponse>, SynapError> {
+    debug!("REST RPOP key={} count={:?}", key, req.count);
+
+    let values = state.list_store.rpop(&key, req.count)?;
+
+    let json_values: Vec<serde_json::Value> = values
+        .into_iter()
+        .map(|v| {
+            serde_json::from_slice(&v).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&v).to_string())
+            })
+        })
+        .collect();
+
+    Ok(Json(ListPopResponse {
+        values: json_values,
+        key,
+    }))
+}
+
+/// GET /list/:key/range?start=:start&stop=:stop - Get range of elements
+pub async fn list_range(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<ListRangeResponse>, SynapError> {
+    let start: i64 = params
+        .get("start")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    let stop: i64 = params
+        .get("stop")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(-1);
+
+    debug!("REST LRANGE key={} start={} stop={}", key, start, stop);
+
+    let values = state.list_store.lrange(&key, start, stop)?;
+
+    let json_values: Vec<serde_json::Value> = values
+        .into_iter()
+        .map(|v| {
+            serde_json::from_slice(&v).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&v).to_string())
+            })
+        })
+        .collect();
+
+    Ok(Json(ListRangeResponse {
+        values: json_values,
+        key,
+    }))
+}
+
+/// GET /list/:key/len - Get list length
+pub async fn list_len(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST LLEN key={}", key);
+
+    let length = state.list_store.llen(&key)?;
+
+    Ok(Json(json!({ "length": length, "key": key })))
+}
+
+/// GET /list/:key/index/:index - Get element at index
+pub async fn list_index(
+    State(state): State<AppState>,
+    Path((key, index)): Path<(String, i64)>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST LINDEX key={} index={}", key, index);
+
+    let value = state.list_store.lindex(&key, index)?;
+
+    let json_value: serde_json::Value = serde_json::from_slice(&value)
+        .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&value).to_string()));
+
+    Ok(Json(
+        json!({ "value": json_value, "key": key, "index": index }),
+    ))
+}
+
+/// POST /list/:key/set - Set element at index
+pub async fn list_set(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ListSetRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST LSET key={} index={}", key, req.index);
+
+    let value = serde_json::to_vec(&req.value)
+        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize value: {}", e)))?;
+
+    state.list_store.lset(&key, req.index, value)?;
+
+    Ok(Json(
+        json!({ "success": true, "key": key, "index": req.index }),
+    ))
+}
+
+/// POST /list/:key/trim - Trim list to range
+pub async fn list_trim(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let start: i64 = params
+        .get("start")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    let stop: i64 = params
+        .get("stop")
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(-1);
+
+    debug!("REST LTRIM key={} start={} stop={}", key, start, stop);
+
+    state.list_store.ltrim(&key, start, stop)?;
+
+    Ok(Json(json!({ "success": true, "key": key })))
+}
+
+/// POST /list/:key/rem - Remove occurrences of value
+pub async fn list_rem(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ListRemRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST LREM key={} count={}", key, req.count);
+
+    let value = serde_json::to_vec(&req.value)
+        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize value: {}", e)))?;
+
+    let removed = state.list_store.lrem(&key, req.count, value)?;
+
+    Ok(Json(json!({ "removed": removed, "key": key })))
+}
+
+/// POST /list/:key/insert - Insert value before/after pivot
+pub async fn list_insert(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ListInsertRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST LINSERT key={} before={}", key, req.before);
+
+    let pivot = serde_json::to_vec(&req.pivot)
+        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize pivot: {}", e)))?;
+
+    let value = serde_json::to_vec(&req.value)
+        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize value: {}", e)))?;
+
+    let length = state.list_store.linsert(&key, req.before, pivot, value)?;
+
+    Ok(Json(json!({ "length": length, "key": key })))
+}
+
+/// POST /list/:source/rpoplpush/:destination - Atomically pop from source and push to destination
+pub async fn list_rpoplpush(
+    State(state): State<AppState>,
+    Path((source, destination)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!(
+        "REST RPOPLPUSH source={} destination={}",
+        source, destination
+    );
+
+    let value = state.list_store.rpoplpush(&source, &destination)?;
+
+    let json_value: serde_json::Value = serde_json::from_slice(&value)
+        .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&value).to_string()));
+
+    Ok(Json(
+        json!({ "value": json_value, "source": source, "destination": destination }),
+    ))
+}
+
+/// GET /list/stats - Get list statistics
+pub async fn list_stats(
+    State(state): State<AppState>,
+) -> Result<Json<ListStatsResponse>, SynapError> {
+    debug!("REST LIST STATS");
+
+    let stats = state.list_store.stats();
+
+    Ok(Json(ListStatsResponse {
+        total_lists: stats.total_lists,
+        total_elements: stats.total_elements,
+        operations: ListOperationStats {
+            lpush_count: stats.lpush_count,
+            rpush_count: stats.rpush_count,
+            lpop_count: stats.lpop_count,
+            rpop_count: stats.rpop_count,
+            lrange_count: stats.lrange_count,
+            llen_count: stats.llen_count,
+            lindex_count: stats.lindex_count,
+            lset_count: stats.lset_count,
+            ltrim_count: stats.ltrim_count,
+            lrem_count: stats.lrem_count,
+            linsert_count: stats.linsert_count,
+            rpoplpush_count: stats.rpoplpush_count,
+            blpop_count: stats.blpop_count,
+            brpop_count: stats.brpop_count,
+        },
+    }))
 }

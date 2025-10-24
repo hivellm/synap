@@ -53,6 +53,25 @@ pub fn create_router(state: AppState, rate_limit_config: crate::config::RateLimi
         .route("/hash/{key}/incrbyfloat", post(handlers::hash_incrbyfloat))
         .route("/hash/{key}/setnx", post(handlers::hash_setnx))
         .route("/hash/stats", get(handlers::hash_stats))
+        // List endpoints
+        .route("/list/{key}/lpush", post(handlers::list_lpush))
+        .route("/list/{key}/lpushx", post(handlers::list_lpushx))
+        .route("/list/{key}/rpush", post(handlers::list_rpush))
+        .route("/list/{key}/rpushx", post(handlers::list_rpushx))
+        .route("/list/{key}/lpop", post(handlers::list_lpop))
+        .route("/list/{key}/rpop", post(handlers::list_rpop))
+        .route("/list/{key}/range", get(handlers::list_range))
+        .route("/list/{key}/len", get(handlers::list_len))
+        .route("/list/{key}/index/{index}", get(handlers::list_index))
+        .route("/list/{key}/set", post(handlers::list_set))
+        .route("/list/{key}/trim", post(handlers::list_trim))
+        .route("/list/{key}/rem", post(handlers::list_rem))
+        .route("/list/{key}/insert", post(handlers::list_insert))
+        .route(
+            "/list/{source}/rpoplpush/{destination}",
+            post(handlers::list_rpoplpush),
+        )
+        .route("/list/stats", get(handlers::list_stats))
         // Persistence endpoints
         .route("/snapshot", post(handlers::trigger_snapshot))
         // Event Stream endpoints
