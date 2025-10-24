@@ -193,4 +193,112 @@ mod tests {
         let client = SynapClient::new(config);
         assert!(client.is_ok());
     }
+
+    #[test]
+    fn test_client_with_auth() {
+        let config = SynapConfig::new("http://localhost:15500").with_auth_token("secret-token-123");
+        let client = SynapClient::new(config);
+        assert!(client.is_ok());
+    }
+
+    #[test]
+    fn test_client_invalid_url() {
+        let config = SynapConfig::new("not-a-valid-url");
+        let client = SynapClient::new(config);
+        assert!(client.is_err());
+    }
+
+    #[test]
+    fn test_client_relative_url() {
+        let config = SynapConfig::new("/relative/path");
+        let client = SynapClient::new(config);
+        assert!(client.is_err());
+    }
+
+    #[test]
+    fn test_client_kv_interface() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let _kv = client.kv();
+        // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_client_queue_interface() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let _queue = client.queue();
+        // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_client_stream_interface() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let _stream = client.stream();
+        // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_client_pubsub_interface() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let _pubsub = client.pubsub();
+        // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_client_clone() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let client2 = client.clone();
+        assert!(std::ptr::eq(
+            &*client.config as *const _,
+            &*client2.config as *const _
+        ));
+    }
+
+    #[test]
+    fn test_base_url_getter() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        assert_eq!(client.base_url().as_str(), "http://localhost:15500/");
+    }
+
+    #[test]
+    fn test_http_client_getter() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let _http_client = client.http_client();
+        // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_config_with_custom_timeout() {
+        let config =
+            SynapConfig::new("http://localhost:15500").with_timeout(Duration::from_secs(60));
+        assert_eq!(config.timeout, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn test_config_with_zero_retries() {
+        let config = SynapConfig::new("http://localhost:15500").with_max_retries(0);
+        assert_eq!(config.max_retries, 0);
+    }
+
+    #[test]
+    fn test_config_clone() {
+        let config = SynapConfig::new("http://localhost:15500").with_auth_token("token");
+        let config2 = config.clone();
+        assert_eq!(config.base_url, config2.base_url);
+        assert_eq!(config.auth_token, config2.auth_token);
+    }
+
+    #[test]
+    fn test_config_debug_format() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let debug_str = format!("{:?}", config);
+        assert!(debug_str.contains("SynapConfig"));
+        assert!(debug_str.contains("http://localhost:15500"));
+    }
 }
