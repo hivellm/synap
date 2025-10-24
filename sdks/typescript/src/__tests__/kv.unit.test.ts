@@ -170,6 +170,85 @@ describe('KVStore (Unit Tests - Additional Coverage)', () => {
     });
   });
 
+  describe('get() - JSON Parsing Coverage (Lines 48-49, 52)', () => {
+    it('should parse valid JSON string', async () => {
+      const jsonString = '{"name":"test","value":123}';
+      vi.mocked(mockClient.sendCommand).mockResolvedValue(jsonString);
+
+      const result = await kv.get<{ name: string; value: number }>('mykey');
+
+      expect(result).toEqual({ name: 'test', value: 123 });
+    });
+
+    it('should return string as-is when JSON parsing fails', async () => {
+      const invalidJson = 'not-a-json-string';
+      vi.mocked(mockClient.sendCommand).mockResolvedValue(invalidJson);
+
+      const result = await kv.get<string>('mykey');
+
+      expect(result).toBe(invalidJson);
+    });
+
+    it('should handle string value that is not JSON', async () => {
+      const plainString = 'plain text value';
+      vi.mocked(mockClient.sendCommand).mockResolvedValue(plainString);
+
+      const result = await kv.get<string>('mykey');
+
+      expect(result).toBe(plainString);
+    });
+
+    it('should handle non-string result directly', async () => {
+      const objValue = { name: 'test', value: 123 };
+      vi.mocked(mockClient.sendCommand).mockResolvedValue(objValue);
+
+      const result = await kv.get<{ name: string; value: number }>('mykey');
+
+      expect(result).toEqual(objValue);
+    });
+
+    it('should handle array values', async () => {
+      const arrayValue = [1, 2, 3, 4, 5];
+      vi.mocked(mockClient.sendCommand).mockResolvedValue(arrayValue);
+
+      const result = await kv.get<number[]>('mykey');
+
+      expect(result).toEqual(arrayValue);
+    });
+
+    it('should handle boolean values', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue(true);
+
+      const result = await kv.get<boolean>('mykey');
+
+      expect(result).toBe(true);
+    });
+
+    it('should handle number values', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue(42);
+
+      const result = await kv.get<number>('mykey');
+
+      expect(result).toBe(42);
+    });
+
+    it('should handle null value', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue(null);
+
+      const result = await kv.get<string>('nonexistent');
+
+      expect(result).toBeNull();
+    });
+
+    it('should handle undefined value', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue(undefined);
+
+      const result = await kv.get<string>('nonexistent');
+
+      expect(result).toBeNull();
+    });
+  });
+
   describe('Integration Tests for Uncovered Lines', () => {
     it('should chain multiple operations', async () => {
       vi.mocked(mockClient.sendCommand)

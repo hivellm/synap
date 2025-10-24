@@ -261,6 +261,126 @@ describe('QueueManager (Unit Tests - Additional Coverage)', () => {
     });
   });
 
+  describe('publishString() - Lines 174-180', () => {
+    it('should publish string message', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({ message_id: 'msg-123' });
+
+      const msgId = await queue.publishString('string-queue', 'Hello World');
+
+      expect(msgId).toBe('msg-123');
+      expect(mockClient.sendCommand).toHaveBeenCalledWith('queue.publish', {
+        queue: 'string-queue',
+        payload: Array.from(new TextEncoder().encode('Hello World')),
+      });
+    });
+
+    it('should publish string message with options', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({ message_id: 'msg-456' });
+
+      const msgId = await queue.publishString('string-queue', 'Important Message', {
+        priority: 9,
+        ttl: 3600,
+      });
+
+      expect(msgId).toBe('msg-456');
+      const callArgs = vi.mocked(mockClient.sendCommand).mock.calls[0];
+      expect(callArgs[0]).toBe('queue.publish');
+      expect(callArgs[1].queue).toBe('string-queue');
+      expect(callArgs[1].payload).toEqual(Array.from(new TextEncoder().encode('Important Message')));
+      expect(callArgs[1].priority).toBe(9);
+      // Note: ttl is not passed in options since it's not in the implementation
+    });
+  });
+
+  describe('consumeJSON() - JSON Parsing Coverage (Lines 228-229)', () => {
+    it('should throw error when JSON parsing fails', async () => {
+      const mockMessage = {
+        id: 'msg-bad-json',
+        payload: new TextEncoder().encode('invalid{json}'),
+        priority: 5,
+        retry_count: 0,
+        timestamp: Date.now(),
+      };
+
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({
+        message: mockMessage,
+      });
+
+      await expect(
+        queue.consumeJSON('invalid-queue', 'consumer-invalid')
+      ).rejects.toThrow('Failed to parse JSON');
+    });
+
+    it('should handle valid JSON parsing', async () => {
+      const validData = { data: 'valid' };
+      const mockMessage = {
+        id: 'msg-valid-json',
+        payload: new TextEncoder().encode(JSON.stringify(validData)),
+        priority: 5,
+        retry_count: 0,
+        timestamp: Date.now(),
+      };
+
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({
+        message: mockMessage,
+      });
+
+      const result = await queue.consumeJSON<{ data: string }>('valid-queue', 'consumer-valid');
+
+      expect(result.message).toEqual(mockMessage);
+      expect(result.data).toEqual(validData);
+    });
+
+    it('should return null when message is missing', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({
+        message: null,
+      });
+
+      const result = await queue.consumeJSON('empty-queue', 'consumer-empty');
+
+      expect(result.message).toBeNull();
+      expect(result.data).toBeNull();
+    });
+
+    it('should parse complex JSON objects', async () => {
+      const complexData = { nested: { value: 42, array: [1, 2, 3] } };
+      const mockMessage = {
+        id: 'msg-complex',
+        payload: new TextEncoder().encode(JSON.stringify(complexData)),
+        priority: 5,
+        retry_count: 0,
+        timestamp: Date.now(),
+      };
+      
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({
+        message: mockMessage,
+      });
+
+      const result = await queue.consumeJSON<{ nested: { value: number, array: number[] } }>('complex-queue', 'consumer');
+
+      expect(result.data).toEqual(complexData);
+    });
+
+    it('should handle empty string payload', async () => {
+      const mockMessage = {
+        id: 'msg-empty',
+        payload: new TextEncoder().encode(''),
+        priority: 5,
+        retry_count: 0,
+        timestamp: Date.now(),
+      };
+
+      vi.mocked(mockClient.sendCommand).mockResolvedValue({
+        message: mockMessage,
+      });
+
+      const result = await queue.consumeJSON('empty-payload-queue', 'consumer');
+
+      expect(result.message).toBeNull();
+      expect(result.data).toBeNull();
+    });
+  });
+
   describe('Lifecycle Management', () => {
     it('should stop consumer by key', () => {
       const observable = queue.observeMessages({

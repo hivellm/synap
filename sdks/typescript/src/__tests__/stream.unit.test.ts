@@ -329,6 +329,101 @@ describe('StreamManager (Unit Tests - Additional Coverage)', () => {
     });
   });
 
+  describe('parseEventData() - Error Handling (Lines 107-111)', () => {
+    it('should handle array byte data parsing errors', async () => {
+      const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      
+      // Create invalid byte array that cannot be decoded properly
+      const invalidByteArray = [255, 254, 253, 252];
+      
+      const mockEvent = {
+        offset: 0,
+        event: 'test.event',
+        data: invalidByteArray, // Invalid UTF-8 sequence
+        timestamp: Date.now(),
+      };
+
+      vi.mocked(mockClient.sendCommand)
+        .mockResolvedValueOnce({ events: [mockEvent] })
+        .mockResolvedValue({ events: [] });
+
+      const events = await firstValueFrom(
+        stream.observeEvents({
+          roomName: 'parse-error-room',
+          subscriberId: 'parse-error-sub',
+          fromOffset: 0,
+          pollingInterval: 10,
+        }).pipe(take(1), toArray())
+      );
+
+      // Should still emit the event with raw data
+      expect(events).toHaveLength(1);
+      expect(events[0].data).toEqual(invalidByteArray);
+      
+      stream.stopConsumer('parse-error-room', 'parse-error-sub');
+      consoleSpy.mockRestore();
+    });
+
+    it('should handle valid byte array parsing', async () => {
+      const validData = { message: 'Hello' };
+      const byteArray = Array.from(new TextEncoder().encode(JSON.stringify(validData)));
+      
+      const mockEvent = {
+        offset: 0,
+        event: 'test.event',
+        data: byteArray,
+        timestamp: Date.now(),
+      };
+
+      vi.mocked(mockClient.sendCommand)
+        .mockResolvedValueOnce({ events: [mockEvent] })
+        .mockResolvedValue({ events: [] });
+
+      const events = await firstValueFrom(
+        stream.observeEvents<{ message: string }>({
+          roomName: 'valid-parse-room',
+          subscriberId: 'valid-parse-sub',
+          fromOffset: 0,
+          pollingInterval: 10,
+        }).pipe(take(1), toArray())
+      );
+
+      expect(events).toHaveLength(1);
+      expect(events[0].data.message).toBe('Hello');
+      
+      stream.stopConsumer('valid-parse-room', 'valid-parse-sub');
+    });
+
+    it('should handle non-array data directly', async () => {
+      const directData = { key: 'value' };
+      
+      const mockEvent = {
+        offset: 0,
+        event: 'test.event',
+        data: directData, // Not an array
+        timestamp: Date.now(),
+      };
+
+      vi.mocked(mockClient.sendCommand)
+        .mockResolvedValueOnce({ events: [mockEvent] })
+        .mockResolvedValue({ events: [] });
+
+      const events = await firstValueFrom(
+        stream.observeEvents<{ key: string }>({
+          roomName: 'direct-data-room',
+          subscriberId: 'direct-data-sub',
+          fromOffset: 0,
+          pollingInterval: 10,
+        }).pipe(take(1), toArray())
+      );
+
+      expect(events).toHaveLength(1);
+      expect(events[0].data.key).toBe('value');
+      
+      stream.stopConsumer('direct-data-room', 'direct-data-sub');
+    });
+  });
+
   describe('Error Handling in observeEvents', () => {
     it('should handle consume errors gracefully', async () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
