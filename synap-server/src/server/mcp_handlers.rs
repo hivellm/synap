@@ -18,6 +18,11 @@ pub async fn handle_mcp_tool(
         "synap_hash_getall" => handle_hash_getall(request, state).await,
         "synap_hash_del" => handle_hash_del(request, state).await,
         "synap_hash_incrby" => handle_hash_incrby(request, state).await,
+        "synap_list_push" => handle_list_push(request, state).await,
+        "synap_list_pop" => handle_list_pop(request, state).await,
+        "synap_list_range" => handle_list_range(request, state).await,
+        "synap_list_len" => handle_list_len(request, state).await,
+        "synap_list_rpoplpush" => handle_list_rpoplpush(request, state).await,
         "synap_queue_publish" => handle_queue_publish(request, state).await,
         "synap_queue_consume" => handle_queue_consume(request, state).await,
         "synap_stream_publish" => handle_stream_publish(request, state).await,
@@ -341,6 +346,190 @@ async fn handle_hash_incrby(
 
     Ok(CallToolResult::success(vec![Content::text(
         json!({"value": new_value}).to_string(),
+    )]))
+}
+
+async fn handle_list_push(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let values_array = args
+        .get("values")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| ErrorData::invalid_params("Missing values array", None))?;
+
+    let direction = args
+        .get("direction")
+        .and_then(|v| v.as_str())
+        .unwrap_or("right");
+
+    let only_if_exists = args
+        .get("only_if_exists")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let values: Vec<Vec<u8>> = values_array
+        .iter()
+        .map(|v| serde_json::to_vec(v).map_err(|e| ErrorData::internal_error(e.to_string(), None)))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let length = if direction == "left" {
+        state.list_store.lpush(key, values, only_if_exists)
+    } else {
+        state.list_store.rpush(key, values, only_if_exists)
+    }
+    .map_err(|e| ErrorData::internal_error(format!("Push failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"length": length, "key": key}).to_string(),
+    )]))
+}
+
+async fn handle_list_pop(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let direction = args
+        .get("direction")
+        .and_then(|v| v.as_str())
+        .unwrap_or("left");
+
+    let count = args
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .map(|c| c as usize);
+
+    let values = if direction == "left" {
+        state.list_store.lpop(key, count)
+    } else {
+        state.list_store.rpop(key, count)
+    }
+    .map_err(|e| ErrorData::internal_error(format!("Pop failed: {}", e), None))?;
+
+    let json_values: Vec<serde_json::Value> = values
+        .into_iter()
+        .map(|v| {
+            serde_json::from_slice(&v).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&v).to_string())
+            })
+        })
+        .collect();
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"values": json_values, "key": key}).to_string(),
+    )]))
+}
+
+async fn handle_list_range(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let start = args.get("start").and_then(|v| v.as_i64()).unwrap_or(0);
+
+    let stop = args.get("stop").and_then(|v| v.as_i64()).unwrap_or(-1);
+
+    let values = state
+        .list_store
+        .lrange(key, start, stop)
+        .map_err(|e| ErrorData::internal_error(format!("LRANGE failed: {}", e), None))?;
+
+    let json_values: Vec<serde_json::Value> = values
+        .into_iter()
+        .map(|v| {
+            serde_json::from_slice(&v).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&v).to_string())
+            })
+        })
+        .collect();
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"values": json_values, "key": key}).to_string(),
+    )]))
+}
+
+async fn handle_list_len(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let length = state
+        .list_store
+        .llen(key)
+        .map_err(|e| ErrorData::internal_error(format!("LLEN failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"length": length, "key": key}).to_string(),
+    )]))
+}
+
+async fn handle_list_rpoplpush(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let source = args
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing source", None))?;
+
+    let destination = args
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing destination", None))?;
+
+    let value = state
+        .list_store
+        .rpoplpush(source, destination)
+        .map_err(|e| ErrorData::internal_error(format!("RPOPLPUSH failed: {}", e), None))?;
+
+    let json_value: serde_json::Value = serde_json::from_slice(&value)
+        .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&value).to_string()));
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"value": json_value, "source": source, "destination": destination}).to_string(),
     )]))
 }
 

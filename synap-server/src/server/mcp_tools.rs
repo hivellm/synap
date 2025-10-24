@@ -196,6 +196,110 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
         },
+        // List Tools
+        Tool {
+            name: Cow::Borrowed("synap_list_push"),
+            title: Some("Push to List".to_string()),
+            description: Some(Cow::Borrowed("Push element(s) to left (LPUSH) or right (RPUSH) of a list")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "List key"},
+                    "values": {"type": "array", "items": {}, "description": "Values to push (any JSON types)"},
+                    "direction": {"type": "string", "enum": ["left", "right"], "default": "right", "description": "Push to left (front) or right (back)"},
+                    "only_if_exists": {"type": "boolean", "default": false, "description": "Only push if list already exists (LPUSHX/RPUSHX)"}
+                },
+                "required": ["key", "values"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_list_pop"),
+            title: Some("Pop from List".to_string()),
+            description: Some(Cow::Borrowed("Pop element(s) from left (LPOP) or right (RPOP) of a list")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "List key"},
+                    "direction": {"type": "string", "enum": ["left", "right"], "default": "left", "description": "Pop from left (front) or right (back)"},
+                    "count": {"type": "integer", "minimum": 1, "default": 1, "description": "Number of elements to pop"}
+                },
+                "required": ["key"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_list_range"),
+            title: Some("Get List Range".to_string()),
+            description: Some(Cow::Borrowed("Get a range of elements from a list (LRANGE)")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "List key"},
+                    "start": {"type": "integer", "default": 0, "description": "Start index (supports negative indices)"},
+                    "stop": {"type": "integer", "default": -1, "description": "Stop index (supports negative indices, -1 = last element)"}
+                },
+                "required": ["key"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_list_len"),
+            title: Some("Get List Length".to_string()),
+            description: Some(Cow::Borrowed("Get the number of elements in a list (LLEN)")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "List key"}
+                },
+                "required": ["key"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_list_rpoplpush"),
+            title: Some("Atomic List Move".to_string()),
+            description: Some(Cow::Borrowed("Atomically pop from source list and push to destination list (RPOPLPUSH)")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "source": {"type": "string", "description": "Source list key"},
+                    "destination": {"type": "string", "description": "Destination list key"}
+                },
+                "required": ["source", "destination"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
         // Queue Tools
         Tool {
             name: Cow::Borrowed("synap_queue_publish"),
