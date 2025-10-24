@@ -94,26 +94,32 @@ mod tests {
         let service = SynapDiscoveryService;
         let operations = service.list_operations();
 
-        // Should have 18 operations (4 KV + 5 Hash + 5 List + 2 Queue + 2 Stream)
+        // Should have 10 essential operations (3 KV + 3 Hash + 3 List + 1 Queue)
         assert_eq!(
             operations.len(),
-            18,
-            "Expected 18 operations, got {}",
+            10,
+            "Expected 10 operations, got {}",
             operations.len()
         );
 
         // Check for key operations
         let op_names: Vec<String> = operations.iter().map(|op| op.name.clone()).collect();
 
-        // Core operations
+        // Verify essential operations are present
+        // KV operations (3)
         assert!(op_names.contains(&"synap_kv_get".to_string()));
         assert!(op_names.contains(&"synap_kv_set".to_string()));
         assert!(op_names.contains(&"synap_kv_delete".to_string()));
-        assert!(op_names.contains(&"synap_kv_scan".to_string()));
+        // Hash operations (3)
+        assert!(op_names.contains(&"synap_hash_set".to_string()));
+        assert!(op_names.contains(&"synap_hash_get".to_string()));
+        assert!(op_names.contains(&"synap_hash_getall".to_string()));
+        // List operations (3)
+        assert!(op_names.contains(&"synap_list_push".to_string()));
+        assert!(op_names.contains(&"synap_list_pop".to_string()));
+        assert!(op_names.contains(&"synap_list_range".to_string()));
+        // Queue operations (1)
         assert!(op_names.contains(&"synap_queue_publish".to_string()));
-        assert!(op_names.contains(&"synap_queue_consume".to_string()));
-        assert!(op_names.contains(&"synap_stream_publish".to_string()));
-        assert!(op_names.contains(&"synap_pubsub_publish".to_string()));
     }
 
     #[test]

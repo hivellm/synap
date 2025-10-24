@@ -2,9 +2,11 @@ use rmcp::model::{Tool, ToolAnnotations};
 use serde_json::json;
 use std::borrow::Cow;
 
+/// Get essential MCP tools (reduced set for Cursor compatibility)
+/// Only the most commonly used tools are exposed to stay within Cursor's limits
 pub fn get_mcp_tools() -> Vec<Tool> {
     vec![
-        // KV Store Tools
+        // KV Store Tools (3 essential)
         Tool {
             name: Cow::Borrowed("synap_kv_get"),
             title: Some("Get Key-Value".to_string()),
@@ -73,28 +75,7 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
         },
-        Tool {
-            name: Cow::Borrowed("synap_kv_scan"),
-            title: Some("Scan Keys by Prefix".to_string()),
-            description: Some(Cow::Borrowed(
-                "Scan keys by prefix pattern for efficient bulk retrieval",
-            )),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "prefix": {"type": "string", "description": "Prefix to match"},
-                    "limit": {"type": "integer", "description": "Maximum keys to return", "default": 100}
-                }
-            })
-            .as_object()
-            .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
-        },
-        // Hash Tools
+        // Hash Tools (3 essential)
         Tool {
             name: Cow::Borrowed("synap_hash_set"),
             title: Some("Set Hash Field".to_string()),
@@ -155,48 +136,7 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
         },
-        Tool {
-            name: Cow::Borrowed("synap_hash_del"),
-            title: Some("Delete Hash Fields".to_string()),
-            description: Some(Cow::Borrowed("Delete one or more fields from a hash")),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "key": {"type": "string", "description": "Hash key"},
-                    "fields": {"type": "array", "items": {"type": "string"}, "description": "Field names to delete"}
-                },
-                "required": ["key", "fields"]
-            })
-            .as_object()
-            .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-        },
-        Tool {
-            name: Cow::Borrowed("synap_hash_incrby"),
-            title: Some("Increment Hash Field".to_string()),
-            description: Some(Cow::Borrowed("Atomically increment a hash field by an integer")),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "key": {"type": "string", "description": "Hash key"},
-                    "field": {"type": "string", "description": "Field name"},
-                    "increment": {"type": "integer", "description": "Amount to increment (can be negative)"}
-                },
-                "required": ["key", "field", "increment"]
-            })
-            .as_object()
-            .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-        },
-        // List Tools
+        // List Tools (3 essential)
         Tool {
             name: Cow::Borrowed("synap_list_push"),
             title: Some("Push to List".to_string()),
@@ -261,46 +201,7 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
         },
-        Tool {
-            name: Cow::Borrowed("synap_list_len"),
-            title: Some("Get List Length".to_string()),
-            description: Some(Cow::Borrowed("Get the number of elements in a list (LLEN)")),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "key": {"type": "string", "description": "List key"}
-                },
-                "required": ["key"]
-            })
-            .as_object()
-            .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
-        },
-        Tool {
-            name: Cow::Borrowed("synap_list_rpoplpush"),
-            title: Some("Atomic List Move".to_string()),
-            description: Some(Cow::Borrowed("Atomically pop from source list and push to destination list (RPOPLPUSH)")),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "source": {"type": "string", "description": "Source list key"},
-                    "destination": {"type": "string", "description": "Destination list key"}
-                },
-                "required": ["source", "destination"]
-            })
-            .as_object()
-            .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-        },
-        // Queue Tools
+        // Queue Tools (1 essential)
         Tool {
             name: Cow::Borrowed("synap_queue_publish"),
             title: Some("Publish to Queue".to_string()),
@@ -322,68 +223,17 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
         },
-        Tool {
-            name: Cow::Borrowed("synap_queue_consume"),
-            title: Some("Consume from Queue".to_string()),
-            description: Some(Cow::Borrowed("Consume a message from a queue")),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "queue": {"type": "string"},
-                    "consumer_id": {"type": "string"}
-                },
-                "required": ["queue", "consumer_id"]
-            })
-            .as_object()
-            .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-        },
-        // Stream Tools
-        Tool {
-            name: Cow::Borrowed("synap_stream_publish"),
-            title: Some("Publish to Stream".to_string()),
-            description: Some(Cow::Borrowed("Publish an event to a stream room")),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "room": {"type": "string"},
-                    "event": {"type": "string"},
-                    "data": {"type": "object"}
-                },
-                "required": ["room", "event", "data"]
-            })
-            .as_object()
-            .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-        },
-        // Pub/Sub Tools
-        Tool {
-            name: Cow::Borrowed("synap_pubsub_publish"),
-            title: Some("Publish to Topic".to_string()),
-            description: Some(Cow::Borrowed("Publish a message to a pub/sub topic")),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "topic": {"type": "string"},
-                    "message": {"type": "object"}
-                },
-                "required": ["topic", "message"]
-            })
-            .as_object()
-            .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-        },
     ]
 }
+
+// Note: Removed 8 less-frequently used tools to meet Cursor's MCP tool limits:
+// - synap_kv_scan (use KV get with known keys instead)
+// - synap_hash_del (use synap_kv_delete on the hash key)
+// - synap_hash_incrby (use hash_set with calculated value)
+// - synap_list_len (use list_range and count elements)
+// - synap_list_rpoplpush (use list_pop + list_push manually)
+// - synap_queue_consume (use REST API for consumption)
+// - synap_stream_publish (use REST API for streams)
+// - synap_pubsub_publish (use REST API for pub/sub)
+//
+// All removed functionality is still available via REST API and StreamableHTTP

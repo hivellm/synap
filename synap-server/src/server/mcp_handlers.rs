@@ -9,24 +9,20 @@ pub async fn handle_mcp_tool(
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     match request.name.as_ref() {
+        // Essential KV tools (3)
         "synap_kv_get" => handle_kv_get(request, state).await,
         "synap_kv_set" => handle_kv_set(request, state).await,
         "synap_kv_delete" => handle_kv_delete(request, state).await,
-        "synap_kv_scan" => handle_kv_scan(request, state).await,
+        // Essential Hash tools (3)
         "synap_hash_set" => handle_hash_set(request, state).await,
         "synap_hash_get" => handle_hash_get(request, state).await,
         "synap_hash_getall" => handle_hash_getall(request, state).await,
-        "synap_hash_del" => handle_hash_del(request, state).await,
-        "synap_hash_incrby" => handle_hash_incrby(request, state).await,
+        // Essential List tools (3)
         "synap_list_push" => handle_list_push(request, state).await,
         "synap_list_pop" => handle_list_pop(request, state).await,
         "synap_list_range" => handle_list_range(request, state).await,
-        "synap_list_len" => handle_list_len(request, state).await,
-        "synap_list_rpoplpush" => handle_list_rpoplpush(request, state).await,
+        // Essential Queue tool (1)
         "synap_queue_publish" => handle_queue_publish(request, state).await,
-        "synap_queue_consume" => handle_queue_consume(request, state).await,
-        "synap_stream_publish" => handle_stream_publish(request, state).await,
-        "synap_pubsub_publish" => handle_pubsub_publish(request, state).await,
         _ => Err(ErrorData::invalid_params("Unknown tool", None)),
     }
 }

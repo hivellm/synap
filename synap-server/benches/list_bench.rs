@@ -1,4 +1,4 @@
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::hint::black_box;
 use synap_server::core::ListStore;
 use tokio::runtime::Runtime;
@@ -34,9 +34,13 @@ fn bench_list_push(c: &mut Criterion) {
     // LPUSH 10 elements at once
     group.bench_function("lpush_10_elements", |b| {
         let store = ListStore::new();
-        let values: Vec<Vec<u8>> = (0..10).map(|i| format!("value-{}", i).into_bytes()).collect();
+        let values: Vec<Vec<u8>> = (0..10)
+            .map(|i| format!("value-{}", i).into_bytes())
+            .collect();
         b.to_async(&rt).iter(|| async {
-            store.lpush(black_box("mylist"), black_box(values.clone()), false).unwrap();
+            store
+                .lpush(black_box("mylist"), black_box(values.clone()), false)
+                .unwrap();
         });
     });
 
@@ -58,7 +62,9 @@ fn bench_list_pop(c: &mut Criterion) {
                 let store = ListStore::new();
                 rt.block_on(async {
                     // Pre-populate with 100 elements
-                    let values: Vec<Vec<u8>> = (0..100).map(|i| format!("val-{}", i).into_bytes()).collect();
+                    let values: Vec<Vec<u8>> = (0..100)
+                        .map(|i| format!("val-{}", i).into_bytes())
+                        .collect();
                     store.rpush("mylist", values, false).unwrap();
                 });
                 store
@@ -78,7 +84,9 @@ fn bench_list_pop(c: &mut Criterion) {
             || {
                 let store = ListStore::new();
                 rt.block_on(async {
-                    let values: Vec<Vec<u8>> = (0..100).map(|i| format!("val-{}", i).into_bytes()).collect();
+                    let values: Vec<Vec<u8>> = (0..100)
+                        .map(|i| format!("val-{}", i).into_bytes())
+                        .collect();
                     store.rpush("mylist", values, false).unwrap();
                 });
                 store
@@ -144,7 +152,9 @@ fn bench_list_index(c: &mut Criterion) {
 
     // Pre-populate list with 100 elements
     rt.block_on(async {
-        let values: Vec<Vec<u8>> = (0..100).map(|i| format!("val-{}", i).into_bytes()).collect();
+        let values: Vec<Vec<u8>> = (0..100)
+            .map(|i| format!("val-{}", i).into_bytes())
+            .collect();
         store.rpush("mylist", values, false).unwrap();
     });
 
@@ -176,14 +186,20 @@ fn bench_list_set(c: &mut Criterion) {
 
     // Pre-populate list
     rt.block_on(async {
-        let values: Vec<Vec<u8>> = (0..100).map(|i| format!("val-{}", i).into_bytes()).collect();
+        let values: Vec<Vec<u8>> = (0..100)
+            .map(|i| format!("val-{}", i).into_bytes())
+            .collect();
         store.rpush("mylist", values, false).unwrap();
     });
 
     group.bench_function("lset_middle", |b| {
         b.to_async(&rt).iter(|| async {
             store
-                .lset(black_box("mylist"), black_box(50), black_box(b"new".to_vec()))
+                .lset(
+                    black_box("mylist"),
+                    black_box(50),
+                    black_box(b"new".to_vec()),
+                )
                 .unwrap();
         });
     });
@@ -217,7 +233,9 @@ fn bench_list_trim(c: &mut Criterion) {
                     },
                     |store| {
                         rt.block_on(async {
-                            store.ltrim(black_box("mylist"), black_box(10), black_box(90)).unwrap();
+                            store
+                                .ltrim(black_box("mylist"), black_box(10), black_box(90))
+                                .unwrap();
                         });
                     },
                     criterion::BatchSize::SmallInput,
@@ -256,7 +274,13 @@ fn bench_list_rem(c: &mut Criterion) {
             },
             |store| {
                 rt.block_on(async {
-                    store.lrem(black_box("mylist"), black_box(2), black_box(b"target".to_vec())).unwrap();
+                    store
+                        .lrem(
+                            black_box("mylist"),
+                            black_box(2),
+                            black_box(b"target".to_vec()),
+                        )
+                        .unwrap();
                 });
             },
             criterion::BatchSize::SmallInput,
@@ -277,7 +301,9 @@ fn bench_list_insert(c: &mut Criterion) {
 
     // Pre-populate list
     rt.block_on(async {
-        let values: Vec<Vec<u8>> = (0..100).map(|i| format!("val-{}", i).into_bytes()).collect();
+        let values: Vec<Vec<u8>> = (0..100)
+            .map(|i| format!("val-{}", i).into_bytes())
+            .collect();
         store.rpush("mylist", values, false).unwrap();
     });
 
@@ -308,7 +334,8 @@ fn bench_list_rpoplpush(c: &mut Criterion) {
             || {
                 let store = ListStore::new();
                 rt.block_on(async {
-                    let values: Vec<Vec<u8>> = (0..10).map(|i| format!("val-{}", i).into_bytes()).collect();
+                    let values: Vec<Vec<u8>> =
+                        (0..10).map(|i| format!("val-{}", i).into_bytes()).collect();
                     store.rpush("source", values, false).unwrap();
                 });
                 store
@@ -401,20 +428,20 @@ fn bench_list_large_values(c: &mut Criterion) {
     for size in [1024, 10240, 102400].iter() {
         group.throughput(Throughput::Bytes(*size as u64));
 
-        group.bench_with_input(
-            BenchmarkId::from_parameter(size),
-            size,
-            |b, &size| {
-                let store = ListStore::new();
-                let large_value = vec![0u8; size];
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
+            let store = ListStore::new();
+            let large_value = vec![0u8; size];
 
-                b.to_async(&rt).iter(|| async {
-                    store
-                        .rpush(black_box("mylist"), vec![black_box(large_value.clone())], false)
-                        .unwrap();
-                });
-            },
-        );
+            b.to_async(&rt).iter(|| async {
+                store
+                    .rpush(
+                        black_box("mylist"),
+                        vec![black_box(large_value.clone())],
+                        false,
+                    )
+                    .unwrap();
+            });
+        });
     }
 
     group.finish();
@@ -436,4 +463,3 @@ criterion_group!(
     bench_list_large_values,
 );
 criterion_main!(benches);
-
