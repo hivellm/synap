@@ -21,6 +21,10 @@ pub async fn handle_mcp_tool(
         "synap_list_push" => handle_list_push(request, state).await,
         "synap_list_pop" => handle_list_pop(request, state).await,
         "synap_list_range" => handle_list_range(request, state).await,
+        // Essential Set tools (3)
+        "synap_set_add" => handle_set_add(request, state).await,
+        "synap_set_members" => handle_set_members(request, state).await,
+        "synap_set_inter" => handle_set_inter(request, state).await,
         // Essential Queue tool (1)
         "synap_queue_publish" => handle_queue_publish(request, state).await,
         _ => Err(ErrorData::invalid_params("Unknown tool", None)),
@@ -147,29 +151,6 @@ async fn handle_kv_delete(
     )]))
 }
 
-async fn handle_kv_scan(
-    request: CallToolRequestParam,
-    state: Arc<AppState>,
-) -> Result<CallToolResult, ErrorData> {
-    let args = request
-        .arguments
-        .as_ref()
-        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
-
-    let prefix = args.get("prefix").and_then(|v| v.as_str());
-    let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
-
-    let keys = state
-        .kv_store
-        .scan(prefix, limit)
-        .await
-        .map_err(|e| ErrorData::internal_error(format!("Scan failed: {}", e), None))?;
-
-    Ok(CallToolResult::success(vec![Content::text(
-        json!({"keys": keys}).to_string(),
-    )]))
-}
-
 // ==================== Hash MCP Handlers ====================
 
 async fn handle_hash_set(
@@ -276,72 +257,6 @@ async fn handle_hash_getall(
 
     Ok(CallToolResult::success(vec![Content::text(
         json!({"fields": result, "count": result.len()}).to_string(),
-    )]))
-}
-
-async fn handle_hash_del(
-    request: CallToolRequestParam,
-    state: Arc<AppState>,
-) -> Result<CallToolResult, ErrorData> {
-    let args = request
-        .arguments
-        .as_ref()
-        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
-
-    let key = args
-        .get("key")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
-
-    let fields: Vec<String> = args
-        .get("fields")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| ErrorData::invalid_params("Missing fields array", None))?
-        .iter()
-        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-        .collect();
-
-    let deleted = state
-        .hash_store
-        .hdel(key, &fields)
-        .map_err(|e| ErrorData::internal_error(format!("HDEL failed: {}", e), None))?;
-
-    Ok(CallToolResult::success(vec![Content::text(
-        json!({"deleted": deleted}).to_string(),
-    )]))
-}
-
-async fn handle_hash_incrby(
-    request: CallToolRequestParam,
-    state: Arc<AppState>,
-) -> Result<CallToolResult, ErrorData> {
-    let args = request
-        .arguments
-        .as_ref()
-        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
-
-    let key = args
-        .get("key")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
-
-    let field = args
-        .get("field")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| ErrorData::invalid_params("Missing field", None))?;
-
-    let increment = args
-        .get("increment")
-        .and_then(|v| v.as_i64())
-        .ok_or_else(|| ErrorData::invalid_params("Missing increment", None))?;
-
-    let new_value = state
-        .hash_store
-        .hincrby(key, field, increment)
-        .map_err(|e| ErrorData::internal_error(format!("HINCRBY failed: {}", e), None))?;
-
-    Ok(CallToolResult::success(vec![Content::text(
-        json!({"value": new_value}).to_string(),
     )]))
 }
 
@@ -473,62 +388,6 @@ async fn handle_list_range(
     )]))
 }
 
-async fn handle_list_len(
-    request: CallToolRequestParam,
-    state: Arc<AppState>,
-) -> Result<CallToolResult, ErrorData> {
-    let args = request
-        .arguments
-        .as_ref()
-        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
-
-    let key = args
-        .get("key")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
-
-    let length = state
-        .list_store
-        .llen(key)
-        .map_err(|e| ErrorData::internal_error(format!("LLEN failed: {}", e), None))?;
-
-    Ok(CallToolResult::success(vec![Content::text(
-        json!({"length": length, "key": key}).to_string(),
-    )]))
-}
-
-async fn handle_list_rpoplpush(
-    request: CallToolRequestParam,
-    state: Arc<AppState>,
-) -> Result<CallToolResult, ErrorData> {
-    let args = request
-        .arguments
-        .as_ref()
-        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
-
-    let source = args
-        .get("source")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| ErrorData::invalid_params("Missing source", None))?;
-
-    let destination = args
-        .get("destination")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| ErrorData::invalid_params("Missing destination", None))?;
-
-    let value = state
-        .list_store
-        .rpoplpush(source, destination)
-        .map_err(|e| ErrorData::internal_error(format!("RPOPLPUSH failed: {}", e), None))?;
-
-    let json_value: serde_json::Value = serde_json::from_slice(&value)
-        .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&value).to_string()));
-
-    Ok(CallToolResult::success(vec![Content::text(
-        json!({"value": json_value, "source": source, "destination": destination}).to_string(),
-    )]))
-}
-
 async fn handle_queue_publish(
     request: CallToolRequestParam,
     state: Arc<AppState>,
@@ -568,124 +427,104 @@ async fn handle_queue_publish(
     )]))
 }
 
-async fn handle_queue_consume(
+// Set MCP handlers
+async fn handle_set_add(
     request: CallToolRequestParam,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
-    let queue_manager = state
-        .queue_manager
-        .as_ref()
-        .ok_or_else(|| ErrorData::internal_error("Queue system disabled", None))?;
-
     let args = request
         .arguments
         .as_ref()
         .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
 
-    let queue = args
-        .get("queue")
+    let key = args
+        .get("key")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| ErrorData::invalid_params("Missing queue", None))?;
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
 
-    let consumer_id = args
-        .get("consumer_id")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| ErrorData::invalid_params("Missing consumer_id", None))?;
+    let members = args
+        .get("members")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| ErrorData::invalid_params("Missing members array", None))?;
 
-    let message = queue_manager
-        .consume(queue, consumer_id)
-        .await
-        .map_err(|e| ErrorData::internal_error(format!("Consume failed: {}", e), None))?;
+    let member_bytes: Vec<Vec<u8>> = members
+        .iter()
+        .map(|v| serde_json::to_vec(v).unwrap_or_default())
+        .collect();
 
-    let response = if let Some(msg) = message {
-        json!({
-            "message_id": msg.id,
-            "payload": (*msg.payload).clone(),
-            "priority": msg.priority
-        })
-    } else {
-        json!(null)
-    };
+    let added = state
+        .set_store
+        .sadd(key, member_bytes)
+        .map_err(|e| ErrorData::internal_error(format!("SADD failed: {}", e), None))?;
 
     Ok(CallToolResult::success(vec![Content::text(
-        response.to_string(),
+        json!({"added": added, "key": key}).to_string(),
     )]))
 }
 
-async fn handle_stream_publish(
+async fn handle_set_members(
     request: CallToolRequestParam,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
-    let stream_manager = state
-        .stream_manager
-        .as_ref()
-        .ok_or_else(|| ErrorData::internal_error("Stream system disabled", None))?;
-
     let args = request
         .arguments
         .as_ref()
         .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
 
-    let room = args
-        .get("room")
+    let key = args
+        .get("key")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| ErrorData::invalid_params("Missing room", None))?;
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
 
-    let event = args
-        .get("event")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| ErrorData::invalid_params("Missing event", None))?;
+    let members_bytes = state
+        .set_store
+        .smembers(key)
+        .map_err(|e| ErrorData::internal_error(format!("SMEMBERS failed: {}", e), None))?;
 
-    let data = args
-        .get("data")
-        .ok_or_else(|| ErrorData::invalid_params("Missing data", None))?;
-
-    let data_bytes = serde_json::to_vec(data)
-        .map_err(|e| ErrorData::internal_error(format!("Serialization failed: {}", e), None))?;
-
-    let offset = stream_manager
-        .publish(room, event, data_bytes)
-        .await
-        .map_err(|e| ErrorData::internal_error(format!("Publish failed: {}", e), None))?;
+    let members: Vec<serde_json::Value> = members_bytes
+        .iter()
+        .map(|b| serde_json::from_slice(b).unwrap_or(json!(null)))
+        .collect();
 
     Ok(CallToolResult::success(vec![Content::text(
-        json!({"offset": offset}).to_string(),
+        json!({"members": members, "count": members.len()}).to_string(),
     )]))
 }
 
-async fn handle_pubsub_publish(
+async fn handle_set_inter(
     request: CallToolRequestParam,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
-    let pubsub_router = state
-        .pubsub_router
-        .as_ref()
-        .ok_or_else(|| ErrorData::internal_error("Pub/Sub system disabled", None))?;
-
     let args = request
         .arguments
         .as_ref()
         .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
 
-    let topic = args
-        .get("topic")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| ErrorData::invalid_params("Missing topic", None))?;
+    let keys = args
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| ErrorData::invalid_params("Missing keys array", None))?;
 
-    let message = args
-        .get("message")
-        .ok_or_else(|| ErrorData::invalid_params("Missing message", None))?
-        .clone();
+    let key_strs: Vec<String> = keys
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
 
-    let result = pubsub_router
-        .publish(topic, message, None)
-        .map_err(|e| ErrorData::internal_error(format!("Publish failed: {}", e), None))?;
+    if key_strs.is_empty() {
+        return Err(ErrorData::invalid_params("No valid keys provided", None));
+    }
+
+    let intersection_bytes = state
+        .set_store
+        .sinter(&key_strs)
+        .map_err(|e| ErrorData::internal_error(format!("SINTER failed: {}", e), None))?;
+
+    let intersection: Vec<serde_json::Value> = intersection_bytes
+        .iter()
+        .map(|b| serde_json::from_slice(b).unwrap_or(json!(null)))
+        .collect();
 
     Ok(CallToolResult::success(vec![Content::text(
-        json!({
-            "message_id": result.message_id,
-            "subscribers_matched": result.subscribers_matched
-        })
-        .to_string(),
+        json!({"intersection": intersection, "count": intersection.len()}).to_string(),
     )]))
 }

@@ -13,6 +13,7 @@ async fn spawn_test_server() -> String {
         kv_store: Arc::new(KVStore::new(kv_config)),
         hash_store: Arc::new(synap_server::core::HashStore::new()),
         list_store: Arc::new(synap_server::core::ListStore::new()),
+        set_store: Arc::new(synap_server::core::SetStore::new()),
         queue_manager: None,
         stream_manager: None,
         pubsub_router: Some(Arc::new(PubSubRouter::new())),

@@ -13,6 +13,7 @@ async fn test_mcp_kv_get() {
         kv_store: kv_store.clone(),
         hash_store,
         list_store: Arc::new(synap_server::core::ListStore::new()),
+        set_store: Arc::new(synap_server::core::SetStore::new()),
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
@@ -45,6 +46,7 @@ async fn test_mcp_kv_set() {
         kv_store: Arc::new(KVStore::new(config.to_kv_config())),
         hash_store,
         list_store: Arc::new(synap_server::core::ListStore::new()),
+        set_store: Arc::new(synap_server::core::SetStore::new()),
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
@@ -82,6 +84,7 @@ async fn test_mcp_kv_delete() {
         kv_store: kv_store.clone(),
         hash_store,
         list_store: Arc::new(synap_server::core::ListStore::new()),
+        set_store: Arc::new(synap_server::core::SetStore::new()),
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
@@ -109,45 +112,10 @@ async fn test_mcp_kv_delete() {
     assert!(value.is_none());
 }
 
-#[tokio::test]
-async fn test_mcp_kv_scan() {
-    let config = ServerConfig::default();
-    let kv_store = Arc::new(KVStore::new(config.to_kv_config()));
-    let hash_store = Arc::new(synap_server::core::HashStore::new());
-
-    let state = Arc::new(AppState {
-        kv_store: kv_store.clone(),
-        hash_store,
-        list_store: Arc::new(synap_server::core::ListStore::new()),
-        queue_manager: None,
-        stream_manager: None,
-        partition_manager: None,
-        consumer_group_manager: None,
-        pubsub_router: None,
-        persistence: None,
-    });
-
-    // Set multiple keys
-    for i in 1..=5 {
-        kv_store
-            .set(&format!("user:{}", i), b"data".to_vec(), None)
-            .await
-            .unwrap();
-    }
-
-    let request = CallToolRequestParam {
-        name: "synap_kv_scan".into(),
-        arguments: json!({
-            "prefix": "user:",
-            "limit": 10
-        })
-        .as_object()
-        .cloned(),
-    };
-
-    let result = handle_mcp_tool(request, state).await;
-    assert!(result.is_ok());
-}
+// Test removed: synap_kv_scan tool was removed for Cursor MCP tool limit compatibility
+// The functionality is still available via REST API
+// #[tokio::test]
+// async fn test_mcp_kv_scan() { ... }
 
 #[tokio::test]
 async fn test_mcp_queue_publish() {
@@ -159,6 +127,7 @@ async fn test_mcp_queue_publish() {
         kv_store: Arc::new(KVStore::new(config.to_kv_config())),
         hash_store,
         list_store: Arc::new(synap_server::core::ListStore::new()),
+        set_store: Arc::new(synap_server::core::SetStore::new()),
         queue_manager: Some(queue_manager.clone()),
         stream_manager: None,
         partition_manager: None,

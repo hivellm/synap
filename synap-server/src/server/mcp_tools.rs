@@ -201,6 +201,73 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
         },
+        // Set Tools (3 essential)
+        Tool {
+            name: Cow::Borrowed("synap_set_add"),
+            title: Some("Add Set Members".to_string()),
+            description: Some(Cow::Borrowed("Add one or more members to a set")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Set key"},
+                    "members": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Members to add"
+                    }
+                },
+                "required": ["key", "members"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_set_members"),
+            title: Some("Get Set Members".to_string()),
+            description: Some(Cow::Borrowed("Get all members of a set")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Set key"}
+                },
+                "required": ["key"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_set_inter"),
+            title: Some("Set Intersection".to_string()),
+            description: Some(Cow::Borrowed("Compute intersection of multiple sets")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "keys": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Set keys to intersect"
+                    }
+                },
+                "required": ["keys"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
         // Queue Tools (1 essential)
         Tool {
             name: Cow::Borrowed("synap_queue_publish"),

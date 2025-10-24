@@ -155,6 +155,28 @@ pub enum Operation {
 
     /// List RPOPLPUSH operation
     ListRpoplpush { source: String, destination: String },
+
+    /// Set ADD operation (SADD)
+    SetAdd { key: String, members: Vec<Vec<u8>> },
+
+    /// Set REMOVE operation (SREM)
+    SetRem { key: String, members: Vec<Vec<u8>> },
+
+    /// Set MOVE operation (SMOVE)
+    SetMove {
+        source: String,
+        destination: String,
+        member: Vec<u8>,
+    },
+
+    /// Set INTER STORE operation (SINTERSTORE)
+    SetInterStore { destination: String, keys: Vec<String> },
+
+    /// Set UNION STORE operation (SUNIONSTORE)
+    SetUnionStore { destination: String, keys: Vec<String> },
+
+    /// Set DIFF STORE operation (SDIFFSTORE)
+    SetDiffStore { destination: String, keys: Vec<String> },
 }
 
 /// Snapshot containing full system state
@@ -169,6 +191,8 @@ pub struct Snapshot {
     pub stream_data: HashMap<String, Vec<StreamEvent>>, // Room -> Events
     #[serde(default)]
     pub list_data: HashMap<String, crate::core::ListValue>, // Key -> List
+    #[serde(default)]
+    pub set_data: HashMap<String, crate::core::SetValue>, // Key -> Set
 }
 
 /// Stream event for snapshot (simplified from stream::StreamEvent)

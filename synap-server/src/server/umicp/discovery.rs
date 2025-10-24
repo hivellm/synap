@@ -24,10 +24,10 @@ impl DiscoverableService for SynapDiscoveryService {
                 "replication".to_string(),
                 "mcp-compatible".to_string(),
             ])
-            .operations_count(8)
+            .operations_count(13)
             .mcp_compatible(true)
             .metadata(json!({
-                "description": "Synap - Unified messaging system (KV + Queue + Stream + PubSub) with 8 core operations"
+                "description": "Synap - Unified messaging system (KV + Hash + List + Set + Queue + Stream + PubSub) with 13 core operations"
             }))
     }
 
@@ -94,11 +94,11 @@ mod tests {
         let service = SynapDiscoveryService;
         let operations = service.list_operations();
 
-        // Should have 10 essential operations (3 KV + 3 Hash + 3 List + 1 Queue)
+        // Should have 13 essential operations (3 KV + 3 Hash + 3 List + 3 Set + 1 Queue)
         assert_eq!(
             operations.len(),
-            10,
-            "Expected 10 operations, got {}",
+            13,
+            "Expected 13 operations, got {}",
             operations.len()
         );
 
@@ -118,6 +118,10 @@ mod tests {
         assert!(op_names.contains(&"synap_list_push".to_string()));
         assert!(op_names.contains(&"synap_list_pop".to_string()));
         assert!(op_names.contains(&"synap_list_range".to_string()));
+        // Set operations (3)
+        assert!(op_names.contains(&"synap_set_add".to_string()));
+        assert!(op_names.contains(&"synap_set_members".to_string()));
+        assert!(op_names.contains(&"synap_set_inter".to_string()));
         // Queue operations (1)
         assert!(op_names.contains(&"synap_queue_publish".to_string()));
     }

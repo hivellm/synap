@@ -4,6 +4,7 @@ use crate::core::QueueConfig;
 use crate::core::hash::HashStore;
 use crate::core::kv_store::KVStore;
 use crate::core::list::ListStore;
+use crate::core::set::SetStore;
 use crate::core::queue::QueueManager;
 use crate::core::types::KVConfig;
 use tracing::info;
@@ -17,6 +18,7 @@ pub async fn recover(
     KVStore,
     Option<HashStore>,
     Option<ListStore>,
+    Option<SetStore>,
     Option<QueueManager>,
     u64,
 )> {
@@ -26,6 +28,7 @@ pub async fn recover(
             KVStore::new(kv_config),
             Some(HashStore::new()),
             Some(ListStore::new()),
+            Some(SetStore::new()),
             Some(QueueManager::new(queue_config)),
             0,
         ));
@@ -37,7 +40,7 @@ pub async fn recover(
     let wal = WriteAheadLog::open(config.wal.clone()).await?;
 
     // Step 1: Load latest snapshot (if exists)
-    let (kv_store, hash_store, list_store, queue_manager, last_offset) =
+    let (kv_store, hash_store, list_store, set_store, queue_manager, last_offset) =
         if let Some((snapshot, path)) = snapshot_mgr.load_latest().await? {
             info!(
                 "Loaded snapshot from {:?} at offset {}",
@@ -76,10 +79,21 @@ pub async fn recover(
                 }
             }
 
+            // Restore Set store
+            let sets = SetStore::new();
+            for (key, set_value) in snapshot.set_data {
+                // Restore set by adding all members
+                let members: Vec<Vec<u8>> = set_value.members.into_iter().collect();
+                if !members.is_empty() {
+                    sets.sadd(&key, members)?;
+                }
+            }
+
             (
                 kv,
                 Some(HashStore::new()),
                 Some(lists),
+                Some(sets),
                 Some(queues),
                 snapshot.wal_offset,
             )
@@ -89,6 +103,7 @@ pub async fn recover(
                 KVStore::new(kv_config),
                 Some(HashStore::new()),
                 Some(ListStore::new()),
+                Some(SetStore::new()),
                 Some(QueueManager::new(queue_config)),
                 0,
             )
@@ -242,6 +257,46 @@ pub async fn recover(
                 }
                 replayed += 1;
             }
+            Operation::SetAdd { key, members } => {
+                if let Some(ref set_store) = set_store {
+                    let _ = set_store.sadd(&key, members);
+                }
+                replayed += 1;
+            }
+            Operation::SetRem { key, members } => {
+                if let Some(ref set_store) = set_store {
+                    let _ = set_store.srem(&key, members);
+                }
+                replayed += 1;
+            }
+            Operation::SetMove {
+                source,
+                destination,
+                member,
+            } => {
+                if let Some(ref set_store) = set_store {
+                    let _ = set_store.smove(&source, &destination, member);
+                }
+                replayed += 1;
+            }
+            Operation::SetInterStore { destination, keys } => {
+                if let Some(ref set_store) = set_store {
+                    let _ = set_store.sinterstore(&destination, &keys);
+                }
+                replayed += 1;
+            }
+            Operation::SetUnionStore { destination, keys } => {
+                if let Some(ref set_store) = set_store {
+                    let _ = set_store.sunionstore(&destination, &keys);
+                }
+                replayed += 1;
+            }
+            Operation::SetDiffStore { destination, keys } => {
+                if let Some(ref set_store) = set_store {
+                    let _ = set_store.sdiffstore(&destination, &keys);
+                }
+                replayed += 1;
+            }
         }
     }
 
@@ -253,6 +308,7 @@ pub async fn recover(
         kv_store,
         hash_store,
         list_store,
+        set_store,
         queue_manager,
         final_offset,
     ))

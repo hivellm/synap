@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use synap_server::core::{HashStore, ListStore};
+use synap_server::core::{HashStore, ListStore, SetStore};
 use synap_server::persistence::{PersistenceLayer, recover};
 use synap_server::replication::NodeRole;
 use synap_server::{
@@ -127,21 +127,23 @@ async fn main() -> Result<()> {
     let queue_config = config.to_queue_config();
 
     #[allow(clippy::type_complexity)]
-    let (kv_store, hash_store_recovered, list_store_recovered, queue_manager, _wal_offset): (
+    let (kv_store, hash_store_recovered, list_store_recovered, set_store_recovered, queue_manager, _wal_offset): (
         Arc<KVStore>,
         Option<Arc<HashStore>>,
         Option<Arc<ListStore>>,
+        Option<Arc<SetStore>>,
         Option<Arc<QueueManager>>,
         u64,
     ) = if config.persistence.enabled {
         info!("Persistence enabled, attempting recovery...");
         match recover(&config.persistence, kv_config.clone(), queue_config.clone()).await {
-            Ok((kv, hs, ls, qm, offset)) => {
+            Ok((kv, hs, ls, ss, qm, offset)) => {
                 info!("Recovery successful, WAL offset: {}", offset);
                 (
                     Arc::new(kv),
                     hs.map(Arc::new),
                     ls.map(Arc::new),
+                    ss.map(Arc::new),
                     qm.map(Arc::new),
                     offset,
                 )
@@ -152,6 +154,7 @@ async fn main() -> Result<()> {
                     Arc::new(KVStore::new(kv_config.clone())),
                     Some(Arc::new(HashStore::new())),
                     Some(Arc::new(ListStore::new())),
+                    Some(Arc::new(SetStore::new())),
                     if config.queue.enabled {
                         Some(Arc::new(QueueManager::new(queue_config.clone())))
                     } else {
@@ -167,6 +170,7 @@ async fn main() -> Result<()> {
             Arc::new(KVStore::new(kv_config.clone())),
             Some(Arc::new(HashStore::new())),
             Some(Arc::new(ListStore::new())),
+            Some(Arc::new(SetStore::new())),
             if config.queue.enabled {
                 Some(Arc::new(QueueManager::new(queue_config.clone())))
             } else {

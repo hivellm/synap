@@ -130,7 +130,7 @@ impl SetValue {
         if count >= members.len() {
             members
         } else {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             members.shuffle(&mut rng);
             members.into_iter().take(count).collect()
         }
