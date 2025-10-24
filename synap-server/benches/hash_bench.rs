@@ -1,6 +1,6 @@
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use std::hint::black_box;
 use std::collections::HashMap;
+use std::hint::black_box;
 use synap_server::core::HashStore;
 use tokio::runtime::Runtime;
 
