@@ -1006,6 +1006,23 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "hash.incrbyfloat" => handle_hash_incrbyfloat_cmd(&state, &request).await,
         "hash.setnx" => handle_hash_setnx_cmd(&state, &request).await,
         "hash.stats" => handle_hash_stats_cmd(&state, &request).await,
+        // List commands
+        "list.lpush" => handle_list_lpush_cmd(&state, &request).await,
+        "list.lpushx" => handle_list_lpushx_cmd(&state, &request).await,
+        "list.rpush" => handle_list_rpush_cmd(&state, &request).await,
+        "list.rpushx" => handle_list_rpushx_cmd(&state, &request).await,
+        "list.lpop" => handle_list_lpop_cmd(&state, &request).await,
+        "list.rpop" => handle_list_rpop_cmd(&state, &request).await,
+        "list.lrange" => handle_list_lrange_cmd(&state, &request).await,
+        "list.llen" => handle_list_llen_cmd(&state, &request).await,
+        "list.lindex" => handle_list_lindex_cmd(&state, &request).await,
+        "list.lset" => handle_list_lset_cmd(&state, &request).await,
+        "list.ltrim" => handle_list_ltrim_cmd(&state, &request).await,
+        "list.lrem" => handle_list_lrem_cmd(&state, &request).await,
+        "list.linsert" => handle_list_linsert_cmd(&state, &request).await,
+        "list.lpos" => handle_list_lpos_cmd(&state, &request).await,
+        "list.rpoplpush" => handle_list_rpoplpush_cmd(&state, &request).await,
+        "list.stats" => handle_list_stats_cmd(&state, &request).await,
         "queue.create" => handle_queue_create_cmd(&state, &request).await,
         "queue.delete" => handle_queue_delete_cmd(&state, &request).await,
         "queue.publish" => handle_queue_publish_cmd(&state, &request).await,
@@ -1760,6 +1777,438 @@ async fn handle_hash_stats_cmd(
             "hset_count": stats.hset_count,
             "hget_count": stats.hget_count,
             "hdel_count": stats.hdel_count,
+        }
+    }))
+}
+
+// ==================== List Command Handlers ====================
+
+async fn handle_list_lpush_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let values: Vec<Vec<u8>> = request
+        .payload
+        .get("values")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'values' array".to_string()))?
+        .iter()
+        .map(|v| serde_json::to_vec(v).map_err(|e| SynapError::SerializationError(e.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let length = state.list_store.lpush(key, values, false)?;
+
+    Ok(serde_json::json!({ "length": length, "key": key }))
+}
+
+async fn handle_list_lpushx_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let values: Vec<Vec<u8>> = request
+        .payload
+        .get("values")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'values' array".to_string()))?
+        .iter()
+        .map(|v| serde_json::to_vec(v).map_err(|e| SynapError::SerializationError(e.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let length = state.list_store.lpush(key, values, true)?;
+
+    Ok(serde_json::json!({ "length": length, "key": key }))
+}
+
+async fn handle_list_rpush_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let values: Vec<Vec<u8>> = request
+        .payload
+        .get("values")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'values' array".to_string()))?
+        .iter()
+        .map(|v| serde_json::to_vec(v).map_err(|e| SynapError::SerializationError(e.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let length = state.list_store.rpush(key, values, false)?;
+
+    Ok(serde_json::json!({ "length": length, "key": key }))
+}
+
+async fn handle_list_rpushx_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let values: Vec<Vec<u8>> = request
+        .payload
+        .get("values")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'values' array".to_string()))?
+        .iter()
+        .map(|v| serde_json::to_vec(v).map_err(|e| SynapError::SerializationError(e.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let length = state.list_store.rpush(key, values, true)?;
+
+    Ok(serde_json::json!({ "length": length, "key": key }))
+}
+
+async fn handle_list_lpop_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let count = request
+        .payload
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .map(|c| c as usize);
+
+    let values = state.list_store.lpop(key, count)?;
+
+    let json_values: Vec<serde_json::Value> = values
+        .into_iter()
+        .map(|v| {
+            serde_json::from_slice(&v).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&v).to_string())
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "values": json_values, "key": key }))
+}
+
+async fn handle_list_rpop_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let count = request
+        .payload
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .map(|c| c as usize);
+
+    let values = state.list_store.rpop(key, count)?;
+
+    let json_values: Vec<serde_json::Value> = values
+        .into_iter()
+        .map(|v| {
+            serde_json::from_slice(&v).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&v).to_string())
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "values": json_values, "key": key }))
+}
+
+async fn handle_list_lrange_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let start = request
+        .payload
+        .get("start")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+
+    let stop = request
+        .payload
+        .get("stop")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(-1);
+
+    let values = state.list_store.lrange(key, start, stop)?;
+
+    let json_values: Vec<serde_json::Value> = values
+        .into_iter()
+        .map(|v| {
+            serde_json::from_slice(&v).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&v).to_string())
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "values": json_values, "key": key }))
+}
+
+async fn handle_list_llen_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let length = state.list_store.llen(key)?;
+
+    Ok(serde_json::json!({ "length": length, "key": key }))
+}
+
+async fn handle_list_lindex_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let index = request
+        .payload
+        .get("index")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'index' field".to_string()))?;
+
+    let value = state.list_store.lindex(key, index)?;
+
+    let json_value: serde_json::Value = serde_json::from_slice(&value)
+        .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&value).to_string()));
+
+    Ok(serde_json::json!({ "value": json_value, "key": key, "index": index }))
+}
+
+async fn handle_list_lset_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let index = request
+        .payload
+        .get("index")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'index' field".to_string()))?;
+
+    let value = request
+        .payload
+        .get("value")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?;
+
+    let value_bytes =
+        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    state.list_store.lset(key, index, value_bytes)?;
+
+    Ok(serde_json::json!({ "success": true, "key": key, "index": index }))
+}
+
+async fn handle_list_ltrim_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let start = request
+        .payload
+        .get("start")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+
+    let stop = request
+        .payload
+        .get("stop")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(-1);
+
+    state.list_store.ltrim(key, start, stop)?;
+
+    Ok(serde_json::json!({ "success": true, "key": key }))
+}
+
+async fn handle_list_lrem_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let count = request
+        .payload
+        .get("count")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'count' field".to_string()))?;
+
+    let value = request
+        .payload
+        .get("value")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?;
+
+    let value_bytes =
+        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let removed = state.list_store.lrem(key, count, value_bytes)?;
+
+    Ok(serde_json::json!({ "removed": removed, "key": key }))
+}
+
+async fn handle_list_linsert_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let before = request
+        .payload
+        .get("before")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    let pivot = request
+        .payload
+        .get("pivot")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'pivot' field".to_string()))?;
+
+    let value = request
+        .payload
+        .get("value")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?;
+
+    let pivot_bytes =
+        serde_json::to_vec(pivot).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let value_bytes =
+        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let length = state
+        .list_store
+        .linsert(key, before, pivot_bytes, value_bytes)?;
+
+    Ok(serde_json::json!({ "length": length, "key": key }))
+}
+
+async fn handle_list_lpos_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let value = request
+        .payload
+        .get("value")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?;
+
+    let value_bytes =
+        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let position = state.list_store.lpos(key, value_bytes)?;
+
+    Ok(serde_json::json!({ "position": position, "key": key }))
+}
+
+async fn handle_list_rpoplpush_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let source = request
+        .payload
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'source' field".to_string()))?;
+
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let value = state.list_store.rpoplpush(source, destination)?;
+
+    let json_value: serde_json::Value = serde_json::from_slice(&value)
+        .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&value).to_string()));
+
+    Ok(serde_json::json!({ "value": json_value, "source": source, "destination": destination }))
+}
+
+async fn handle_list_stats_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let stats = state.list_store.stats();
+
+    Ok(serde_json::json!({
+        "total_lists": stats.total_lists,
+        "total_elements": stats.total_elements,
+        "operations": {
+            "lpush_count": stats.lpush_count,
+            "rpush_count": stats.rpush_count,
+            "lpop_count": stats.lpop_count,
+            "rpop_count": stats.rpop_count,
+            "lrange_count": stats.lrange_count,
+            "llen_count": stats.llen_count,
+            "lindex_count": stats.lindex_count,
+            "lset_count": stats.lset_count,
+            "ltrim_count": stats.ltrim_count,
+            "lrem_count": stats.lrem_count,
+            "linsert_count": stats.linsert_count,
+            "rpoplpush_count": stats.rpoplpush_count,
+            "blpop_count": stats.blpop_count,
+            "brpop_count": stats.brpop_count,
         }
     }))
 }
