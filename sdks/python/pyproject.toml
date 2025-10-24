@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "synap-sdk"
+name = "synap_sdk"
 version = "0.1.0"
 description = "Official Python SDK for Synap - High-Performance In-Memory Key-Value Store & Message Broker"
 readme = "README.md"
