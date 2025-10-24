@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - List Data Structure Implementation 🎉 (October 24, 2025)
+
+**Complete Redis-compatible List data structure - Phase 2 of Redis feature roadmap**
+
+#### Core Implementation
+- ✅ **ListStore Module** (`synap-server/src/core/list.rs` - 1300+ lines)
+- ✅ **16 List Commands**: LPUSH, RPUSH, LPOP, RPOP, LRANGE, LLEN, LINDEX, LSET, LTRIM, LREM, LINSERT, RPOPLPUSH, LPOS, LPUSHX, RPUSHX
+- ✅ **Blocking Operations**: BLPOP, BRPOP, BRPOPLPUSH with timeout support
+- ✅ **64-Way Sharding**: Arc<RwLock> per shard for concurrent access
+- ✅ **VecDeque Storage**: O(1) push/pop at both ends
+- ✅ **TTL Support**: TTL applies to entire list, automatic expiration
+- ✅ **Notification System**: tokio::sync::broadcast for blocked waiters
+
+#### API Layer (14 REST + 16 StreamableHTTP + 5 MCP)
+- ✅ **REST API**: POST /list/:key/lpush, /rpush, /lpop, /rpop, GET /list/:key/range, /len, etc.
+- ✅ **StreamableHTTP**: list.lpush, list.rpush, list.lpop, list.rpop, list.lrange, list.ltrim, etc.
+- ✅ **MCP Tools**: synap_list_push, synap_list_pop, synap_list_range, synap_list_len, synap_list_rpoplpush
+
+#### Persistence
+- ✅ **WAL Integration**: 7 Operation variants (ListPush, ListPop, ListSet, ListTrim, ListRem, ListInsert, ListRpoplpush)
+- ✅ **Recovery**: Full list state reconstruction from WAL + snapshots
+- ✅ **Snapshot Support**: list_data field in Snapshot struct
+
+#### Testing
+- ✅ **16 Unit Tests**: 100% coverage of list module (all passing)
+- ✅ **15 Integration Tests**: REST API end-to-end tests (all passing)
+- ✅ **Total Tests**: 207 (192 unit + 15 integration) - 100% passing
+
+#### Performance Benchmarks
+- ✅ **12 Benchmark Groups**: push, pop, range, index, set, trim, rem, insert, rpoplpush, len, concurrent, large_values
+- Target: LPUSH/RPOP <100µs, LRANGE(100) <500µs, BLPOP(no wait) <100µs
+
+#### Use Cases
+- Activity feeds, job queues, message buffers, recent items caching, task lists
+
+#### Target Version
+- **v0.5.0-alpha**: List data structure implementation complete
+
 ### Added - Hash Data Structure Implementation 🎉 (October 24, 2025)
 
 **Complete Redis-compatible Hash data structure - Phase 1 of Redis feature roadmap**
