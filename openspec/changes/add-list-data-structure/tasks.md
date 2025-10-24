@@ -2,30 +2,30 @@
 
 ## Phase 1: Core Implementation
 
-- [ ] Create `ListStore` struct with 64-way sharding
-- [ ] Implement `ListValue` with VecDeque storage
-- [ ] Add `LPUSH` operation
-- [ ] Add `RPUSH` operation
-- [ ] Add `LPOP` operation
-- [ ] Add `RPOP` operation
-- [ ] Add `LRANGE` operation
-- [ ] Add `LLEN` operation
-- [ ] Add `LINDEX` operation
-- [ ] Add `LSET` operation
-- [ ] Add `LPUSHX` operation (push if exists)
-- [ ] Add `RPUSHX` operation (push if exists)
-- [ ] Implement TTL support for entire list
-- [ ] Add statistics tracking (`ListStats`)
-- [ ] Write 15+ unit tests for list module
+- [x] Create `ListStore` struct with 64-way sharding
+- [x] Implement `ListValue` with VecDeque storage
+- [x] Add `LPUSH` operation
+- [x] Add `RPUSH` operation
+- [x] Add `LPOP` operation
+- [x] Add `RPOP` operation
+- [x] Add `LRANGE` operation
+- [x] Add `LLEN` operation
+- [x] Add `LINDEX` operation
+- [x] Add `LSET` operation
+- [x] Add `LPUSHX` operation (push if exists)
+- [x] Add `RPUSHX` operation (push if exists)
+- [x] Implement TTL support for entire list
+- [x] Add statistics tracking (`ListStats`)
+- [x] Write 15+ unit tests for list module (16 tests passing ✅)
 
 ## Phase 2: Advanced Operations
 
-- [ ] Add `LTRIM` operation
-- [ ] Add `LREM` operation (remove by value)
-- [ ] Add `LINSERT` operation (insert before/after)
-- [ ] Add `RPOPLPUSH` operation (atomic move)
-- [ ] Add `LPOS` operation (find position)
-- [ ] Write 10+ tests for advanced operations
+- [x] Add `LTRIM` operation
+- [x] Add `LREM` operation (remove by value)
+- [x] Add `LINSERT` operation (insert before/after)
+- [x] Add `RPOPLPUSH` operation (atomic move)
+- [x] Add `LPOS` operation (find position)
+- [x] Write 10+ tests for advanced operations (included in 31 total tests ✅)
 
 ## Phase 3: Blocking Operations
 

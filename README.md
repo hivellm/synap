@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.85%2B)-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-359%2F359%20(100%25)-brightgreen.svg)](#testing--quality)
+[![Tests](https://img.shields.io/badge/tests-374%2F374%20(100%25)-brightgreen.svg)](#testing--quality)
 [![Coverage](https://img.shields.io/badge/coverage-99.30%25-brightgreen.svg)](docs/TESTING.md)
 [![Version](https://img.shields.io/badge/version-0.3.0--rc-blue.svg)](#project-status)
 
@@ -12,13 +12,14 @@ Synap is a modern, high-performance data infrastructure system built in Rust, co
 
 ## 🎯 Overview
 
-Synap provides four core capabilities in a single, cohesive system:
+Synap provides six core capabilities in a single, cohesive system:
 
 1. **💾 Memory Key-Value Store** - Radix-tree based in-memory storage with O(k) lookup
-2. **#️⃣ Hash Data Structure** - Field-value maps within keys (Redis-compatible HSET, HGET, etc.) 🆕
-3. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
-4. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
-5. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
+2. **#️⃣ Hash Data Structure** - Field-value maps within keys (Redis-compatible HSET, HGET, etc.)
+3. **📋 List Data Structure** - Ordered sequences with LPUSH, RPOP, LRANGE (Redis-compatible) 🆕
+4. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
+5. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
+6. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
 
 ## ✨ Key Features
 
@@ -59,7 +60,7 @@ Synap provides four core capabilities in a single, cohesive system:
 - **📖 Rich Examples**: Chat, event broadcasting, task queues, and more
 
 ### 🔗 Protocol Support
-- **🤖 MCP (Model Context Protocol)**: ✅ **PRODUCTION READY** - 13 tools integrated at `/mcp` endpoint
+- **🤖 MCP (Model Context Protocol)**: ✅ **PRODUCTION READY** - 18 tools integrated at `/mcp` endpoint
 - **🌐 UMICP (Universal Matrix Inter-Communication Protocol)**: ✅ **PRODUCTION READY** - 5 tools via MCP bridge
 - **📡 REST API**: Standard HTTP endpoints for all operations
 - **🔌 WebSocket API**: Real-time bidirectional communication
