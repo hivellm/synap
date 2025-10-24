@@ -3,6 +3,7 @@ use super::{SnapshotManager, WriteAheadLog};
 use crate::core::QueueConfig;
 use crate::core::hash::HashStore;
 use crate::core::kv_store::KVStore;
+use crate::core::list::ListStore;
 use crate::core::queue::QueueManager;
 use crate::core::types::KVConfig;
 use tracing::info;
@@ -12,12 +13,19 @@ pub async fn recover(
     config: &PersistenceConfig,
     kv_config: KVConfig,
     queue_config: QueueConfig,
-) -> Result<(KVStore, Option<HashStore>, Option<QueueManager>, u64)> {
+) -> Result<(
+    KVStore,
+    Option<HashStore>,
+    Option<ListStore>,
+    Option<QueueManager>,
+    u64,
+)> {
     if !config.enabled {
         info!("Persistence disabled, starting with fresh state");
         return Ok((
             KVStore::new(kv_config),
             Some(HashStore::new()),
+            Some(ListStore::new()),
             Some(QueueManager::new(queue_config)),
             0,
         ));
@@ -29,7 +37,7 @@ pub async fn recover(
     let wal = WriteAheadLog::open(config.wal.clone()).await?;
 
     // Step 1: Load latest snapshot (if exists)
-    let (kv_store, hash_store, queue_manager, last_offset) =
+    let (kv_store, hash_store, list_store, queue_manager, last_offset) =
         if let Some((snapshot, path)) = snapshot_mgr.load_latest().await? {
             info!(
                 "Loaded snapshot from {:?} at offset {}",
@@ -58,9 +66,20 @@ pub async fn recover(
                 }
             }
 
+            // Restore List store
+            let lists = ListStore::new();
+            for (key, list_value) in snapshot.list_data {
+                // Restore list by pushing all elements
+                let elements: Vec<Vec<u8>> = list_value.elements.into_iter().collect();
+                if !elements.is_empty() {
+                    lists.rpush(&key, elements, false)?;
+                }
+            }
+
             (
                 kv,
                 Some(HashStore::new()),
+                Some(lists),
                 Some(queues),
                 snapshot.wal_offset,
             )
@@ -69,6 +88,7 @@ pub async fn recover(
             (
                 KVStore::new(kv_config),
                 Some(HashStore::new()),
+                Some(ListStore::new()),
                 Some(QueueManager::new(queue_config)),
                 0,
             )
@@ -164,6 +184,64 @@ pub async fn recover(
                 }
                 replayed += 1;
             }
+            Operation::ListPush { key, values, left } => {
+                if let Some(ref list_store) = list_store {
+                    if left {
+                        list_store.lpush(&key, values, false)?;
+                    } else {
+                        list_store.rpush(&key, values, false)?;
+                    }
+                }
+                replayed += 1;
+            }
+            Operation::ListPop { key, count, left } => {
+                if let Some(ref list_store) = list_store {
+                    let _ = if left {
+                        list_store.lpop(&key, Some(count))
+                    } else {
+                        list_store.rpop(&key, Some(count))
+                    };
+                }
+                replayed += 1;
+            }
+            Operation::ListSet { key, index, value } => {
+                if let Some(ref list_store) = list_store {
+                    let _ = list_store.lset(&key, index, value);
+                }
+                replayed += 1;
+            }
+            Operation::ListTrim { key, start, stop } => {
+                if let Some(ref list_store) = list_store {
+                    let _ = list_store.ltrim(&key, start, stop);
+                }
+                replayed += 1;
+            }
+            Operation::ListRem { key, count, value } => {
+                if let Some(ref list_store) = list_store {
+                    let _ = list_store.lrem(&key, count, value);
+                }
+                replayed += 1;
+            }
+            Operation::ListInsert {
+                key,
+                before,
+                pivot,
+                value,
+            } => {
+                if let Some(ref list_store) = list_store {
+                    let _ = list_store.linsert(&key, before, pivot, value);
+                }
+                replayed += 1;
+            }
+            Operation::ListRpoplpush {
+                source,
+                destination,
+            } => {
+                if let Some(ref list_store) = list_store {
+                    let _ = list_store.rpoplpush(&source, &destination);
+                }
+                replayed += 1;
+            }
         }
     }
 
@@ -171,7 +249,13 @@ pub async fn recover(
 
     let final_offset = last_offset + replayed;
 
-    Ok((kv_store, hash_store, queue_manager, final_offset))
+    Ok((
+        kv_store,
+        hash_store,
+        list_store,
+        queue_manager,
+        final_offset,
+    ))
 }
 
 /// Test recovery without actually loading data (validation only)

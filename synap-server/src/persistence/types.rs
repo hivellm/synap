@@ -113,6 +113,48 @@ pub enum Operation {
         field: String,
         increment: f64,
     },
+
+    /// List PUSH operation (LPUSH or RPUSH)
+    ListPush {
+        key: String,
+        values: Vec<Vec<u8>>,
+        left: bool, // true = LPUSH, false = RPUSH
+    },
+
+    /// List POP operation (LPOP or RPOP)
+    ListPop {
+        key: String,
+        count: usize,
+        left: bool, // true = LPOP, false = RPOP
+    },
+
+    /// List SET operation (LSET)
+    ListSet {
+        key: String,
+        index: i64,
+        value: Vec<u8>,
+    },
+
+    /// List TRIM operation (LTRIM)
+    ListTrim { key: String, start: i64, stop: i64 },
+
+    /// List REMOVE operation (LREM)
+    ListRem {
+        key: String,
+        count: i64,
+        value: Vec<u8>,
+    },
+
+    /// List INSERT operation (LINSERT)
+    ListInsert {
+        key: String,
+        before: bool,
+        pivot: Vec<u8>,
+        value: Vec<u8>,
+    },
+
+    /// List RPOPLPUSH operation
+    ListRpoplpush { source: String, destination: String },
 }
 
 /// Snapshot containing full system state
@@ -125,6 +167,8 @@ pub struct Snapshot {
     pub queue_data: HashMap<String, Vec<QueueMessage>>, // Simplified for now
     #[serde(default)]
     pub stream_data: HashMap<String, Vec<StreamEvent>>, // Room -> Events
+    #[serde(default)]
+    pub list_data: HashMap<String, crate::core::ListValue>, // Key -> List
 }
 
 /// Stream event for snapshot (simplified from stream::StreamEvent)

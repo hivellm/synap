@@ -157,6 +157,161 @@ impl PersistenceLayer {
         Ok(())
     }
 
+    /// Log a List PUSH operation
+    pub async fn log_list_push(
+        &self,
+        key: String,
+        values: Vec<Vec<u8>>,
+        left: bool,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ListPush { key, values, left };
+
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a List POP operation
+    pub async fn log_list_pop(
+        &self,
+        key: String,
+        count: usize,
+        left: bool,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ListPop { key, count, left };
+
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a List SET operation
+    pub async fn log_list_set(
+        &self,
+        key: String,
+        index: i64,
+        value: Vec<u8>,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ListSet { key, index, value };
+
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a List TRIM operation
+    pub async fn log_list_trim(
+        &self,
+        key: String,
+        start: i64,
+        stop: i64,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ListTrim { key, start, stop };
+
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a List REMOVE operation
+    pub async fn log_list_rem(
+        &self,
+        key: String,
+        count: i64,
+        value: Vec<u8>,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ListRem { key, count, value };
+
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a List INSERT operation
+    pub async fn log_list_insert(
+        &self,
+        key: String,
+        before: bool,
+        pivot: Vec<u8>,
+        value: Vec<u8>,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ListInsert {
+            key,
+            before,
+            pivot,
+            value,
+        };
+
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a List RPOPLPUSH operation
+    pub async fn log_list_rpoplpush(
+        &self,
+        source: String,
+        destination: String,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ListRpoplpush {
+            source,
+            destination,
+        };
+
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
     /// Log a Queue PUBLISH operation
     pub async fn log_queue_publish(
         &self,

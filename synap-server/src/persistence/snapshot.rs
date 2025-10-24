@@ -330,6 +330,7 @@ impl SnapshotManager {
             kv_data,
             queue_data,
             stream_data,
+            list_data: HashMap::new(), // Empty for now, will be populated from WAL replay
         };
 
         Ok(Some((snapshot, latest.clone())))
