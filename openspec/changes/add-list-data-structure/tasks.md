@@ -29,145 +29,145 @@
 
 ## Phase 3: Blocking Operations
 
-- [ ] Implement blocking channel infrastructure
-- [ ] Add `BLPOP` operation (blocking pop left)
-- [ ] Add `BRPOP` operation (blocking pop right)
-- [ ] Add `BRPOPLPUSH` operation (blocking move)
-- [ ] Add timeout support for blocking ops
-- [ ] Add multi-key blocking support
-- [ ] Write 8+ tests for blocking operations
+- [x] Implement blocking channel infrastructure
+- [x] Add `BLPOP` operation (blocking pop left)
+- [x] Add `BRPOP` operation (blocking pop right)
+- [x] Add `BRPOPLPUSH` operation (blocking move)
+- [x] Add timeout support for blocking ops
+- [x] Add multi-key blocking support
+- [x] Write 8+ tests for blocking operations
 
 ## Phase 4: API Exposure
 
 ### REST API
-- [ ] Create REST endpoint: `POST /list/{key}/lpush`
-- [ ] Create REST endpoint: `POST /list/{key}/rpush`
-- [ ] Create REST endpoint: `POST /list/{key}/lpop`
-- [ ] Create REST endpoint: `POST /list/{key}/rpop`
-- [ ] Create REST endpoint: `GET /list/{key}/range`
-- [ ] Create REST endpoint: `GET /list/{key}/len`
-- [ ] Create REST endpoint: `GET /list/{key}/index`
-- [ ] Create REST endpoint: `POST /list/{key}/set`
-- [ ] Create REST endpoint: `POST /list/{key}/trim`
-- [ ] Create REST endpoint: `POST /list/{key}/rem`
-- [ ] Create REST endpoint: `POST /list/{key}/insert`
-- [ ] Create REST endpoint: `POST /list/{key}/rpoplpush`
-- [ ] Create REST endpoint: `POST /list/{key}/blpop`
-- [ ] Create REST endpoint: `POST /list/{key}/brpop`
-- [ ] Create REST endpoint: `POST /list/{key}/brpoplpush`
-- [ ] Create REST endpoint: `GET /list/stats`
+- [x] Create REST endpoint: `POST /list/{key}/lpush`
+- [x] Create REST endpoint: `POST /list/{key}/rpush`
+- [x] Create REST endpoint: `POST /list/{key}/lpop`
+- [x] Create REST endpoint: `POST /list/{key}/rpop`
+- [x] Create REST endpoint: `GET /list/{key}/range`
+- [x] Create REST endpoint: `GET /list/{key}/len`
+- [x] Create REST endpoint: `GET /list/{key}/index`
+- [x] Create REST endpoint: `POST /list/{key}/set`
+- [x] Create REST endpoint: `POST /list/{key}/trim`
+- [x] Create REST endpoint: `POST /list/{key}/rem`
+- [x] Create REST endpoint: `POST /list/{key}/insert`
+- [x] Create REST endpoint: `POST /list/{key}/rpoplpush`
+- [x] Create REST endpoint: `POST /list/{key}/blpop`
+- [x] Create REST endpoint: `POST /list/{key}/brpop`
+- [x] Create REST endpoint: `POST /list/{key}/brpoplpush`
+- [x] Create REST endpoint: `GET /list/stats`
 
 ### StreamableHTTP
-- [ ] Add StreamableHTTP command: `list.lpush`
-- [ ] Add StreamableHTTP command: `list.rpush`
-- [ ] Add StreamableHTTP command: `list.lpop`
-- [ ] Add StreamableHTTP command: `list.rpop`
-- [ ] Add StreamableHTTP command: `list.range`
-- [ ] Add StreamableHTTP command: `list.len`
-- [ ] Add StreamableHTTP command: `list.index`
-- [ ] Add StreamableHTTP command: `list.set`
-- [ ] Add StreamableHTTP command: `list.trim`
-- [ ] Add StreamableHTTP command: `list.rem`
-- [ ] Add StreamableHTTP command: `list.insert`
-- [ ] Add StreamableHTTP command: `list.rpoplpush`
-- [ ] Add StreamableHTTP command: `list.blpop`
-- [ ] Add StreamableHTTP command: `list.brpop`
-- [ ] Add StreamableHTTP command: `list.brpoplpush`
-- [ ] Add StreamableHTTP command: `list.stats`
+- [x] Add StreamableHTTP command: `list.lpush`
+- [x] Add StreamableHTTP command: `list.rpush`
+- [x] Add StreamableHTTP command: `list.lpop`
+- [x] Add StreamableHTTP command: `list.rpop`
+- [x] Add StreamableHTTP command: `list.range`
+- [x] Add StreamableHTTP command: `list.len`
+- [x] Add StreamableHTTP command: `list.index`
+- [x] Add StreamableHTTP command: `list.set`
+- [x] Add StreamableHTTP command: `list.trim`
+- [x] Add StreamableHTTP command: `list.rem`
+- [x] Add StreamableHTTP command: `list.insert`
+- [x] Add StreamableHTTP command: `list.rpoplpush`
+- [x] Add StreamableHTTP command: `list.blpop`
+- [x] Add StreamableHTTP command: `list.brpop`
+- [x] Add StreamableHTTP command: `list.brpoplpush`
+- [x] Add StreamableHTTP command: `list.stats`
 
 ### MCP Tools
-- [ ] Create MCP tool: `synap_list_push`
-- [ ] Create MCP tool: `synap_list_pop`
-- [ ] Create MCP tool: `synap_list_range`
-- [ ] Create MCP tool: `synap_list_len`
-- [ ] Create MCP tool: `synap_list_rpoplpush`
+- [x] Create MCP tool: `synap_list_push`
+- [x] Create MCP tool: `synap_list_pop`
+- [x] Create MCP tool: `synap_list_range`
+- [x] Create MCP tool: `synap_list_len`
+- [x] Create MCP tool: `synap_list_rpoplpush`
 
 ## Phase 5: Persistence Integration
 
-- [ ] Add `ListPush` variant to `Operation` enum
-- [ ] Add `ListPop` variant to `Operation` enum
-- [ ] Add `ListSet` variant to `Operation` enum
-- [ ] Add `ListTrim` variant to `Operation` enum
-- [ ] Add `ListRem` variant to `Operation` enum
-- [ ] Add `ListInsert` variant to `Operation` enum
-- [ ] Implement `PersistenceLayer::log_list_push`
-- [ ] Implement `PersistenceLayer::log_list_pop`
-- [ ] Implement `PersistenceLayer::log_list_set`
-- [ ] Implement `PersistenceLayer::log_list_trim`
-- [ ] Update `recover()` function to handle List operations
-- [ ] Add List recovery from WAL replay
-- [ ] Initialize `ListStore` from snapshot data
-- [ ] Integrate List with `AppState`
+- [x] Add `ListPush` variant to `Operation` enum
+- [x] Add `ListPop` variant to `Operation` enum
+- [x] Add `ListSet` variant to `Operation` enum
+- [x] Add `ListTrim` variant to `Operation` enum
+- [x] Add `ListRem` variant to `Operation` enum
+- [x] Add `ListInsert` variant to `Operation` enum
+- [x] Implement `PersistenceLayer::log_list_push`
+- [x] Implement `PersistenceLayer::log_list_pop`
+- [x] Implement `PersistenceLayer::log_list_set`
+- [x] Implement `PersistenceLayer::log_list_trim`
+- [x] Update `recover()` function to handle List operations
+- [x] Add List recovery from WAL replay
+- [x] Initialize `ListStore` from snapshot data
+- [x] Integrate List with `AppState`
 
 ## Phase 6: Testing
 
 ### Unit Tests
-- [ ] Unit test: `test_lpush_rpush`
-- [ ] Unit test: `test_lpop_rpop`
-- [ ] Unit test: `test_lrange_all`
-- [ ] Unit test: `test_lrange_partial`
-- [ ] Unit test: `test_llen`
-- [ ] Unit test: `test_lindex_valid`
-- [ ] Unit test: `test_lindex_out_of_bounds`
-- [ ] Unit test: `test_lset`
-- [ ] Unit test: `test_ltrim`
-- [ ] Unit test: `test_lrem_count_positive`
-- [ ] Unit test: `test_lrem_count_negative`
-- [ ] Unit test: `test_lrem_count_zero`
-- [ ] Unit test: `test_linsert_before`
-- [ ] Unit test: `test_linsert_after`
-- [ ] Unit test: `test_rpoplpush`
-- [ ] Unit test: `test_lpushx_exists`
-- [ ] Unit test: `test_lpushx_not_exists`
+- [x] Unit test: `test_lpush_rpush`
+- [x] Unit test: `test_lpop_rpop`
+- [x] Unit test: `test_lrange_all`
+- [x] Unit test: `test_lrange_partial`
+- [x] Unit test: `test_llen`
+- [x] Unit test: `test_lindex_valid`
+- [x] Unit test: `test_lindex_out_of_bounds`
+- [x] Unit test: `test_lset`
+- [x] Unit test: `test_ltrim`
+- [x] Unit test: `test_lrem_count_positive`
+- [x] Unit test: `test_lrem_count_negative`
+- [x] Unit test: `test_lrem_count_zero`
+- [x] Unit test: `test_linsert_before`
+- [x] Unit test: `test_linsert_after`
+- [x] Unit test: `test_rpoplpush`
+- [x] Unit test: `test_lpushx_exists`
+- [x] Unit test: `test_lpushx_not_exists`
 
 ### Integration Tests
-- [ ] Integration test: `test_list_push_pop_rest`
-- [ ] Integration test: `test_list_range_rest`
-- [ ] Integration test: `test_list_trim_rest`
-- [ ] Integration test: `test_list_rem_rest`
-- [ ] Integration test: `test_list_insert_rest`
-- [ ] Integration test: `test_list_rpoplpush_rest`
-- [ ] Integration test: `test_list_blpop_timeout`
-- [ ] Integration test: `test_list_blpop_immediate`
-- [ ] Integration test: `test_list_blpop_multiple_keys`
-- [ ] Integration test: `test_list_streamable_http`
-- [ ] Integration test: `test_list_with_persistence_recovery`
-- [ ] Integration test: `test_list_concurrent_access`
-- [ ] Integration test: `test_list_large_elements`
-- [ ] Integration test: `test_list_edge_cases`
-- [ ] Fix all AppState compatibility tests
+- [x] Integration test: `test_list_push_pop_rest`
+- [x] Integration test: `test_list_range_rest`
+- [x] Integration test: `test_list_trim_rest`
+- [x] Integration test: `test_list_rem_rest`
+- [x] Integration test: `test_list_insert_rest`
+- [x] Integration test: `test_list_rpoplpush_rest`
+- [x] Integration test: `test_list_blpop_timeout`
+- [x] Integration test: `test_list_blpop_immediate`
+- [x] Integration test: `test_list_blpop_multiple_keys`
+- [x] Integration test: `test_list_streamable_http`
+- [x] Integration test: `test_list_with_persistence_recovery`
+- [x] Integration test: `test_list_concurrent_access`
+- [x] Integration test: `test_list_large_elements`
+- [x] Integration test: `test_list_edge_cases`
+- [x] Fix all AppState compatibility tests
 
 ## Phase 7: Performance Benchmarking
 
-- [ ] Benchmark: `lpush_single_element`
-- [ ] Benchmark: `lpush_100_elements`
-- [ ] Benchmark: `lpush_1000_elements`
-- [ ] Benchmark: `rpush_single_element`
-- [ ] Benchmark: `lpop_single`
-- [ ] Benchmark: `rpop_single`
-- [ ] Benchmark: `lrange_100_elements`
-- [ ] Benchmark: `lrange_1000_elements`
-- [ ] Benchmark: `lindex_various_positions`
-- [ ] Benchmark: `lset_various_positions`
-- [ ] Benchmark: `ltrim_various_sizes`
-- [ ] Benchmark: `lrem_various_counts`
-- [ ] Benchmark: `rpoplpush_operations`
-- [ ] Benchmark: `blpop_no_wait`
-- [ ] Benchmark: Concurrent access (100 threads)
-- [ ] Verify all benchmarks meet performance targets
+- [x] Benchmark: `lpush_single_element`
+- [x] Benchmark: `lpush_100_elements`
+- [x] Benchmark: `lpush_1000_elements`
+- [x] Benchmark: `rpush_single_element`
+- [x] Benchmark: `lpop_single`
+- [x] Benchmark: `rpop_single`
+- [x] Benchmark: `lrange_100_elements`
+- [x] Benchmark: `lrange_1000_elements`
+- [x] Benchmark: `lindex_various_positions`
+- [x] Benchmark: `lset_various_positions`
+- [x] Benchmark: `ltrim_various_sizes`
+- [x] Benchmark: `lrem_various_counts`
+- [x] Benchmark: `rpoplpush_operations`
+- [x] Benchmark: `blpop_no_wait`
+- [x] Benchmark: Concurrent access (100 threads)
+- [x] Verify all benchmarks meet performance targets
 
 ## Phase 8: Documentation
 
-- [ ] Update `README.md` with List capabilities
-- [ ] Add List examples to README
-- [ ] Update feature comparison table
-- [ ] Update MCP tool count
-- [ ] Create CHANGELOG entry for v0.5.0-alpha
-- [ ] Document List API in CHANGELOG
-- [ ] Update `docs/api/openapi.yml` with List endpoints
-- [ ] Add code comments for public List APIs
-- [ ] Document persistence integration
-- [ ] Document blocking operations behavior
+- [x] Update `README.md` with List capabilities
+- [x] Add List examples to README
+- [x] Update feature comparison table
+- [x] Update MCP tool count
+- [x] Create CHANGELOG entry for v0.5.0-alpha
+- [x] Document List API in CHANGELOG
+- [x] Update `docs/api/openapi.yml` with List endpoints
+- [x] Add code comments for public List APIs
+- [x] Document persistence integration
+- [x] Document blocking operations behavior
 
 ## 📊 Summary
 
@@ -178,12 +178,12 @@
 
 ## 🎯 Success Criteria
 
-- [ ] All 16+ list commands functional
-- [ ] Blocking operations working correctly
-- [ ] Performance targets met
-- [ ] 95%+ test coverage
-- [ ] Zero clippy warnings
-- [ ] All integration tests passing
-- [ ] OpenAPI spec updated
-- [ ] Ready for v0.5.0-alpha release
+- [x] All 16+ list commands functional
+- [x] Blocking operations working correctly
+- [x] Performance targets met
+- [x] 95%+ test coverage
+- [x] Zero clippy warnings
+- [x] All integration tests passing
+- [x] OpenAPI spec updated
+- [x] Ready for v0.5.0-alpha release
 
