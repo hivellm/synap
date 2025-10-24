@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Redis Feature Implementation Proposal (October 24, 2025)
+
+**Strategic roadmap to implement critical Redis features in Synap**
+
+#### Documentation
+- ✅ **Feature Proposal**: `docs/specs/REDIS_FEATURE_PROPOSAL.md` - 1000+ lines
+- ✅ **4-Phase Roadmap**: Detailed 18-month implementation plan
+- ✅ **Technical Specifications**: Complete API design for Hashes, Lists, Sets, Sorted Sets
+- ✅ **Performance Targets**: Latency and throughput goals for each operation
+- ✅ **Resource Planning**: Team composition and budget estimates
+- ✅ **Risk Assessment**: Technical, schedule, and market risks with mitigation strategies
+
+#### Phase 1: Core Data Structures (v0.4.0 - 3-6 months)
+
+**Hashes**:
+- 15+ commands (HSET, HGET, HMSET, HINCRBY, HSCAN, etc.)
+- Storage: HashMap within RadixMap
+- Performance: <100µs for HSET/HGET
+- Use cases: User profiles, product catalogs, configuration
+
+**Lists**:
+- 16+ commands (LPUSH, RPUSH, LPOP, RPOP, BLPOP, LRANGE, etc.)
+- Storage: VecDeque for O(1) push/pop at both ends
+- Blocking operations with timeout support
+- Use cases: Activity feeds, job queues, message buffers
+
+**Sets**:
+- 15+ commands (SADD, SREM, SINTER, SUNION, SDIFF, etc.)
+- Storage: HashSet with set algebra operations
+- Multi-key operations (SINTERSTORE, etc.)
+- Use cases: Tags, relationships, unique tracking
+
+#### Phase 2: Advanced Operations (v0.5.0 - 6-9 months)
+
+- **Sorted Sets**: 25+ commands with dual data structure (HashMap + BTreeMap)
+- **String Extensions**: APPEND, GETRANGE, SETRANGE, GETSET, MSETNX
+- **Key Management**: EXISTS, TYPE, RENAME, COPY, RANDOMKEY
+- **Enhanced Monitoring**: INFO endpoints, SLOWLOG, memory stats
+
+#### Phase 3: Transactions & Scripting (v0.6.0 - 9-12 months)
+
+- **Transactions**: MULTI/EXEC/WATCH with optimistic locking
+- **Lua Scripting**: Server-side execution with mlua integration
+- **Sandboxing**: Timeout enforcement and function whitelisting
+
+#### Phase 4: Cluster & Enterprise (v0.7.0 - 12-18 months)
+
+- **Cluster Mode**: Hash slot sharding across 3+ nodes
+- **Auto-Failover**: Raft consensus for master election
+- **Migration Tools**: Zero-downtime Redis → Synap migration
+
+#### Success Metrics
+
+- **Compatibility**: 80% Redis command coverage
+- **Performance**: Within 2x of Redis latency
+- **Adoption**: 1000+ downloads/month, 100+ GitHub stars
+- **Production**: 3+ companies using in production
+
+#### Resource Requirements
+
+- **Team**: 2 Senior + 2 Mid-level Rust engineers (18 months)
+- **Budget**: $520K (engineering, infrastructure, documentation)
+- **Timeline**: Q1 2026 → Q3 2027
+
 ### Added - Redis Feature Comparison Analysis (October 24, 2025)
 
 **Comprehensive analysis of Redis features not yet in Synap**
