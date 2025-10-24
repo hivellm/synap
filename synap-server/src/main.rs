@@ -253,11 +253,16 @@ async fn main() -> Result<()> {
         list_store_recovered.unwrap_or_else(|| Arc::new(synap_server::core::ListStore::new()));
     info!("List store initialized");
 
+    // Create set store
+    let set_store = Arc::new(synap_server::core::SetStore::new());
+    info!("Set store initialized");
+
     // Create application state with persistence and streams
     let app_state = AppState {
         kv_store,
         hash_store,
         list_store,
+        set_store,
         queue_manager,
         stream_manager,
         partition_manager,

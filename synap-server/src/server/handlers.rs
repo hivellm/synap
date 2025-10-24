@@ -22,6 +22,7 @@ pub struct AppState {
     pub kv_store: Arc<KVStore>,
     pub hash_store: Arc<HashStore>,
     pub list_store: Arc<crate::core::ListStore>,
+    pub set_store: Arc<crate::core::SetStore>,
     pub queue_manager: Option<Arc<QueueManager>>,
     pub stream_manager: Option<Arc<crate::core::StreamManager>>,
     pub partition_manager: Option<Arc<crate::core::PartitionManager>>,
@@ -3946,6 +3947,321 @@ pub async fn consumer_heartbeat(
     Ok(Json(json!({
         "success": true
     })))
+}
+
+// ============================================================================
+// Set Handlers
+// ============================================================================
+
+// Request/Response types for Set operations
+#[derive(Debug, Deserialize)]
+pub struct SetAddRequest {
+    pub members: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SetAddResponse {
+    pub added: usize,
+    pub key: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetRemRequest {
+    pub members: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetMemberRequest {
+    pub member: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SetStatsResponse {
+    pub total_sets: usize,
+    pub total_members: usize,
+    pub operations: SetOperationStats,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SetOperationStats {
+    pub sadd_count: u64,
+    pub srem_count: u64,
+    pub sismember_count: u64,
+    pub smembers_count: u64,
+    pub scard_count: u64,
+    pub spop_count: u64,
+    pub srandmember_count: u64,
+    pub smove_count: u64,
+    pub sinter_count: u64,
+    pub sunion_count: u64,
+    pub sdiff_count: u64,
+}
+
+/// POST /set/:key/add - Add member(s) to set
+pub async fn set_add(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<SetAddRequest>,
+) -> Result<Json<SetAddResponse>, SynapError> {
+    debug!("REST SADD key={} count={}", key, req.members.len());
+
+    let members: Result<Vec<Vec<u8>>, _> = req
+        .members
+        .into_iter()
+        .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
+        .collect();
+
+    let added = state.set_store.sadd(&key, members?)?;
+
+    Ok(Json(SetAddResponse { added, key }))
+}
+
+/// POST /set/:key/rem - Remove member(s) from set
+pub async fn set_rem(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<SetRemRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST SREM key={} count={}", key, req.members.len());
+
+    let members: Result<Vec<Vec<u8>>, _> = req
+        .members
+        .into_iter()
+        .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
+        .collect();
+
+    let removed = state.set_store.srem(&key, members?)?;
+
+    Ok(Json(json!({ "removed": removed, "key": key })))
+}
+
+/// POST /set/:key/ismember - Check if member exists
+pub async fn set_ismember(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<SetMemberRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST SISMEMBER key={}", key);
+
+    let member = serde_json::to_vec(&req.member)
+        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize member: {}", e)))?;
+
+    let is_member = state.set_store.sismember(&key, member)?;
+
+    Ok(Json(json!({ "is_member": is_member, "key": key })))
+}
+
+/// GET /set/:key/members - Get all members
+pub async fn set_members(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST SMEMBERS key={}", key);
+
+    let members = state.set_store.smembers(&key)?;
+
+    let json_members: Vec<serde_json::Value> = members
+        .into_iter()
+        .map(|m| {
+            serde_json::from_slice(&m).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&m).to_string())
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({ "members": json_members, "key": key })))
+}
+
+/// GET /set/:key/card - Get set cardinality
+pub async fn set_card(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST SCARD key={}", key);
+
+    let count = state.set_store.scard(&key)?;
+
+    Ok(Json(json!({ "count": count, "key": key })))
+}
+
+/// POST /set/:key/pop - Remove and return random member(s)
+pub async fn set_pop(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let count = params.get("count").and_then(|s| s.parse::<usize>().ok());
+
+    debug!("REST SPOP key={} count={:?}", key, count);
+
+    let members = state.set_store.spop(&key, count)?;
+
+    let json_members: Vec<serde_json::Value> = members
+        .into_iter()
+        .map(|m| {
+            serde_json::from_slice(&m).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&m).to_string())
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({ "members": json_members, "key": key })))
+}
+
+/// GET /set/:key/randmember - Get random member(s) without removing
+pub async fn set_randmember(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let count = params.get("count").and_then(|s| s.parse::<usize>().ok());
+
+    debug!("REST SRANDMEMBER key={} count={:?}", key, count);
+
+    let members = state.set_store.srandmember(&key, count)?;
+
+    let json_members: Vec<serde_json::Value> = members
+        .into_iter()
+        .map(|m| {
+            serde_json::from_slice(&m).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&m).to_string())
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({ "members": json_members, "key": key })))
+}
+
+/// POST /set/:source/move/:destination - Move member between sets
+pub async fn set_move(
+    State(state): State<AppState>,
+    Path((source, destination)): Path<(String, String)>,
+    Json(req): Json<SetMemberRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST SMOVE source={} destination={}", source, destination);
+
+    let member = serde_json::to_vec(&req.member)
+        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize member: {}", e)))?;
+
+    let moved = state.set_store.smove(&source, &destination, member)?;
+
+    Ok(Json(
+        json!({ "moved": moved, "source": source, "destination": destination }),
+    ))
+}
+
+/// POST /set/inter - Intersection of multiple sets
+pub async fn set_inter(
+    State(state): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let keys: Vec<String> = req
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'keys' array".to_string()))?
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+
+    debug!("REST SINTER keys={:?}", keys);
+
+    let members = state.set_store.sinter(&keys)?;
+
+    let json_members: Vec<serde_json::Value> = members
+        .into_iter()
+        .map(|m| {
+            serde_json::from_slice(&m).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&m).to_string())
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({ "members": json_members })))
+}
+
+/// POST /set/union - Union of multiple sets
+pub async fn set_union(
+    State(state): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let keys: Vec<String> = req
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'keys' array".to_string()))?
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+
+    debug!("REST SUNION keys={:?}", keys);
+
+    let members = state.set_store.sunion(&keys)?;
+
+    let json_members: Vec<serde_json::Value> = members
+        .into_iter()
+        .map(|m| {
+            serde_json::from_slice(&m).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&m).to_string())
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({ "members": json_members })))
+}
+
+/// POST /set/diff - Difference of sets
+pub async fn set_diff(
+    State(state): State<AppState>,
+    Json(req): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let keys: Vec<String> = req
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'keys' array".to_string()))?
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+
+    debug!("REST SDIFF keys={:?}", keys);
+
+    let members = state.set_store.sdiff(&keys)?;
+
+    let json_members: Vec<serde_json::Value> = members
+        .into_iter()
+        .map(|m| {
+            serde_json::from_slice(&m).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&m).to_string())
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({ "members": json_members })))
+}
+
+/// GET /set/stats - Get set statistics
+pub async fn set_stats(
+    State(state): State<AppState>,
+) -> Result<Json<SetStatsResponse>, SynapError> {
+    debug!("REST SET STATS");
+
+    let stats = state.set_store.stats();
+
+    Ok(Json(SetStatsResponse {
+        total_sets: stats.total_sets,
+        total_members: stats.total_members,
+        operations: SetOperationStats {
+            sadd_count: stats.sadd_count,
+            srem_count: stats.srem_count,
+            sismember_count: stats.sismember_count,
+            smembers_count: stats.smembers_count,
+            scard_count: stats.scard_count,
+            spop_count: stats.spop_count,
+            srandmember_count: stats.srandmember_count,
+            smove_count: stats.smove_count,
+            sinter_count: stats.sinter_count,
+            sunion_count: stats.sunion_count,
+            sdiff_count: stats.sdiff_count,
+        },
+    }))
 }
 
 // ============================================================================
