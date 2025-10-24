@@ -14,8 +14,10 @@ async fn spawn_test_server() -> String {
         ..Default::default()
     };
     let kv_store = Arc::new(KVStore::new(config));
+    let hash_store = Arc::new(synap_server::core::HashStore::new());
     let state = AppState {
         kv_store,
+        hash_store,
         queue_manager: None,
         stream_manager: None,
         pubsub_router: None,
