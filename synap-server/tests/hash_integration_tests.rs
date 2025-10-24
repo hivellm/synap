@@ -321,6 +321,7 @@ async fn test_hash_streamable_http() {
         .post(&format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.set",
+            "request_id": "test-1",
             "payload": {
                 "key": "user:7000",
                 "field": "name",
@@ -333,7 +334,7 @@ async fn test_hash_streamable_http() {
 
     assert_eq!(set_resp.status(), 200);
     let set_body: serde_json::Value = set_resp.json().await.unwrap();
-    assert_eq!(set_body["status"], "success");
+    assert_eq!(set_body["success"], true);
     assert_eq!(set_body["payload"]["created"], true);
 
     // hash.get command
@@ -341,6 +342,7 @@ async fn test_hash_streamable_http() {
         .post(&format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.get",
+            "request_id": "test-2",
             "payload": {
                 "key": "user:7000",
                 "field": "name"
@@ -352,7 +354,7 @@ async fn test_hash_streamable_http() {
 
     assert_eq!(get_resp.status(), 200);
     let get_body: serde_json::Value = get_resp.json().await.unwrap();
-    assert_eq!(get_body["status"], "success");
+    assert_eq!(get_body["success"], true);
     assert_eq!(get_body["payload"]["found"], true);
     assert_eq!(get_body["payload"]["value"], "Grace");
 }
@@ -367,6 +369,7 @@ async fn test_hash_mset_getall_streamable() {
         .post(&format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.mset",
+            "request_id": "test-3",
             "payload": {
                 "key": "user:8000",
                 "fields": {
@@ -387,6 +390,7 @@ async fn test_hash_mset_getall_streamable() {
         .post(&format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.getall",
+            "request_id": "test-4",
             "payload": {
                 "key": "user:8000"
             }
@@ -397,7 +401,7 @@ async fn test_hash_mset_getall_streamable() {
 
     assert_eq!(getall_resp.status(), 200);
     let getall_body: serde_json::Value = getall_resp.json().await.unwrap();
-    assert_eq!(getall_body["status"], "success");
+    assert_eq!(getall_body["success"], true);
     let fields = &getall_body["payload"]["fields"];
     assert_eq!(fields["name"], "Henry");
     assert_eq!(fields["age"], 40);
@@ -413,6 +417,7 @@ async fn test_hash_incrby_streamable() {
         .post(&format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.incrby",
+            "request_id": "test-5",
             "payload": {
                 "key": "stats:user:9000",
                 "field": "views",
@@ -425,7 +430,7 @@ async fn test_hash_incrby_streamable() {
 
     assert_eq!(incr_resp.status(), 200);
     let incr_body: serde_json::Value = incr_resp.json().await.unwrap();
-    assert_eq!(incr_body["status"], "success");
+    assert_eq!(incr_body["success"], true);
     assert_eq!(incr_body["payload"]["value"], 10);
 
     // Increment again
@@ -433,6 +438,7 @@ async fn test_hash_incrby_streamable() {
         .post(&format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.incrby",
+            "request_id": "test-6",
             "payload": {
                 "key": "stats:user:9000",
                 "field": "views",
@@ -457,6 +463,7 @@ async fn test_hash_del_streamable() {
         .post(&format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.mset",
+            "request_id": "test-7",
             "payload": {
                 "key": "user:10000",
                 "fields": {"name": "Ivy", "age": 22, "email": "ivy@example.com"}
@@ -471,6 +478,7 @@ async fn test_hash_del_streamable() {
         .post(&format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.del",
+            "request_id": "test-8",
             "payload": {
                 "key": "user:10000",
                 "fields": ["email"]
@@ -482,6 +490,7 @@ async fn test_hash_del_streamable() {
 
     assert_eq!(del_resp.status(), 200);
     let del_body: serde_json::Value = del_resp.json().await.unwrap();
+    assert_eq!(del_body["success"], true);
     assert_eq!(del_body["payload"]["deleted"], 1);
 }
 
