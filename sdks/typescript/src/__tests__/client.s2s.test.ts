@@ -280,6 +280,12 @@ describe('Synap Client (S2S Integration)', () => {
       const pong = await synap.ping();
       expect(typeof pong).toBe('boolean');
     });
+
+    it('should get underlying client', () => {
+      const client = synap.getClient();
+      expect(client).toBeTruthy();
+      expect(typeof client.sendCommand).toBe('function');
+    });
   });
 });
 

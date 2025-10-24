@@ -343,6 +343,40 @@ describe('KV Store (S2S Advanced)', () => {
     });
   });
 
+  describe('Advanced Operations', () => {
+    it('should persist keys (remove TTL)', async () => {
+      const key = `persist-test-${Date.now()}`;
+      await synap.kv.set(key, 'value', { ttl: 60 });
+      
+      const persistResult = await synap.kv.persist(key);
+      expect(typeof persistResult).toBe('boolean');
+      
+      const ttl = await synap.kv.ttl(key);
+      expect(ttl).toBe(null); // No TTL after persist
+      
+      await synap.kv.del(key);
+    });
+
+    it('should list keys with pattern', async () => {
+      const prefix = `keys-test-${Date.now()}`;
+      await synap.kv.set(`${prefix}-1`, 'value1');
+      await synap.kv.set(`${prefix}-2`, 'value2');
+      await synap.kv.set(`${prefix}-3`, 'value3');
+      
+      const keys = await synap.kv.keys(`${prefix}*`);
+      expect(Array.isArray(keys)).toBe(true);
+      expect(keys.length).toBeGreaterThanOrEqual(3);
+      
+      await synap.kv.mdel(keys.filter(k => k.startsWith(prefix)));
+    });
+
+    it('should get database size', async () => {
+      const size = await synap.kv.dbsize();
+      expect(typeof size).toBe('number');
+      expect(size).toBeGreaterThanOrEqual(0);
+    });
+  });
+
   describe('Error Handling', () => {
     it('should handle get on non-existent key', async () => {
       const nonExistentKey = `nonexist-${Date.now()}`;
