@@ -6,12 +6,13 @@ info:
     
     Synap combines Redis, RabbitMQ, and Kafka features in a single platform:
     - **Key-Value Store**: Radix-tree based storage with TTL support
+    - **Hash Store**: Redis-compatible hash data structure for structured objects
     - **Message Queues**: RabbitMQ-style queues with ACK/NACK
     - **Event Streams**: Kafka-style partitioned topics with consumer groups
     - **Pub/Sub**: Topic-based messaging with wildcard support
     
     **Authentication**: Supports Basic Auth, Bearer Token, and API Key
-  version: 0.3.0-rc
+  version: 0.4.0-alpha
   contact:
     name: Synap Team
     url: https://github.com/hivellm/synap
@@ -30,6 +31,8 @@ tags:
     description: Health check endpoints
   - name: Key-Value
     description: Redis-style key-value operations
+  - name: Hash
+    description: Redis-style hash operations (field-value maps)
   - name: Queue
     description: RabbitMQ-style message queues
   - name: Event Streams (Simple)
@@ -186,6 +189,450 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/KVStats'
+
+  # ==========================================
+  # Hash Endpoints
+  # ==========================================
+  /hash/{key}/set:
+    post:
+      tags: [Hash]
+      summary: Set a hash field
+      description: Set a field value in a hash
+      operationId: hashSet
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user:1000
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [field, value]
+              properties:
+                field:
+                  type: string
+                  example: name
+                value:
+                  description: Value (can be string, number, or object)
+                  example: Alice
+      responses:
+        '200':
+          description: Field set successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HashSetResponse'
+
+  /hash/{key}/{field}:
+    get:
+      tags: [Hash]
+      summary: Get a hash field value
+      description: Retrieve the value of a field in a hash
+      operationId: hashGet
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user:1000
+        - name: field
+          in: path
+          required: true
+          schema:
+            type: string
+          example: name
+      responses:
+        '200':
+          description: Field value retrieved
+          content:
+            application/json:
+              schema:
+                description: Field value (string, number, or null if not found)
+                example: Alice
+        '404':
+          description: Hash or field not found
+
+  /hash/{key}/getall:
+    get:
+      tags: [Hash]
+      summary: Get all hash fields
+      description: Retrieve all field-value pairs in a hash
+      operationId: hashGetAll
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user:1000
+      responses:
+        '200':
+          description: All fields retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                example:
+                  name: Alice
+                  age: 30
+                  email: alice@example.com
+
+  /hash/{key}/keys:
+    get:
+      tags: [Hash]
+      summary: Get all field names
+      description: Retrieve all field names in a hash
+      operationId: hashKeys
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user:1000
+      responses:
+        '200':
+          description: Field names retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+                example: [name, age, email]
+
+  /hash/{key}/vals:
+    get:
+      tags: [Hash]
+      summary: Get all field values
+      description: Retrieve all values in a hash
+      operationId: hashVals
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user:1000
+      responses:
+        '200':
+          description: Values retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  description: Field value
+                example: [Alice, 30, alice@example.com]
+
+  /hash/{key}/len:
+    get:
+      tags: [Hash]
+      summary: Get hash field count
+      description: Get the number of fields in a hash
+      operationId: hashLen
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user:1000
+      responses:
+        '200':
+          description: Field count retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  length:
+                    type: integer
+                    example: 3
+
+  /hash/{key}/mset:
+    post:
+      tags: [Hash]
+      summary: Set multiple hash fields
+      description: Set multiple field-value pairs in a hash
+      operationId: hashMSet
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user:1000
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fields]
+              properties:
+                fields:
+                  type: object
+                  additionalProperties: true
+                  example:
+                    name: Alice
+                    age: 30
+                    email: alice@example.com
+      responses:
+        '200':
+          description: Fields set successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+
+  /hash/{key}/mget:
+    post:
+      tags: [Hash]
+      summary: Get multiple hash fields
+      description: Retrieve values for multiple fields in a hash
+      operationId: hashMGet
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user:1000
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fields]
+              properties:
+                fields:
+                  type: array
+                  items:
+                    type: string
+                  example: [name, age, email]
+      responses:
+        '200':
+          description: Field values retrieved
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  description: Field value (null if not found)
+                example: [Alice, 30, alice@example.com]
+
+  /hash/{key}/del:
+    delete:
+      tags: [Hash]
+      summary: Delete hash fields
+      description: Delete one or more fields from a hash
+      operationId: hashDel
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user:1000
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fields]
+              properties:
+                fields:
+                  type: array
+                  items:
+                    type: string
+                  example: [email, age]
+      responses:
+        '200':
+          description: Fields deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HashDelResponse'
+
+  /hash/{key}/{field}/exists:
+    get:
+      tags: [Hash]
+      summary: Check field existence
+      description: Check if a field exists in a hash
+      operationId: hashExists
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user:1000
+        - name: field
+          in: path
+          required: true
+          schema:
+            type: string
+          example: name
+      responses:
+        '200':
+          description: Existence check result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  exists:
+                    type: boolean
+                    example: true
+
+  /hash/{key}/incrby:
+    post:
+      tags: [Hash]
+      summary: Increment field by integer
+      description: Atomically increment a hash field by an integer
+      operationId: hashIncrBy
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: stats:user:1000
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [field, increment]
+              properties:
+                field:
+                  type: string
+                  example: login_count
+                increment:
+                  type: integer
+                  format: int64
+                  example: 1
+      responses:
+        '200':
+          description: Field incremented
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  value:
+                    type: integer
+                    format: int64
+                    example: 42
+
+  /hash/{key}/incrbyfloat:
+    post:
+      tags: [Hash]
+      summary: Increment field by float
+      description: Atomically increment a hash field by a floating point number
+      operationId: hashIncrByFloat
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: stats:metrics
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [field, increment]
+              properties:
+                field:
+                  type: string
+                  example: average_response_time
+                increment:
+                  type: number
+                  format: double
+                  example: 0.25
+      responses:
+        '200':
+          description: Field incremented
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  value:
+                    type: number
+                    format: double
+                    example: 123.75
+
+  /hash/{key}/setnx:
+    post:
+      tags: [Hash]
+      summary: Set field if not exists
+      description: Set a hash field only if it doesn't already exist
+      operationId: hashSetNX
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: user:1000
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [field, value]
+              properties:
+                field:
+                  type: string
+                  example: created_at
+                value:
+                  description: Value to set
+                  example: '2025-10-24T12:00:00Z'
+      responses:
+        '200':
+          description: Set operation result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  created:
+                    type: boolean
+                    example: true
+
+  /hash/stats:
+    get:
+      tags: [Hash]
+      summary: Get hash statistics
+      description: Retrieve statistics about the hash store
+      operationId: hashStats
+      responses:
+        '200':
+          description: Statistics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HashStatsResponse'
 
   # ==========================================
   # Queue Endpoints
@@ -1222,6 +1669,109 @@ components:
           type: number
           format: float
           example: 0.9
+
+    # Hash Schemas
+    HashSetResponse:
+      type: object
+      properties:
+        created:
+          type: boolean
+          description: True if field was created, false if updated
+          example: true
+
+    HashDelResponse:
+      type: object
+      properties:
+        deleted:
+          type: integer
+          description: Number of fields deleted
+          example: 2
+
+    HashStatsResponse:
+      type: object
+      properties:
+        total_hashes:
+          type: integer
+          description: Total number of hashes
+          example: 1000
+        total_fields:
+          type: integer
+          format: int64
+          description: Total number of fields across all hashes
+          example: 50000
+        total_memory_bytes:
+          type: integer
+          format: int64
+          description: Total memory used by hash storage
+          example: 2097152
+        operations:
+          type: object
+          properties:
+            hset_count:
+              type: integer
+              format: int64
+              description: Total HSET operations
+              example: 10000
+            hget_count:
+              type: integer
+              format: int64
+              description: Total HGET operations
+              example: 50000
+            hdel_count:
+              type: integer
+              format: int64
+              description: Total HDEL operations
+              example: 500
+            hgetall_count:
+              type: integer
+              format: int64
+              description: Total HGETALL operations
+              example: 5000
+            hmset_count:
+              type: integer
+              format: int64
+              description: Total HMSET operations
+              example: 2000
+            hmget_count:
+              type: integer
+              format: int64
+              description: Total HMGET operations
+              example: 8000
+            hincrby_count:
+              type: integer
+              format: int64
+              description: Total HINCRBY operations
+              example: 1500
+            hincrbyfloat_count:
+              type: integer
+              format: int64
+              description: Total HINCRBYFLOAT operations
+              example: 500
+            hexists_count:
+              type: integer
+              format: int64
+              description: Total HEXISTS operations
+              example: 15000
+            hlen_count:
+              type: integer
+              format: int64
+              description: Total HLEN operations
+              example: 3000
+            hkeys_count:
+              type: integer
+              format: int64
+              description: Total HKEYS operations
+              example: 1000
+            hvals_count:
+              type: integer
+              format: int64
+              description: Total HVALS operations
+              example: 1000
+            hsetnx_count:
+              type: integer
+              format: int64
+              description: Total HSETNX operations
+              example: 800
 
     # Queue Schemas
     CreateQueueRequest:
