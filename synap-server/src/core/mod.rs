@@ -7,6 +7,7 @@ pub mod list;
 pub mod partition;
 pub mod pubsub;
 pub mod queue;
+pub mod set;
 pub mod stream;
 pub mod types;
 
@@ -27,5 +28,6 @@ pub use pubsub::{
     Message, MessageSender, PubSubRouter, PubSubStats, PublishResult, SubscribeResult, TopicInfo,
 };
 pub use queue::{QueueConfig, QueueManager, QueueMessage, QueueStats};
+pub use set::{SetStats, SetStore, SetValue};
 pub use stream::{RoomStats, StreamConfig, StreamEvent, StreamManager};
 pub use types::{EvictionPolicy, KVConfig, KVStats, StoredValue};
