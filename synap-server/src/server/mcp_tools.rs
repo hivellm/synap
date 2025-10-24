@@ -94,6 +94,108 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
         },
+        // Hash Tools
+        Tool {
+            name: Cow::Borrowed("synap_hash_set"),
+            title: Some("Set Hash Field".to_string()),
+            description: Some(Cow::Borrowed("Set a field value in a hash")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Hash key"},
+                    "field": {"type": "string", "description": "Field name"},
+                    "value": {"description": "Value to store (any JSON type)"}
+                },
+                "required": ["key", "field", "value"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_hash_get"),
+            title: Some("Get Hash Field".to_string()),
+            description: Some(Cow::Borrowed("Retrieve a field value from a hash")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Hash key"},
+                    "field": {"type": "string", "description": "Field name"}
+                },
+                "required": ["key", "field"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_hash_getall"),
+            title: Some("Get All Hash Fields".to_string()),
+            description: Some(Cow::Borrowed("Retrieve all field-value pairs from a hash")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Hash key"}
+                },
+                "required": ["key"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_hash_del"),
+            title: Some("Delete Hash Fields".to_string()),
+            description: Some(Cow::Borrowed("Delete one or more fields from a hash")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Hash key"},
+                    "fields": {"type": "array", "items": {"type": "string"}, "description": "Field names to delete"}
+                },
+                "required": ["key", "fields"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_hash_incrby"),
+            title: Some("Increment Hash Field".to_string()),
+            description: Some(Cow::Borrowed("Atomically increment a hash field by an integer")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Hash key"},
+                    "field": {"type": "string", "description": "Field name"},
+                    "increment": {"type": "integer", "description": "Amount to increment (can be negative)"}
+                },
+                "required": ["key", "field", "increment"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
         // Queue Tools
         Tool {
             name: Cow::Borrowed("synap_queue_publish"),

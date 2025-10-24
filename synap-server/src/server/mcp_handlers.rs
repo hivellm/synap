@@ -13,6 +13,11 @@ pub async fn handle_mcp_tool(
         "synap_kv_set" => handle_kv_set(request, state).await,
         "synap_kv_delete" => handle_kv_delete(request, state).await,
         "synap_kv_scan" => handle_kv_scan(request, state).await,
+        "synap_hash_set" => handle_hash_set(request, state).await,
+        "synap_hash_get" => handle_hash_get(request, state).await,
+        "synap_hash_getall" => handle_hash_getall(request, state).await,
+        "synap_hash_del" => handle_hash_del(request, state).await,
+        "synap_hash_incrby" => handle_hash_incrby(request, state).await,
         "synap_queue_publish" => handle_queue_publish(request, state).await,
         "synap_queue_consume" => handle_queue_consume(request, state).await,
         "synap_stream_publish" => handle_stream_publish(request, state).await,
@@ -161,6 +166,181 @@ async fn handle_kv_scan(
 
     Ok(CallToolResult::success(vec![Content::text(
         json!({"keys": keys}).to_string(),
+    )]))
+}
+
+// ==================== Hash MCP Handlers ====================
+
+async fn handle_hash_set(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let field = args
+        .get("field")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing field", None))?;
+
+    let value = args
+        .get("value")
+        .ok_or_else(|| ErrorData::invalid_params("Missing value", None))?;
+
+    let value_bytes = serde_json::to_vec(value)
+        .map_err(|e| ErrorData::internal_error(format!("Serialization failed: {}", e), None))?;
+
+    let created = state
+        .hash_store
+        .hset(key, field, value_bytes)
+        .map_err(|e| ErrorData::internal_error(format!("HSET failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"created": created, "key": key, "field": field}).to_string(),
+    )]))
+}
+
+async fn handle_hash_get(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let field = args
+        .get("field")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing field", None))?;
+
+    let value_bytes = state
+        .hash_store
+        .hget(key, field)
+        .map_err(|e| ErrorData::internal_error(format!("HGET failed: {}", e), None))?;
+
+    let response = match value_bytes {
+        Some(bytes) => {
+            let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&bytes).to_string())
+            });
+            json!({"found": true, "value": value}).to_string()
+        }
+        None => json!({"found": false}).to_string(),
+    };
+
+    Ok(CallToolResult::success(vec![Content::text(response)]))
+}
+
+async fn handle_hash_getall(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let all = state
+        .hash_store
+        .hgetall(key)
+        .map_err(|e| ErrorData::internal_error(format!("HGETALL failed: {}", e), None))?;
+
+    let result: std::collections::HashMap<String, serde_json::Value> = all
+        .into_iter()
+        .map(|(k, v)| {
+            let json_value: serde_json::Value = serde_json::from_slice(&v).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&v).to_string())
+            });
+            (k, json_value)
+        })
+        .collect();
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"fields": result, "count": result.len()}).to_string(),
+    )]))
+}
+
+async fn handle_hash_del(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let fields: Vec<String> = args
+        .get("fields")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| ErrorData::invalid_params("Missing fields array", None))?
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
+
+    let deleted = state
+        .hash_store
+        .hdel(key, &fields)
+        .map_err(|e| ErrorData::internal_error(format!("HDEL failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"deleted": deleted}).to_string(),
+    )]))
+}
+
+async fn handle_hash_incrby(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let field = args
+        .get("field")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing field", None))?;
+
+    let increment = args
+        .get("increment")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| ErrorData::invalid_params("Missing increment", None))?;
+
+    let new_value = state
+        .hash_store
+        .hincrby(key, field, increment)
+        .map_err(|e| ErrorData::internal_error(format!("HINCRBY failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"value": new_value}).to_string(),
     )]))
 }
 
