@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.85%2B)-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-374%2F374%20(100%25)-brightgreen.svg)](#testing--quality)
+[![Tests](https://img.shields.io/badge/tests-456%2F456%20(100%25)-brightgreen.svg)](#testing--quality)
 [![Coverage](https://img.shields.io/badge/coverage-99.30%25-brightgreen.svg)](docs/TESTING.md)
 [![Version](https://img.shields.io/badge/version-0.3.0--rc-blue.svg)](#project-status)
 
