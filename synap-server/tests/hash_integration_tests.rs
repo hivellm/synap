@@ -61,7 +61,7 @@ async fn test_hash_set_get_rest() {
 
     // SET a field
     let set_resp = client
-        .post(&format!("{}/hash/user:1000/set", base_url))
+        .post(format!("{}/hash/user:1000/set", base_url))
         .json(&json!({
             "field": "name",
             "value": "Alice"
@@ -76,7 +76,7 @@ async fn test_hash_set_get_rest() {
 
     // GET the field
     let get_resp = client
-        .get(&format!("{}/hash/user:1000/name", base_url))
+        .get(format!("{}/hash/user:1000/name", base_url))
         .send()
         .await
         .unwrap();
@@ -93,7 +93,7 @@ async fn test_hash_mset_getall_rest() {
 
     // MSET multiple fields
     let mset_resp = client
-        .post(&format!("{}/hash/user:2000/mset", base_url))
+        .post(format!("{}/hash/user:2000/mset", base_url))
         .json(&json!({
             "fields": {
                 "name": "Bob",
@@ -109,7 +109,7 @@ async fn test_hash_mset_getall_rest() {
 
     // GETALL fields
     let getall_resp = client
-        .get(&format!("{}/hash/user:2000/getall", base_url))
+        .get(format!("{}/hash/user:2000/getall", base_url))
         .send()
         .await
         .unwrap();
@@ -128,7 +128,7 @@ async fn test_hash_del_rest() {
 
     // Setup: Create hash with fields
     client
-        .post(&format!("{}/hash/user:3000/mset", base_url))
+        .post(format!("{}/hash/user:3000/mset", base_url))
         .json(&json!({
             "fields": {
                 "name": "Charlie",
@@ -142,7 +142,7 @@ async fn test_hash_del_rest() {
 
     // DELETE fields
     let del_resp = client
-        .delete(&format!("{}/hash/user:3000/del", base_url))
+        .delete(format!("{}/hash/user:3000/del", base_url))
         .json(&json!({
             "fields": ["email", "age"]
         }))
@@ -156,7 +156,7 @@ async fn test_hash_del_rest() {
 
     // Verify only name remains
     let len_resp = client
-        .get(&format!("{}/hash/user:3000/len", base_url))
+        .get(format!("{}/hash/user:3000/len", base_url))
         .send()
         .await
         .unwrap();
@@ -172,7 +172,7 @@ async fn test_hash_incrby_rest() {
 
     // INCRBY starting from 0
     let incr1 = client
-        .post(&format!("{}/hash/stats:user:1000/incrby", base_url))
+        .post(format!("{}/hash/stats:user:1000/incrby", base_url))
         .json(&json!({
             "field": "login_count",
             "increment": 1
@@ -186,7 +186,7 @@ async fn test_hash_incrby_rest() {
 
     // INCRBY again
     let incr2 = client
-        .post(&format!("{}/hash/stats:user:1000/incrby", base_url))
+        .post(format!("{}/hash/stats:user:1000/incrby", base_url))
         .json(&json!({
             "field": "login_count",
             "increment": 5
@@ -206,7 +206,7 @@ async fn test_hash_exists_rest() {
 
     // Setup
     client
-        .post(&format!("{}/hash/user:4000/set", base_url))
+        .post(format!("{}/hash/user:4000/set", base_url))
         .json(&json!({
             "field": "name",
             "value": "David"
@@ -217,7 +217,7 @@ async fn test_hash_exists_rest() {
 
     // EXISTS - existing field
     let exists_resp = client
-        .get(&format!("{}/hash/user:4000/name/exists", base_url))
+        .get(format!("{}/hash/user:4000/name/exists", base_url))
         .send()
         .await
         .unwrap();
@@ -227,7 +227,7 @@ async fn test_hash_exists_rest() {
 
     // EXISTS - non-existent field
     let not_exists_resp = client
-        .get(&format!("{}/hash/user:4000/age/exists", base_url))
+        .get(format!("{}/hash/user:4000/age/exists", base_url))
         .send()
         .await
         .unwrap();
@@ -243,7 +243,7 @@ async fn test_hash_keys_vals_rest() {
 
     // Setup
     client
-        .post(&format!("{}/hash/user:5000/mset", base_url))
+        .post(format!("{}/hash/user:5000/mset", base_url))
         .json(&json!({
             "fields": {
                 "name": "Eve",
@@ -256,7 +256,7 @@ async fn test_hash_keys_vals_rest() {
 
     // KEYS
     let keys_resp = client
-        .get(&format!("{}/hash/user:5000/keys", base_url))
+        .get(format!("{}/hash/user:5000/keys", base_url))
         .send()
         .await
         .unwrap();
@@ -268,7 +268,7 @@ async fn test_hash_keys_vals_rest() {
 
     // VALS
     let vals_resp = client
-        .get(&format!("{}/hash/user:5000/vals", base_url))
+        .get(format!("{}/hash/user:5000/vals", base_url))
         .send()
         .await
         .unwrap();
@@ -284,21 +284,21 @@ async fn test_hash_stats_rest() {
 
     // Perform some operations
     client
-        .post(&format!("{}/hash/user:6000/set", base_url))
+        .post(format!("{}/hash/user:6000/set", base_url))
         .json(&json!({"field": "name", "value": "Frank"}))
         .send()
         .await
         .unwrap();
 
     client
-        .get(&format!("{}/hash/user:6000/name", base_url))
+        .get(format!("{}/hash/user:6000/name", base_url))
         .send()
         .await
         .unwrap();
 
     // GET stats
     let stats_resp = client
-        .get(&format!("{}/hash/stats", base_url))
+        .get(format!("{}/hash/stats", base_url))
         .send()
         .await
         .unwrap();
@@ -318,7 +318,7 @@ async fn test_hash_streamable_http() {
 
     // hash.set command
     let set_resp = client
-        .post(&format!("{}/api/v1/command", base_url))
+        .post(format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.set",
             "request_id": "test-1",
@@ -339,7 +339,7 @@ async fn test_hash_streamable_http() {
 
     // hash.get command
     let get_resp = client
-        .post(&format!("{}/api/v1/command", base_url))
+        .post(format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.get",
             "request_id": "test-2",
@@ -366,7 +366,7 @@ async fn test_hash_mset_getall_streamable() {
 
     // hash.mset command
     let mset_resp = client
-        .post(&format!("{}/api/v1/command", base_url))
+        .post(format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.mset",
             "request_id": "test-3",
@@ -387,7 +387,7 @@ async fn test_hash_mset_getall_streamable() {
 
     // hash.getall command
     let getall_resp = client
-        .post(&format!("{}/api/v1/command", base_url))
+        .post(format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.getall",
             "request_id": "test-4",
@@ -414,7 +414,7 @@ async fn test_hash_incrby_streamable() {
 
     // hash.incrby command
     let incr_resp = client
-        .post(&format!("{}/api/v1/command", base_url))
+        .post(format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.incrby",
             "request_id": "test-5",
@@ -435,7 +435,7 @@ async fn test_hash_incrby_streamable() {
 
     // Increment again
     let incr2_resp = client
-        .post(&format!("{}/api/v1/command", base_url))
+        .post(format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.incrby",
             "request_id": "test-6",
@@ -460,7 +460,7 @@ async fn test_hash_del_streamable() {
 
     // Setup
     client
-        .post(&format!("{}/api/v1/command", base_url))
+        .post(format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.mset",
             "request_id": "test-7",
@@ -475,7 +475,7 @@ async fn test_hash_del_streamable() {
 
     // hash.del command
     let del_resp = client
-        .post(&format!("{}/api/v1/command", base_url))
+        .post(format!("{}/api/v1/command", base_url))
         .json(&json!({
             "command": "hash.del",
             "request_id": "test-8",
@@ -668,7 +668,7 @@ async fn test_hash_concurrent_rest_access() {
                 let value = format!("value_{}_{}", i, j);
 
                 client
-                    .post(&format!("{}/hash/concurrent:test/set", base_url))
+                    .post(format!("{}/hash/concurrent:test/set", base_url))
                     .json(&json!({"field": field, "value": value}))
                     .send()
                     .await
@@ -686,7 +686,7 @@ async fn test_hash_concurrent_rest_access() {
 
     // Verify all fields were set
     let len_resp = client
-        .get(&format!("{}/hash/concurrent:test/len", base_url))
+        .get(format!("{}/hash/concurrent:test/len", base_url))
         .send()
         .await
         .unwrap();
@@ -704,7 +704,7 @@ async fn test_hash_invalid_increment() {
 
     // Set non-numeric field
     client
-        .post(&format!("{}/hash/user:11000/set", base_url))
+        .post(format!("{}/hash/user:11000/set", base_url))
         .json(&json!({
             "field": "name",
             "value": "NotANumber"
@@ -715,7 +715,7 @@ async fn test_hash_invalid_increment() {
 
     // Try to increment (should fail)
     let incr_resp = client
-        .post(&format!("{}/hash/user:11000/incrby", base_url))
+        .post(format!("{}/hash/user:11000/incrby", base_url))
         .json(&json!({
             "field": "name",
             "increment": 1
@@ -735,7 +735,7 @@ async fn test_hash_mget_partial_fields() {
 
     // Setup with only 2 fields
     client
-        .post(&format!("{}/hash/user:12000/mset", base_url))
+        .post(format!("{}/hash/user:12000/mset", base_url))
         .json(&json!({
             "fields": {
                 "name": "John",
@@ -748,7 +748,7 @@ async fn test_hash_mget_partial_fields() {
 
     // MGET with some non-existent fields
     let mget_resp = client
-        .post(&format!("{}/hash/user:12000/mget", base_url))
+        .post(format!("{}/hash/user:12000/mget", base_url))
         .json(&json!({
             "fields": ["name", "nonexistent", "age", "also_nonexistent"]
         }))
@@ -774,7 +774,7 @@ async fn test_hash_empty_operations() {
 
     // GETALL on non-existent hash
     let getall_resp = client
-        .get(&format!("{}/hash/nonexistent:key/getall", base_url))
+        .get(format!("{}/hash/nonexistent:key/getall", base_url))
         .send()
         .await
         .unwrap();
@@ -784,7 +784,7 @@ async fn test_hash_empty_operations() {
 
     // HLEN on non-existent hash
     let len_resp = client
-        .get(&format!("{}/hash/nonexistent:key/len", base_url))
+        .get(format!("{}/hash/nonexistent:key/len", base_url))
         .send()
         .await
         .unwrap();
@@ -794,7 +794,7 @@ async fn test_hash_empty_operations() {
 
     // HDEL on non-existent hash
     let del_resp = client
-        .delete(&format!("{}/hash/nonexistent:key/del", base_url))
+        .delete(format!("{}/hash/nonexistent:key/del", base_url))
         .json(&json!({
             "fields": ["any", "fields"]
         }))
@@ -813,7 +813,7 @@ async fn test_hash_hsetnx_conditional() {
 
     // First SETNX should succeed
     let setnx1 = client
-        .post(&format!("{}/hash/user:13000/setnx", base_url))
+        .post(format!("{}/hash/user:13000/setnx", base_url))
         .json(&json!({
             "field": "name",
             "value": "Alice"
@@ -827,7 +827,7 @@ async fn test_hash_hsetnx_conditional() {
 
     // Second SETNX should fail (field exists)
     let setnx2 = client
-        .post(&format!("{}/hash/user:13000/setnx", base_url))
+        .post(format!("{}/hash/user:13000/setnx", base_url))
         .json(&json!({
             "field": "name",
             "value": "Bob"
@@ -841,7 +841,7 @@ async fn test_hash_hsetnx_conditional() {
 
     // Verify original value wasn't changed
     let get_resp = client
-        .get(&format!("{}/hash/user:13000/name", base_url))
+        .get(format!("{}/hash/user:13000/name", base_url))
         .send()
         .await
         .unwrap();
@@ -864,7 +864,7 @@ async fn test_hash_large_field_count() {
     }
 
     let mset_resp = client
-        .post(&format!("{}/hash/large:test/mset", base_url))
+        .post(format!("{}/hash/large:test/mset", base_url))
         .json(&json!({ "fields": fields }))
         .timeout(Duration::from_secs(5))
         .send()
@@ -875,7 +875,7 @@ async fn test_hash_large_field_count() {
 
     // Verify count
     let len_resp = client
-        .get(&format!("{}/hash/large:test/len", base_url))
+        .get(format!("{}/hash/large:test/len", base_url))
         .send()
         .await
         .unwrap();
@@ -886,7 +886,7 @@ async fn test_hash_large_field_count() {
     // GETALL should complete within reasonable time
     let start = std::time::Instant::now();
     let getall_resp = client
-        .get(&format!("{}/hash/large:test/getall", base_url))
+        .get(format!("{}/hash/large:test/getall", base_url))
         .timeout(Duration::from_secs(5))
         .send()
         .await
@@ -913,7 +913,7 @@ async fn test_hash_large_value_size() {
     let large_value = "x".repeat(1024 * 1024);
 
     let set_resp = client
-        .post(&format!("{}/hash/large:value/set", base_url))
+        .post(format!("{}/hash/large:value/set", base_url))
         .json(&json!({
             "field": "data",
             "value": large_value
@@ -927,7 +927,7 @@ async fn test_hash_large_value_size() {
 
     // Retrieve large value
     let get_resp = client
-        .get(&format!("{}/hash/large:value/data", base_url))
+        .get(format!("{}/hash/large:value/data", base_url))
         .timeout(Duration::from_secs(5))
         .send()
         .await
