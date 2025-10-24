@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use synap_server::core::HashStore;
+use synap_server::core::{HashStore, ListStore};
 use synap_server::persistence::{PersistenceLayer, recover};
 use synap_server::replication::NodeRole;
 use synap_server::{
@@ -127,23 +127,31 @@ async fn main() -> Result<()> {
     let queue_config = config.to_queue_config();
 
     #[allow(clippy::type_complexity)]
-    let (kv_store, hash_store_recovered, queue_manager, _wal_offset): (
+    let (kv_store, hash_store_recovered, list_store_recovered, queue_manager, _wal_offset): (
         Arc<KVStore>,
         Option<Arc<HashStore>>,
+        Option<Arc<ListStore>>,
         Option<Arc<QueueManager>>,
         u64,
     ) = if config.persistence.enabled {
         info!("Persistence enabled, attempting recovery...");
         match recover(&config.persistence, kv_config.clone(), queue_config.clone()).await {
-            Ok((kv, hs, qm, offset)) => {
+            Ok((kv, hs, ls, qm, offset)) => {
                 info!("Recovery successful, WAL offset: {}", offset);
-                (Arc::new(kv), hs.map(Arc::new), qm.map(Arc::new), offset)
+                (
+                    Arc::new(kv),
+                    hs.map(Arc::new),
+                    ls.map(Arc::new),
+                    qm.map(Arc::new),
+                    offset,
+                )
             }
             Err(e) => {
                 warn!("Recovery failed: {}, starting fresh", e);
                 (
                     Arc::new(KVStore::new(kv_config.clone())),
                     Some(Arc::new(HashStore::new())),
+                    Some(Arc::new(ListStore::new())),
                     if config.queue.enabled {
                         Some(Arc::new(QueueManager::new(queue_config.clone())))
                     } else {
@@ -158,6 +166,7 @@ async fn main() -> Result<()> {
         (
             Arc::new(KVStore::new(kv_config.clone())),
             Some(Arc::new(HashStore::new())),
+            Some(Arc::new(ListStore::new())),
             if config.queue.enabled {
                 Some(Arc::new(QueueManager::new(queue_config.clone())))
             } else {
@@ -239,8 +248,9 @@ async fn main() -> Result<()> {
         hash_store_recovered.unwrap_or_else(|| Arc::new(synap_server::core::HashStore::new()));
     info!("Hash store initialized");
 
-    // Create list store
-    let list_store = Arc::new(synap_server::core::ListStore::new());
+    // Use recovered list store
+    let list_store: Arc<synap_server::core::ListStore> =
+        list_store_recovered.unwrap_or_else(|| Arc::new(synap_server::core::ListStore::new()));
     info!("List store initialized");
 
     // Create application state with persistence and streams

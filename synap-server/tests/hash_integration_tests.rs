@@ -23,6 +23,7 @@ async fn spawn_test_server() -> String {
     let app_state = AppState {
         kv_store,
         hash_store,
+        list_store: Arc::new(synap_server::core::ListStore::new()),
         queue_manager: Some(queue_manager),
         stream_manager: None,
         pubsub_router: None,
@@ -559,7 +560,7 @@ async fn test_hash_with_persistence_recovery() {
         let kv_config = KVConfig::default();
         let queue_config = QueueConfig::default();
 
-        let (_, hash_store, _, _) =
+        let (_, hash_store, _, _, _) =
             synap_server::persistence::recover(&persist_config, kv_config, queue_config)
                 .await
                 .unwrap();
@@ -632,7 +633,7 @@ async fn test_hash_hincrby_persistence() {
         let kv_config = KVConfig::default();
         let queue_config = QueueConfig::default();
 
-        let (_, hash_store, _, _) =
+        let (_, hash_store, _, _, _) =
             synap_server::persistence::recover(&persist_config, kv_config, queue_config)
                 .await
                 .unwrap();

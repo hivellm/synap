@@ -15,6 +15,7 @@ async fn spawn_test_server() -> String {
     let app_state = AppState {
         kv_store: Arc::new(KVStore::new(kv_config)),
         hash_store,
+        list_store: Arc::new(synap_server::core::ListStore::new()),
         queue_manager: Some(Arc::new(QueueManager::new(queue_config))),
         stream_manager: None,
         pubsub_router: None,

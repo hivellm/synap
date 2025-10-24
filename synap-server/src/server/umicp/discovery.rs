@@ -94,11 +94,11 @@ mod tests {
         let service = SynapDiscoveryService;
         let operations = service.list_operations();
 
-        // Should have 13 operations (8 original + 5 hash operations)
+        // Should have 18 operations (4 KV + 5 Hash + 5 List + 2 Queue + 2 Stream)
         assert_eq!(
             operations.len(),
-            13,
-            "Expected 13 operations, got {}",
+            18,
+            "Expected 18 operations, got {}",
             operations.len()
         );
 

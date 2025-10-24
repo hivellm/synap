@@ -12,6 +12,7 @@ async fn test_mcp_kv_get() {
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
         hash_store,
+        list_store: Arc::new(synap_server::core::ListStore::new()),
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
@@ -43,6 +44,7 @@ async fn test_mcp_kv_set() {
     let state = Arc::new(AppState {
         kv_store: Arc::new(KVStore::new(config.to_kv_config())),
         hash_store,
+        list_store: Arc::new(synap_server::core::ListStore::new()),
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
@@ -79,6 +81,7 @@ async fn test_mcp_kv_delete() {
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
         hash_store,
+        list_store: Arc::new(synap_server::core::ListStore::new()),
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
@@ -115,6 +118,7 @@ async fn test_mcp_kv_scan() {
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
         hash_store,
+        list_store: Arc::new(synap_server::core::ListStore::new()),
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
@@ -154,6 +158,7 @@ async fn test_mcp_queue_publish() {
     let state = Arc::new(AppState {
         kv_store: Arc::new(KVStore::new(config.to_kv_config())),
         hash_store,
+        list_store: Arc::new(synap_server::core::ListStore::new()),
         queue_manager: Some(queue_manager.clone()),
         stream_manager: None,
         partition_manager: None,
