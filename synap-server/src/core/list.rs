@@ -228,7 +228,7 @@ impl ListValue {
             // Remove from head to tail
             let mut i = 0;
             while i < self.elements.len() && removed < count as usize {
-                if &self.elements[i] == value {
+                if self.elements[i] == value {
                     self.elements.remove(i);
                     removed += 1;
                 } else {
@@ -241,7 +241,7 @@ impl ListValue {
             let target = count.unsigned_abs() as usize;
             while i > 0 && removed < target {
                 i -= 1;
-                if &self.elements[i] == value {
+                if self.elements[i] == value {
                     self.elements.remove(i);
                     removed += 1;
                 }
