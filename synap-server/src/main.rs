@@ -239,10 +239,15 @@ async fn main() -> Result<()> {
         hash_store_recovered.unwrap_or_else(|| Arc::new(synap_server::core::HashStore::new()));
     info!("Hash store initialized");
 
+    // Create list store
+    let list_store = Arc::new(synap_server::core::ListStore::new());
+    info!("List store initialized");
+
     // Create application state with persistence and streams
     let app_state = AppState {
         kv_store,
         hash_store,
+        list_store,
         queue_manager,
         stream_manager,
         partition_manager,

@@ -53,6 +53,18 @@ pub enum SynapError {
 
     #[error("IO error: {0}")]
     IoError(String),
+
+    #[error("Not found")]
+    NotFound,
+
+    #[error("Index out of range")]
+    IndexOutOfRange,
+
+    #[error("Key expired")]
+    KeyExpired,
+
+    #[error("Operation timed out")]
+    Timeout,
 }
 
 impl SynapError {
@@ -75,6 +87,10 @@ impl SynapError {
             }
             Self::QueueFull(_) => StatusCode::INSUFFICIENT_STORAGE,
             Self::IoError(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::NotFound => StatusCode::NOT_FOUND,
+            Self::IndexOutOfRange => StatusCode::BAD_REQUEST,
+            Self::KeyExpired => StatusCode::GONE,
+            Self::Timeout => StatusCode::REQUEST_TIMEOUT,
         }
     }
 }

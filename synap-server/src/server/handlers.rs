@@ -21,6 +21,7 @@ use tracing::{debug, error, info, warn};
 pub struct AppState {
     pub kv_store: Arc<KVStore>,
     pub hash_store: Arc<HashStore>,
+    pub list_store: Arc<crate::core::ListStore>,
     pub queue_manager: Option<Arc<QueueManager>>,
     pub stream_manager: Option<Arc<crate::core::StreamManager>>,
     pub partition_manager: Option<Arc<crate::core::PartitionManager>>,
