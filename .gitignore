@@ -25,3 +25,6 @@ coverage/
 # Persistence data
 data/
 
+# Python credentials
+**/.pypirc
+
