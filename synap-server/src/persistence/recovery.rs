@@ -4,8 +4,8 @@ use crate::core::QueueConfig;
 use crate::core::hash::HashStore;
 use crate::core::kv_store::KVStore;
 use crate::core::list::ListStore;
-use crate::core::set::SetStore;
 use crate::core::queue::QueueManager;
+use crate::core::set::SetStore;
 use crate::core::types::KVConfig;
 use tracing::info;
 

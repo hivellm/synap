@@ -170,13 +170,22 @@ pub enum Operation {
     },
 
     /// Set INTER STORE operation (SINTERSTORE)
-    SetInterStore { destination: String, keys: Vec<String> },
+    SetInterStore {
+        destination: String,
+        keys: Vec<String>,
+    },
 
     /// Set UNION STORE operation (SUNIONSTORE)
-    SetUnionStore { destination: String, keys: Vec<String> },
+    SetUnionStore {
+        destination: String,
+        keys: Vec<String>,
+    },
 
     /// Set DIFF STORE operation (SDIFFSTORE)
-    SetDiffStore { destination: String, keys: Vec<String> },
+    SetDiffStore {
+        destination: String,
+        keys: Vec<String>,
+    },
 }
 
 /// Snapshot containing full system state

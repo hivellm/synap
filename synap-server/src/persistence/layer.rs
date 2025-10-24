@@ -440,7 +440,11 @@ impl PersistenceLayer {
     }
 
     /// Log a Set ADD operation (SADD)
-    pub async fn log_set_add(&self, key: String, members: Vec<Vec<u8>>) -> super::types::Result<()> {
+    pub async fn log_set_add(
+        &self,
+        key: String,
+        members: Vec<Vec<u8>>,
+    ) -> super::types::Result<()> {
         if !self.config.enabled || !self.config.wal.enabled {
             return Ok(());
         }
@@ -455,7 +459,11 @@ impl PersistenceLayer {
     }
 
     /// Log a Set REMOVE operation (SREM)
-    pub async fn log_set_rem(&self, key: String, members: Vec<Vec<u8>>) -> super::types::Result<()> {
+    pub async fn log_set_rem(
+        &self,
+        key: String,
+        members: Vec<Vec<u8>>,
+    ) -> super::types::Result<()> {
         if !self.config.enabled || !self.config.wal.enabled {
             return Ok(());
         }
@@ -470,12 +478,21 @@ impl PersistenceLayer {
     }
 
     /// Log a Set MOVE operation (SMOVE)
-    pub async fn log_set_move(&self, source: String, destination: String, member: Vec<u8>) -> super::types::Result<()> {
+    pub async fn log_set_move(
+        &self,
+        source: String,
+        destination: String,
+        member: Vec<u8>,
+    ) -> super::types::Result<()> {
         if !self.config.enabled || !self.config.wal.enabled {
             return Ok(());
         }
 
-        let operation = Operation::SetMove { source, destination, member };
+        let operation = Operation::SetMove {
+            source,
+            destination,
+            member,
+        };
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -485,7 +502,11 @@ impl PersistenceLayer {
     }
 
     /// Log a Set INTER STORE operation (SINTERSTORE)
-    pub async fn log_set_interstore(&self, destination: String, keys: Vec<String>) -> super::types::Result<()> {
+    pub async fn log_set_interstore(
+        &self,
+        destination: String,
+        keys: Vec<String>,
+    ) -> super::types::Result<()> {
         if !self.config.enabled || !self.config.wal.enabled {
             return Ok(());
         }
@@ -500,7 +521,11 @@ impl PersistenceLayer {
     }
 
     /// Log a Set UNION STORE operation (SUNIONSTORE)
-    pub async fn log_set_unionstore(&self, destination: String, keys: Vec<String>) -> super::types::Result<()> {
+    pub async fn log_set_unionstore(
+        &self,
+        destination: String,
+        keys: Vec<String>,
+    ) -> super::types::Result<()> {
         if !self.config.enabled || !self.config.wal.enabled {
             return Ok(());
         }
@@ -515,7 +540,11 @@ impl PersistenceLayer {
     }
 
     /// Log a Set DIFF STORE operation (SDIFFSTORE)
-    pub async fn log_set_diffstore(&self, destination: String, keys: Vec<String>) -> super::types::Result<()> {
+    pub async fn log_set_diffstore(
+        &self,
+        destination: String,
+        keys: Vec<String>,
+    ) -> super::types::Result<()> {
         if !self.config.enabled || !self.config.wal.enabled {
             return Ok(());
         }

@@ -1,8 +1,8 @@
 //! Pub/Sub integration tests
 
 use serde_json::json;
-use synap_sdk::{SynapClient, SynapConfig};
 use std::time::{SystemTime, UNIX_EPOCH};
+use synap_sdk::{SynapClient, SynapConfig};
 
 fn timestamp_millis() -> u128 {
     SystemTime::now()
@@ -35,23 +35,38 @@ async fn test_pubsub_publish_different_types() {
     let topic = format!("test.types.{}", timestamp_millis());
 
     // String payload
-    let result = client.pubsub().publish(&topic, json!("string message"), None, None).await;
+    let result = client
+        .pubsub()
+        .publish(&topic, json!("string message"), None, None)
+        .await;
     assert!(result.is_ok());
 
     // Number payload
-    let result = client.pubsub().publish(&topic, json!(12345), None, None).await;
+    let result = client
+        .pubsub()
+        .publish(&topic, json!(12345), None, None)
+        .await;
     assert!(result.is_ok());
 
     // Object payload
-    let result = client.pubsub().publish(&topic, json!({"key": "value"}), None, None).await;
+    let result = client
+        .pubsub()
+        .publish(&topic, json!({"key": "value"}), None, None)
+        .await;
     assert!(result.is_ok());
 
     // Array payload
-    let result = client.pubsub().publish(&topic, json!([1, 2, 3]), None, None).await;
+    let result = client
+        .pubsub()
+        .publish(&topic, json!([1, 2, 3]), None, None)
+        .await;
     assert!(result.is_ok());
 
     // Null payload
-    let result = client.pubsub().publish(&topic, json!(null), None, None).await;
+    let result = client
+        .pubsub()
+        .publish(&topic, json!(null), None, None)
+        .await;
     assert!(result.is_ok());
 }
 
@@ -79,16 +94,14 @@ async fn test_pubsub_rapid_publishing() {
     for i in 0..50 {
         let client_clone = client.clone();
         let topic_clone = topic.clone();
-        
+
         let handle = tokio::spawn(async move {
-            client_clone.pubsub().publish(
-                &topic_clone,
-                json!({"id": i}),
-                None,
-                None
-            ).await
+            client_clone
+                .pubsub()
+                .publish(&topic_clone, json!({"id": i}), None, None)
+                .await
         });
-        
+
         handles.push(handle);
     }
 

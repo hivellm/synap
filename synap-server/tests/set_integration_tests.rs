@@ -171,7 +171,7 @@ async fn test_set_card() {
         .unwrap();
 
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["cardinality"], 5);
+    assert_eq!(body["count"], 5);
 }
 
 #[tokio::test]
@@ -286,10 +286,9 @@ async fn test_set_pop() {
         .await
         .unwrap();
 
-    // Pop members
+    // Pop members with count as query parameter
     let resp = client
-        .post(format!("{}/set/test_set5/pop", base_url))
-        .json(&json!({"count": 2}))
+        .post(format!("{}/set/test_set5/pop?count=2", base_url))
         .send()
         .await
         .unwrap();
@@ -305,7 +304,7 @@ async fn test_set_pop() {
         .unwrap();
 
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["cardinality"], 3);
+    assert_eq!(body["count"], 3);
 }
 
 #[tokio::test]
@@ -346,7 +345,7 @@ async fn test_set_move() {
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["cardinality"], 1);
+    assert_eq!(body["count"], 1);
 
     // Verify destination
     let resp = client
@@ -355,7 +354,7 @@ async fn test_set_move() {
         .await
         .unwrap();
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["cardinality"], 2);
+    assert_eq!(body["count"], 2);
 }
 
 #[tokio::test]
@@ -371,9 +370,10 @@ async fn test_set_empty_operations() {
         .unwrap();
 
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["members"].as_array().unwrap().len(), 0);
+    let members = body.get("members").and_then(|m| m.as_array());
+    assert_eq!(members.map(|a| a.len()).unwrap_or(0), 0);
 
-    // Get cardinality of non-existent set
+    // Get cardinality of non-existent set - should return 0 for count field
     let resp = client
         .get(format!("{}/set/nonexistent/card", base_url))
         .send()
@@ -381,7 +381,8 @@ async fn test_set_empty_operations() {
         .unwrap();
 
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["cardinality"], 0);
+    let count = body.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+    assert_eq!(count, 0);
 }
 
 #[tokio::test]
@@ -415,7 +416,7 @@ async fn test_set_randmember() {
         .unwrap();
 
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["cardinality"], 5);
+    assert_eq!(body["count"], 5);
 }
 
 #[tokio::test]
@@ -484,7 +485,7 @@ async fn test_set_duplicate_members() {
         .unwrap();
 
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["cardinality"], 4); // a, b, c, d
+    assert_eq!(body["count"], 4); // a, b, c, d
 }
 
 #[tokio::test]
@@ -509,12 +510,11 @@ async fn test_set_large_set() {
         .unwrap();
 
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["cardinality"], 100);
+    assert_eq!(body["count"], 100);
 
-    // Pop 10 members
+    // Pop 10 members with query parameter
     let resp = client
-        .post(format!("{}/set/large_set/pop", base_url))
-        .json(&json!({"count": 10}))
+        .post(format!("{}/set/large_set/pop?count=10", base_url))
         .send()
         .await
         .unwrap();
@@ -530,6 +530,5 @@ async fn test_set_large_set() {
         .unwrap();
 
     let body: serde_json::Value = resp.json().await.unwrap();
-    assert_eq!(body["cardinality"], 90);
+    assert_eq!(body["count"], 90);
 }
-

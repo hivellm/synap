@@ -105,7 +105,7 @@ async fn test_crash_recovery() {
 
     // First run: create data
     {
-        let (kv, _hs, _ls, _qm, _offset) =
+        let (kv, _hs, _ls, _ss, _qm, _offset) =
             recover(&persist_config, kv_config.clone(), queue_config.clone())
                 .await
                 .unwrap();
@@ -121,7 +121,7 @@ async fn test_crash_recovery() {
 
     // Second run: recover data
     {
-        let (kv, _hs, _ls, _qm, _offset) =
+        let (kv, _hs, _ls, _ss, _qm, _offset) =
             recover(&persist_config, kv_config.clone(), queue_config.clone())
                 .await
                 .unwrap();

@@ -56,7 +56,7 @@ impl PubSubManager {
         if let Some(p) = priority {
             payload["priority"] = json!(p);
         }
-        
+
         if let Some(h) = headers {
             payload["headers"] = json!(h);
         }

@@ -127,7 +127,14 @@ async fn main() -> Result<()> {
     let queue_config = config.to_queue_config();
 
     #[allow(clippy::type_complexity)]
-    let (kv_store, hash_store_recovered, list_store_recovered, set_store_recovered, queue_manager, _wal_offset): (
+    let (
+        kv_store,
+        hash_store_recovered,
+        list_store_recovered,
+        _set_store_recovered,
+        queue_manager,
+        _wal_offset,
+    ): (
         Arc<KVStore>,
         Option<Arc<HashStore>>,
         Option<Arc<ListStore>>,

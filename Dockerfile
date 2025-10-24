@@ -33,10 +33,12 @@ WORKDIR /usr/src/synap
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY synap-server/Cargo.toml ./synap-server/
 COPY synap-cli/Cargo.toml ./synap-cli/
+COPY sdks/rust/Cargo.toml ./sdks/rust/
 
 # Copy source code
 COPY synap-server/src ./synap-server/src
 COPY synap-cli/src ./synap-cli/src
+COPY sdks/rust/src ./sdks/rust/src
 
 # Build release binary with optimizations
 # - Static linking for portability

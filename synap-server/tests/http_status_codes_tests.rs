@@ -330,7 +330,7 @@ async fn test_queue_consume_empty_returns_200_null() {
 }
 
 #[tokio::test]
-async fn test_queue_consume_nonexistent_returns_404() {
+async fn test_queue_consume_nonexistent_returns_200_null() {
     let base_url = spawn_test_server().await;
     let client = Client::new();
 
@@ -340,7 +340,10 @@ async fn test_queue_consume_nonexistent_returns_404() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    // Queue consume returns 200 with null when queue doesn't exist or is empty
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert!(body["data"].is_null());
 }
 
 #[tokio::test]

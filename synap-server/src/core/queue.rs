@@ -367,7 +367,7 @@ impl QueueManager {
         debug!("Consuming from queue: {}", queue_name);
 
         let mut queues = self.queues.write();
-        
+
         // ✅ FIX: Return Ok(None) instead of error when queue doesn't exist
         // This allows graceful handling of non-existent queues
         match queues.get_mut(queue_name) {
