@@ -367,11 +367,16 @@ impl QueueManager {
         debug!("Consuming from queue: {}", queue_name);
 
         let mut queues = self.queues.write();
-        let queue = queues
-            .get_mut(queue_name)
-            .ok_or_else(|| SynapError::QueueNotFound(queue_name.to_string()))?;
-
-        Ok(queue.consume(consumer_id.to_string()))
+        
+        // ✅ FIX: Return Ok(None) instead of error when queue doesn't exist
+        // This allows graceful handling of non-existent queues
+        match queues.get_mut(queue_name) {
+            Some(queue) => Ok(queue.consume(consumer_id.to_string())),
+            None => {
+                debug!("Queue not found: {}, returning None", queue_name);
+                Ok(None)
+            }
+        }
     }
 
     /// Acknowledge message

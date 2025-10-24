@@ -32,22 +32,22 @@ export class PubSubManager {
     data: any,
     options?: PubSubPublishOptions
   ): Promise<boolean> {
-    const payload: Record<string, any> = {
+    const cmdPayload: Record<string, any> = {
       topic,
-      data,
+      payload: data,  // ✅ FIX: Use "payload" instead of "data" to match server API
     };
 
     if (options?.priority !== undefined) {
-      payload.priority = options.priority;
+      cmdPayload.priority = options.priority;
     }
 
     if (options?.headers) {
-      payload.headers = options.headers;
+      cmdPayload.headers = options.headers;
     }
 
     const result = await this.client.sendCommand<{ success: boolean }>(
       'pubsub.publish',
-      payload
+      cmdPayload
     );
 
     return result.success;
