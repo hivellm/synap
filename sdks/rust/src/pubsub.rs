@@ -48,16 +48,22 @@ impl PubSubManager {
         priority: Option<u8>,
         headers: Option<HashMap<String, String>>,
     ) -> Result<usize> {
-        let payload = json!({
+        let mut payload = json!({
             "topic": topic,
-            "data": data,
-            "priority": priority,
-            "headers": headers,
+            "payload": data,  // ✅ FIX: Use "payload" instead of "data" to match server API
         });
+
+        if let Some(p) = priority {
+            payload["priority"] = json!(p);
+        }
+        
+        if let Some(h) = headers {
+            payload["headers"] = json!(h);
+        }
 
         let response = self.client.send_command("pubsub.publish", payload).await?;
 
-        Ok(response["delivered_count"].as_u64().unwrap_or(0) as usize)
+        Ok(response["subscribers_matched"].as_u64().unwrap_or(0) as usize)
     }
 
     /// Subscribe to topics

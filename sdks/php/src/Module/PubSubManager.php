@@ -27,7 +27,10 @@ class PubSubManager
         ?int $priority = null,
         ?array $headers = null
     ): int {
-        $data = ['message' => $message];
+        $data = [
+            'topic' => $topic,
+            'payload' => $message  // ✅ FIX: Use "payload" instead of "message" to match server API
+        ];
 
         if ($priority !== null) {
             $data['priority'] = $priority;
@@ -38,7 +41,7 @@ class PubSubManager
         }
 
         $response = $this->client->execute('pubsub.publish', $topic, $data);
-        $delivered = $response['delivered'] ?? 0;
+        $delivered = $response['subscribers_matched'] ?? 0;  // ✅ FIX: Use correct response field
 
         assert(is_int($delivered) || is_numeric($delivered));
 

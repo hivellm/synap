@@ -56,10 +56,14 @@ public sealed class PubSubManager
         object? message,
         CancellationToken cancellationToken = default)
     {
-        var data = new Dictionary<string, object?> { ["message"] = message };
+        var data = new Dictionary<string, object?>
+        {
+            ["topic"] = topic,
+            ["payload"] = message  // ✅ FIX: Use "payload" instead of "message" to match server API
+        };
         using var response = await _client.ExecuteAsync("pubsub.publish", topic, data, cancellationToken).ConfigureAwait(false);
 
-        if (response.RootElement.TryGetProperty("delivered", out var delivered))
+        if (response.RootElement.TryGetProperty("subscribers_matched", out var delivered))
         {
             return delivered.GetInt32();
         }

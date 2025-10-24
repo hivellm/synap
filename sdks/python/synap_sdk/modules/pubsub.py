@@ -72,9 +72,9 @@ class PubSubManager:
         response = await self._client.execute(
             "pubsub.publish",
             topic,
-            {"message": message},
+            {"topic": topic, "payload": message},  # ✅ FIX: Use "payload" instead of "message"
         )
-        return int(response.get("delivered", 0))
+        return int(response.get("subscribers_matched", 0))
 
     async def stats(self) -> dict[str, Any]:
         """Get Pub/Sub statistics.
