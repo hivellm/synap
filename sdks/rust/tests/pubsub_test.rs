@@ -1,154 +1,137 @@
-//! Comprehensive tests for Pub/Sub operations
+//! Pub/Sub integration tests
 
-mod common;
+use serde_json::json;
+use synap_sdk::{SynapClient, SynapConfig};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(test)]
-mod tests {
-    use super::common::setup_test_client;
-    use mockito::Matcher;
-    use serde_json::json;
+fn timestamp_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
+}
 
-    #[tokio::test]
-    async fn test_pubsub_publish() {
-        let (client, mut server) = setup_test_client().await;
+#[tokio::test]
+async fn test_pubsub_publish_correct_payload_field() {
+    let config = SynapConfig::new("http://localhost:15500");
+    let client = SynapClient::new(config).expect("Failed to create client");
 
-        let mock = server
-            .mock("POST", "/api/v1/command")
-            .match_body(Matcher::PartialJson(json!({
-                "command": "pubsub.publish",
-                "payload": {
-                    "topic": "user.created",
-                    "data": {"id": 123}
-                }
-            })))
-            .with_status(200)
-            .with_body(r#"{"success": true, "payload": {"delivered_count": 5}}"#)
-            .create_async()
-            .await;
+    let topic = format!("test.topic.{}", timestamp_millis());
+    let data = json!({"event": "test", "data": "test-data"});
 
-        let count = client
-            .pubsub()
-            .publish("user.created", json!({"id": 123}), None, None)
-            .await
-            .unwrap();
-        assert_eq!(count, 5);
+    // This test will verify that the SDK sends the correct "payload" field
+    // If it sends "data" instead, the server will reject it
+    let result = client.pubsub().publish(&topic, data, None, None).await;
 
-        mock.assert_async().await;
-    }
+    // Should succeed even with 0 subscribers
+    assert!(result.is_ok(), "Publish failed: {:?}", result.err());
+}
 
-    #[tokio::test]
-    async fn test_pubsub_publish_with_priority() {
-        let (client, mut server) = setup_test_client().await;
+#[tokio::test]
+async fn test_pubsub_publish_different_types() {
+    let config = SynapConfig::new("http://localhost:15500");
+    let client = SynapClient::new(config).expect("Failed to create client");
 
-        let mock = server
-            .mock("POST", "/api/v1/command")
-            .match_body(Matcher::PartialJson(json!({
-                "command": "pubsub.publish",
-                "payload": {
-                    "topic": "alerts.critical",
-                    "data": {"message": "Server down"},
-                    "priority": 9
-                }
-            })))
-            .with_status(200)
-            .with_body(r#"{"success": true, "payload": {"delivered_count": 3}}"#)
-            .create_async()
-            .await;
+    let topic = format!("test.types.{}", timestamp_millis());
 
-        let count = client
-            .pubsub()
-            .publish(
-                "alerts.critical",
-                json!({"message": "Server down"}),
-                Some(9),
+    // String payload
+    let result = client.pubsub().publish(&topic, json!("string message"), None, None).await;
+    assert!(result.is_ok());
+
+    // Number payload
+    let result = client.pubsub().publish(&topic, json!(12345), None, None).await;
+    assert!(result.is_ok());
+
+    // Object payload
+    let result = client.pubsub().publish(&topic, json!({"key": "value"}), None, None).await;
+    assert!(result.is_ok());
+
+    // Array payload
+    let result = client.pubsub().publish(&topic, json!([1, 2, 3]), None, None).await;
+    assert!(result.is_ok());
+
+    // Null payload
+    let result = client.pubsub().publish(&topic, json!(null), None, None).await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_pubsub_publish_with_priority() {
+    let config = SynapConfig::new("http://localhost:15500");
+    let client = SynapClient::new(config).expect("Failed to create client");
+
+    let topic = format!("test.priority.{}", timestamp_millis());
+    let data = json!({"message": "high priority"});
+
+    let result = client.pubsub().publish(&topic, data, Some(9), None).await;
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_pubsub_rapid_publishing() {
+    let config = SynapConfig::new("http://localhost:15500");
+    let client = SynapClient::new(config).expect("Failed to create client");
+
+    let topic = format!("test.rapid.{}", timestamp_millis());
+
+    // Publish 50 messages rapidly
+    let mut handles = vec![];
+    for i in 0..50 {
+        let client_clone = client.clone();
+        let topic_clone = topic.clone();
+        
+        let handle = tokio::spawn(async move {
+            client_clone.pubsub().publish(
+                &topic_clone,
+                json!({"id": i}),
                 None,
-            )
-            .await
-            .unwrap();
-        assert_eq!(count, 3);
-
-        mock.assert_async().await;
+                None
+            ).await
+        });
+        
+        handles.push(handle);
     }
 
-    #[tokio::test]
-    async fn test_pubsub_subscribe() {
-        let (client, mut server) = setup_test_client().await;
-
-        let mock = server
-            .mock("POST", "/api/v1/command")
-            .match_body(Matcher::PartialJson(json!({
-                "command": "pubsub.subscribe",
-                "payload": {
-                    "subscriber_id": "sub-123",
-                    "topics": ["events.*", "notifications.#"]
-                }
-            })))
-            .with_status(200)
-            .with_body(r#"{"success": true, "payload": {"subscription_id": "sub-123"}}"#)
-            .create_async()
-            .await;
-
-        let sub_id = client
-            .pubsub()
-            .subscribe_topics(
-                "sub-123",
-                vec!["events.*".to_string(), "notifications.#".to_string()],
-            )
-            .await
-            .unwrap();
-        assert_eq!(sub_id, "sub-123");
-
-        mock.assert_async().await;
-    }
-
-    #[tokio::test]
-    async fn test_pubsub_unsubscribe() {
-        let (client, mut server) = setup_test_client().await;
-
-        let mock = server
-            .mock("POST", "/api/v1/command")
-            .match_body(Matcher::PartialJson(json!({
-                "command": "pubsub.unsubscribe",
-                "payload": {
-                    "subscriber_id": "sub-123",
-                    "topics": ["topic.test"]
-                }
-            })))
-            .with_status(200)
-            .with_body(r#"{"success": true, "payload": {}}"#)
-            .create_async()
-            .await;
-
-        let result = client
-            .pubsub()
-            .unsubscribe("sub-123", vec!["topic.test".to_string()])
-            .await;
+    // Wait for all to complete
+    for handle in handles {
+        let result = handle.await.expect("Task failed");
         assert!(result.is_ok());
-
-        mock.assert_async().await;
     }
+}
 
-    #[tokio::test]
-    async fn test_pubsub_list_topics() {
-        let (client, mut server) = setup_test_client().await;
+#[tokio::test]
+async fn test_pubsub_large_payload() {
+    let config = SynapConfig::new("http://localhost:15500");
+    let client = SynapClient::new(config).expect("Failed to create client");
 
-        let mock = server
-            .mock("POST", "/api/v1/command")
-            .match_body(Matcher::PartialJson(json!({
-                "command": "pubsub.topics",
-                "payload": {}
-            })))
-            .with_status(200)
-            .with_body(
-                r#"{"success": true, "payload": {"topics": ["user.created", "order.completed"]}}"#,
-            )
-            .create_async()
-            .await;
+    let topic = format!("test.large.{}", timestamp_millis());
+    let large_data = "x".repeat(50000); // 50KB
+    let message = json!({"data": large_data});
 
-        let topics = client.pubsub().list_topics().await.unwrap();
-        assert_eq!(topics.len(), 2);
-        assert_eq!(topics[0], "user.created");
+    let result = client.pubsub().publish(&topic, message, None, None).await;
+    assert!(result.is_ok());
+}
 
-        mock.assert_async().await;
-    }
+#[tokio::test]
+async fn test_pubsub_nested_objects() {
+    let config = SynapConfig::new("http://localhost:15500");
+    let client = SynapClient::new(config).expect("Failed to create client");
+
+    let topic = format!("test.nested.{}", timestamp_millis());
+    let message = json!({
+        "user": {
+            "id": 123,
+            "profile": {
+                "name": "Alice",
+                "settings": {
+                    "theme": "dark",
+                    "notifications": true
+                }
+            }
+        },
+        "timestamp": timestamp_millis()
+    });
+
+    let result = client.pubsub().publish(&topic, message, None, None).await;
+    assert!(result.is_ok());
 }

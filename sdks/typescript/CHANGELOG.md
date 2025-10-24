@@ -2,6 +2,27 @@
 
 All notable changes to the Synap TypeScript SDK will be documented in this file.
 
+## [0.2.0-beta.3] - 2025-10-24
+
+### Fixed
+- **CRITICAL**: Fixed pub/sub publish API contract - now sends `payload` field instead of incorrect `data` field
+- **CRITICAL**: Fixed server queue consume to gracefully return `null` for non-existent queues instead of throwing error
+
+### Added
+- 8 new pub/sub unit tests covering API contract validation
+- 10 new pub/sub S2S integration tests
+- Tests for different payload types (string, number, object, array, null)
+- Tests for edge cases (large payloads, rapid publishing, concurrent operations)
+
+### Changed
+- Total test count: 123 tests (was 115)
+- All tests passing: 123/123 (100%)
+
+### Impact
+- Fixes compatibility issues with external projects (e.g., cmmv-queue)
+- Prevents regression of pub/sub API contract
+- Ensures queue operations handle missing queues gracefully
+
 ## [0.2.0-beta.2] - 2025-10-21
 
 ### Changed
