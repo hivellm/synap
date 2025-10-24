@@ -7,9 +7,11 @@ use synap_server::{AppState, KVStore, QueueConfig, QueueManager, ServerConfig, h
 async fn test_mcp_kv_get() {
     let config = ServerConfig::default();
     let kv_store = Arc::new(KVStore::new(config.to_kv_config()));
+    let hash_store = Arc::new(synap_server::core::HashStore::new());
 
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
+        hash_store,
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
@@ -37,8 +39,10 @@ async fn test_mcp_kv_get() {
 #[tokio::test]
 async fn test_mcp_kv_set() {
     let config = ServerConfig::default();
+    let hash_store = Arc::new(synap_server::core::HashStore::new());
     let state = Arc::new(AppState {
         kv_store: Arc::new(KVStore::new(config.to_kv_config())),
+        hash_store,
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
@@ -70,9 +74,11 @@ async fn test_mcp_kv_set() {
 async fn test_mcp_kv_delete() {
     let config = ServerConfig::default();
     let kv_store = Arc::new(KVStore::new(config.to_kv_config()));
+    let hash_store = Arc::new(synap_server::core::HashStore::new());
 
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
+        hash_store,
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
@@ -104,9 +110,11 @@ async fn test_mcp_kv_delete() {
 async fn test_mcp_kv_scan() {
     let config = ServerConfig::default();
     let kv_store = Arc::new(KVStore::new(config.to_kv_config()));
+    let hash_store = Arc::new(synap_server::core::HashStore::new());
 
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
+        hash_store,
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
@@ -141,9 +149,11 @@ async fn test_mcp_kv_scan() {
 async fn test_mcp_queue_publish() {
     let config = ServerConfig::default();
     let queue_manager = Arc::new(QueueManager::new(QueueConfig::default()));
+    let hash_store = Arc::new(synap_server::core::HashStore::new());
 
     let state = Arc::new(AppState {
         kv_store: Arc::new(KVStore::new(config.to_kv_config())),
+        hash_store,
         queue_manager: Some(queue_manager.clone()),
         stream_manager: None,
         partition_manager: None,

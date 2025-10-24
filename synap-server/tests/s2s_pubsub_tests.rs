@@ -9,8 +9,10 @@ async fn spawn_test_server() -> String {
     let config = ServerConfig::default();
     let kv_config = config.to_kv_config();
 
+    let hash_store = Arc::new(synap_server::core::HashStore::new());
     let app_state = AppState {
         kv_store: Arc::new(KVStore::new(kv_config)),
+        hash_store,
         queue_manager: None,
         stream_manager: None,
         pubsub_router: Some(Arc::new(PubSubRouter::new())),

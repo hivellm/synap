@@ -13,8 +13,10 @@ async fn spawn_test_server() -> String {
     let stream_mgr = Arc::new(StreamManager::new(StreamConfig::default()));
     stream_mgr.clone().start_compaction_task();
 
+    let hash_store = Arc::new(synap_server::core::HashStore::new());
     let app_state = AppState {
         kv_store: Arc::new(KVStore::new(kv_config)),
+        hash_store,
         queue_manager: None,
         stream_manager: Some(stream_mgr),
         pubsub_router: None,

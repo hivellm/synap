@@ -1,6 +1,7 @@
 pub mod cache;
 pub mod consumer_group;
 pub mod error;
+pub mod hash;
 pub mod kv_store;
 pub mod partition;
 pub mod pubsub;
@@ -14,6 +15,7 @@ pub use consumer_group::{
     ConsumerGroupStats, ConsumerMember, GroupState,
 };
 pub use error::SynapError;
+pub use hash::{HashStats, HashStore, HashValue};
 pub use kv_store::KVStore;
 pub use partition::{
     CompactionResult, PartitionConfig, PartitionEvent, PartitionManager, PartitionStats,

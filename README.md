@@ -15,9 +15,10 @@ Synap is a modern, high-performance data infrastructure system built in Rust, co
 Synap provides four core capabilities in a single, cohesive system:
 
 1. **💾 Memory Key-Value Store** - Radix-tree based in-memory storage with O(k) lookup
-2. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
-3. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
-4. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
+2. **#️⃣ Hash Data Structure** - Field-value maps within keys (Redis-compatible HSET, HGET, etc.) 🆕
+3. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
+4. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
+5. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
 
 ## ✨ Key Features
 
@@ -58,7 +59,7 @@ Synap provides four core capabilities in a single, cohesive system:
 - **📖 Rich Examples**: Chat, event broadcasting, task queues, and more
 
 ### 🔗 Protocol Support
-- **🤖 MCP (Model Context Protocol)**: ✅ **PRODUCTION READY** - 8 tools integrated at `/mcp` endpoint
+- **🤖 MCP (Model Context Protocol)**: ✅ **PRODUCTION READY** - 13 tools integrated at `/mcp` endpoint
 - **🌐 UMICP (Universal Matrix Inter-Communication Protocol)**: ✅ **PRODUCTION READY** - 5 tools via MCP bridge
 - **📡 REST API**: Standard HTTP endpoints for all operations
 - **🔌 WebSocket API**: Real-time bidirectional communication
@@ -444,6 +445,7 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 | Feature | Synap | Redis | RabbitMQ | Kafka |
 |---------|-------|-------|----------|-------|
 | Key-Value | ✅ | ✅ | ❌ | ❌ |
+| **Hashes** | ✅ (v0.4.0) | ✅ | ❌ | ❌ |
 | Queues (ACK) | ✅ | ❌ | ✅ | ❌ |
 | Priority Queues | ✅ (0-9) | ❌ | ✅ | ❌ |
 | Dead Letter Queue | ✅ | ❌ | ✅ | ❌ |

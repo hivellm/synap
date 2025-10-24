@@ -1,6 +1,7 @@
 use super::types::{Operation, PersistenceConfig, Result};
 use super::{SnapshotManager, WriteAheadLog};
 use crate::core::QueueConfig;
+use crate::core::hash::HashStore;
 use crate::core::kv_store::KVStore;
 use crate::core::queue::QueueManager;
 use crate::core::types::KVConfig;
@@ -11,11 +12,12 @@ pub async fn recover(
     config: &PersistenceConfig,
     kv_config: KVConfig,
     queue_config: QueueConfig,
-) -> Result<(KVStore, Option<QueueManager>, u64)> {
+) -> Result<(KVStore, Option<HashStore>, Option<QueueManager>, u64)> {
     if !config.enabled {
         info!("Persistence disabled, starting with fresh state");
         return Ok((
             KVStore::new(kv_config),
+            Some(HashStore::new()),
             Some(QueueManager::new(queue_config)),
             0,
         ));
@@ -27,7 +29,7 @@ pub async fn recover(
     let wal = WriteAheadLog::open(config.wal.clone()).await?;
 
     // Step 1: Load latest snapshot (if exists)
-    let (kv_store, queue_manager, last_offset) =
+    let (kv_store, hash_store, queue_manager, last_offset) =
         if let Some((snapshot, path)) = snapshot_mgr.load_latest().await? {
             info!(
                 "Loaded snapshot from {:?} at offset {}",
@@ -56,11 +58,17 @@ pub async fn recover(
                 }
             }
 
-            (kv, Some(queues), snapshot.wal_offset)
+            (
+                kv,
+                Some(HashStore::new()),
+                Some(queues),
+                snapshot.wal_offset,
+            )
         } else {
             info!("No snapshot found, starting fresh");
             (
                 KVStore::new(kv_config),
+                Some(HashStore::new()),
                 Some(QueueManager::new(queue_config)),
                 0,
             )
@@ -124,6 +132,38 @@ pub async fn recover(
                 // This is here to prevent compilation errors
                 replayed += 1;
             }
+            Operation::HashSet { key, field, value } => {
+                if let Some(ref hash_store) = hash_store {
+                    hash_store.hset(&key, &field, value)?;
+                }
+                replayed += 1;
+            }
+            Operation::HashDel { key, fields } => {
+                if let Some(ref hash_store) = hash_store {
+                    hash_store.hdel(&key, &fields)?;
+                }
+                replayed += 1;
+            }
+            Operation::HashIncrBy {
+                key,
+                field,
+                increment,
+            } => {
+                if let Some(ref hash_store) = hash_store {
+                    hash_store.hincrby(&key, &field, increment)?;
+                }
+                replayed += 1;
+            }
+            Operation::HashIncrByFloat {
+                key,
+                field,
+                increment,
+            } => {
+                if let Some(ref hash_store) = hash_store {
+                    hash_store.hincrbyfloat(&key, &field, increment)?;
+                }
+                replayed += 1;
+            }
         }
     }
 
@@ -131,7 +171,7 @@ pub async fn recover(
 
     let final_offset = last_offset + replayed;
 
-    Ok((kv_store, queue_manager, final_offset))
+    Ok((kv_store, hash_store, queue_manager, final_offset))
 }
 
 /// Test recovery without actually loading data (validation only)

@@ -8,8 +8,11 @@ use tokio::net::TcpListener;
 /// Helper to spawn a test server
 async fn spawn_test_server() -> String {
     let kv_store = Arc::new(KVStore::new(KVConfig::default()));
+    let hash_store = Arc::new(synap_server::core::HashStore::new());
+
     let state = AppState {
         kv_store,
+        hash_store,
         queue_manager: None,
         stream_manager: None,
         pubsub_router: None,
