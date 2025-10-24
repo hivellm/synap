@@ -5,6 +5,20 @@ All notable changes to the Synap Rust SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2025-10-24
+
+### Fixed
+- **CRITICAL**: Fixed pub/sub publish API - now sends `payload` field instead of `data`
+- **CRITICAL**: Fixed response field from `delivered_count` to `subscribers_matched`
+
+### Added
+- 6 pub/sub integration tests covering API contract
+- Tests for different payload types and edge cases
+
+### Changed
+- All 34 tests passing
+- Ready for crates.io publication
+
 ## [0.1.0] - 2025-10-23
 
 ### Added

@@ -10,7 +10,7 @@
 
     <!-- Package Metadata -->
     <PackageId>HiveLLM.Synap.SDK</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.1.1</Version>
     <Authors>HiveLLM</Authors>
     <Company>HiveLLM</Company>
     <Description>Official C# SDK for Synap - High-Performance In-Memory Key-Value Store &amp; Message Broker</Description>

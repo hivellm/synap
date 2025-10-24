@@ -2,6 +2,20 @@
 
 All notable changes to the Synap Python SDK will be documented in this file.
 
+## [0.1.1] - 2025-10-24
+
+### Fixed
+- **CRITICAL**: Fixed pub/sub publish API - now sends `payload` field instead of `message`
+- **CRITICAL**: Fixed response field from `delivered` to `subscribers_matched`
+
+### Added
+- 8 pub/sub unit tests with mock validation
+- 8 pub/sub S2S integration tests
+- Tests verify API contract compliance
+
+### Changed
+- Ready for PyPI publication
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 

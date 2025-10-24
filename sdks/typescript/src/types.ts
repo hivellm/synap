@@ -354,6 +354,7 @@ export class NetworkError extends SynapError {
   constructor(message: string, public originalError?: Error) {
     super(message, 'NETWORK_ERROR');
     this.name = 'NetworkError';
+    Object.setPrototypeOf(this, NetworkError.prototype);
   }
 }
 
@@ -364,6 +365,7 @@ export class TimeoutError extends SynapError {
   constructor(message: string, public timeoutMs: number) {
     super(message, 'TIMEOUT_ERROR');
     this.name = 'TimeoutError';
+    Object.setPrototypeOf(this, TimeoutError.prototype);
   }
 }
 
@@ -374,6 +376,7 @@ export class ServerError extends SynapError {
   constructor(message: string, statusCode?: number, requestId?: string) {
     super(message, 'SERVER_ERROR', statusCode, requestId);
     this.name = 'ServerError';
+    Object.setPrototypeOf(this, ServerError.prototype);
   }
 }
 
