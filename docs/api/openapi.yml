@@ -435,7 +435,7 @@ paths:
                 example: [Alice, 30, alice@example.com]
 
   /hash/{key}/del:
-    delete:
+    post:
       tags: [Hash]
       summary: Delete hash fields
       description: Delete one or more fields from a hash
