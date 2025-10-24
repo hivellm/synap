@@ -105,9 +105,10 @@ async fn test_crash_recovery() {
 
     // First run: create data
     {
-        let (kv, _qm, _offset) = recover(&persist_config, kv_config.clone(), queue_config.clone())
-            .await
-            .unwrap();
+        let (kv, _hs, _qm, _offset) =
+            recover(&persist_config, kv_config.clone(), queue_config.clone())
+                .await
+                .unwrap();
 
         // Add some data
         kv.set("user:1", b"Alice".to_vec(), None).await.unwrap();
@@ -120,9 +121,10 @@ async fn test_crash_recovery() {
 
     // Second run: recover data
     {
-        let (kv, _qm, _offset) = recover(&persist_config, kv_config.clone(), queue_config.clone())
-            .await
-            .unwrap();
+        let (kv, _hs, _qm, _offset) =
+            recover(&persist_config, kv_config.clone(), queue_config.clone())
+                .await
+                .unwrap();
 
         // Data would be recovered if we were actually logging to WAL
         // This test demonstrates the recovery process works

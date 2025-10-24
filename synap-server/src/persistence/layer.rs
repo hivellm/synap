@@ -70,6 +70,93 @@ impl PersistenceLayer {
         Ok(())
     }
 
+    /// Log a Hash SET operation
+    pub async fn log_hash_set(
+        &self,
+        key: String,
+        field: String,
+        value: Vec<u8>,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::HashSet { key, field, value };
+
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a Hash DELETE operation
+    pub async fn log_hash_del(&self, key: String, fields: Vec<String>) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::HashDel { key, fields };
+
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a Hash INCREMENT operation
+    pub async fn log_hash_incrby(
+        &self,
+        key: String,
+        field: String,
+        increment: i64,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::HashIncrBy {
+            key,
+            field,
+            increment,
+        };
+
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a Hash INCREMENT BY FLOAT operation
+    pub async fn log_hash_incrbyfloat(
+        &self,
+        key: String,
+        field: String,
+        increment: f64,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::HashIncrByFloat {
+            key,
+            field,
+            increment,
+        };
+
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
     /// Log a Queue PUBLISH operation
     pub async fn log_queue_publish(
         &self,

@@ -89,6 +89,30 @@ pub enum Operation {
         event_type: String,
         payload: Vec<u8>,
     },
+
+    /// Hash SET operation
+    HashSet {
+        key: String,
+        field: String,
+        value: Vec<u8>,
+    },
+
+    /// Hash DELETE operation
+    HashDel { key: String, fields: Vec<String> },
+
+    /// Hash INCREMENT operation
+    HashIncrBy {
+        key: String,
+        field: String,
+        increment: i64,
+    },
+
+    /// Hash INCREMENT BY FLOAT operation
+    HashIncrByFloat {
+        key: String,
+        field: String,
+        increment: f64,
+    },
 }
 
 /// Snapshot containing full system state
