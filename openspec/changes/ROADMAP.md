@@ -120,6 +120,8 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 
 Currently active OpenSpec changes:
 
+### Phase 1: Core Data Structures
+
 1. ✅ **implement-hash-data-structure** (MERGED)
    - Status: Complete, ready for archival
    - Target: v0.4.0-alpha
@@ -128,12 +130,68 @@ Currently active OpenSpec changes:
 2. 📋 **add-list-data-structure** (DRAFT)
    - Status: Proposal created
    - Target: v0.5.0-alpha
-   - 0/150 tasks (0%)
+   - ~150 tasks
 
 3. 📋 **add-set-data-structure** (DRAFT)
    - Status: Proposal created
    - Target: v0.5.0-alpha
-   - 0/130 tasks (0%)
+   - ~130 tasks
+
+### Phase 2: Advanced Operations
+
+4. 📋 **add-sorted-set-data-structure** (DRAFT)
+   - Status: Proposal created
+   - Target: v0.6.0-alpha
+   - ~200 tasks, 6 weeks
+
+5. 📋 **add-string-extensions** (DRAFT)
+   - Status: Proposal created
+   - Target: v0.6.0-alpha
+   - ~50 tasks, 2 weeks
+
+6. 📋 **add-key-management** (DRAFT)
+   - Status: Proposal created
+   - Target: v0.6.0-alpha
+   - ~60 tasks, 2 weeks
+
+7. 📋 **add-enhanced-monitoring** (DRAFT)
+   - Status: Proposal created
+   - Target: v0.6.0-alpha
+   - ~80 tasks, 3 weeks
+
+### Phase 3: Transactions & Scripting
+
+8. 📋 **add-transactions-support** (DRAFT)
+   - Status: Proposal created
+   - Target: v0.7.0-alpha
+   - ~120 tasks, 6 weeks
+
+9. 📋 **add-lua-scripting** (DRAFT)
+   - Status: Proposal created
+   - Target: v0.7.0-alpha
+   - ~150 tasks, 8 weeks
+
+### Phase 4: Cluster & Specialized
+
+10. 📋 **add-cluster-mode** (DRAFT)
+    - Status: Proposal created
+    - Target: v0.8.0-alpha
+    - ~300 tasks, 12 weeks
+
+11. 📋 **add-bitmap-operations** (DRAFT)
+    - Status: Proposal created
+    - Target: v0.8.0+
+    - ~70 tasks, 3 weeks
+
+12. 📋 **add-hyperloglog** (DRAFT)
+    - Status: Proposal created
+    - Target: v0.8.0+
+    - ~40 tasks, 2 weeks
+
+13. 📋 **add-geospatial-indexes** (DRAFT)
+    - Status: Proposal created
+    - Target: v0.8.0+
+    - ~90 tasks, 4 weeks
 
 ## Next Steps
 
