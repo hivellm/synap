@@ -45,12 +45,13 @@ export class PubSubManager {
       cmdPayload.headers = options.headers;
     }
 
-    const result = await this.client.sendCommand<{ success: boolean }>(
+    const result = await this.client.sendCommand<{ message_id: string; subscribers_matched: number }>(
       'pubsub.publish',
       cmdPayload
     );
 
-    return result.success;
+    // Return true if publish succeeded (message_id present)
+    return !!result.message_id;
   }
 
   /**
