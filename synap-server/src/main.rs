@@ -225,9 +225,14 @@ async fn main() -> Result<()> {
         None
     };
 
+    // Initialize Hash store
+    let hash_store = Arc::new(synap_server::core::HashStore::new());
+    info!("Hash store initialized");
+
     // Create application state with persistence and streams
     let app_state = AppState {
         kv_store,
+        hash_store,
         queue_manager,
         stream_manager,
         partition_manager,

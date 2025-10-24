@@ -38,6 +38,21 @@ pub fn create_router(state: AppState, rate_limit_config: crate::config::RateLimi
         .route("/kv/get/{key}", get(handlers::kv_get))
         .route("/kv/del/{key}", delete(handlers::kv_delete))
         .route("/kv/stats", get(handlers::kv_stats))
+        // Hash endpoints
+        .route("/hash/:key/set", post(handlers::hash_set))
+        .route("/hash/:key/:field", get(handlers::hash_get))
+        .route("/hash/:key/getall", get(handlers::hash_getall))
+        .route("/hash/:key/keys", get(handlers::hash_keys))
+        .route("/hash/:key/vals", get(handlers::hash_vals))
+        .route("/hash/:key/len", get(handlers::hash_len))
+        .route("/hash/:key/mset", post(handlers::hash_mset))
+        .route("/hash/:key/mget", post(handlers::hash_mget))
+        .route("/hash/:key/del", delete(handlers::hash_del))
+        .route("/hash/:key/:field/exists", get(handlers::hash_exists))
+        .route("/hash/:key/incrby", post(handlers::hash_incrby))
+        .route("/hash/:key/incrbyfloat", post(handlers::hash_incrbyfloat))
+        .route("/hash/:key/setnx", post(handlers::hash_setnx))
+        .route("/hash/stats", get(handlers::hash_stats))
         // Persistence endpoints
         .route("/snapshot", post(handlers::trigger_snapshot))
         // Event Stream endpoints
