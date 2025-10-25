@@ -33,6 +33,7 @@ import { KVStore } from './kv';
 import { HashManager } from './hash';
 import { ListManager } from './list';
 import { SetManager } from './set';
+import { SortedSetManager } from './sorted-set';
 import { QueueManager } from './queue';
 import { StreamManager } from './stream';
 import { PubSubManager } from './pubsub';
@@ -70,6 +71,8 @@ export { KVStore } from './kv';
 export { HashManager } from './hash';
 export { ListManager } from './list';
 export { SetManager } from './set';
+export { SortedSetManager } from './sorted-set';
+export type { ScoredMember, SortedSetStats } from './sorted-set';
 export { QueueManager } from './queue';
 export { StreamManager } from './stream';
 export { PubSubManager } from './pubsub';
@@ -94,6 +97,9 @@ export class Synap {
   /** Set data structure operations */
   public readonly set: SetManager;
 
+  /** Sorted Set data structure operations */
+  public readonly sortedSet: SortedSetManager;
+
   /** Queue system operations */
   public readonly queue: QueueManager;
 
@@ -109,6 +115,7 @@ export class Synap {
     this.hash = new HashManager(this.client);
     this.list = new ListManager(this.client);
     this.set = new SetManager(this.client);
+    this.sortedSet = new SortedSetManager(this.client);
     this.queue = new QueueManager(this.client);
     this.stream = new StreamManager(this.client);
     this.pubsub = new PubSubManager(this.client);
