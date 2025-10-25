@@ -90,6 +90,15 @@ mcp:
 - ✅ **Tests**: 6 comprehensive test cases
 - ✅ **Client Method**: `client.sorted_set()` for easy access
 
+#### TypeScript SDK (v0.3.0-beta)
+- ✅ **SortedSetManager Class**: 18 operations implemented
+- ✅ **Core Methods**: add, rem, score, card, incrBy, range, revRange, rank, revRank, count
+- ✅ **Advanced Methods**: rangeByScore, popMin, popMax, remRangeByRank, remRangeByScore
+- ✅ **Set Operations**: interStore, unionStore, diffStore (with weights & aggregation)
+- ✅ **Types**: ScoredMember interface, SortedSetStats interface
+- ✅ **Tests**: 18 comprehensive unit tests (100% passing)
+- ✅ **Client Property**: `synap.sortedSet` for easy access
+
 **Implementation Status**
 - ✅ Phase 1: Core Implementation - COMPLETE (100%)
 - ✅ Phase 2: Range & Ranking Commands - COMPLETE (100%)  
