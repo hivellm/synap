@@ -2,6 +2,28 @@
 
 All notable changes to the Synap TypeScript SDK will be documented in this file.
 
+## [Unreleased]
+
+### Added - Redis Data Structures (v0.3.0) 🎉
+
+**Complete Redis-compatible Hash, List, and Set data structures - 45 new commands**
+
+#### Hash Manager (15 commands)
+- `hash.set()`, `hash.get()`, `hash.getAll()`, `hash.del()`, `hash.exists()`
+- `hash.keys()`, `hash.values()`, `hash.len()`, `hash.mset()`, `hash.mget()`
+- `hash.incrBy()`, `hash.incrByFloat()`, `hash.setNX()`
+
+#### List Manager (16 commands)
+- `list.lpush()`, `list.rpush()`, `list.lpop()`, `list.rpop()`, `list.range()`
+- `list.len()`, `list.index()`, `list.set()`, `list.trim()`, `list.rem()`
+- `list.insert()`, `list.rpoplpush()`, `list.pos()`, `list.lpushx()`, `list.rpushx()`
+
+#### Set Manager (14 commands)
+- `set.add()`, `set.rem()`, `set.isMember()`, `set.members()`, `set.card()`
+- `set.pop()`, `set.randMember()`, `set.move()`
+- `set.inter()`, `set.union()`, `set.diff()`
+- `set.interStore()`, `set.unionStore()`, `set.diffStore()`
+
 ## [0.2.0-beta.3] - 2025-10-24
 
 ### Fixed

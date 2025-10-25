@@ -30,6 +30,9 @@
 
 import { SynapClient } from './client';
 import { KVStore } from './kv';
+import { HashManager } from './hash';
+import { ListManager } from './list';
+import { SetManager } from './set';
 import { QueueManager } from './queue';
 import { StreamManager } from './stream';
 import { PubSubManager } from './pubsub';
@@ -64,6 +67,9 @@ export {
 
 export { SynapClient } from './client';
 export { KVStore } from './kv';
+export { HashManager } from './hash';
+export { ListManager } from './list';
+export { SetManager } from './set';
 export { QueueManager } from './queue';
 export { StreamManager } from './stream';
 export { PubSubManager } from './pubsub';
@@ -79,6 +85,15 @@ export class Synap {
   /** Key-Value store operations */
   public readonly kv: KVStore;
 
+  /** Hash data structure operations */
+  public readonly hash: HashManager;
+
+  /** List data structure operations */
+  public readonly list: ListManager;
+
+  /** Set data structure operations */
+  public readonly set: SetManager;
+
   /** Queue system operations */
   public readonly queue: QueueManager;
 
@@ -91,6 +106,9 @@ export class Synap {
   constructor(options: import('./types').SynapClientOptions = {}) {
     this.client = new SynapClient(options);
     this.kv = new KVStore(this.client);
+    this.hash = new HashManager(this.client);
+    this.list = new ListManager(this.client);
+    this.set = new SetManager(this.client);
     this.queue = new QueueManager(this.client);
     this.stream = new StreamManager(this.client);
     this.pubsub = new PubSubManager(this.client);
