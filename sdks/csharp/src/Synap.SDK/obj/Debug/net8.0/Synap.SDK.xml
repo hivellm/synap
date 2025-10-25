@@ -63,6 +63,76 @@
             <param name="message">The error message.</param>
             <returns>A new <see cref="T:Synap.SDK.Exceptions.SynapException"/> instance.</returns>
         </member>
+        <member name="T:Synap.SDK.Modules.HashManager">
+            <summary>
+            Hash data structure operations (Redis-compatible).
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.HashManager.SetAsync(System.String,System.String,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Set field in hash.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.HashManager.GetAsync(System.String,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Get field from hash.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.HashManager.GetAllAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Get all fields and values from hash.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.HashManager.DeleteAsync(System.String,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Delete field from hash.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.HashManager.ExistsAsync(System.String,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Check if field exists in hash.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.HashManager.KeysAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Get all field names in hash.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.HashManager.ValuesAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Get all values in hash.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.HashManager.LenAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Get number of fields in hash.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.HashManager.MSetAsync(System.String,System.Collections.Generic.Dictionary{System.String,System.String},System.Threading.CancellationToken)">
+            <summary>
+            Set multiple fields in hash.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.HashManager.MGetAsync(System.String,System.Collections.Generic.IReadOnlyList{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Get multiple fields from hash.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.HashManager.IncrByAsync(System.String,System.String,System.Int64,System.Threading.CancellationToken)">
+            <summary>
+            Increment field value by integer.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.HashManager.IncrByFloatAsync(System.String,System.String,System.Double,System.Threading.CancellationToken)">
+            <summary>
+            Increment field value by float.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.HashManager.SetNXAsync(System.String,System.String,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Set field only if it doesn't exist.
+            </summary>
+        </member>
         <member name="T:Synap.SDK.Modules.KVStore">
             <summary>
             Key-Value Store operations.
@@ -142,6 +212,56 @@
             <param name="limit">Maximum number of keys to return.</param>
             <param name="cancellationToken">Cancellation token.</param>
             <returns>List of matching keys.</returns>
+        </member>
+        <member name="T:Synap.SDK.Modules.ListManager">
+            <summary>
+            List data structure operations (Redis-compatible).
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.ListManager.LPushAsync(System.String,System.Collections.Generic.IReadOnlyList{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Push elements to left (head) of list.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.ListManager.RPushAsync(System.String,System.Collections.Generic.IReadOnlyList{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Push elements to right (tail) of list.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.ListManager.LPopAsync(System.String,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Pop elements from left (head) of list.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.ListManager.RPopAsync(System.String,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Pop elements from right (tail) of list.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.ListManager.RangeAsync(System.String,System.Int32,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Get range of elements from list.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.ListManager.LenAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Get list length.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.ListManager.IndexAsync(System.String,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Get element at index.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.ListManager.SetAsync(System.String,System.Int32,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Set element at index.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.ListManager.TrimAsync(System.String,System.Int32,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Trim list to specified range.
+            </summary>
         </member>
         <member name="T:Synap.SDK.Modules.PubSubManager">
             <summary>
@@ -252,6 +372,66 @@
             <param name="cancellationToken">Cancellation token.</param>
             <returns>List of queue names.</returns>
         </member>
+        <member name="T:Synap.SDK.Modules.SetManager">
+            <summary>
+            Set data structure operations (Redis-compatible).
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.SetManager.AddAsync(System.String,System.Collections.Generic.IReadOnlyList{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Add members to set.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.SetManager.RemAsync(System.String,System.Collections.Generic.IReadOnlyList{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Remove members from set.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.SetManager.IsMemberAsync(System.String,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Check if member exists in set.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.SetManager.MembersAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Get all members of set.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.SetManager.CardAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Get set cardinality (size).
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.SetManager.PopAsync(System.String,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Remove and return random members.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.SetManager.RandMemberAsync(System.String,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Get random members without removing.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.SetManager.MoveAsync(System.String,System.String,System.String,System.Threading.CancellationToken)">
+            <summary>
+            Move member from source to destination set.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.SetManager.InterAsync(System.Collections.Generic.IReadOnlyList{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Get intersection of sets.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.SetManager.UnionAsync(System.Collections.Generic.IReadOnlyList{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Get union of sets.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.SetManager.DiffAsync(System.Collections.Generic.IReadOnlyList{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Get difference of sets (first minus others).
+            </summary>
+        </member>
         <member name="T:Synap.SDK.Modules.StreamManager">
             <summary>
             Event Stream operations.
@@ -327,6 +507,21 @@
         <member name="P:Synap.SDK.SynapClient.KV">
             <summary>
             Gets the Key-Value Store operations.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapClient.Hash">
+            <summary>
+            Gets the Hash data structure operations.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapClient.List">
+            <summary>
+            Gets the List data structure operations.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapClient.Set">
+            <summary>
+            Gets the Set data structure operations.
             </summary>
         </member>
         <member name="P:Synap.SDK.SynapClient.Queue">

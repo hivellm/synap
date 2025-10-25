@@ -1,25 +1,31 @@
 {
   "format": 1,
   "restore": {
-    "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/Synap.SDK.csproj": {}
+    "F:\\Node\\hivellm\\synap\\sdks\\csharp\\src\\Synap.SDK\\Synap.SDK.csproj": {}
   },
   "projects": {
-    "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/Synap.SDK.csproj": {
-      "version": "0.1.0",
+    "F:\\Node\\hivellm\\synap\\sdks\\csharp\\src\\Synap.SDK\\Synap.SDK.csproj": {
+      "version": "0.1.1",
       "restore": {
-        "projectUniqueName": "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/Synap.SDK.csproj",
+        "projectUniqueName": "F:\\Node\\hivellm\\synap\\sdks\\csharp\\src\\Synap.SDK\\Synap.SDK.csproj",
         "projectName": "HiveLLM.Synap.SDK",
-        "projectPath": "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/Synap.SDK.csproj",
-        "packagesPath": "/home/andre/.nuget/packages/",
-        "outputPath": "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/obj/",
+        "projectPath": "F:\\Node\\hivellm\\synap\\sdks\\csharp\\src\\Synap.SDK\\Synap.SDK.csproj",
+        "packagesPath": "C:\\Users\\Bolado\\.nuget\\packages\\",
+        "outputPath": "F:\\Node\\hivellm\\synap\\sdks\\csharp\\src\\Synap.SDK\\obj\\",
         "projectStyle": "PackageReference",
+        "fallbackFolders": [
+          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
+        ],
         "configFilePaths": [
-          "/home/andre/.nuget/NuGet/NuGet.Config"
+          "C:\\Users\\Bolado\\AppData\\Roaming\\NuGet\\NuGet.Config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
         ],
         "originalTargetFrameworks": [
           "net8.0"
         ],
         "sources": {
+          "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
@@ -33,7 +39,13 @@
           "warnAsError": [
             "NU1605"
           ]
-        }
+        },
+        "restoreAuditProperties": {
+          "enableAudit": "true",
+          "auditLevel": "low",
+          "auditMode": "direct"
+        },
+        "SdkAnalysisLevel": "9.0.300"
       },
       "frameworks": {
         "net8.0": {
@@ -66,7 +78,7 @@
               "privateAssets": "all"
             }
           },
-          "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/8.0.117/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.301/PortableRuntimeIdentifierGraph.json"
         }
       }
     }

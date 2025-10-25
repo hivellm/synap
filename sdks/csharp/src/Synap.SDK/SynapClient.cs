@@ -15,6 +15,9 @@ public sealed class SynapClient : IDisposable
     private readonly bool _disposeHttpClient;
 
     private KVStore? _kv;
+    private HashManager? _hash;
+    private ListManager? _list;
+    private SetManager? _set;
     private QueueManager? _queue;
     private StreamManager? _stream;
     private PubSubManager? _pubsub;
@@ -64,6 +67,21 @@ public sealed class SynapClient : IDisposable
     /// Gets the Key-Value Store operations.
     /// </summary>
     public KVStore KV => _kv ??= new KVStore(this);
+
+    /// <summary>
+    /// Gets the Hash data structure operations.
+    /// </summary>
+    public HashManager Hash => _hash ??= new HashManager(this);
+
+    /// <summary>
+    /// Gets the List data structure operations.
+    /// </summary>
+    public ListManager List => _list ??= new ListManager(this);
+
+    /// <summary>
+    /// Gets the Set data structure operations.
+    /// </summary>
+    public SetManager Set => _set ??= new SetManager(this);
 
     /// <summary>
     /// Gets the Queue operations.

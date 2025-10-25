@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2025-10-25
+
+### Added - Redis Data Structures 🎉
+
+**Complete Redis-compatible Hash, List, and Set data structures**
+
+#### Hash Manager (13+ commands)
+- `Hash.SetAsync()`, `Hash.GetAsync()`, `Hash.GetAllAsync()`, `Hash.DeleteAsync()`, `Hash.ExistsAsync()`
+- `Hash.KeysAsync()`, `Hash.ValuesAsync()`, `Hash.LenAsync()`, `Hash.MSetAsync()`, `Hash.MGetAsync()`
+- `Hash.IncrByAsync()`, `Hash.IncrByFloatAsync()`, `Hash.SetNXAsync()`
+
+#### List Manager (8+ commands)
+- `List.LPushAsync()`, `List.RPushAsync()`, `List.LPopAsync()`, `List.RPopAsync()`
+- `List.RangeAsync()`, `List.LenAsync()`, `List.IndexAsync()`, `List.SetAsync()`, `List.TrimAsync()`
+
+#### Set Manager (11+ commands)
+- `Set.AddAsync()`, `Set.RemAsync()`, `Set.IsMemberAsync()`, `Set.MembersAsync()`, `Set.CardAsync()`
+- `Set.PopAsync()`, `Set.RandMemberAsync()`, `Set.MoveAsync()`
+- `Set.InterAsync()`, `Set.UnionAsync()`, `Set.DiffAsync()`
+
+**Usage Example**:
+```csharp
+using Synap.SDK;
+
+var config = new SynapConfig("http://localhost:15500");
+var client = new SynapClient(config);
+
+// Hash operations
+await client.Hash.SetAsync("user:1", "name", "Alice");
+var name = await client.Hash.GetAsync("user:1", "name");
+
+// List operations
+await client.List.RPushAsync("tasks", new List<string> { "task1", "task2" });
+var tasks = await client.List.RangeAsync("tasks", 0, -1);
+
+// Set operations
+await client.Set.AddAsync("tags", new List<string> { "csharp", "redis" });
+var isMember = await client.Set.IsMemberAsync("tags", "csharp");
+```
+
 ## [0.1.0] - 2025-10-23
 
 ### Added
