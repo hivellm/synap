@@ -9,6 +9,9 @@ import httpx
 from synap_sdk.config import SynapConfig
 from synap_sdk.exceptions import SynapException
 from synap_sdk.modules.kv_store import KVStore
+from synap_sdk.modules.hash import HashManager
+from synap_sdk.modules.list import ListManager
+from synap_sdk.modules.set import SetManager
 from synap_sdk.modules.pubsub import PubSubManager
 from synap_sdk.modules.queue import QueueManager
 from synap_sdk.modules.stream import StreamManager
@@ -51,6 +54,9 @@ class SynapClient:
             )
 
         self._kv: KVStore | None = None
+        self._hash: HashManager | None = None
+        self._list: ListManager | None = None
+        self._set: SetManager | None = None
         self._queue: QueueManager | None = None
         self._stream: StreamManager | None = None
         self._pubsub: PubSubManager | None = None
@@ -61,6 +67,27 @@ class SynapClient:
         if self._kv is None:
             self._kv = KVStore(self)
         return self._kv
+
+    @property
+    def hash(self) -> HashManager:
+        """Get the Hash data structure operations."""
+        if self._hash is None:
+            self._hash = HashManager(self)
+        return self._hash
+
+    @property
+    def list(self) -> ListManager:
+        """Get the List data structure operations."""
+        if self._list is None:
+            self._list = ListManager(self)
+        return self._list
+
+    @property
+    def set(self) -> SetManager:
+        """Get the Set data structure operations."""
+        if self._set is None:
+            self._set = SetManager(self)
+        return self._set
 
     @property
     def queue(self) -> QueueManager:

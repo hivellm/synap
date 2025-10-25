@@ -2,6 +2,47 @@
 
 All notable changes to the Synap Python SDK will be documented in this file.
 
+## [0.2.0] - 2025-10-25
+
+### Added - Redis Data Structures 🎉
+
+**Complete Redis-compatible Hash, List, and Set data structures - 45 new commands**
+
+#### Hash Manager (15 commands)
+- `hash.set()`, `hash.get()`, `hash.get_all()`, `hash.delete()`, `hash.exists()`
+- `hash.keys()`, `hash.values()`, `hash.len()`, `hash.mset()`, `hash.mget()`
+- `hash.incr_by()`, `hash.incr_by_float()`, `hash.set_nx()`
+
+#### List Manager (16 commands)
+- `list.lpush()`, `list.rpush()`, `list.lpop()`, `list.rpop()`, `list.range()`
+- `list.len()`, `list.index()`, `list.set()`, `list.trim()`, `list.rem()`
+- `list.insert()`, `list.rpoplpush()`, `list.pos()`, `list.lpushx()`, `list.rpushx()`
+
+#### Set Manager (14 commands)
+- `set.add()`, `set.rem()`, `set.is_member()`, `set.members()`, `set.card()`
+- `set.pop()`, `set.rand_member()`, `set.move()`
+- `set.inter()`, `set.union()`, `set.diff()`
+- `set.inter_store()`, `set.union_store()`, `set.diff_store()`
+
+**Usage Example**:
+```python
+from synap_sdk import SynapClient, SynapConfig
+
+config = SynapConfig("http://localhost:15500")
+async with SynapClient(config) as client:
+    # Hash operations
+    await client.hash.set("user:1", "name", "Alice")
+    name = await client.hash.get("user:1", "name")
+    
+    # List operations
+    await client.list.rpush("tasks", "task1", "task2")
+    tasks = await client.list.range("tasks", 0, -1)
+    
+    # Set operations
+    await client.set.add("tags", "python", "redis")
+    is_member = await client.set.is_member("tags", "python")
+```
+
 ## [0.1.1] - 2025-10-24
 
 ### Fixed
