@@ -6,6 +6,7 @@ use crate::core::kv_store::KVStore;
 use crate::core::list::ListStore;
 use crate::core::queue::QueueManager;
 use crate::core::set::SetStore;
+use crate::core::sorted_set::{SortedSetStore, ZAddOptions};
 use crate::core::types::KVConfig;
 use tracing::info;
 
@@ -19,6 +20,7 @@ pub async fn recover(
     Option<HashStore>,
     Option<ListStore>,
     Option<SetStore>,
+    Option<SortedSetStore>,
     Option<QueueManager>,
     u64,
 )> {
@@ -29,6 +31,7 @@ pub async fn recover(
             Some(HashStore::new()),
             Some(ListStore::new()),
             Some(SetStore::new()),
+            Some(SortedSetStore::new()),
             Some(QueueManager::new(queue_config)),
             0,
         ));
@@ -40,7 +43,7 @@ pub async fn recover(
     let wal = WriteAheadLog::open(config.wal.clone()).await?;
 
     // Step 1: Load latest snapshot (if exists)
-    let (kv_store, hash_store, list_store, set_store, queue_manager, last_offset) =
+    let (kv_store, hash_store, list_store, set_store, sorted_set_store, queue_manager, last_offset) =
         if let Some((snapshot, path)) = snapshot_mgr.load_latest().await? {
             info!(
                 "Loaded snapshot from {:?} at offset {}",
@@ -89,11 +92,22 @@ pub async fn recover(
                 }
             }
 
+            // Restore Sorted Set store
+            let sorted_sets = SortedSetStore::new();
+            for (key, members_scores) in snapshot.sorted_set_data {
+                // Restore sorted set by adding all members with their scores
+                let opts = ZAddOptions::default();
+                for (member, score) in members_scores {
+                    sorted_sets.zadd(&key, member, score, &opts);
+                }
+            }
+
             (
                 kv,
                 Some(HashStore::new()),
                 Some(lists),
                 Some(sets),
+                Some(sorted_sets),
                 Some(queues),
                 snapshot.wal_offset,
             )
@@ -104,6 +118,7 @@ pub async fn recover(
                 Some(HashStore::new()),
                 Some(ListStore::new()),
                 Some(SetStore::new()),
+                Some(SortedSetStore::new()),
                 Some(QueueManager::new(queue_config)),
                 0,
             )
@@ -297,6 +312,107 @@ pub async fn recover(
                 }
                 replayed += 1;
             }
+            Operation::ZAdd {
+                key,
+                member,
+                score,
+                nx,
+                xx,
+                gt,
+                lt,
+            } => {
+                if let Some(ref sorted_set_store) = sorted_set_store {
+                    let opts = ZAddOptions {
+                        nx,
+                        xx,
+                        gt,
+                        lt,
+                        ch: false,
+                        incr: false,
+                    };
+                    let _ = sorted_set_store.zadd(&key, member, score, &opts);
+                }
+                replayed += 1;
+            }
+            Operation::ZRem { key, members } => {
+                if let Some(ref sorted_set_store) = sorted_set_store {
+                    let _ = sorted_set_store.zrem(&key, &members);
+                }
+                replayed += 1;
+            }
+            Operation::ZIncrBy {
+                key,
+                member,
+                increment,
+            } => {
+                if let Some(ref sorted_set_store) = sorted_set_store {
+                    let _ = sorted_set_store.zincrby(&key, member, increment);
+                }
+                replayed += 1;
+            }
+            Operation::ZRemRangeByRank { key, start, stop } => {
+                if let Some(ref sorted_set_store) = sorted_set_store {
+                    let _ = sorted_set_store.zremrangebyrank(&key, start, stop);
+                }
+                replayed += 1;
+            }
+            Operation::ZRemRangeByScore { key, min, max } => {
+                if let Some(ref sorted_set_store) = sorted_set_store {
+                    let _ = sorted_set_store.zremrangebyscore(&key, min, max);
+                }
+                replayed += 1;
+            }
+            Operation::ZInterStore {
+                destination,
+                keys,
+                weights,
+                aggregate,
+            } => {
+                if let Some(ref sorted_set_store) = sorted_set_store {
+                    let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+                    let agg = match aggregate.to_lowercase().as_str() {
+                        "min" => crate::core::Aggregate::Min,
+                        "max" => crate::core::Aggregate::Max,
+                        _ => crate::core::Aggregate::Sum,
+                    };
+                    let _ = sorted_set_store.zinterstore(
+                        &destination,
+                        &key_refs,
+                        weights.as_deref(),
+                        agg,
+                    );
+                }
+                replayed += 1;
+            }
+            Operation::ZUnionStore {
+                destination,
+                keys,
+                weights,
+                aggregate,
+            } => {
+                if let Some(ref sorted_set_store) = sorted_set_store {
+                    let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+                    let agg = match aggregate.to_lowercase().as_str() {
+                        "min" => crate::core::Aggregate::Min,
+                        "max" => crate::core::Aggregate::Max,
+                        _ => crate::core::Aggregate::Sum,
+                    };
+                    let _ = sorted_set_store.zunionstore(
+                        &destination,
+                        &key_refs,
+                        weights.as_deref(),
+                        agg,
+                    );
+                }
+                replayed += 1;
+            }
+            Operation::ZDiffStore { destination, keys } => {
+                if let Some(ref sorted_set_store) = sorted_set_store {
+                    let key_refs: Vec<&str> = keys.iter().map(|s| s.as_str()).collect();
+                    let _ = sorted_set_store.zdiffstore(&destination, &key_refs);
+                }
+                replayed += 1;
+            }
         }
     }
 
@@ -309,6 +425,7 @@ pub async fn recover(
         hash_store,
         list_store,
         set_store,
+        sorted_set_store,
         queue_manager,
         final_offset,
     ))

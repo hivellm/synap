@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use synap_server::core::{HashStore, ListStore, SetStore};
+use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
 use synap_server::persistence::{PersistenceLayer, recover};
 use synap_server::replication::NodeRole;
 use synap_server::{
@@ -132,6 +132,7 @@ async fn main() -> Result<()> {
         hash_store_recovered,
         list_store_recovered,
         _set_store_recovered,
+        _sorted_set_store_recovered,
         queue_manager,
         _wal_offset,
     ): (
@@ -139,18 +140,20 @@ async fn main() -> Result<()> {
         Option<Arc<HashStore>>,
         Option<Arc<ListStore>>,
         Option<Arc<SetStore>>,
+        Option<Arc<SortedSetStore>>,
         Option<Arc<QueueManager>>,
         u64,
     ) = if config.persistence.enabled {
         info!("Persistence enabled, attempting recovery...");
         match recover(&config.persistence, kv_config.clone(), queue_config.clone()).await {
-            Ok((kv, hs, ls, ss, qm, offset)) => {
+            Ok((kv, hs, ls, ss, zs, qm, offset)) => {
                 info!("Recovery successful, WAL offset: {}", offset);
                 (
                     Arc::new(kv),
                     hs.map(Arc::new),
                     ls.map(Arc::new),
                     ss.map(Arc::new),
+                    zs.map(Arc::new),
                     qm.map(Arc::new),
                     offset,
                 )
@@ -162,6 +165,7 @@ async fn main() -> Result<()> {
                     Some(Arc::new(HashStore::new())),
                     Some(Arc::new(ListStore::new())),
                     Some(Arc::new(SetStore::new())),
+                    Some(Arc::new(SortedSetStore::new())),
                     if config.queue.enabled {
                         Some(Arc::new(QueueManager::new(queue_config.clone())))
                     } else {
@@ -178,6 +182,7 @@ async fn main() -> Result<()> {
             Some(Arc::new(HashStore::new())),
             Some(Arc::new(ListStore::new())),
             Some(Arc::new(SetStore::new())),
+            Some(Arc::new(SortedSetStore::new())),
             if config.queue.enabled {
                 Some(Arc::new(QueueManager::new(queue_config.clone())))
             } else {
@@ -268,8 +273,9 @@ async fn main() -> Result<()> {
     let set_store = Arc::new(synap_server::core::SetStore::new());
     info!("Set store initialized");
 
-    // Create sorted set store
-    let sorted_set_store = Arc::new(synap_server::core::SortedSetStore::new());
+    // Use sorted set store (fresh or recovered)
+    let sorted_set_store = _sorted_set_store_recovered
+        .unwrap_or_else(|| Arc::new(synap_server::core::SortedSetStore::new()));
     info!("Sorted set store initialized");
 
     // Create application state with persistence and streams

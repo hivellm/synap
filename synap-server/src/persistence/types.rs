@@ -192,6 +192,55 @@ pub enum Operation {
         destination: String,
         keys: Vec<String>,
     },
+
+    /// Sorted Set ADD operation (ZADD)
+    ZAdd {
+        key: String,
+        member: Vec<u8>,
+        score: f64,
+        nx: bool,
+        xx: bool,
+        gt: bool,
+        lt: bool,
+    },
+
+    /// Sorted Set REMOVE operation (ZREM)
+    ZRem { key: String, members: Vec<Vec<u8>> },
+
+    /// Sorted Set INCREMENT BY operation (ZINCRBY)
+    ZIncrBy {
+        key: String,
+        member: Vec<u8>,
+        increment: f64,
+    },
+
+    /// Sorted Set REMOVE RANGE BY RANK operation (ZREMRANGEBYRANK)
+    ZRemRangeByRank { key: String, start: i64, stop: i64 },
+
+    /// Sorted Set REMOVE RANGE BY SCORE operation (ZREMRANGEBYSCORE)
+    ZRemRangeByScore { key: String, min: f64, max: f64 },
+
+    /// Sorted Set INTER STORE operation (ZINTERSTORE)
+    ZInterStore {
+        destination: String,
+        keys: Vec<String>,
+        weights: Option<Vec<f64>>,
+        aggregate: String, // "sum", "min", "max"
+    },
+
+    /// Sorted Set UNION STORE operation (ZUNIONSTORE)
+    ZUnionStore {
+        destination: String,
+        keys: Vec<String>,
+        weights: Option<Vec<f64>>,
+        aggregate: String, // "sum", "min", "max"
+    },
+
+    /// Sorted Set DIFF STORE operation (ZDIFFSTORE)
+    ZDiffStore {
+        destination: String,
+        keys: Vec<String>,
+    },
 }
 
 /// Snapshot containing full system state
@@ -208,6 +257,8 @@ pub struct Snapshot {
     pub list_data: HashMap<String, crate::core::ListValue>, // Key -> List
     #[serde(default)]
     pub set_data: HashMap<String, crate::core::SetValue>, // Key -> Set
+    #[serde(default)]
+    pub sorted_set_data: HashMap<String, Vec<(Vec<u8>, f64)>>, // Key -> Vec<(member, score)>
 }
 
 /// Stream event for snapshot (simplified from stream::StreamEvent)
