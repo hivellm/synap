@@ -4656,3 +4656,273 @@ pub async fn list_stats(
         },
     }))
 }
+
+// ==================== Sorted Set Handlers ====================
+
+#[derive(Debug, Deserialize)]
+pub struct ZAddRequest {
+    pub member: serde_json::Value,
+    pub score: f64,
+    #[serde(default)]
+    pub nx: bool,
+    #[serde(default)]
+    pub xx: bool,
+    #[serde(default)]
+    pub gt: bool,
+    #[serde(default)]
+    pub lt: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ZRemRequest {
+    pub members: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ZInterstoreRequest {
+    pub destination: String,
+    pub keys: Vec<String>,
+    #[serde(default)]
+    pub weights: Option<Vec<f64>>,
+    #[serde(default)]
+    pub aggregate: String, // "sum", "min", "max"
+}
+
+/// POST /sortedset/:key/zadd - Add member with score
+pub async fn sortedset_zadd(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ZAddRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!(
+        "REST ZADD key={} member={:?} score={}",
+        key, req.member, req.score
+    );
+
+    let member = serde_json::to_vec(&req.member)
+        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize member: {}", e)))?;
+
+    let opts = crate::core::ZAddOptions {
+        nx: req.nx,
+        xx: req.xx,
+        gt: req.gt,
+        lt: req.lt,
+        ch: false,
+        incr: false,
+    };
+
+    let (added, _) = state.sorted_set_store.zadd(&key, member, req.score, &opts);
+
+    Ok(Json(json!({ "added": added, "key": key })))
+}
+
+/// POST /sortedset/:key/zrem - Remove members
+pub async fn sortedset_zrem(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ZRemRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST ZREM key={} members={:?}", key, req.members);
+
+    let members: Result<Vec<Vec<u8>>, _> = req.members.iter().map(serde_json::to_vec).collect();
+
+    let members = members
+        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize members: {}", e)))?;
+
+    let removed = state.sorted_set_store.zrem(&key, &members);
+
+    Ok(Json(json!({ "removed": removed, "key": key })))
+}
+
+/// GET /sortedset/:key/:member/zscore - Get score of member
+pub async fn sortedset_zscore(
+    State(state): State<AppState>,
+    Path((key, member)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST ZSCORE key={} member={}", key, member);
+
+    let member_bytes = member.as_bytes();
+    let score = state.sorted_set_store.zscore(&key, member_bytes);
+
+    Ok(Json(
+        json!({ "score": score, "key": key, "member": member }),
+    ))
+}
+
+/// GET /sortedset/:key/zcard - Get cardinality
+pub async fn sortedset_zcard(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST ZCARD key={}", key);
+
+    let count = state.sorted_set_store.zcard(&key);
+
+    Ok(Json(json!({ "count": count, "key": key })))
+}
+
+/// POST /sortedset/:key/zincrby - Increment score
+pub async fn sortedset_zincrby(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ZAddRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!(
+        "REST ZINCRBY key={} member={:?} increment={}",
+        key, req.member, req.score
+    );
+
+    let member = serde_json::to_vec(&req.member)
+        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize member: {}", e)))?;
+
+    let new_score = state.sorted_set_store.zincrby(&key, member, req.score);
+
+    Ok(Json(json!({ "score": new_score, "key": key })))
+}
+
+/// GET /sortedset/:key/zrange - Get range by rank
+pub async fn sortedset_zrange(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let start: i64 = params
+        .get("start")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let stop: i64 = params
+        .get("stop")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(-1);
+    let with_scores = params
+        .get("withscores")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+
+    debug!(
+        "REST ZRANGE key={} start={} stop={} withscores={}",
+        key, start, stop, with_scores
+    );
+
+    let members = state
+        .sorted_set_store
+        .zrange(&key, start, stop, with_scores);
+
+    Ok(Json(json!({ "members": members, "key": key })))
+}
+
+/// GET /sortedset/:key/zrevrange - Get reverse range by rank
+pub async fn sortedset_zrevrange(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let start: i64 = params
+        .get("start")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let stop: i64 = params
+        .get("stop")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(-1);
+    let with_scores = params
+        .get("withscores")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+
+    debug!(
+        "REST ZREVRANGE key={} start={} stop={} withscores={}",
+        key, start, stop, with_scores
+    );
+
+    let members = state
+        .sorted_set_store
+        .zrevrange(&key, start, stop, with_scores);
+
+    Ok(Json(json!({ "members": members, "key": key })))
+}
+
+/// GET /sortedset/:key/:member/zrank - Get rank of member
+pub async fn sortedset_zrank(
+    State(state): State<AppState>,
+    Path((key, member)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST ZRANK key={} member={}", key, member);
+
+    let member_bytes = member.as_bytes();
+    let rank = state.sorted_set_store.zrank(&key, member_bytes);
+
+    Ok(Json(json!({ "rank": rank, "key": key, "member": member })))
+}
+
+/// POST /sortedset/zinterstore - Intersection
+pub async fn sortedset_zinterstore(
+    State(state): State<AppState>,
+    Json(req): Json<ZInterstoreRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!(
+        "REST ZINTERSTORE dest={} keys={:?}",
+        req.destination, req.keys
+    );
+
+    let keys: Vec<&str> = req.keys.iter().map(|s| s.as_str()).collect();
+    let weights = req.weights.as_deref();
+
+    let aggregate = match req.aggregate.to_lowercase().as_str() {
+        "min" => crate::core::Aggregate::Min,
+        "max" => crate::core::Aggregate::Max,
+        _ => crate::core::Aggregate::Sum,
+    };
+
+    let count = state
+        .sorted_set_store
+        .zinterstore(&req.destination, &keys, weights, aggregate);
+
+    Ok(Json(
+        json!({ "count": count, "destination": req.destination }),
+    ))
+}
+
+/// POST /sortedset/zunionstore - Union
+pub async fn sortedset_zunionstore(
+    State(state): State<AppState>,
+    Json(req): Json<ZInterstoreRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!(
+        "REST ZUNIONSTORE dest={} keys={:?}",
+        req.destination, req.keys
+    );
+
+    let keys: Vec<&str> = req.keys.iter().map(|s| s.as_str()).collect();
+    let weights = req.weights.as_deref();
+
+    let aggregate = match req.aggregate.to_lowercase().as_str() {
+        "min" => crate::core::Aggregate::Min,
+        "max" => crate::core::Aggregate::Max,
+        _ => crate::core::Aggregate::Sum,
+    };
+
+    let count = state
+        .sorted_set_store
+        .zunionstore(&req.destination, &keys, weights, aggregate);
+
+    Ok(Json(
+        json!({ "count": count, "destination": req.destination }),
+    ))
+}
+
+/// GET /sortedset/stats - Get sorted set statistics
+pub async fn sortedset_stats(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST SORTEDSET STATS");
+
+    let stats = state.sorted_set_store.stats();
+
+    Ok(Json(json!({
+        "total_keys": stats.total_keys,
+        "total_members": stats.total_members,
+        "avg_members_per_key": stats.avg_members_per_key,
+        "memory_bytes": stats.memory_bytes,
+    })))
+}

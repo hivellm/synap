@@ -385,6 +385,57 @@ impl SortedSetValue {
             (expires_at as i64) - (now as i64)
         })
     }
+
+    /// Get all members with scores
+    pub fn members_with_scores(&self) -> Vec<ScoredMember> {
+        self.sorted
+            .iter()
+            .map(|((score, member), _)| ScoredMember {
+                member: member.clone(),
+                score: score.get(),
+            })
+            .collect()
+    }
+
+    /// Remove members by rank range
+    pub fn zremrangebyrank(&mut self, start: i64, stop: i64) -> usize {
+        let range = self.zrange(start, stop, false);
+        let members: Vec<Vec<u8>> = range.into_iter().map(|m| m.member).collect();
+        self.zrem(&members)
+    }
+
+    /// Remove members by score range
+    pub fn zremrangebyscore(&mut self, min: f64, max: f64) -> usize {
+        let min_key = OrderedFloat::new(min);
+        let max_key = OrderedFloat::new(max);
+
+        let to_remove: Vec<Vec<u8>> = self
+            .sorted
+            .range((min_key, Vec::new())..=(max_key, vec![u8::MAX; 256]))
+            .map(|((_, member), _)| member.clone())
+            .collect();
+
+        self.zrem(&to_remove)
+    }
+
+    /// Get range by score
+    pub fn zrangebyscore(&self, min: f64, max: f64, _with_scores: bool) -> Vec<ScoredMember> {
+        let min_key = OrderedFloat::new(min);
+        let max_key = OrderedFloat::new(max);
+
+        self.sorted
+            .range((min_key, Vec::new())..=(max_key, vec![u8::MAX; 256]))
+            .map(|((score, member), _)| ScoredMember {
+                member: member.clone(),
+                score: score.get(),
+            })
+            .collect()
+    }
+
+    /// Get multiple scores
+    pub fn zmscore(&self, members: &[Vec<u8>]) -> Vec<Option<f64>> {
+        members.iter().map(|member| self.zscore(member)).collect()
+    }
 }
 
 impl Default for SortedSetValue {
@@ -400,6 +451,14 @@ pub struct SortedSetStats {
     pub total_members: usize,
     pub avg_members_per_key: f64,
     pub memory_bytes: usize,
+}
+
+/// Aggregation method for set operations
+#[derive(Debug, Clone, Copy)]
+pub enum Aggregate {
+    Sum,
+    Min,
+    Max,
 }
 
 /// Sorted Set store with 64-way sharding
@@ -574,6 +633,237 @@ impl SortedSetStore {
         let shard = self.get_or_create(key);
         let mut map = shard.write();
         map.remove(key).is_some()
+    }
+
+    /// Compute intersection of multiple sorted sets and store in destination
+    /// Returns count of members in result
+    pub fn zinterstore(
+        &self,
+        destination: &str,
+        keys: &[&str],
+        weights: Option<&[f64]>,
+        aggregate: Aggregate,
+    ) -> usize {
+        if keys.is_empty() {
+            return 0;
+        }
+
+        let default_weights = vec![1.0; keys.len()];
+        let weights = weights.unwrap_or(&default_weights);
+
+        // Read all source sets
+        let mut sets: Vec<HashMap<Vec<u8>, f64>> = Vec::new();
+        for (i, key) in keys.iter().enumerate() {
+            let shard = self.get_or_create(key);
+            let map = shard.read();
+            if let Some(zset) = map.get(*key) {
+                let mut weighted_set = HashMap::new();
+                for (member, score) in &zset.scores {
+                    weighted_set.insert(member.clone(), score.get() * weights[i]);
+                }
+                sets.push(weighted_set);
+            } else {
+                // If any set doesn't exist, intersection is empty
+                return 0;
+            }
+        }
+
+        // Compute intersection
+        let mut result = HashMap::new();
+        if let Some(first_set) = sets.first() {
+            for (member, first_score) in first_set {
+                // Check if member exists in all sets
+                let mut all_scores = vec![*first_score];
+                let mut exists_in_all = true;
+
+                for set in sets.iter().skip(1) {
+                    if let Some(score) = set.get(member) {
+                        all_scores.push(*score);
+                    } else {
+                        exists_in_all = false;
+                        break;
+                    }
+                }
+
+                if exists_in_all {
+                    let aggregated = match aggregate {
+                        Aggregate::Sum => all_scores.iter().sum(),
+                        Aggregate::Min => all_scores.iter().cloned().fold(f64::INFINITY, f64::min),
+                        Aggregate::Max => {
+                            all_scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max)
+                        }
+                    };
+                    result.insert(member.clone(), aggregated);
+                }
+            }
+        }
+
+        // Store result
+        let count = result.len();
+        let dest_shard = self.get_or_create(destination);
+        let mut dest_map = dest_shard.write();
+
+        let mut dest_zset = SortedSetValue::new();
+        let opts = ZAddOptions::default();
+        for (member, score) in result {
+            dest_zset.zadd(member, score, &opts);
+        }
+
+        dest_map.insert(destination.to_string(), dest_zset);
+        count
+    }
+
+    /// Compute union of multiple sorted sets and store in destination
+    /// Returns count of members in result
+    pub fn zunionstore(
+        &self,
+        destination: &str,
+        keys: &[&str],
+        weights: Option<&[f64]>,
+        aggregate: Aggregate,
+    ) -> usize {
+        if keys.is_empty() {
+            return 0;
+        }
+
+        let default_weights = vec![1.0; keys.len()];
+        let weights = weights.unwrap_or(&default_weights);
+
+        // Read all source sets and collect all members
+        let mut all_members: HashMap<Vec<u8>, Vec<f64>> = HashMap::new();
+
+        for (i, key) in keys.iter().enumerate() {
+            let shard = self.get_or_create(key);
+            let map = shard.read();
+            if let Some(zset) = map.get(*key) {
+                for (member, score) in &zset.scores {
+                    all_members
+                        .entry(member.clone())
+                        .or_default()
+                        .push(score.get() * weights[i]);
+                }
+            }
+        }
+
+        // Aggregate scores
+        let mut result = HashMap::new();
+        for (member, scores) in all_members {
+            let aggregated = match aggregate {
+                Aggregate::Sum => scores.iter().sum(),
+                Aggregate::Min => scores.iter().cloned().fold(f64::INFINITY, f64::min),
+                Aggregate::Max => scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max),
+            };
+            result.insert(member, aggregated);
+        }
+
+        // Store result
+        let count = result.len();
+        let dest_shard = self.get_or_create(destination);
+        let mut dest_map = dest_shard.write();
+
+        let mut dest_zset = SortedSetValue::new();
+        let opts = ZAddOptions::default();
+        for (member, score) in result {
+            dest_zset.zadd(member, score, &opts);
+        }
+
+        dest_map.insert(destination.to_string(), dest_zset);
+        count
+    }
+
+    /// Compute difference of first set minus other sets and store in destination
+    /// Returns count of members in result
+    pub fn zdiffstore(&self, destination: &str, keys: &[&str]) -> usize {
+        if keys.is_empty() {
+            return 0;
+        }
+
+        // Read first set
+        let first_key = keys[0];
+        let first_shard = self.get_or_create(first_key);
+        let first_map = first_shard.read();
+
+        let first_set = match first_map.get(first_key) {
+            Some(zset) => zset.scores.clone(),
+            None => return 0, // First set doesn't exist, result is empty
+        };
+        drop(first_map);
+
+        // Read other sets to subtract
+        let mut subtract_members = std::collections::HashSet::new();
+        for key in keys.iter().skip(1) {
+            let shard = self.get_or_create(key);
+            let map = shard.read();
+            if let Some(zset) = map.get(*key) {
+                for member in zset.scores.keys() {
+                    subtract_members.insert(member.clone());
+                }
+            }
+        }
+
+        // Compute difference
+        let mut result = HashMap::new();
+        for (member, score) in first_set {
+            if !subtract_members.contains(&member) {
+                result.insert(member, score.get());
+            }
+        }
+
+        // Store result
+        let count = result.len();
+        let dest_shard = self.get_or_create(destination);
+        let mut dest_map = dest_shard.write();
+
+        let mut dest_zset = SortedSetValue::new();
+        let opts = ZAddOptions::default();
+        for (member, score) in result {
+            dest_zset.zadd(member, score, &opts);
+        }
+
+        dest_map.insert(destination.to_string(), dest_zset);
+        count
+    }
+
+    /// Get range by score (wrapper for store)
+    pub fn zrangebyscore(
+        &self,
+        key: &str,
+        min: f64,
+        max: f64,
+        with_scores: bool,
+    ) -> Vec<ScoredMember> {
+        let shard = self.get_or_create(key);
+        let map = shard.read();
+        map.get(key)
+            .map(|zset| zset.zrangebyscore(min, max, with_scores))
+            .unwrap_or_default()
+    }
+
+    /// Remove members by rank range
+    pub fn zremrangebyrank(&self, key: &str, start: i64, stop: i64) -> usize {
+        let shard = self.get_or_create(key);
+        let mut map = shard.write();
+        map.get_mut(key)
+            .map(|zset| zset.zremrangebyrank(start, stop))
+            .unwrap_or(0)
+    }
+
+    /// Remove members by score range
+    pub fn zremrangebyscore(&self, key: &str, min: f64, max: f64) -> usize {
+        let shard = self.get_or_create(key);
+        let mut map = shard.write();
+        map.get_mut(key)
+            .map(|zset| zset.zremrangebyscore(min, max))
+            .unwrap_or(0)
+    }
+
+    /// Get multiple scores
+    pub fn zmscore(&self, key: &str, members: &[Vec<u8>]) -> Vec<Option<f64>> {
+        let shard = self.get_or_create(key);
+        let map = shard.read();
+        map.get(key)
+            .map(|zset| zset.zmscore(members))
+            .unwrap_or_else(|| vec![None; members.len()])
     }
 }
 

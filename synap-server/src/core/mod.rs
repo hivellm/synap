@@ -31,7 +31,8 @@ pub use pubsub::{
 pub use queue::{QueueConfig, QueueManager, QueueMessage, QueueStats};
 pub use set::{SetStats, SetStore, SetValue};
 pub use sorted_set::{
-    OrderedFloat, ScoredMember, SortedSetStats, SortedSetStore, SortedSetValue, ZAddOptions,
+    Aggregate, OrderedFloat, ScoredMember, SortedSetStats, SortedSetStore, SortedSetValue,
+    ZAddOptions,
 };
 pub use stream::{RoomStats, StreamConfig, StreamEvent, StreamManager};
 pub use types::{EvictionPolicy, KVConfig, KVStats, StoredValue};

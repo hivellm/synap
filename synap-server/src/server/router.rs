@@ -66,6 +66,36 @@ pub fn create_router(state: AppState, rate_limit_config: crate::config::RateLimi
         .route("/set/union", post(handlers::set_union))
         .route("/set/diff", post(handlers::set_diff))
         .route("/set/stats", get(handlers::set_stats))
+        // Sorted Set endpoints
+        .route("/sortedset/{key}/zadd", post(handlers::sortedset_zadd))
+        .route("/sortedset/{key}/zrem", post(handlers::sortedset_zrem))
+        .route(
+            "/sortedset/{key}/{member}/zscore",
+            get(handlers::sortedset_zscore),
+        )
+        .route("/sortedset/{key}/zcard", get(handlers::sortedset_zcard))
+        .route(
+            "/sortedset/{key}/zincrby",
+            post(handlers::sortedset_zincrby),
+        )
+        .route("/sortedset/{key}/zrange", get(handlers::sortedset_zrange))
+        .route(
+            "/sortedset/{key}/zrevrange",
+            get(handlers::sortedset_zrevrange),
+        )
+        .route(
+            "/sortedset/{key}/{member}/zrank",
+            get(handlers::sortedset_zrank),
+        )
+        .route(
+            "/sortedset/zinterstore",
+            post(handlers::sortedset_zinterstore),
+        )
+        .route(
+            "/sortedset/zunionstore",
+            post(handlers::sortedset_zunionstore),
+        )
+        .route("/sortedset/stats", get(handlers::sortedset_stats))
         // List endpoints
         .route("/list/{key}/lpush", post(handlers::list_lpush))
         .route("/list/{key}/lpushx", post(handlers::list_lpushx))
