@@ -65,13 +65,27 @@ mcp:
 - ✅ All UMICP discovery tests updated and passing
 - ✅ Zero clippy warnings
 
+**Persistence Integration**
+
+#### WAL (Write-Ahead Log)
+- ✅ **8 Operation Variants**: ZAdd, ZRem, ZIncrBy, ZRemRangeByRank, ZRemRangeByScore, ZInterStore, ZUnionStore, ZDiffStore
+- ✅ **8 Log Methods**: log_zadd, log_zrem, log_zincrby, log_zremrangebyrank, log_zremrangebyscore, log_zinterstore, log_zunionstore, log_zdiffstore
+- ✅ **AsyncWAL Integration**: Group commit optimization for high throughput
+- ✅ **Replay Logic**: Full WAL replay capability for all Sorted Set operations
+
+#### Snapshot Support
+- ✅ **Snapshot Field**: sorted_set_data stores Vec<(member, score)> per key
+- ✅ **Snapshot Creation**: Capture all sorted sets in snapshots
+- ✅ **Snapshot Recovery**: Restore sorted sets from snapshots
+- ✅ **Combined Recovery**: Snapshot + WAL replay for complete durability
+
 **Implementation Status**
 - ✅ Phase 1: Core Implementation - COMPLETE (100%)
 - ✅ Phase 2: Range & Ranking Commands - COMPLETE (100%)  
 - ✅ Phase 3: Advanced Operations - COMPLETE (100%)
 - ✅ Phase 4: API Exposure - COMPLETE (100%)
-- ⏳ Phase 5: Persistence Integration - PENDING
-- ⏳ Phase 6: Benchmarking - PENDING
+- ✅ Phase 5: Persistence Integration - COMPLETE (100%)
+- ⏳ Phase 6: Benchmarking - PENDING (optional)
 
 ### Changed - Dependency Updates 🔄 (October 25, 2025)
 
