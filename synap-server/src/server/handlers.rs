@@ -1034,6 +1034,29 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "queue.list" => handle_queue_list_cmd(&state, &request).await,
         "queue.stats" => handle_queue_stats_cmd(&state, &request).await,
         "queue.purge" => handle_queue_purge_cmd(&state, &request).await,
+        // Sorted Set commands
+        "sortedset.zadd" => handle_sortedset_zadd_cmd(&state, &request).await,
+        "sortedset.zrem" => handle_sortedset_zrem_cmd(&state, &request).await,
+        "sortedset.zscore" => handle_sortedset_zscore_cmd(&state, &request).await,
+        "sortedset.zcard" => handle_sortedset_zcard_cmd(&state, &request).await,
+        "sortedset.zincrby" => handle_sortedset_zincrby_cmd(&state, &request).await,
+        "sortedset.zrange" => handle_sortedset_zrange_cmd(&state, &request).await,
+        "sortedset.zrevrange" => handle_sortedset_zrevrange_cmd(&state, &request).await,
+        "sortedset.zrank" => handle_sortedset_zrank_cmd(&state, &request).await,
+        "sortedset.zrevrank" => handle_sortedset_zrevrank_cmd(&state, &request).await,
+        "sortedset.zcount" => handle_sortedset_zcount_cmd(&state, &request).await,
+        "sortedset.zpopmin" => handle_sortedset_zpopmin_cmd(&state, &request).await,
+        "sortedset.zpopmax" => handle_sortedset_zpopmax_cmd(&state, &request).await,
+        "sortedset.zrangebyscore" => handle_sortedset_zrangebyscore_cmd(&state, &request).await,
+        "sortedset.zremrangebyrank" => handle_sortedset_zremrangebyrank_cmd(&state, &request).await,
+        "sortedset.zremrangebyscore" => {
+            handle_sortedset_zremrangebyscore_cmd(&state, &request).await
+        }
+        "sortedset.zinterstore" => handle_sortedset_zinterstore_cmd(&state, &request).await,
+        "sortedset.zunionstore" => handle_sortedset_zunionstore_cmd(&state, &request).await,
+        "sortedset.zdiffstore" => handle_sortedset_zdiffstore_cmd(&state, &request).await,
+        "sortedset.zmscore" => handle_sortedset_zmscore_cmd(&state, &request).await,
+        "sortedset.stats" => handle_sortedset_stats_cmd(&state, &request).await,
         "pubsub.subscribe" => handle_pubsub_subscribe_cmd(&state, &request).await,
         "pubsub.publish" => handle_pubsub_publish_cmd(&state, &request).await,
         "pubsub.unsubscribe" => handle_pubsub_unsubscribe_cmd(&state, &request).await,
@@ -2475,6 +2498,579 @@ async fn handle_queue_purge_cmd(
 
     let count = queue_manager.purge(queue).await?;
     Ok(serde_json::json!({ "purged": count }))
+}
+
+// ==================== Sorted Set Command Handlers ====================
+
+async fn handle_sortedset_zadd_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let member = request
+        .payload
+        .get("member")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
+
+    let score = request
+        .payload
+        .get("score")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'score' field".to_string()))?;
+
+    let member_bytes =
+        serde_json::to_vec(member).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let opts = crate::core::ZAddOptions {
+        nx: request
+            .payload
+            .get("nx")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        xx: request
+            .payload
+            .get("xx")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        gt: request
+            .payload
+            .get("gt")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        lt: request
+            .payload
+            .get("lt")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        ch: request
+            .payload
+            .get("ch")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        incr: request
+            .payload
+            .get("incr")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    };
+
+    let (added, changed) = state.sorted_set_store.zadd(key, member_bytes, score, &opts);
+
+    Ok(serde_json::json!({ "added": added, "changed": changed, "key": key }))
+}
+
+async fn handle_sortedset_zrem_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let members = request
+        .payload
+        .get("members")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'members' array".to_string()))?;
+
+    let member_bytes: Result<Vec<Vec<u8>>, _> = members.iter().map(serde_json::to_vec).collect();
+    let member_bytes = member_bytes.map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let removed = state.sorted_set_store.zrem(key, &member_bytes);
+
+    Ok(serde_json::json!({ "removed": removed, "key": key }))
+}
+
+async fn handle_sortedset_zscore_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let member = request
+        .payload
+        .get("member")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
+
+    let member_bytes = member.as_bytes();
+    let score = state.sorted_set_store.zscore(key, member_bytes);
+
+    Ok(serde_json::json!({ "score": score, "key": key, "member": member }))
+}
+
+async fn handle_sortedset_zcard_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let count = state.sorted_set_store.zcard(key);
+
+    Ok(serde_json::json!({ "count": count, "key": key }))
+}
+
+async fn handle_sortedset_zincrby_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let member = request
+        .payload
+        .get("member")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
+
+    let increment = request
+        .payload
+        .get("increment")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'increment' field".to_string()))?;
+
+    let member_bytes =
+        serde_json::to_vec(member).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let new_score = state.sorted_set_store.zincrby(key, member_bytes, increment);
+
+    Ok(serde_json::json!({ "score": new_score, "key": key }))
+}
+
+async fn handle_sortedset_zrange_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let start = request
+        .payload
+        .get("start")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+
+    let stop = request
+        .payload
+        .get("stop")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(-1);
+
+    let with_scores = request
+        .payload
+        .get("withscores")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let members = state.sorted_set_store.zrange(key, start, stop, with_scores);
+
+    Ok(serde_json::json!({ "members": members, "key": key }))
+}
+
+async fn handle_sortedset_zrevrange_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let start = request
+        .payload
+        .get("start")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+
+    let stop = request
+        .payload
+        .get("stop")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(-1);
+
+    let with_scores = request
+        .payload
+        .get("withscores")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let members = state
+        .sorted_set_store
+        .zrevrange(key, start, stop, with_scores);
+
+    Ok(serde_json::json!({ "members": members, "key": key }))
+}
+
+async fn handle_sortedset_zrank_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let member = request
+        .payload
+        .get("member")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
+
+    let member_bytes = member.as_bytes();
+    let rank = state.sorted_set_store.zrank(key, member_bytes);
+
+    Ok(serde_json::json!({ "rank": rank, "key": key, "member": member }))
+}
+
+async fn handle_sortedset_zrevrank_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let member = request
+        .payload
+        .get("member")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
+
+    let member_bytes = member.as_bytes();
+    let rank = state.sorted_set_store.zrevrank(key, member_bytes);
+
+    Ok(serde_json::json!({ "rank": rank, "key": key, "member": member }))
+}
+
+async fn handle_sortedset_zcount_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let min = request
+        .payload
+        .get("min")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::NEG_INFINITY);
+
+    let max = request
+        .payload
+        .get("max")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::INFINITY);
+
+    let count = state.sorted_set_store.zcount(key, min, max);
+
+    Ok(serde_json::json!({ "count": count, "key": key }))
+}
+
+async fn handle_sortedset_zpopmin_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let count = request
+        .payload
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1) as usize;
+
+    let members = state.sorted_set_store.zpopmin(key, count);
+
+    Ok(serde_json::json!({ "members": members, "count": members.len(), "key": key }))
+}
+
+async fn handle_sortedset_zpopmax_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let count = request
+        .payload
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1) as usize;
+
+    let members = state.sorted_set_store.zpopmax(key, count);
+
+    Ok(serde_json::json!({ "members": members, "count": members.len(), "key": key }))
+}
+
+async fn handle_sortedset_zrangebyscore_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let min = request
+        .payload
+        .get("min")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::NEG_INFINITY);
+
+    let max = request
+        .payload
+        .get("max")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::INFINITY);
+
+    let with_scores = request
+        .payload
+        .get("withscores")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let members = state
+        .sorted_set_store
+        .zrangebyscore(key, min, max, with_scores);
+
+    Ok(serde_json::json!({ "members": members, "key": key }))
+}
+
+async fn handle_sortedset_zremrangebyrank_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let start = request
+        .payload
+        .get("start")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+
+    let stop = request
+        .payload
+        .get("stop")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(-1);
+
+    let removed = state.sorted_set_store.zremrangebyrank(key, start, stop);
+
+    Ok(serde_json::json!({ "removed": removed, "key": key }))
+}
+
+async fn handle_sortedset_zremrangebyscore_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let min = request
+        .payload
+        .get("min")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::NEG_INFINITY);
+
+    let max = request
+        .payload
+        .get("max")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::INFINITY);
+
+    let removed = state.sorted_set_store.zremrangebyscore(key, min, max);
+
+    Ok(serde_json::json!({ "removed": removed, "key": key }))
+}
+
+async fn handle_sortedset_zinterstore_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let keys = request
+        .payload
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'keys' array".to_string()))?;
+
+    let key_strs: Vec<&str> = keys.iter().filter_map(|v| v.as_str()).collect();
+
+    let weights = request
+        .payload
+        .get("weights")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<f64>>());
+
+    let aggregate_str = request
+        .payload
+        .get("aggregate")
+        .and_then(|v| v.as_str())
+        .unwrap_or("sum");
+
+    let aggregate = match aggregate_str.to_lowercase().as_str() {
+        "min" => crate::core::Aggregate::Min,
+        "max" => crate::core::Aggregate::Max,
+        _ => crate::core::Aggregate::Sum,
+    };
+
+    let count =
+        state
+            .sorted_set_store
+            .zinterstore(destination, &key_strs, weights.as_deref(), aggregate);
+
+    Ok(serde_json::json!({ "count": count, "destination": destination }))
+}
+
+async fn handle_sortedset_zunionstore_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let keys = request
+        .payload
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'keys' array".to_string()))?;
+
+    let key_strs: Vec<&str> = keys.iter().filter_map(|v| v.as_str()).collect();
+
+    let weights = request
+        .payload
+        .get("weights")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<f64>>());
+
+    let aggregate_str = request
+        .payload
+        .get("aggregate")
+        .and_then(|v| v.as_str())
+        .unwrap_or("sum");
+
+    let aggregate = match aggregate_str.to_lowercase().as_str() {
+        "min" => crate::core::Aggregate::Min,
+        "max" => crate::core::Aggregate::Max,
+        _ => crate::core::Aggregate::Sum,
+    };
+
+    let count =
+        state
+            .sorted_set_store
+            .zunionstore(destination, &key_strs, weights.as_deref(), aggregate);
+
+    Ok(serde_json::json!({ "count": count, "destination": destination }))
+}
+
+async fn handle_sortedset_zdiffstore_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let keys = request
+        .payload
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'keys' array".to_string()))?;
+
+    let key_strs: Vec<&str> = keys.iter().filter_map(|v| v.as_str()).collect();
+
+    let count = state.sorted_set_store.zdiffstore(destination, &key_strs);
+
+    Ok(serde_json::json!({ "count": count, "destination": destination }))
+}
+
+async fn handle_sortedset_zmscore_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let members = request
+        .payload
+        .get("members")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'members' array".to_string()))?;
+
+    let member_bytes: Result<Vec<Vec<u8>>, _> = members.iter().map(serde_json::to_vec).collect();
+    let member_bytes = member_bytes.map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let scores = state.sorted_set_store.zmscore(key, &member_bytes);
+
+    Ok(serde_json::json!({ "scores": scores, "key": key }))
+}
+
+async fn handle_sortedset_stats_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let stats = state.sorted_set_store.stats();
+
+    Ok(serde_json::json!({
+        "total_keys": stats.total_keys,
+        "total_members": stats.total_members,
+        "avg_members_per_key": stats.avg_members_per_key,
+        "memory_bytes": stats.memory_bytes,
+    }))
 }
 
 // ============================================================================
