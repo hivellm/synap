@@ -18,9 +18,10 @@ Synap provides seven core capabilities in a single, cohesive system:
 2. **#️⃣ Hash Data Structure** - Field-value maps within keys (Redis-compatible HSET, HGET, etc.) ✅ **v0.6.0**
 3. **📋 List Data Structure** - Ordered sequences with LPUSH, RPOP, LRANGE (Redis-compatible) ✅ **v0.6.0**
 4. **🔷 Set Data Structure** - Unordered unique collections with SADD, SREM, SINTER, SUNION (Redis-compatible) ✅ **v0.6.0**
-5. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
-6. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
-7. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
+5. **📊 Sorted Set Data Structure** - Scored members with ranking (ZADD, ZRANGE, ZRANK, ZINTER/ZUNION) 🔄 **v0.7.0-alpha** (80% complete)
+6. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
+7. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
+8. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
 
 ## ✨ Key Features
 
@@ -685,9 +686,9 @@ See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) for complete authentication
 **✅ Phase 2 (Q4 2025)**: Event Streams, Pub/Sub, Persistence - **COMPLETE**  
 **✅ Phase 3 (Q1 2026)**: Master-Slave Replication with TCP - **COMPLETE**  
 **✅ Redis Phase 1 (Oct 2025)**: Hash, List, Set Data Structures + 5 SDKs - **COMPLETE** 🎉  
-**✅ MCP Integration**: Model Context Protocol - **COMPLETE**  
+**✅ MCP Integration**: Model Context Protocol with Configurable Tools - **COMPLETE**  
 **✅ UMICP Integration**: Universal Matrix Inter-Communication Protocol - **COMPLETE**  
-**⏳ Redis Phase 2**: Sorted Sets, String Extensions, Key Management  
+**🔄 Redis Phase 2**: Sorted Sets (80%), String Extensions, Key Management  
 **⏳ Phase 4 (Q2 2026)**: Clustering, Sharding, GUI Dashboard, Distribution packages
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for details.
