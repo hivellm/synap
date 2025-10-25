@@ -39,7 +39,7 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 
 | Feature | Status | Change ID | Target | Duration |
 |---------|--------|-----------|--------|----------|
-| **Sorted Sets** | ⏳ Pending | `add-sorted-set-data-structure` | v0.6.0-alpha | 6 weeks |
+| **Sorted Sets** | 🔄 In Progress (80%) | `add-sorted-set-data-structure` | v0.7.0-alpha | 6 weeks |
 | **String Extensions** | ⏳ Pending | `add-string-commands` | v0.6.0-alpha | 2 weeks |
 | **Key Management** | ⏳ Pending | `add-key-management` | v0.6.0-alpha | 2 weeks |
 | **Enhanced Monitoring** | ⏳ Pending | `add-info-commands` | v0.6.0-alpha | 3 weeks |
@@ -51,7 +51,7 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 - INFO command variants
 - Enhanced statistics
 
-**Progress**: 0/4 (0%)
+**Progress**: 1/4 (25%) - Sorted Sets 80% complete
 
 ## Phase 3: Transactions & Scripting (v0.7.0)
 
@@ -139,10 +139,18 @@ Currently active OpenSpec changes:
 
 ### Phase 2: Advanced Operations
 
-4. 📋 **add-sorted-set-data-structure** (DRAFT)
-   - Status: Proposal created
-   - Target: v0.6.0-alpha
-   - ~200 tasks, 6 weeks
+4. 🔄 **add-sorted-set-data-structure** (IN PROGRESS - 80%)
+   - Status: Core + API + Tests COMPLETE
+   - Target: v0.7.0-alpha
+   - Progress: 160/200 tasks (80%)
+   - Completed:
+     * ✅ Phase 1: Core Implementation (100%)
+     * ✅ Phase 2: Range & Ranking (100%)
+     * ✅ Phase 3: Advanced Operations (100%)
+     * ✅ Phase 4: API Exposure (100%)
+   - Pending:
+     * ⏳ Phase 5: Persistence Integration (0%)
+     * ⏳ Phase 6: Benchmarking (0%)
 
 5. 📋 **add-string-extensions** (DRAFT)
    - Status: Proposal created
