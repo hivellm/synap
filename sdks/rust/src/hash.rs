@@ -1,4 +1,4 @@
-///! Hash data structure operations
+//! Hash data structure operations
 use crate::client::SynapClient;
 use crate::error::Result;
 use serde_json::json;
