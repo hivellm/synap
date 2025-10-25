@@ -2,7 +2,8 @@
 
 use crate::error::{Result, SynapError};
 use crate::{
-    HashManager, KVStore, ListManager, PubSubManager, QueueManager, SetManager, StreamManager,
+    HashManager, KVStore, ListManager, PubSubManager, QueueManager, SetManager, SortedSetManager,
+    StreamManager,
 };
 use reqwest::Client;
 use serde_json::Value;
@@ -105,6 +106,11 @@ impl SynapClient {
     /// Get the Set manager interface
     pub fn set(&self) -> SetManager {
         SetManager::new(self.clone())
+    }
+
+    /// Get the Sorted Set manager interface
+    pub fn sorted_set(&self) -> SortedSetManager {
+        SortedSetManager::new(self.clone())
     }
 
     /// Get the Queue manager interface
