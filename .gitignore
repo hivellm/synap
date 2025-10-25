@@ -29,3 +29,20 @@ data/
 **/.pypirc
 
 .pypirc
+
+# Release artifacts
+/releases/
+/release/
+*.tar.gz
+*.zip
+SHA256SUMS
+*.deb
+*.rpm
+*.msi
+*.pkg
+*.dmg
+
+# Build artifacts
+/dist/
+/build/
+*.AppImage
