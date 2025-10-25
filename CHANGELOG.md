@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Sorted Set REST API & MCP Configuration 🎉 (October 25, 2025)
+
+**Sorted Set REST API Completion**
+
+#### Core Implementation
+- ✅ **19 REST Endpoints** for Sorted Set operations
+- ✅ **Complete Coverage**: All basic, range, ranking, pop, and set operations
+- ✅ **42 Integration Tests** passing (100% success rate)
+
+#### New REST Endpoints
+- Basic Operations: `zadd`, `zrem`, `zscore`, `zcard`, `zincrby`, `zmscore`
+- Range Queries: `zrange`, `zrevrange`, `zrangebyscore`
+- Ranking: `zrank`, `zrevrank`, `zcount`
+- Pop Operations: `zpopmin`, `zpopmax`
+- Remove Range: `zremrangebyrank`, `zremrangebyscore`
+- Set Operations: `zinterstore`, `zunionstore`, `zdiffstore`
+- Statistics: `stats`
+
+**MCP Tools Configuration System**
+
+#### Configurable Tool Selection
+- ✅ **McpConfig** struct for selective tool exposure
+- ✅ **6 Tool Categories**: KV, Hash, List, Set, Queue, Sorted Set
+- ✅ **Default Configuration**: Only essential tools (KV + Queue = 4 tools)
+- ✅ **Maximum Tools**: 16 (if all categories enabled)
+
+#### Configuration Options
+```yaml
+mcp:
+  enable_kv_tools: true       # 3 tools (default: enabled)
+  enable_hash_tools: false    # 3 tools
+  enable_list_tools: false    # 3 tools
+  enable_set_tools: false     # 3 tools
+  enable_queue_tools: true    # 1 tool (default: enabled)
+  enable_sortedset_tools: false  # 3 tools
+```
+
+#### Benefits
+- Respects Cursor MCP tool limits
+- Flexible configuration for different use cases
+- All functionality still available via REST API regardless of MCP config
+- Updated config.yml and config.example.yml
+
+**Testing**
+- ✅ 249 workspace tests passing (213 unit + 36 integration)
+- ✅ All UMICP discovery tests updated and passing
+- ✅ Zero clippy warnings
+
 ### Changed - Dependency Updates 🔄 (October 25, 2025)
 
 **BREAKING**: Major dependency updates with API migrations
