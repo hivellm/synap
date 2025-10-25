@@ -183,7 +183,9 @@ impl MasterNode {
                     return;
                 }
                 eprintln!("[MASTER] Received {} bytes handshake", n);
-                bincode::deserialize::<u64>(&buf[..n]).unwrap_or_default()
+                bincode::serde::decode_from_slice::<u64, _>(&buf[..n], bincode::config::legacy())
+                    .map(|(v, _)| v)
+                    .unwrap_or_default()
             }
             Err(e) => {
                 eprintln!("[MASTER] Error reading handshake: {}", e);
@@ -321,7 +323,7 @@ impl MasterNode {
         stream: &mut TcpStream,
         cmd: &ReplicationCommand,
     ) -> ReplicationResult<()> {
-        let data = bincode::serialize(cmd)?;
+        let data = bincode::serde::encode_to_vec(cmd, bincode::config::legacy())?;
         let len = data.len() as u32;
 
         // Send length prefix
@@ -347,7 +349,7 @@ impl MasterNode {
             operations,
         };
 
-        let data = bincode::serialize(&cmd)?;
+        let data = bincode::serde::encode_to_vec(&cmd, bincode::config::legacy())?;
         stream.write_all(&data).await?;
         stream.flush().await?;
 

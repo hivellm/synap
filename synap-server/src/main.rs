@@ -268,12 +268,17 @@ async fn main() -> Result<()> {
     let set_store = Arc::new(synap_server::core::SetStore::new());
     info!("Set store initialized");
 
+    // Create sorted set store
+    let sorted_set_store = Arc::new(synap_server::core::SortedSetStore::new());
+    info!("Sorted set store initialized");
+
     // Create application state with persistence and streams
     let app_state = AppState {
         kv_store,
         hash_store,
         list_store,
         set_store,
+        sorted_set_store,
         queue_manager,
         stream_manager,
         partition_manager,

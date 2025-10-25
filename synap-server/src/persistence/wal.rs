@@ -79,8 +79,9 @@ impl WriteAheadLog {
             }
 
             // Try to deserialize
-            match bincode::deserialize::<WALEntry>(&data) {
-                Ok(entry) => {
+            match bincode::serde::decode_from_slice::<WALEntry, _>(&data, bincode::config::legacy())
+            {
+                Ok((entry, _)) => {
                     max_offset = max_offset.max(entry.offset);
                 }
                 Err(_) => {
@@ -108,7 +109,7 @@ impl WriteAheadLog {
         };
 
         // Serialize entry
-        let data = bincode::serialize(&entry)?;
+        let data = bincode::serde::encode_to_vec(&entry, bincode::config::legacy())?;
         let checksum = crc32fast::hash(&data);
 
         debug!("WAL append: offset={}, size={}", offset, data.len());
@@ -188,8 +189,9 @@ impl WriteAheadLog {
             }
 
             // Deserialize
-            let entry: WALEntry =
-                bincode::deserialize(&data).map_err(|_| PersistenceError::InvalidEntry)?;
+            let (entry, _): (WALEntry, _) =
+                bincode::serde::decode_from_slice(&data, bincode::config::legacy())
+                    .map_err(|_| PersistenceError::InvalidEntry)?;
 
             if entry.offset >= from_offset {
                 entries.push(entry);
@@ -227,7 +229,7 @@ impl WriteAheadLog {
         let entries = self.replay(keep_after_offset).await?;
 
         for entry in entries {
-            let data = bincode::serialize(&entry)?;
+            let data = bincode::serde::encode_to_vec(&entry, bincode::config::legacy())?;
             let checksum = crc32fast::hash(&data);
 
             new_writer.write_u64(data.len() as u64).await?;

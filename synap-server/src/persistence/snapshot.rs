@@ -119,7 +119,8 @@ impl SnapshotManager {
 
             // Serialize each message
             for message in messages {
-                let msg_data = bincode::serialize(&message)?;
+                let msg_data = bincode::serde::encode_to_vec(&message, bincode::config::legacy())
+                    .map_err(std::io::Error::other)?;
                 let msg_len = msg_data.len() as u32;
 
                 writer.write_u32(msg_len).await?;
@@ -170,7 +171,9 @@ impl SnapshotManager {
                     timestamp: event.timestamp,
                 };
 
-                let event_data = bincode::serialize(&snapshot_event)?;
+                let event_data =
+                    bincode::serde::encode_to_vec(&snapshot_event, bincode::config::legacy())
+                        .map_err(std::io::Error::other)?;
                 let event_len = event_data.len() as u32;
 
                 writer.write_u32(event_len).await?;
@@ -274,8 +277,9 @@ impl SnapshotManager {
                 let mut msg_bytes = vec![0u8; msg_len];
                 reader.read_exact(&mut msg_bytes).await?;
 
-                let message: QueueMessage = bincode::deserialize(&msg_bytes)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                let (message, _): (QueueMessage, _) =
+                    bincode::serde::decode_from_slice(&msg_bytes, bincode::config::legacy())
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
                 messages.push(message);
             }
 
@@ -302,8 +306,9 @@ impl SnapshotManager {
                     let mut event_bytes = vec![0u8; event_len];
                     reader.read_exact(&mut event_bytes).await?;
 
-                    let event: StreamEvent = bincode::deserialize(&event_bytes)
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                    let (event, _): (StreamEvent, _) =
+                        bincode::serde::decode_from_slice(&event_bytes, bincode::config::legacy())
+                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
                     events.push(event);
                 }
 

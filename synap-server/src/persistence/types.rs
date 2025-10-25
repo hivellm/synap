@@ -32,8 +32,14 @@ pub enum PersistenceError {
     RecoveryFailed(String),
 }
 
-impl From<bincode::Error> for PersistenceError {
-    fn from(e: bincode::Error) -> Self {
+impl From<bincode::error::EncodeError> for PersistenceError {
+    fn from(e: bincode::error::EncodeError) -> Self {
+        PersistenceError::SerializationError(e.to_string())
+    }
+}
+
+impl From<bincode::error::DecodeError> for PersistenceError {
+    fn from(e: bincode::error::DecodeError) -> Self {
         PersistenceError::SerializationError(e.to_string())
     }
 }

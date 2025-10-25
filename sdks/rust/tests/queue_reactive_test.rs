@@ -15,7 +15,7 @@ async fn test_observe_messages_with_options() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).unwrap();
 
-    let (mut stream, handle) =
+    let (_stream, handle) =
         client
             .queue()
             .observe_messages("test-queue", "consumer-1", Duration::from_millis(100));

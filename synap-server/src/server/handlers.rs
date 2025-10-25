@@ -1,4 +1,4 @@
-use crate::core::{HashStore, KVStore, Message, QueueManager, SynapError};
+use crate::core::{HashStore, KVStore, Message, QueueManager, SortedSetStore, SynapError};
 use crate::protocol::{Request, Response};
 use axum::{
     Json,
@@ -23,6 +23,7 @@ pub struct AppState {
     pub hash_store: Arc<HashStore>,
     pub list_store: Arc<crate::core::ListStore>,
     pub set_store: Arc<crate::core::SetStore>,
+    pub sorted_set_store: Arc<SortedSetStore>,
     pub queue_manager: Option<Arc<QueueManager>>,
     pub stream_manager: Option<Arc<crate::core::StreamManager>>,
     pub partition_manager: Option<Arc<crate::core::PartitionManager>>,

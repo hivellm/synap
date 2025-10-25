@@ -1,6 +1,6 @@
 //! List Manager tests
 
-use synap_sdk::{ListManager, SynapClient, SynapConfig};
+use synap_sdk::{SynapClient, SynapConfig};
 
 #[tokio::test]
 async fn test_list_push_pop() {

@@ -8,6 +8,7 @@ pub mod partition;
 pub mod pubsub;
 pub mod queue;
 pub mod set;
+pub mod sorted_set;
 pub mod stream;
 pub mod types;
 
@@ -29,5 +30,8 @@ pub use pubsub::{
 };
 pub use queue::{QueueConfig, QueueManager, QueueMessage, QueueStats};
 pub use set::{SetStats, SetStore, SetValue};
+pub use sorted_set::{
+    OrderedFloat, ScoredMember, SortedSetStats, SortedSetStore, SortedSetValue, ZAddOptions,
+};
 pub use stream::{RoomStats, StreamConfig, StreamEvent, StreamManager};
 pub use types::{EvictionPolicy, KVConfig, KVStats, StoredValue};

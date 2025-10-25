@@ -130,7 +130,7 @@ impl ReplicaNode {
 
         // Send handshake with current offset
         let current_offset = self.current_offset.load(Ordering::SeqCst);
-        let handshake = bincode::serialize(&current_offset)?;
+        let handshake = bincode::serde::encode_to_vec(current_offset, bincode::config::legacy())?;
         info!("[REPLICA] Sending handshake, offset: {}", current_offset);
         stream.write_all(&handshake).await?;
         stream.flush().await?;
@@ -228,7 +228,7 @@ impl ReplicaNode {
         stream.read_exact(&mut data).await?;
 
         // Deserialize
-        let cmd = bincode::deserialize(&data)?;
+        let (cmd, _) = bincode::serde::decode_from_slice(&data, bincode::config::legacy())?;
         Ok(cmd)
     }
 

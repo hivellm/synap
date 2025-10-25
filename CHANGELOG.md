@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed - Dependency Updates 🔄 (October 25, 2025)
+
+**BREAKING**: Major dependency updates with API migrations
+
+#### Rust Dependencies
+- ⬆️ **bincode** `1.3.3 → 2.0.1` - **BREAKING CHANGE**
+  - Migrated to new API: `bincode::serialize()` → `bincode::serde::encode_to_vec()`
+  - Migrated to new API: `bincode::deserialize()` → `bincode::serde::decode_from_slice()`
+  - Using `bincode::config::legacy()` for backward compatibility
+  - Updated all persistence and replication code
+  - All 261 tests passing ✅
+  
+- ⬆️ **rustyline** `14.0.0 → 17.0.2` - CLI dependency
+  - Minor API improvements
+  - No breaking changes in our usage
+  
+- ⬆️ **compact_str** `0.8.1 → 0.9.0`
+  - Internal optimizations
+  - No API changes required
+
+#### TypeScript SDK Dependencies
+- ⬆️ **vitest** `3.2.4 → 4.0.3` - Testing framework
+- ⬆️ **@vitest/coverage-v8** `3.2.4 → 4.0.3` - Coverage tool
+
+#### GitHub Actions
+- ⬆️ **actions/upload-artifact** `v4 → v5`
+- ⬆️ **actions/download-artifact** `v4 → v6`
+- ⬆️ **docker/build-push-action** `v5 → v6`
+- ⬆️ **softprops/action-gh-release** `v1 → v2`
+
+**Migration Notes**:
+- Bincode 2.0 uses different API but maintains backward-compatible encoding with `legacy()` config
+- All persistence formats remain compatible
+- Replication protocol unchanged
+- No data migration required
+
+**Tests**: 261/261 passing (100% success rate) ✅
+
 ## [0.6.0-alpha] - 2025-10-25
 
 ### Added - Redis Phase 1 Complete 🎉 (Hash, List, Set Data Structures)

@@ -249,7 +249,7 @@ impl OptimizedWAL {
 
     /// Write a single entry to the WAL
     async fn write_entry(writer: &mut BufWriter<File>, entry: &WALEntry) -> Result<u64> {
-        let data = bincode::serialize(entry)?;
+        let data = bincode::serde::encode_to_vec(entry, bincode::config::legacy())?;
         let size = data.len() as u64;
 
         // Checksum (CRC32)
@@ -340,7 +340,9 @@ impl OptimizedWAL {
                 break;
             }
 
-            if let Ok(entry) = bincode::deserialize::<WALEntry>(&data) {
+            if let Ok((entry, _)) =
+                bincode::serde::decode_from_slice::<WALEntry, _>(&data, bincode::config::legacy())
+            {
                 max_offset = max_offset.max(entry.offset);
             }
         }
@@ -377,8 +379,9 @@ impl OptimizedWAL {
                 break;
             }
 
-            match bincode::deserialize::<WALEntry>(&data) {
-                Ok(entry) => entries.push(entry),
+            match bincode::serde::decode_from_slice::<WALEntry, _>(&data, bincode::config::legacy())
+            {
+                Ok((entry, _)) => entries.push(entry),
                 Err(e) => {
                     warn!("Failed to deserialize WAL entry: {}", e);
                     break;

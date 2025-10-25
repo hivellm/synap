@@ -1,6 +1,6 @@
 //! Hash Manager tests
 
-use synap_sdk::{HashManager, SynapClient, SynapConfig};
+use synap_sdk::{SynapClient, SynapConfig};
 
 #[tokio::test]
 async fn test_hash_operations() {

@@ -17,11 +17,14 @@ async fn spawn_test_server() -> String {
     let set_store = Arc::new(synap_server::core::SetStore::new());
     let queue_manager = Arc::new(QueueManager::new(QueueConfig::default()));
 
+    let sorted_set_store = Arc::new(synap_server::core::SortedSetStore::new());
+
     let app_state = AppState {
         kv_store,
         hash_store,
         list_store,
         set_store,
+        sorted_set_store,
         queue_manager: Some(queue_manager),
         stream_manager: None,
         pubsub_router: None,

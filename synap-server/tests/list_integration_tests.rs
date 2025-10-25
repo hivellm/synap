@@ -21,6 +21,7 @@ async fn spawn_test_server() -> String {
         hash_store,
         list_store,
         set_store: Arc::new(synap_server::core::SetStore::new()),
+        sorted_set_store: Arc::new(synap_server::core::SortedSetStore::new()),
         queue_manager: Some(queue_manager),
         stream_manager: None,
         pubsub_router: None,
