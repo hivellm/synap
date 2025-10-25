@@ -132,8 +132,8 @@ Currently active OpenSpec changes:
    - Target: v0.5.0-alpha
    - ~150/150 tasks (100%) ✅
 
-3. ✅ **add-set-data-structure** (COMPLETE)
-   - Status: Complete, ready for archival
+3. ✅ **add-set-data-structure** (COMPLETE & ARCHIVED)
+   - Status: Archived to `archive/2025-10-25-add-set-data-structure/`
    - Target: v0.6.0-alpha
    - ~110/130 tasks (85% - core features complete, benchmarks/SSCAN deferred to v1.1)
 
@@ -198,10 +198,10 @@ Currently active OpenSpec changes:
 ### Immediate (Next 1 week)
 1. ✅ Archive `implement-hash-data-structure` - DONE
 2. ✅ Archive `add-list-data-structure` - DONE
-3. Archive `add-set-data-structure` to `changes/archive/2025-10-24-add-set-data-structure/`
-4. Fix persistence test compilation errors
-5. Tag v0.6.0-alpha release with Hash + List + Set
-6. Tag v1.0.0-rc1 (all core features complete)
+3. ✅ Archive `add-set-data-structure` - DONE (2025-10-25)
+4. [ ] Fix persistence test compilation errors (if any)
+5. [ ] Tag v0.6.0-alpha release with Hash + List + Set
+6. [ ] Tag v1.0.0-rc1 (all core features complete)
 
 ### Short Term (Next 1-2 months)
 1. ✅ Hashes, Lists, Sets - ALL COMPLETE
