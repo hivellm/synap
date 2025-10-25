@@ -290,9 +290,75 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
         },
+        // Sorted Set Tools (3 essential)
+        Tool {
+            name: Cow::Borrowed("synap_sortedset_zadd"),
+            title: Some("Add to Sorted Set".to_string()),
+            description: Some(Cow::Borrowed("Add member with score to sorted set")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Sorted set key"},
+                    "member": {"type": "string", "description": "Member to add"},
+                    "score": {"type": "number", "description": "Score value"}
+                },
+                "required": ["key", "member", "score"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_sortedset_zrange"),
+            title: Some("Get Sorted Set Range".to_string()),
+            description: Some(Cow::Borrowed("Get range of members by rank (0-based index)")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Sorted set key"},
+                    "start": {"type": "integer", "default": 0, "description": "Start index (supports negative)"},
+                    "stop": {"type": "integer", "default": -1, "description": "Stop index (supports negative, -1 = last)"},
+                    "withscores": {"type": "boolean", "default": true, "description": "Include scores in output"}
+                },
+                "required": ["key"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_sortedset_zrank"),
+            title: Some("Get Sorted Set Rank".to_string()),
+            description: Some(Cow::Borrowed("Get rank of member in sorted set (0-based, lowest score = rank 0)")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Sorted set key"},
+                    "member": {"type": "string", "description": "Member to find rank for"}
+                },
+                "required": ["key", "member"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
     ]
 }
 
+// Total MCP Tools: 16 (3 KV + 3 Hash + 3 List + 3 Set + 1 Queue + 3 Sorted Set)
+//
 // Note: Removed 8 less-frequently used tools to meet Cursor's MCP tool limits:
 // - synap_kv_scan (use KV get with known keys instead)
 // - synap_hash_del (use synap_kv_delete on the hash key)

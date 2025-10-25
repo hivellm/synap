@@ -27,6 +27,10 @@ pub async fn handle_mcp_tool(
         "synap_set_inter" => handle_set_inter(request, state).await,
         // Essential Queue tool (1)
         "synap_queue_publish" => handle_queue_publish(request, state).await,
+        // Essential Sorted Set tools (3)
+        "synap_sortedset_zadd" => handle_sortedset_zadd(request, state).await,
+        "synap_sortedset_zrange" => handle_sortedset_zrange(request, state).await,
+        "synap_sortedset_zrank" => handle_sortedset_zrank(request, state).await,
         _ => Err(ErrorData::invalid_params("Unknown tool", None)),
     }
 }
@@ -526,5 +530,110 @@ async fn handle_set_inter(
 
     Ok(CallToolResult::success(vec![Content::text(
         json!({"intersection": intersection, "count": intersection.len()}).to_string(),
+    )]))
+}
+
+async fn handle_sortedset_zadd(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let member = args
+        .get("member")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing member", None))?;
+
+    let score = args
+        .get("score")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| ErrorData::invalid_params("Missing or invalid score", None))?;
+
+    let member_bytes = member.as_bytes().to_vec();
+    let opts = crate::core::ZAddOptions::default();
+
+    let (added, _) = state.sorted_set_store.zadd(key, member_bytes, score, &opts);
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"added": added > 0, "key": key, "member": member, "score": score}).to_string(),
+    )]))
+}
+
+async fn handle_sortedset_zrange(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let start = args.get("start").and_then(|v| v.as_i64()).unwrap_or(0);
+
+    let stop = args.get("stop").and_then(|v| v.as_i64()).unwrap_or(-1);
+
+    let with_scores = args
+        .get("withscores")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    let members = state.sorted_set_store.zrange(key, start, stop, with_scores);
+
+    let result: Vec<serde_json::Value> = members
+        .iter()
+        .map(|sm| {
+            if with_scores {
+                json!({
+                    "member": String::from_utf8_lossy(&sm.member),
+                    "score": sm.score
+                })
+            } else {
+                json!(String::from_utf8_lossy(&sm.member))
+            }
+        })
+        .collect();
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"members": result, "count": result.len()}).to_string(),
+    )]))
+}
+
+async fn handle_sortedset_zrank(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let member = args
+        .get("member")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing member", None))?;
+
+    let member_bytes = member.as_bytes();
+    let rank = state.sorted_set_store.zrank(key, member_bytes);
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"rank": rank, "key": key, "member": member}).to_string(),
     )]))
 }
