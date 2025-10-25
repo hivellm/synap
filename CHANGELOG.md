@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ✅ **Complete Coverage**: All basic, range, ranking, pop, and set operations
 - ✅ **42 Integration Tests** passing (100% success rate)
 
-#### New REST Endpoints
+#### New REST Endpoints (19 total)
 - Basic Operations: `zadd`, `zrem`, `zscore`, `zcard`, `zincrby`, `zmscore`
 - Range Queries: `zrange`, `zrevrange`, `zrangebyscore`
 - Ranking: `zrank`, `zrevrank`, `zcount`
@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove Range: `zremrangebyrank`, `zremrangebyscore`
 - Set Operations: `zinterstore`, `zunionstore`, `zdiffstore`
 - Statistics: `stats`
+
+#### StreamableHTTP Commands (19 total)
+- `sortedset.zadd`, `sortedset.zrem`, `sortedset.zscore`, `sortedset.zcard`
+- `sortedset.zincrby`, `sortedset.zmscore`, `sortedset.zrange`, `sortedset.zrevrange`
+- `sortedset.zrank`, `sortedset.zrevrank`, `sortedset.zcount`
+- `sortedset.zpopmin`, `sortedset.zpopmax`, `sortedset.zrangebyscore`
+- `sortedset.zremrangebyrank`, `sortedset.zremrangebyscore`
+- `sortedset.zinterstore`, `sortedset.zunionstore`, `sortedset.zdiffstore`
+- `sortedset.stats`
 
 **MCP Tools Configuration System**
 
@@ -51,9 +60,18 @@ mcp:
 - Updated config.yml and config.example.yml
 
 **Testing**
-- ✅ 249 workspace tests passing (213 unit + 36 integration)
+- ✅ 284 workspace tests passing (255 unit + 36 integration)
+- ✅ Sorted Set: 52 total tests (42 integration + 10 unit)
 - ✅ All UMICP discovery tests updated and passing
 - ✅ Zero clippy warnings
+
+**Implementation Status**
+- ✅ Phase 1: Core Implementation - COMPLETE (100%)
+- ✅ Phase 2: Range & Ranking Commands - COMPLETE (100%)  
+- ✅ Phase 3: Advanced Operations - COMPLETE (100%)
+- ✅ Phase 4: API Exposure - COMPLETE (100%)
+- ⏳ Phase 5: Persistence Integration - PENDING
+- ⏳ Phase 6: Benchmarking - PENDING
 
 ### Changed - Dependency Updates 🔄 (October 25, 2025)
 
