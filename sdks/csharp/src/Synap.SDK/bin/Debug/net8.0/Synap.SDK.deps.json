@@ -6,7 +6,7 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v8.0": {
-      "Synap.SDK/0.1.1": {
+      "Synap.SDK/0.2.0": {
         "dependencies": {
           "Microsoft.CodeAnalysis.NetAnalyzers": "8.0.0",
           "System.Text.Json": "8.0.5"
@@ -20,7 +20,7 @@
     }
   },
   "libraries": {
-    "Synap.SDK/0.1.1": {
+    "Synap.SDK/0.2.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

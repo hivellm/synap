@@ -74,7 +74,7 @@
       }
     },
     "F:\\Node\\hivellm\\synap\\sdks\\csharp\\src\\Synap.SDK\\Synap.SDK.csproj": {
-      "version": "0.1.1",
+      "version": "0.2.0",
       "restore": {
         "projectUniqueName": "F:\\Node\\hivellm\\synap\\sdks\\csharp\\src\\Synap.SDK\\Synap.SDK.csproj",
         "projectName": "HiveLLM.Synap.SDK",
