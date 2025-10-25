@@ -5,6 +5,47 @@ All notable changes to the Synap PHP SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-10-25
+
+### Added - Redis Data Structures 🎉
+
+**Complete Redis-compatible Hash, List, and Set data structures**
+
+#### Hash Manager (13 commands)
+- `hash()->set()`, `hash()->get()`, `hash()->getAll()`, `hash()->delete()`, `hash()->exists()`
+- `hash()->keys()`, `hash()->values()`, `hash()->len()`, `hash()->mset()`, `hash()->mget()`
+- `hash()->incrBy()`, `hash()->incrByFloat()`, `hash()->setNX()`
+
+#### List Manager (9 commands)
+- `list()->lpush()`, `list()->rpush()`, `list()->lpop()`, `list()->rpop()`, `list()->range()`
+- `list()->len()`, `list()->index()`, `list()->set()`, `list()->trim()`
+
+#### Set Manager (11 commands)
+- `set()->add()`, `set()->rem()`, `set()->isMember()`, `set()->members()`, `set()->card()`
+- `set()->pop()`, `set()->randMember()`, `set()->move()`
+- `set()->inter()`, `set()->union()`, `set()->diff()`
+
+**Usage Example**:
+```php
+<?php
+use Synap\SDK\SynapClient;
+use Synap\SDK\SynapConfig;
+
+$client = new SynapClient(new SynapConfig('http://localhost:15500'));
+
+// Hash operations
+$client->hash()->set('user:1', 'name', 'Alice');
+$name = $client->hash()->get('user:1', 'name');
+
+// List operations
+$client->list()->rpush('tasks', ['task1', 'task2']);
+$tasks = $client->list()->range('tasks', 0, -1);
+
+// Set operations
+$client->set()->add('tags', ['php', 'redis']);
+$isMember = $client->set()->isMember('tags', 'php');
+```
+
 ## [0.1.0] - 2025-10-23
 
 ### Added

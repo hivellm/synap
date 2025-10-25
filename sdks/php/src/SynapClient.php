@@ -8,9 +8,12 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\RequestOptions;
 use Synap\SDK\Exception\SynapException;
+use Synap\SDK\Module\HashManager;
 use Synap\SDK\Module\KVStore;
+use Synap\SDK\Module\ListManager;
 use Synap\SDK\Module\PubSubManager;
 use Synap\SDK\Module\QueueManager;
+use Synap\SDK\Module\SetManager;
 use Synap\SDK\Module\StreamManager;
 
 /**
@@ -21,6 +24,9 @@ class SynapClient
     private Client $httpClient;
     private SynapConfig $config;
     private ?KVStore $kv = null;
+    private ?HashManager $hash = null;
+    private ?ListManager $list = null;
+    private ?SetManager $set = null;
     private ?QueueManager $queue = null;
     private ?StreamManager $stream = null;
     private ?PubSubManager $pubsub = null;
@@ -42,6 +48,33 @@ class SynapClient
         }
 
         return $this->kv;
+    }
+
+    public function hash(): HashManager
+    {
+        if ($this->hash === null) {
+            $this->hash = new HashManager($this);
+        }
+
+        return $this->hash;
+    }
+
+    public function list(): ListManager
+    {
+        if ($this->list === null) {
+            $this->list = new ListManager($this);
+        }
+
+        return $this->list;
+    }
+
+    public function set(): SetManager
+    {
+        if ($this->set === null) {
+            $this->set = new SetManager($this);
+        }
+
+        return $this->set;
     }
 
     public function queue(): QueueManager
