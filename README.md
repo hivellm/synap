@@ -4,7 +4,7 @@
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.85%2B)-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/tests-456%2F456%20(100%25)-brightgreen.svg)](#testing--quality)
 [![Coverage](https://img.shields.io/badge/coverage-99.30%25-brightgreen.svg)](docs/TESTING.md)
-[![Version](https://img.shields.io/badge/version-0.3.0--rc-blue.svg)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.6.0--alpha-blue.svg)](#project-status)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
 
@@ -12,12 +12,12 @@ Synap is a modern, high-performance data infrastructure system built in Rust, co
 
 ## 🎯 Overview
 
-Synap provides six core capabilities in a single, cohesive system:
+Synap provides seven core capabilities in a single, cohesive system:
 
 1. **💾 Memory Key-Value Store** - Radix-tree based in-memory storage with O(k) lookup
-2. **#️⃣ Hash Data Structure** - Field-value maps within keys (Redis-compatible HSET, HGET, etc.)
-3. **📋 List Data Structure** - Ordered sequences with LPUSH, RPOP, LRANGE (Redis-compatible)
-4. **🔷 Set Data Structure** - Unordered unique collections with SADD, SREM, SINTER, SUNION (Redis-compatible) 🆕
+2. **#️⃣ Hash Data Structure** - Field-value maps within keys (Redis-compatible HSET, HGET, etc.) ✅ **v0.6.0**
+3. **📋 List Data Structure** - Ordered sequences with LPUSH, RPOP, LRANGE (Redis-compatible) ✅ **v0.6.0**
+4. **🔷 Set Data Structure** - Unordered unique collections with SADD, SREM, SINTER, SUNION (Redis-compatible) ✅ **v0.6.0**
 5. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
 6. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
 7. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
@@ -447,7 +447,9 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 | Feature | Synap | Redis | RabbitMQ | Kafka |
 |---------|-------|-------|----------|-------|
 | Key-Value | ✅ | ✅ | ❌ | ❌ |
-| **Hashes** | ✅ (v0.4.0) | ✅ | ❌ | ❌ |
+| **Hashes** | ✅ (v0.6.0) | ✅ | ❌ | ❌ |
+| **Lists** | ✅ (v0.6.0) | ✅ | ❌ | ❌ |
+| **Sets** | ✅ (v0.6.0) | ✅ | ❌ | ❌ |
 | Queues (ACK) | ✅ | ❌ | ✅ | ❌ |
 | Priority Queues | ✅ (0-9) | ❌ | ✅ | ❌ |
 | Dead Letter Queue | ✅ | ❌ | ✅ | ❌ |
@@ -485,10 +487,10 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 
 ## 📊 Project Status
 
-**Status**: ✅ Phase 1 Complete | ✅ Phase 2 Complete | ✅ Phase 3 Replication Complete  
-**Version**: 0.3.0-rc1 (release candidate)  
+**Status**: ✅ Phase 1-3 Complete | ✅ Redis Phase 1 Complete (Hash, List, Set)  
+**Version**: 0.6.0-alpha (Redis-compatible data structures)  
 **Edition**: Rust 2024 (nightly 1.85+)  
-**Last Updated**: October 22, 2025
+**Last Updated**: October 25, 2025
 
 ### ✅ Implementation Complete
 
@@ -682,9 +684,10 @@ See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) for complete authentication
 
 **✅ Phase 2 (Q4 2025)**: Event Streams, Pub/Sub, Persistence - **COMPLETE**  
 **✅ Phase 3 (Q1 2026)**: Master-Slave Replication with TCP - **COMPLETE**  
+**✅ Redis Phase 1 (Oct 2025)**: Hash, List, Set Data Structures + 5 SDKs - **COMPLETE** 🎉  
 **✅ MCP Integration**: Model Context Protocol - **COMPLETE**  
 **✅ UMICP Integration**: Universal Matrix Inter-Communication Protocol - **COMPLETE**  
-**⏳ Phase 3 Remaining**: Advanced Monitoring (Prometheus)  
+**⏳ Redis Phase 2**: Sorted Sets, String Extensions, Key Management  
 **⏳ Phase 4 (Q2 2026)**: Clustering, Sharding, GUI Dashboard, Distribution packages
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for details.
