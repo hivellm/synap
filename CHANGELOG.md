@@ -79,13 +79,25 @@ mcp:
 - ✅ **Snapshot Recovery**: Restore sorted sets from snapshots
 - ✅ **Combined Recovery**: Snapshot + WAL replay for complete durability
 
+**SDK Support**
+
+#### Rust SDK (v0.2.1-alpha)
+- ✅ **SortedSetManager Module**: 18 operations implemented
+- ✅ **Core Methods**: add, rem, score, card, incr_by, range, rev_range, rank, rev_rank, count
+- ✅ **Advanced Methods**: range_by_score, pop_min, pop_max, rem_range_by_rank, rem_range_by_score
+- ✅ **Set Operations**: inter_store, union_store, diff_store (with weights & aggregation)
+- ✅ **Types**: ScoredMember, SortedSetStats
+- ✅ **Tests**: 6 comprehensive test cases
+- ✅ **Client Method**: `client.sorted_set()` for easy access
+
 **Implementation Status**
 - ✅ Phase 1: Core Implementation - COMPLETE (100%)
 - ✅ Phase 2: Range & Ranking Commands - COMPLETE (100%)  
 - ✅ Phase 3: Advanced Operations - COMPLETE (100%)
 - ✅ Phase 4: API Exposure - COMPLETE (100%)
 - ✅ Phase 5: Persistence Integration - COMPLETE (100%)
-- ⏳ Phase 6: Benchmarking - PENDING (optional)
+- ✅ Phase 6: SDK Integration - Rust SDK COMPLETE (100%)
+- 📊 Phase 7: Benchmarking - PENDING (optional, deferred to v1.1)
 
 ### Changed - Dependency Updates 🔄 (October 25, 2025)
 
