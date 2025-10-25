@@ -1,7 +1,9 @@
 //! Synap client implementation
 
 use crate::error::{Result, SynapError};
-use crate::{KVStore, PubSubManager, QueueManager, StreamManager};
+use crate::{
+    HashManager, KVStore, ListManager, PubSubManager, QueueManager, SetManager, StreamManager,
+};
 use reqwest::Client;
 use serde_json::Value;
 use std::sync::Arc;
@@ -88,6 +90,21 @@ impl SynapClient {
     /// Get the Key-Value store interface
     pub fn kv(&self) -> KVStore {
         KVStore::new(self.clone())
+    }
+
+    /// Get the Hash manager interface
+    pub fn hash(&self) -> HashManager {
+        HashManager::new(self.clone())
+    }
+
+    /// Get the List manager interface
+    pub fn list(&self) -> ListManager {
+        ListManager::new(self.clone())
+    }
+
+    /// Get the Set manager interface
+    pub fn set(&self) -> SetManager {
+        SetManager::new(self.clone())
     }
 
     /// Get the Queue manager interface

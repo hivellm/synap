@@ -5,6 +5,53 @@ All notable changes to the Synap Rust SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2025-10-25
+
+### Added - Redis Data Structures 🎉
+
+**Complete Redis-compatible Hash, List, and Set data structures - 45 new commands**
+
+#### Hash Manager (15 commands)
+- `hash().set()`, `hash().get()`, `hash().get_all()`, `hash().del()`, `hash().exists()`
+- `hash().keys()`, `hash().values()`, `hash().len()`, `hash().mset()`, `hash().mget()`
+- `hash().incr_by()`, `hash().incr_by_float()`, `hash().set_nx()`
+
+#### List Manager (16 commands)
+- `list().lpush()`, `list().rpush()`, `list().lpop()`, `list().rpop()`, `list().range()`
+- `list().len()`, `list().index()`, `list().set()`, `list().trim()`, `list().rem()`
+- `list().insert()`, `list().rpoplpush()`, `list().pos()`, `list().lpushx()`, `list().rpushx()`
+
+#### Set Manager (14 commands)
+- `set().add()`, `set().rem()`, `set().is_member()`, `set().members()`, `set().card()`
+- `set().pop()`, `set().rand_member()`, `set().r#move()`
+- `set().inter()`, `set().union()`, `set().diff()`
+- `set().inter_store()`, `set().union_store()`, `set().diff_store()`
+
+**Usage Example**:
+```rust
+use synap_sdk::{SynapClient, SynapConfig};
+use std::collections::HashMap;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let client = SynapClient::new(SynapConfig::new("http://localhost:15500"))?;
+
+    // Hash operations
+    client.hash().set("user:1", "name", "Alice").await?;
+    let name: Option<String> = client.hash().get("user:1", "name").await?;
+
+    // List operations
+    client.list().rpush("tasks", vec!["task1".into(), "task2".into()]).await?;
+    let tasks = client.list().range("tasks", 0, -1).await?;
+
+    // Set operations
+    client.set().add("tags", vec!["rust".into(), "redis".into()]).await?;
+    let is_member = client.set().is_member("tags", "rust".into()).await?;
+
+    Ok(())
+}
+```
+
 ## [0.1.1] - 2025-10-24
 
 ### Fixed

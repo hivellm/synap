@@ -33,20 +33,26 @@
 
 pub mod client;
 pub mod error;
+pub mod hash;
 pub mod kv;
+pub mod list;
 pub mod pubsub;
 pub mod queue;
 mod queue_reactive;
 pub mod reactive;
 pub mod rx; // RxJS-style reactive programming
+pub mod set;
 pub mod stream;
 mod stream_reactive;
 pub mod types;
 
 pub use client::{SynapClient, SynapConfig};
 pub use error::{Result, SynapError};
+pub use hash::HashManager;
 pub use kv::KVStore;
+pub use list::ListManager;
 pub use pubsub::PubSubManager;
 pub use queue::QueueManager;
 pub use reactive::{MessageStream, SubscriptionHandle};
+pub use set::SetManager;
 pub use stream::StreamManager;
