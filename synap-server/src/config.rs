@@ -19,6 +19,8 @@ pub struct ServerConfig {
     pub persistence: PersistenceConfig,
     #[serde(default)]
     pub replication: ReplicationConfig,
+    #[serde(default)]
+    pub mcp: McpConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +79,51 @@ pub struct RestConfig {
     pub prefix: String,
 }
 
+/// MCP (Model Context Protocol) Tools Configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpConfig {
+    /// Enable KV (key-value) tools (synap_kv_get, synap_kv_set, synap_kv_delete)
+    #[serde(default = "default_true")]
+    pub enable_kv_tools: bool,
+
+    /// Enable Hash tools (synap_hash_get, synap_hash_set, synap_hash_getall)
+    #[serde(default)]
+    pub enable_hash_tools: bool,
+
+    /// Enable List tools (synap_list_push, synap_list_pop, synap_list_range)
+    #[serde(default)]
+    pub enable_list_tools: bool,
+
+    /// Enable Set tools (synap_set_add, synap_set_members, synap_set_inter)
+    #[serde(default)]
+    pub enable_set_tools: bool,
+
+    /// Enable Queue tools (synap_queue_publish)
+    #[serde(default = "default_true")]
+    pub enable_queue_tools: bool,
+
+    /// Enable Sorted Set tools (synap_sortedset_zadd, synap_sortedset_zrange, synap_sortedset_zrank)
+    #[serde(default)]
+    pub enable_sortedset_tools: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for McpConfig {
+    fn default() -> Self {
+        Self {
+            enable_kv_tools: true,         // Essential - always enabled by default
+            enable_hash_tools: false,      // Optional
+            enable_list_tools: false,      // Optional
+            enable_set_tools: false,       // Optional
+            enable_queue_tools: true,      // Essential - enabled by default
+            enable_sortedset_tools: false, // Optional
+        }
+    }
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
@@ -119,6 +166,7 @@ impl Default for ServerConfig {
             },
             persistence: PersistenceConfig::default(),
             replication: ReplicationConfig::default(),
+            mcp: McpConfig::default(),
         }
     }
 }

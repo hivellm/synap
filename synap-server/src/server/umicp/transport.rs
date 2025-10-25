@@ -94,12 +94,14 @@ pub async fn umicp_handler(State(state): State<UmicpState>, request: Request) ->
     }
 }
 
-/// UMICP Discovery Handler - Returns all 8 available operations
+/// UMICP Discovery Handler - Returns all available operations
 /// Endpoint: GET /umicp/discover
-pub async fn umicp_discover_handler(State(_state): State<UmicpState>) -> Json<serde_json::Value> {
+pub async fn umicp_discover_handler(State(state): State<UmicpState>) -> Json<serde_json::Value> {
     info!("🔍 UMICP discovery request received");
 
-    let service = SynapDiscoveryService;
+    let service = SynapDiscoveryService {
+        mcp_config: state.mcp_config.clone(),
+    };
     let server_info = service.server_info();
     let operations = service.list_operations();
 

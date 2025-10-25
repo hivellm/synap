@@ -12,7 +12,11 @@ use tower_http::{
 };
 
 /// Create the Axum router with all endpoints
-pub fn create_router(state: AppState, rate_limit_config: crate::config::RateLimitConfig) -> Router {
+pub fn create_router(
+    state: AppState,
+    rate_limit_config: crate::config::RateLimitConfig,
+    mcp_config: crate::config::McpConfig,
+) -> Router {
     // CORS configuration
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -21,10 +25,10 @@ pub fn create_router(state: AppState, rate_limit_config: crate::config::RateLimi
 
     // Create MCP router (stateless)
     let state_arc = Arc::new(state.clone());
-    let mcp_router = create_mcp_router(state_arc.clone());
+    let mcp_router = create_mcp_router(state_arc.clone(), mcp_config.clone());
 
     // Create UMICP router
-    let umicp_router = create_umicp_router(state_arc.clone());
+    let umicp_router = create_umicp_router(state_arc.clone(), mcp_config.clone());
 
     // Create main API router with state
     let api_router = Router::new()
@@ -235,7 +239,7 @@ pub fn create_router(state: AppState, rate_limit_config: crate::config::RateLimi
 }
 
 /// Create MCP router with StreamableHTTP service
-fn create_mcp_router(state: Arc<AppState>) -> Router {
+fn create_mcp_router(state: Arc<AppState>, mcp_config: crate::config::McpConfig) -> Router {
     use hyper_util::service::TowerToHyperService;
     use rmcp::transport::streamable_http_server::StreamableHttpService;
     use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -245,6 +249,7 @@ fn create_mcp_router(state: Arc<AppState>) -> Router {
         move || {
             Ok(SynapMcpService {
                 state: state.clone(),
+                mcp_config: mcp_config.clone(),
             })
         },
         LocalSessionManager::default().into(),
@@ -272,10 +277,13 @@ fn create_mcp_router(state: Arc<AppState>) -> Router {
 }
 
 /// Create UMICP router with discovery and message endpoints
-fn create_umicp_router(state: Arc<AppState>) -> Router {
+fn create_umicp_router(state: Arc<AppState>, mcp_config: crate::config::McpConfig) -> Router {
     use super::umicp::{UmicpState, transport};
 
-    let umicp_state = UmicpState { app_state: state };
+    let umicp_state = UmicpState {
+        app_state: state,
+        mcp_config,
+    };
 
     Router::new()
         .route("/umicp", post(transport::umicp_handler))

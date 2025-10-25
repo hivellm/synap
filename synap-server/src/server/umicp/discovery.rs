@@ -1,14 +1,17 @@
 //! UMICP Tool Discovery for Synap
 //!
-//! Implements the DiscoverableService trait to expose all 8 MCP tools
+//! Implements the DiscoverableService trait to expose all MCP tools
 //! via UMICP v0.2.3 tool discovery protocol
 
+use crate::config::McpConfig;
 use serde_json::json;
 use umicp_core::{DiscoverableService, OperationSchema, ServerInfo};
 
 /// Synap Discovery Service
 /// Exposes all MCP tools as UMICP-discoverable operations
-pub struct SynapDiscoveryService;
+pub struct SynapDiscoveryService {
+    pub mcp_config: McpConfig,
+}
 
 impl DiscoverableService for SynapDiscoveryService {
     fn server_info(&self) -> ServerInfo {
@@ -24,16 +27,16 @@ impl DiscoverableService for SynapDiscoveryService {
                 "replication".to_string(),
                 "mcp-compatible".to_string(),
             ])
-            .operations_count(13)
+            .operations_count(16) // Maximum if all tools enabled
             .mcp_compatible(true)
             .metadata(json!({
-                "description": "Synap - Unified messaging system (KV + Hash + List + Set + Queue + Stream + PubSub) with 13 core operations"
+                "description": "Synap - Unified messaging system (KV + Hash + List + Set + Queue + Stream + PubSub) with configurable MCP tools"
             }))
     }
 
     fn list_operations(&self) -> Vec<OperationSchema> {
-        // Get all MCP tools
-        let mcp_tools = crate::server::mcp_tools::get_mcp_tools();
+        // Get all MCP tools based on configuration
+        let mcp_tools = crate::server::mcp_tools::get_mcp_tools(&self.mcp_config);
 
         // Convert MCP Tools to UMICP OperationSchema
         mcp_tools
@@ -79,7 +82,9 @@ mod tests {
 
     #[test]
     fn test_server_info() {
-        let service = SynapDiscoveryService;
+        let service = SynapDiscoveryService {
+            mcp_config: McpConfig::default(),
+        };
         let info = service.server_info();
 
         assert_eq!(info.server, "synap-server");
@@ -91,44 +96,43 @@ mod tests {
 
     #[test]
     fn test_list_operations() {
-        let service = SynapDiscoveryService;
+        let service = SynapDiscoveryService {
+            mcp_config: McpConfig::default(),
+        };
         let operations = service.list_operations();
 
-        // Should have 13 essential operations (3 KV + 3 Hash + 3 List + 3 Set + 1 Queue)
+        // With default config, should have 4 operations (3 KV + 1 Queue)
         assert_eq!(
             operations.len(),
-            13,
+            4,
             "Expected 13 operations, got {}",
             operations.len()
         );
 
-        // Check for key operations
+        // Check for key operations (with default config)
         let op_names: Vec<String> = operations.iter().map(|op| op.name.clone()).collect();
 
-        // Verify essential operations are present
-        // KV operations (3)
+        // Verify only default-enabled operations are present
+        // KV operations (3) - enabled by default
         assert!(op_names.contains(&"synap_kv_get".to_string()));
         assert!(op_names.contains(&"synap_kv_set".to_string()));
         assert!(op_names.contains(&"synap_kv_delete".to_string()));
-        // Hash operations (3)
-        assert!(op_names.contains(&"synap_hash_set".to_string()));
-        assert!(op_names.contains(&"synap_hash_get".to_string()));
-        assert!(op_names.contains(&"synap_hash_getall".to_string()));
-        // List operations (3)
-        assert!(op_names.contains(&"synap_list_push".to_string()));
-        assert!(op_names.contains(&"synap_list_pop".to_string()));
-        assert!(op_names.contains(&"synap_list_range".to_string()));
-        // Set operations (3)
-        assert!(op_names.contains(&"synap_set_add".to_string()));
-        assert!(op_names.contains(&"synap_set_members".to_string()));
-        assert!(op_names.contains(&"synap_set_inter".to_string()));
-        // Queue operations (1)
+
+        // Queue operations (1) - enabled by default
         assert!(op_names.contains(&"synap_queue_publish".to_string()));
+
+        // Hash, List, Set, Sorted Set - disabled by default
+        assert!(!op_names.contains(&"synap_hash_set".to_string()));
+        assert!(!op_names.contains(&"synap_list_push".to_string()));
+        assert!(!op_names.contains(&"synap_set_add".to_string()));
+        assert!(!op_names.contains(&"synap_sortedset_zadd".to_string()));
     }
 
     #[test]
     fn test_operation_has_required_fields() {
-        let service = SynapDiscoveryService;
+        let service = SynapDiscoveryService {
+            mcp_config: McpConfig::default(),
+        };
         let operations = service.list_operations();
 
         for op in operations.iter() {
@@ -142,7 +146,9 @@ mod tests {
 
     #[test]
     fn test_kv_get_operation() {
-        let service = SynapDiscoveryService;
+        let service = SynapDiscoveryService {
+            mcp_config: McpConfig::default(),
+        };
         let operations = service.list_operations();
 
         let kv_get_op = operations

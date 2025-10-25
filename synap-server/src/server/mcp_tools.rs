@@ -2,15 +2,54 @@ use rmcp::model::{Tool, ToolAnnotations};
 use serde_json::json;
 use std::borrow::Cow;
 
-/// Get essential MCP tools (reduced set for Cursor compatibility)
-/// Only the most commonly used tools are exposed to stay within Cursor's limits
-pub fn get_mcp_tools() -> Vec<Tool> {
+use crate::config::McpConfig;
+
+/// Get MCP tools based on configuration
+/// Tools can be selectively enabled/disabled to stay within Cursor's MCP tool limits
+pub fn get_mcp_tools(config: &McpConfig) -> Vec<Tool> {
+    let mut tools = Vec::new();
+
+    // KV Store Tools (3 essential)
+    if config.enable_kv_tools {
+        tools.extend(get_kv_tools());
+    }
+
+    // Hash Tools (3)
+    if config.enable_hash_tools {
+        tools.extend(get_hash_tools());
+    }
+
+    // List Tools (3)
+    if config.enable_list_tools {
+        tools.extend(get_list_tools());
+    }
+
+    // Set Tools (3)
+    if config.enable_set_tools {
+        tools.extend(get_set_tools());
+    }
+
+    // Queue Tools (1)
+    if config.enable_queue_tools {
+        tools.extend(get_queue_tools());
+    }
+
+    // Sorted Set Tools (3)
+    if config.enable_sortedset_tools {
+        tools.extend(get_sortedset_tools());
+    }
+
+    tools
+}
+
+fn get_kv_tools() -> Vec<Tool> {
     vec![
-        // KV Store Tools (3 essential)
         Tool {
             name: Cow::Borrowed("synap_kv_get"),
             title: Some("Get Key-Value".to_string()),
-            description: Some(Cow::Borrowed("Retrieve a value from the key-value store (returns string by default)")),
+            description: Some(Cow::Borrowed(
+                "Retrieve a value from the key-value store (returns string by default)",
+            )),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -75,7 +114,11 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
         },
-        // Hash Tools (3 essential)
+    ]
+}
+
+fn get_hash_tools() -> Vec<Tool> {
+    vec![
         Tool {
             name: Cow::Borrowed("synap_hash_set"),
             title: Some("Set Hash Field".to_string()),
@@ -136,7 +179,11 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
         },
-        // List Tools (3 essential)
+    ]
+}
+
+fn get_list_tools() -> Vec<Tool> {
+    vec![
         Tool {
             name: Cow::Borrowed("synap_list_push"),
             title: Some("Push to List".to_string()),
@@ -201,7 +248,11 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
         },
-        // Set Tools (3 essential)
+    ]
+}
+
+fn get_set_tools() -> Vec<Tool> {
+    vec![
         Tool {
             name: Cow::Borrowed("synap_set_add"),
             title: Some("Add Set Members".to_string()),
@@ -268,29 +319,35 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
         },
-        // Queue Tools (1 essential)
-        Tool {
-            name: Cow::Borrowed("synap_queue_publish"),
-            title: Some("Publish to Queue".to_string()),
-            description: Some(Cow::Borrowed("Publish a message to a queue")),
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "queue": {"type": "string"},
-                    "message": {"type": "string"},
-                    "priority": {"type": "integer", "minimum": 0, "maximum": 9, "default": 5}
-                },
-                "required": ["queue", "message"]
-            })
-            .as_object()
-            .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-        },
-        // Sorted Set Tools (3 essential)
+    ]
+}
+
+fn get_queue_tools() -> Vec<Tool> {
+    vec![Tool {
+        name: Cow::Borrowed("synap_queue_publish"),
+        title: Some("Publish to Queue".to_string()),
+        description: Some(Cow::Borrowed("Publish a message to a queue")),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "queue": {"type": "string"},
+                "message": {"type": "string"},
+                "priority": {"type": "integer", "minimum": 0, "maximum": 9, "default": 5}
+            },
+            "required": ["queue", "message"]
+        })
+        .as_object()
+        .unwrap()
+        .clone()
+        .into(),
+        output_schema: None,
+        icons: None,
+        annotations: Some(ToolAnnotations::new().read_only(false)),
+    }]
+}
+
+fn get_sortedset_tools() -> Vec<Tool> {
+    vec![
         Tool {
             name: Cow::Borrowed("synap_sortedset_zadd"),
             title: Some("Add to Sorted Set".to_string()),
@@ -357,16 +414,23 @@ pub fn get_mcp_tools() -> Vec<Tool> {
     ]
 }
 
-// Total MCP Tools: 16 (3 KV + 3 Hash + 3 List + 3 Set + 1 Queue + 3 Sorted Set)
+// MCP Tools Configuration
 //
-// Note: Removed 8 less-frequently used tools to meet Cursor's MCP tool limits:
-// - synap_kv_scan (use KV get with known keys instead)
-// - synap_hash_del (use synap_kv_delete on the hash key)
-// - synap_hash_incrby (use hash_set with calculated value)
-// - synap_list_len (use list_range and count elements)
-// - synap_list_rpoplpush (use list_pop + list_push manually)
-// - synap_queue_consume (use REST API for consumption)
-// - synap_stream_publish (use REST API for streams)
-// - synap_pubsub_publish (use REST API for pub/sub)
+// Available tool categories (can be enabled/disabled in config.yml):
+// - KV Tools (3): synap_kv_get, synap_kv_set, synap_kv_delete
+// - Hash Tools (3): synap_hash_get, synap_hash_set, synap_hash_getall
+// - List Tools (3): synap_list_push, synap_list_pop, synap_list_range
+// - Set Tools (3): synap_set_add, synap_set_members, synap_set_inter
+// - Queue Tools (1): synap_queue_publish
+// - Sorted Set Tools (3): synap_sortedset_zadd, synap_sortedset_zrange, synap_sortedset_zrank
 //
-// All removed functionality is still available via REST API and StreamableHTTP
+// Default enabled (4 tools): KV (3) + Queue (1)
+// Maximum tools: 16 (if all categories enabled)
+//
+// Cursor MCP Limit Considerations:
+// - Cursor has a limit on the number of MCP tools it can handle efficiently
+// - Default configuration keeps only essential tools enabled (KV + Queue)
+// - Additional tools can be enabled as needed in config.yml under mcp section
+//
+// Note: All functionality is also available via REST API and StreamableHTTP,
+// so disabling MCP tools doesn't reduce available features

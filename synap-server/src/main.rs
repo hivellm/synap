@@ -291,7 +291,7 @@ async fn main() -> Result<()> {
     init_metrics();
 
     // Create router with rate limiting
-    let app = create_router(app_state, config.rate_limit.clone());
+    let app = create_router(app_state, config.rate_limit.clone(), config.mcp.clone());
 
     if config.rate_limit.enabled {
         info!(

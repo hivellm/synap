@@ -54,3 +54,36 @@ protocols:
     enabled: true
     prefix: "/kv"
 
+# ============================================================================
+# MCP (Model Context Protocol) TOOLS
+# ============================================================================
+
+# Configure which MCP tool categories to expose
+# Note: Cursor has limits on the number of MCP tools it can handle efficiently
+# Default: Only essential tools (KV + Queue = 4 tools total)
+# Maximum: All categories enabled = 16 tools
+
+mcp:
+  # KV Tools (3 tools): synap_kv_get, synap_kv_set, synap_kv_delete
+  # Essential - recommended to keep enabled
+  enable_kv_tools: true
+  
+  # Hash Tools (3 tools): synap_hash_get, synap_hash_set, synap_hash_getall
+  enable_hash_tools: false
+  
+  # List Tools (3 tools): synap_list_push, synap_list_pop, synap_list_range
+  enable_list_tools: false
+  
+  # Set Tools (3 tools): synap_set_add, synap_set_members, synap_set_inter
+  enable_set_tools: false
+  
+  # Queue Tools (1 tool): synap_queue_publish
+  # Essential - recommended to keep enabled
+  enable_queue_tools: true
+  
+  # Sorted Set Tools (3 tools): synap_sortedset_zadd, synap_sortedset_zrange, synap_sortedset_zrank
+  enable_sortedset_tools: false
+
+# Note: All functionality is available via REST API and StreamableHTTP
+# regardless of MCP tool configuration
+
