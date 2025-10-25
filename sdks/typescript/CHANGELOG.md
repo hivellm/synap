@@ -4,6 +4,31 @@ All notable changes to the Synap TypeScript SDK will be documented in this file.
 
 ## [Unreleased]
 
+### Added - Sorted Set Support 🎉 (October 25, 2025)
+
+**New Module: sorted-set.ts with 18 operations**
+
+#### Core Operations (15 methods)
+- `add()`, `rem()`, `score()`, `card()`, `incrBy()`
+- `range()`, `revRange()`, `rank()`, `revRank()`, `count()`
+- `rangeByScore()`, `popMin()`, `popMax()`
+- `remRangeByRank()`, `remRangeByScore()`
+
+#### Set Operations (3 methods)
+- `interStore()` (with weights & aggregation)
+- `unionStore()` (with weights & aggregation)
+- `diffStore()`
+
+#### Types
+- `ScoredMember` interface
+- `SortedSetStats` interface
+
+#### Client Integration
+- `synap.sortedSet` property
+
+#### Tests
+- 18 comprehensive unit tests (100% passing ✅)
+
 ### Added - Redis Data Structures (v0.3.0) 🎉
 
 **Complete Redis-compatible Hash, List, and Set data structures - 45 new commands**
