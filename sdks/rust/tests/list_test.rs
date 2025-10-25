@@ -9,7 +9,9 @@ async fn test_list_push_pop() {
     let list = client.list();
 
     // Test rpush
-    let rpush_result = list.rpush("test:tasks", vec!["task1".to_string(), "task2".to_string()]).await;
+    let rpush_result = list
+        .rpush("test:tasks", vec!["task1".to_string(), "task2".to_string()])
+        .await;
     assert!(rpush_result.is_ok() || rpush_result.is_err());
 
     // Test lpush
@@ -67,4 +69,3 @@ async fn test_list_trim() {
     let trim_result = list.trim("test:tasks", 0, 10).await;
     assert!(trim_result.is_ok() || trim_result.is_err());
 }
-

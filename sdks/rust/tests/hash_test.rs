@@ -10,7 +10,7 @@ async fn test_hash_operations() {
 
     // Note: These are interface tests - will fail if server not running
     // For true unit tests, we'd need to mock the HTTP client
-    
+
     // Test set
     let set_result = hash.set("test:hash", "field1", "value1").await;
     assert!(set_result.is_ok() || set_result.is_err()); // Either OK or network error
@@ -47,7 +47,9 @@ async fn test_hash_mset_mget() {
     let mset_result = hash.mset("test:user", fields).await;
     assert!(mset_result.is_ok() || mset_result.is_err());
 
-    let mget_result = hash.mget("test:user", vec!["name".to_string(), "age".to_string()]).await;
+    let mget_result = hash
+        .mget("test:user", vec!["name".to_string(), "age".to_string()])
+        .await;
     assert!(mget_result.is_ok() || mget_result.is_err());
 }
 
@@ -63,4 +65,3 @@ async fn test_hash_incr() {
     let incr_float_result = hash.incr_by_float("test:metrics", "score", 0.5).await;
     assert!(incr_float_result.is_ok() || incr_float_result.is_err());
 }
-

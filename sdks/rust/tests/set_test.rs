@@ -9,7 +9,9 @@ async fn test_set_add_rem() {
     let set = client.set();
 
     // Test add
-    let add_result = set.add("test:tags", vec!["rust".to_string(), "redis".to_string()]).await;
+    let add_result = set
+        .add("test:tags", vec!["rust".to_string(), "redis".to_string()])
+        .await;
     assert!(add_result.is_ok() || add_result.is_err());
 
     // Test rem
@@ -74,15 +76,21 @@ async fn test_set_algebra() {
     let set = client.set();
 
     // Test inter
-    let inter_result = set.inter(vec!["test:tags1".to_string(), "test:tags2".to_string()]).await;
+    let inter_result = set
+        .inter(vec!["test:tags1".to_string(), "test:tags2".to_string()])
+        .await;
     assert!(inter_result.is_ok() || inter_result.is_err());
 
     // Test union
-    let union_result = set.union(vec!["test:tags1".to_string(), "test:tags2".to_string()]).await;
+    let union_result = set
+        .union(vec!["test:tags1".to_string(), "test:tags2".to_string()])
+        .await;
     assert!(union_result.is_ok() || union_result.is_err());
 
     // Test diff
-    let diff_result = set.diff(vec!["test:tags1".to_string(), "test:tags2".to_string()]).await;
+    let diff_result = set
+        .diff(vec!["test:tags1".to_string(), "test:tags2".to_string()])
+        .await;
     assert!(diff_result.is_ok() || diff_result.is_err());
 }
 
@@ -92,10 +100,11 @@ async fn test_set_store_operations() {
     let client = SynapClient::new(config).expect("Failed to create client");
     let set = client.set();
 
-    let inter_store_result = set.inter_store(
-        "test:result",
-        vec!["test:tags1".to_string(), "test:tags2".to_string()],
-    ).await;
+    let inter_store_result = set
+        .inter_store(
+            "test:result",
+            vec!["test:tags1".to_string(), "test:tags2".to_string()],
+        )
+        .await;
     assert!(inter_store_result.is_ok() || inter_store_result.is_err());
 }
-
