@@ -65,7 +65,7 @@ fn test_zadd_nx_option() {
 #[test]
 fn test_zadd_xx_option() {
     let mut zset = SortedSetValue::new();
-    let _opts_default = ZAddOptions::default();
+    let opts_default = ZAddOptions::default();
     let opts_xx = ZAddOptions {
         xx: true,
         ..Default::default()
@@ -77,7 +77,7 @@ fn test_zadd_xx_option() {
     assert_eq!(zset.zcard(), 0);
 
     // Add normally, then XX allows update
-    zset.zadd(b"alice".to_vec(), 100.0, &_opts_default);
+    zset.zadd(b"alice".to_vec(), 100.0, &opts_default);
     let (added, _) = zset.zadd(b"alice".to_vec(), 200.0, &opts_xx);
     assert_eq!(added, 0);
     assert_eq!(zset.zscore(b"alice"), Some(200.0));
@@ -130,7 +130,6 @@ fn test_zadd_lt_option() {
 #[test]
 fn test_zadd_ch_option() {
     let mut zset = SortedSetValue::new();
-    let opts_default = ZAddOptions::default();
     let opts_ch = ZAddOptions {
         ch: true,
         ..Default::default()
@@ -155,13 +154,14 @@ fn test_zadd_ch_option() {
 #[test]
 fn test_zadd_incr_option() {
     let mut zset = SortedSetValue::new();
-    let opts_default = ZAddOptions::default();
     let opts_incr = ZAddOptions {
         incr: true,
         ..Default::default()
     };
 
-    zset.zadd(b"alice".to_vec(), 100.0, &opts_default);
+    // Start from 0, increment by 100
+    zset.zadd(b"alice".to_vec(), 100.0, &opts_incr);
+    // Increment by 50
     zset.zadd(b"alice".to_vec(), 50.0, &opts_incr);
 
     assert_eq!(zset.zscore(b"alice"), Some(150.0));
