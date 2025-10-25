@@ -5,6 +5,24 @@ All notable changes to the Synap Rust SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added - Sorted Set Support 🎉 (October 25, 2025)
+
+**New Module: sorted_set.rs with 18 operations**
+
+#### Core Operations (15 methods)
+- `add()`, `rem()`, `score()`, `card()`, `incr_by()`
+- `range()`, `rev_range()`, `rank()`, `rev_rank()`, `count()`
+- `range_by_score()`, `pop_min()`, `pop_max()`
+- `rem_range_by_rank()`, `rem_range_by_score()`
+
+#### Set Operations
+- `inter_store()` (with weights & aggregation), `union_store()`, `diff_store()`
+
+#### Tests
+- 6 comprehensive test cases covering all operations
+
 ## [0.2.0] - 2025-10-25
 
 ### Added - Redis Data Structures 🎉
