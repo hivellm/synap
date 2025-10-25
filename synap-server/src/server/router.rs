@@ -99,6 +99,39 @@ pub fn create_router(
             "/sortedset/zunionstore",
             post(handlers::sortedset_zunionstore),
         )
+        .route(
+            "/sortedset/zdiffstore",
+            post(handlers::sortedset_zdiffstore),
+        )
+        .route(
+            "/sortedset/{key}/{member}/zrevrank",
+            get(handlers::sortedset_zrevrank),
+        )
+        .route("/sortedset/{key}/zcount", get(handlers::sortedset_zcount))
+        .route(
+            "/sortedset/{key}/zmscore",
+            post(handlers::sortedset_zmscore),
+        )
+        .route(
+            "/sortedset/{key}/zrangebyscore",
+            get(handlers::sortedset_zrangebyscore),
+        )
+        .route(
+            "/sortedset/{key}/zpopmin",
+            post(handlers::sortedset_zpopmin),
+        )
+        .route(
+            "/sortedset/{key}/zpopmax",
+            post(handlers::sortedset_zpopmax),
+        )
+        .route(
+            "/sortedset/{key}/zremrangebyrank",
+            post(handlers::sortedset_zremrangebyrank),
+        )
+        .route(
+            "/sortedset/{key}/zremrangebyscore",
+            post(handlers::sortedset_zremrangebyscore),
+        )
         .route("/sortedset/stats", get(handlers::sortedset_stats))
         // List endpoints
         .route("/list/{key}/lpush", post(handlers::list_lpush))

@@ -4926,3 +4926,191 @@ pub async fn sortedset_stats(
         "memory_bytes": stats.memory_bytes,
     })))
 }
+
+/// GET /sortedset/:key/:member/zrevrank - Get reverse rank of member
+pub async fn sortedset_zrevrank(
+    State(state): State<AppState>,
+    Path((key, member)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST ZREVRANK key={} member={}", key, member);
+
+    let member_bytes = member.as_bytes();
+    let rank = state.sorted_set_store.zrevrank(&key, member_bytes);
+
+    Ok(Json(json!({ "rank": rank, "key": key, "member": member })))
+}
+
+/// GET /sortedset/:key/zcount - Count members in score range
+pub async fn sortedset_zcount(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let min: f64 = params
+        .get("min")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(f64::NEG_INFINITY);
+    let max: f64 = params
+        .get("max")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(f64::INFINITY);
+
+    debug!("REST ZCOUNT key={} min={} max={}", key, min, max);
+
+    let count = state.sorted_set_store.zcount(&key, min, max);
+
+    Ok(Json(json!({ "count": count, "key": key })))
+}
+
+/// POST /sortedset/:key/zmscore - Get multiple scores
+pub async fn sortedset_zmscore(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ZRemRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST ZMSCORE key={} members={:?}", key, req.members);
+
+    let members: Result<Vec<Vec<u8>>, _> = req.members.iter().map(serde_json::to_vec).collect();
+    let members = members
+        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize members: {}", e)))?;
+
+    let scores = state.sorted_set_store.zmscore(&key, &members);
+
+    Ok(Json(json!({ "scores": scores, "key": key })))
+}
+
+/// GET /sortedset/:key/zrangebyscore - Get range by score
+pub async fn sortedset_zrangebyscore(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let min: f64 = params
+        .get("min")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(f64::NEG_INFINITY);
+    let max: f64 = params
+        .get("max")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(f64::INFINITY);
+    let with_scores = params
+        .get("withscores")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+
+    debug!(
+        "REST ZRANGEBYSCORE key={} min={} max={} withscores={}",
+        key, min, max, with_scores
+    );
+
+    let members = state
+        .sorted_set_store
+        .zrangebyscore(&key, min, max, with_scores);
+
+    Ok(Json(json!({ "members": members, "key": key })))
+}
+
+/// POST /sortedset/:key/zpopmin - Pop minimum scored members
+pub async fn sortedset_zpopmin(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let count: usize = params
+        .get("count")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+
+    debug!("REST ZPOPMIN key={} count={}", key, count);
+
+    let members = state.sorted_set_store.zpopmin(&key, count);
+
+    Ok(Json(
+        json!({ "members": members, "count": members.len(), "key": key }),
+    ))
+}
+
+/// POST /sortedset/:key/zpopmax - Pop maximum scored members
+pub async fn sortedset_zpopmax(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let count: usize = params
+        .get("count")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+
+    debug!("REST ZPOPMAX key={} count={}", key, count);
+
+    let members = state.sorted_set_store.zpopmax(&key, count);
+
+    Ok(Json(
+        json!({ "members": members, "count": members.len(), "key": key }),
+    ))
+}
+
+/// POST /sortedset/:key/zremrangebyrank - Remove members by rank range
+pub async fn sortedset_zremrangebyrank(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let start: i64 = params
+        .get("start")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let stop: i64 = params
+        .get("stop")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(-1);
+
+    debug!(
+        "REST ZREMRANGEBYRANK key={} start={} stop={}",
+        key, start, stop
+    );
+
+    let removed = state.sorted_set_store.zremrangebyrank(&key, start, stop);
+
+    Ok(Json(json!({ "removed": removed, "key": key })))
+}
+
+/// POST /sortedset/:key/zremrangebyscore - Remove members by score range
+pub async fn sortedset_zremrangebyscore(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let min: f64 = params
+        .get("min")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(f64::NEG_INFINITY);
+    let max: f64 = params
+        .get("max")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(f64::INFINITY);
+
+    debug!("REST ZREMRANGEBYSCORE key={} min={} max={}", key, min, max);
+
+    let removed = state.sorted_set_store.zremrangebyscore(&key, min, max);
+
+    Ok(Json(json!({ "removed": removed, "key": key })))
+}
+
+/// POST /sortedset/zdiffstore - Difference store
+pub async fn sortedset_zdiffstore(
+    State(state): State<AppState>,
+    Json(req): Json<ZInterstoreRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!(
+        "REST ZDIFFSTORE dest={} keys={:?}",
+        req.destination, req.keys
+    );
+
+    let keys: Vec<&str> = req.keys.iter().map(|s| s.as_str()).collect();
+    let count = state.sorted_set_store.zdiffstore(&req.destination, &keys);
+
+    Ok(Json(
+        json!({ "count": count, "destination": req.destination }),
+    ))
+}

@@ -31,6 +31,7 @@ async fn spawn_test_server() -> String {
             requests_per_second: 100,
             burst_size: 10,
         },
+        synap_server::config::McpConfig::default(),
     );
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
