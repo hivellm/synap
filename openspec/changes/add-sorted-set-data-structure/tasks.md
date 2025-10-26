@@ -13,59 +13,59 @@
 - [ ] Write 10+ unit tests for core structure
 
 ### Basic Commands (Week 1)
-- [ ] Add `ZADD` operation (add/update members with scores)
+- [x] Add `ZADD` operation (add/update members with scores) - TypeScript SDK
   - [ ] Support NX (only add new) option
   - [ ] Support XX (only update existing) option
   - [ ] Support GT (only update if new score > old) option
   - [ ] Support LT (only update if new score < old) option
   - [ ] Support CH (return count of changed elements)
   - [ ] Support INCR (increment score) option
-- [ ] Add `ZREM` operation (remove members)
-- [ ] Add `ZSCORE` operation (get member score)
-- [ ] Add `ZCARD` operation (get cardinality/count)
-- [ ] Add `ZINCRBY` operation (increment member score)
+- [x] Add `ZREM` operation (remove members) - TypeScript SDK
+- [x] Add `ZSCORE` operation (get member score) - TypeScript SDK
+- [x] Add `ZCARD` operation (get cardinality/count) - TypeScript SDK
+- [x] Add `ZINCRBY` operation (increment member score) - TypeScript SDK
 - [ ] Add `ZMSCORE` operation (get multiple scores)
-- [ ] Write 15+ tests for basic operations
+- [x] Write 15+ tests for basic operations - TypeScript SDK tests added
 
 ## Phase 2: Range & Ranking Commands (Week 2-3)
 
 ### Range Operations
-- [ ] Add `ZRANGE` operation (get range by index)
-  - [ ] Support WITHSCORES option
+- [x] Add `ZRANGE` operation (get range by index) - TypeScript SDK
+  - [x] Support WITHSCORES option - TypeScript SDK
   - [ ] Support REV (reverse) option
   - [ ] Support BYSCORE option
   - [ ] Support BYLEX option
   - [ ] Support LIMIT offset count
 - [ ] Add `ZREVRANGE` operation (reverse range by index)
-- [ ] Add `ZRANGEBYSCORE` operation (range by score)
+- [x] Add `ZRANGEBYSCORE` operation (range by score) - TypeScript SDK
   - [ ] Support min/max with inclusive/exclusive bounds
-  - [ ] Support WITHSCORES option
+  - [x] Support WITHSCORES option - TypeScript SDK
   - [ ] Support LIMIT offset count
 - [ ] Add `ZREVRANGEBYSCORE` operation (reverse range by score)
 - [ ] Add `ZRANGEBYLEX` operation (range by lexicographical order)
 - [ ] Add `ZREVRANGEBYLEX` operation (reverse range by lex)
-- [ ] Write 20+ tests for range operations
+- [x] Write 20+ tests for range operations - TypeScript SDK tests added
 
 ### Ranking Commands
-- [ ] Add `ZRANK` operation (get member rank, 0-based)
-- [ ] Add `ZREVRANK` operation (get reverse rank)
-- [ ] Add `ZCOUNT` operation (count members in score range)
+- [x] Add `ZRANK` operation (get member rank, 0-based) - TypeScript SDK
+- [x] Add `ZREVRANK` operation (get reverse rank) - TypeScript SDK
+- [x] Add `ZCOUNT` operation (count members in score range) - TypeScript SDK
 - [ ] Add `ZLEXCOUNT` operation (count in lex range)
-- [ ] Write 10+ tests for ranking operations
+- [x] Write 10+ tests for ranking operations - TypeScript SDK tests added
 
 ## Phase 3: Advanced Operations (Week 3-4)
 
 ### Pop & Remove Operations
-- [ ] Add `ZPOPMIN` operation (remove and return lowest scored)
-  - [ ] Support count parameter
-- [ ] Add `ZPOPMAX` operation (remove and return highest scored)
-  - [ ] Support count parameter
+- [x] Add `ZPOPMIN` operation (remove and return lowest scored) - TypeScript SDK
+  - [x] Support count parameter - TypeScript SDK
+- [x] Add `ZPOPMAX` operation (remove and return highest scored) - TypeScript SDK
+  - [x] Support count parameter - TypeScript SDK
 - [ ] Add `BZPOPMIN` operation (blocking pop min)
 - [ ] Add `BZPOPMAX` operation (blocking pop max)
 - [ ] Add `ZREMRANGEBYRANK` operation (remove by rank range)
 - [ ] Add `ZREMRANGEBYSCORE` operation (remove by score range)
 - [ ] Add `ZREMRANGEBYLEX` operation (remove by lex range)
-- [ ] Write 15+ tests for pop/remove operations
+- [x] Write 15+ tests for pop/remove operations - TypeScript SDK tests added
 
 ### Set Operations (Complex)
 - [ ] Add `ZINTERSTORE` operation (intersection with weights)
