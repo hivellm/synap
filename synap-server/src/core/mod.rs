@@ -2,6 +2,7 @@ pub mod cache;
 pub mod consumer_group;
 pub mod error;
 pub mod hash;
+pub mod key_manager;
 pub mod kv_store;
 pub mod list;
 pub mod partition;
@@ -19,6 +20,7 @@ pub use consumer_group::{
 };
 pub use error::SynapError;
 pub use hash::{HashStats, HashStore, HashValue};
+pub use key_manager::{KeyManager, KeyType};
 pub use kv_store::KVStore;
 pub use list::{ListStats, ListStore, ListValue};
 pub use partition::{

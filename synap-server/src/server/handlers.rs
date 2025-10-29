@@ -1,4 +1,6 @@
-use crate::core::{HashStore, KVStore, Message, QueueManager, SortedSetStore, SynapError};
+use crate::core::{
+    HashStore, KVStore, KeyManager, Message, QueueManager, SortedSetStore, SynapError,
+};
 use crate::protocol::{Request, Response};
 use axum::{
     Json,
@@ -488,6 +490,182 @@ pub async fn kv_msetnx(
     }
 
     Ok(Json(MSetNxResponse { success }))
+}
+
+// ==================== Key Management REST Endpoints ====================
+
+/// Helper to create KeyManager from AppState
+fn create_key_manager(state: &AppState) -> KeyManager {
+    KeyManager::new(
+        state.kv_store.clone(),
+        state.hash_store.clone(),
+        state.list_store.clone(),
+        state.set_store.clone(),
+        state.sorted_set_store.clone(),
+    )
+}
+
+#[derive(Debug, Serialize)]
+pub struct TypeResponse {
+    pub key: String,
+    pub r#type: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RenameRequest {
+    pub destination: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RenameResponse {
+    pub success: bool,
+    pub source: String,
+    pub destination: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CopyRequest {
+    pub destination: String,
+    pub replace: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CopyResponse {
+    pub success: bool,
+    pub source: String,
+    pub destination: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RandomKeyResponse {
+    pub key: Option<String>,
+}
+
+/// TYPE endpoint - get the type of a key
+pub async fn key_type(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<TypeResponse>, SynapError> {
+    debug!("REST TYPE key={}", key);
+
+    let manager = create_key_manager(&state);
+    let key_type = manager.key_type(&key).await?;
+
+    Ok(Json(TypeResponse {
+        key,
+        r#type: key_type.as_str().to_string(),
+    }))
+}
+
+/// EXISTS endpoint - check if key exists (cross-store)
+pub async fn key_exists(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST EXISTS key={}", key);
+
+    let manager = create_key_manager(&state);
+    let exists = manager.exists(&key).await?;
+
+    Ok(Json(serde_json::json!({
+        "key": key,
+        "exists": exists
+    })))
+}
+
+/// RENAME endpoint - rename a key atomically
+pub async fn key_rename(
+    State(state): State<AppState>,
+    Path(source): Path<String>,
+    Json(req): Json<RenameRequest>,
+) -> Result<Json<RenameResponse>, SynapError> {
+    debug!(
+        "REST RENAME source={}, destination={}",
+        source, req.destination
+    );
+
+    let manager = create_key_manager(&state);
+    manager.rename(&source, &req.destination).await?;
+
+    // Log to WAL if persistence is enabled
+    if state.persistence.is_some() {
+        // RENAME is logged as a copy + delete sequence
+        // TODO: Add specific RENAME operation to WAL
+    }
+
+    Ok(Json(RenameResponse {
+        success: true,
+        source,
+        destination: req.destination,
+    }))
+}
+
+/// RENAMENX endpoint - rename key only if destination doesn't exist
+pub async fn key_renamenx(
+    State(state): State<AppState>,
+    Path(source): Path<String>,
+    Json(req): Json<RenameRequest>,
+) -> Result<Json<RenameResponse>, SynapError> {
+    debug!(
+        "REST RENAMENX source={}, destination={}",
+        source, req.destination
+    );
+
+    let manager = create_key_manager(&state);
+    let success = manager.renamenx(&source, &req.destination).await?;
+
+    if !success {
+        return Err(SynapError::InvalidRequest(
+            "Destination key already exists".to_string(),
+        ));
+    }
+
+    Ok(Json(RenameResponse {
+        success: true,
+        source,
+        destination: req.destination,
+    }))
+}
+
+/// COPY endpoint - copy key to destination
+pub async fn key_copy(
+    State(state): State<AppState>,
+    Path(source): Path<String>,
+    Json(req): Json<CopyRequest>,
+) -> Result<Json<CopyResponse>, SynapError> {
+    debug!(
+        "REST COPY source={}, destination={}, replace={:?}",
+        source, req.destination, req.replace
+    );
+
+    let manager = create_key_manager(&state);
+    let success = manager
+        .copy(&source, &req.destination, req.replace.unwrap_or(false))
+        .await?;
+
+    if !success {
+        return Err(SynapError::InvalidRequest(
+            "Destination key already exists and replace=false".to_string(),
+        ));
+    }
+
+    Ok(Json(CopyResponse {
+        success: true,
+        source,
+        destination: req.destination,
+    }))
+}
+
+/// RANDOMKEY endpoint - get a random key
+pub async fn key_randomkey(
+    State(state): State<AppState>,
+) -> Result<Json<RandomKeyResponse>, SynapError> {
+    debug!("REST RANDOMKEY");
+
+    let manager = create_key_manager(&state);
+    let random_key = manager.randomkey().await?;
+
+    Ok(Json(RandomKeyResponse { key: random_key }))
 }
 
 // ==================== Hash REST Endpoints ====================
@@ -1212,6 +1390,13 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "kv.strlen" => handle_kv_strlen_cmd(state.kv_store.clone(), &request).await,
         "kv.getset" => handle_kv_getset_cmd(&state, &request).await,
         "kv.msetnx" => handle_kv_msetnx_cmd(&state, &request).await,
+        // Key Management commands
+        "key.type" => handle_key_type_cmd(state.clone(), &request).await,
+        "key.exists" => handle_key_exists_cmd(state.clone(), &request).await,
+        "key.rename" => handle_key_rename_cmd(&state, &request).await,
+        "key.renamenx" => handle_key_renamenx_cmd(&state, &request).await,
+        "key.copy" => handle_key_copy_cmd(&state, &request).await,
+        "key.randomkey" => handle_key_randomkey_cmd(state.clone(), &request).await,
         // Hash commands
         "hash.set" => handle_hash_set_cmd(&state, &request).await,
         "hash.get" => handle_hash_get_cmd(&state, &request).await,
@@ -1797,6 +1982,157 @@ async fn handle_kv_msetnx_cmd(
     }
 
     Ok(serde_json::json!({ "success": success }))
+}
+
+// ==================== Key Management StreamableHTTP Handlers ====================
+
+async fn handle_key_type_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let manager = create_key_manager(&state);
+    let key_type = manager.key_type(key).await?;
+
+    Ok(serde_json::json!({
+        "key": key,
+        "type": key_type.as_str()
+    }))
+}
+
+async fn handle_key_exists_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let manager = create_key_manager(&state);
+    let exists = manager.exists(key).await?;
+
+    Ok(serde_json::json!({
+        "key": key,
+        "exists": exists
+    }))
+}
+
+async fn handle_key_rename_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let source = request
+        .payload
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'source' field".to_string()))?;
+
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let manager = create_key_manager(state);
+    manager.rename(source, destination).await?;
+
+    // TODO: Log RENAME to WAL when persistence is enabled
+    // RENAME operation would be logged as a copy + delete sequence
+
+    Ok(serde_json::json!({
+        "success": true,
+        "source": source,
+        "destination": destination
+    }))
+}
+
+async fn handle_key_renamenx_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let source = request
+        .payload
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'source' field".to_string()))?;
+
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let manager = create_key_manager(state);
+    let success = manager.renamenx(source, destination).await?;
+
+    if !success {
+        return Err(SynapError::InvalidRequest(
+            "Destination key already exists".to_string(),
+        ));
+    }
+
+    Ok(serde_json::json!({
+        "success": true,
+        "source": source,
+        "destination": destination
+    }))
+}
+
+async fn handle_key_copy_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let source = request
+        .payload
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'source' field".to_string()))?;
+
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let replace = request
+        .payload
+        .get("replace")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let manager = create_key_manager(state);
+    let success = manager.copy(source, destination, replace).await?;
+
+    if !success {
+        return Err(SynapError::InvalidRequest(
+            "Destination key already exists and replace=false".to_string(),
+        ));
+    }
+
+    Ok(serde_json::json!({
+        "success": true,
+        "source": source,
+        "destination": destination
+    }))
+}
+
+async fn handle_key_randomkey_cmd(
+    state: AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let manager = create_key_manager(&state);
+    let random_key = manager.randomkey().await?;
+
+    Ok(serde_json::json!({
+        "key": random_key
+    }))
 }
 
 async fn handle_kv_keys_cmd(

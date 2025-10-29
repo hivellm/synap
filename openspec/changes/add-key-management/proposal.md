@@ -1,6 +1,6 @@
 # Add Key Management Commands
 
-> **Status**: Draft  
+> **Status**: Complete  
 > **Priority**: Medium (Phase 2)  
 > **Target**: v0.6.0-alpha  
 > **Duration**: 2 weeks

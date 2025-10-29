@@ -17,6 +17,10 @@ pub async fn handle_mcp_tool(
         "synap_kv_append" => handle_kv_append(request, state).await,
         "synap_kv_getrange" => handle_kv_getrange(request, state).await,
         "synap_kv_strlen" => handle_kv_strlen(request, state).await,
+        // Key Management tools (3)
+        "synap_key_type" => handle_key_type(request, state).await,
+        "synap_key_exists" => handle_key_exists(request, state).await,
+        "synap_key_rename" => handle_key_rename(request, state).await,
         // Essential Hash tools (3)
         "synap_hash_set" => handle_hash_set(request, state).await,
         "synap_hash_get" => handle_hash_get(request, state).await,
@@ -262,6 +266,109 @@ async fn handle_kv_strlen(
 
     Ok(CallToolResult::success(vec![Content::text(
         json!({"length": length, "key": key}).to_string(),
+    )]))
+}
+
+// ==================== Key Management MCP Handlers ====================
+
+async fn handle_key_type(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let manager = crate::core::KeyManager::new(
+        state.kv_store.clone(),
+        state.hash_store.clone(),
+        state.list_store.clone(),
+        state.set_store.clone(),
+        state.sorted_set_store.clone(),
+    );
+
+    let key_type = manager
+        .key_type(key)
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("TYPE failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"key": key, "type": key_type.as_str()}).to_string(),
+    )]))
+}
+
+async fn handle_key_exists(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let manager = crate::core::KeyManager::new(
+        state.kv_store.clone(),
+        state.hash_store.clone(),
+        state.list_store.clone(),
+        state.set_store.clone(),
+        state.sorted_set_store.clone(),
+    );
+
+    let exists = manager
+        .exists(key)
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("EXISTS failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"key": key, "exists": exists}).to_string(),
+    )]))
+}
+
+async fn handle_key_rename(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let source = args
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing source", None))?;
+
+    let destination = args
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing destination", None))?;
+
+    let manager = crate::core::KeyManager::new(
+        state.kv_store.clone(),
+        state.hash_store.clone(),
+        state.list_store.clone(),
+        state.set_store.clone(),
+        state.sorted_set_store.clone(),
+    );
+
+    manager
+        .rename(source, destination)
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("RENAME failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"success": true, "source": source, "destination": destination}).to_string(),
     )]))
 }
 

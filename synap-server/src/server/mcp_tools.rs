@@ -9,7 +9,7 @@ use crate::config::McpConfig;
 pub fn get_mcp_tools(config: &McpConfig) -> Vec<Tool> {
     let mut tools = Vec::new();
 
-    // KV Store Tools (6 total: 3 essential + 3 string extensions)
+    // KV Store Tools (9 total: 3 essential + 3 string extensions + 3 key management)
     if config.enable_kv_tools {
         tools.extend(get_kv_tools());
     }
@@ -196,6 +196,83 @@ fn get_kv_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        // Key Management tools (3)
+        Tool {
+            name: Cow::Borrowed("synap_key_type"),
+            title: Some("Get Key Type".to_string()),
+            description: Some(Cow::Borrowed(
+                "Get the type of a key across all stores (string, hash, list, set, zset, none)",
+            )),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The key to get type for"
+                    }
+                },
+                "required": ["key"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_key_exists"),
+            title: Some("Check Key Exists".to_string()),
+            description: Some(Cow::Borrowed(
+                "Check if a key exists in any store (KV, Hash, List, Set, SortedSet)",
+            )),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The key to check"
+                    }
+                },
+                "required": ["key"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_key_rename"),
+            title: Some("Rename Key".to_string()),
+            description: Some(Cow::Borrowed(
+                "Rename a key atomically, overwriting destination if it exists. Works across all data types.",
+            )),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "Source key name"
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": "Destination key name"
+                    }
+                },
+                "required": ["source", "destination"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
         },
     ]
 }

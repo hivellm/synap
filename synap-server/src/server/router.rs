@@ -49,6 +49,13 @@ pub fn create_router(
         .route("/kv/{key}/strlen", get(handlers::kv_strlen))
         .route("/kv/{key}/getset", post(handlers::kv_getset))
         .route("/kv/msetnx", post(handlers::kv_msetnx))
+        // Key Management endpoints
+        .route("/key/{key}/type", get(handlers::key_type))
+        .route("/key/{key}/exists", get(handlers::key_exists))
+        .route("/key/{key}/rename", post(handlers::key_rename))
+        .route("/key/{key}/renamenx", post(handlers::key_renamenx))
+        .route("/key/{key}/copy", post(handlers::key_copy))
+        .route("/key/randomkey", get(handlers::key_randomkey))
         // Hash endpoints
         .route("/hash/{key}/set", post(handlers::hash_set))
         .route("/hash/{key}/{field}", get(handlers::hash_get))
