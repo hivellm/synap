@@ -31,6 +31,13 @@ async fn spawn_test_server() -> String {
         persistence: None,
         consumer_group_manager: None,
         partition_manager: None,
+        monitoring: Arc::new(synap_server::monitoring::MonitoringManager::new(
+            kv_store.clone(),
+            hash_store.clone(),
+            list_store.clone(),
+            set_store.clone(),
+            sorted_set_store.clone(),
+        )),
     };
 
     let app = create_router(

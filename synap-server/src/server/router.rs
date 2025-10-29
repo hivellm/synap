@@ -56,6 +56,11 @@ pub fn create_router(
         .route("/key/{key}/renamenx", post(handlers::key_renamenx))
         .route("/key/{key}/copy", post(handlers::key_copy))
         .route("/key/randomkey", get(handlers::key_randomkey))
+        // Monitoring endpoints
+        .route("/info", get(handlers::info))
+        .route("/slowlog", get(handlers::slowlog))
+        .route("/memory/{key}/usage", get(handlers::memory_usage))
+        .route("/clients", get(handlers::client_list))
         // Hash endpoints
         .route("/hash/{key}/set", post(handlers::hash_set))
         .route("/hash/{key}/{field}", get(handlers::hash_get))

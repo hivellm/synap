@@ -3,6 +3,7 @@ use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
+use synap_server::monitoring::MonitoringManager;
 use synap_server::persistence::{PersistenceLayer, recover};
 use synap_server::replication::NodeRole;
 use synap_server::{
@@ -278,6 +279,16 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| Arc::new(synap_server::core::SortedSetStore::new()));
     info!("Sorted set store initialized");
 
+    // Create monitoring manager
+    let monitoring = Arc::new(MonitoringManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
+    info!("Monitoring manager initialized");
+
     // Create application state with persistence and streams
     let app_state = AppState {
         kv_store,
@@ -291,6 +302,7 @@ async fn main() -> Result<()> {
         consumer_group_manager,
         pubsub_router,
         persistence,
+        monitoring,
     };
 
     // Initialize Prometheus metrics

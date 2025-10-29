@@ -1,6 +1,10 @@
 use crate::core::{
     HashStore, KVStore, KeyManager, Message, QueueManager, SortedSetStore, SynapError,
 };
+use crate::monitoring::{
+    ClientList, InfoSection, KeyspaceInfo, MemoryInfo, MemoryUsage, ReplicationInfo, ServerInfo,
+    SlowLogManager, StatsInfo,
+};
 use crate::protocol::{Request, Response};
 use axum::{
     Json,
@@ -32,6 +36,7 @@ pub struct AppState {
     pub consumer_group_manager: Option<Arc<crate::core::ConsumerGroupManager>>,
     pub pubsub_router: Option<Arc<crate::core::PubSubRouter>>,
     pub persistence: Option<Arc<crate::persistence::PersistenceLayer>>,
+    pub monitoring: Arc<crate::monitoring::MonitoringManager>,
 }
 
 // Request/Response types for REST API
@@ -666,6 +671,110 @@ pub async fn key_randomkey(
     let random_key = manager.randomkey().await?;
 
     Ok(Json(RandomKeyResponse { key: random_key }))
+}
+
+// ==================== Monitoring REST Endpoints ====================
+
+/// INFO endpoint - get server information
+pub async fn info(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let section = params.get("section").map(|s| s.as_str()).unwrap_or("all");
+    let section = InfoSection::from_str(section);
+
+    let mut response = serde_json::json!({});
+
+    if section == InfoSection::All || section == InfoSection::Server {
+        let server_info = ServerInfo::collect(state.monitoring.uptime_secs(), 15500).await;
+        response["server"] = serde_json::to_value(server_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Memory {
+        let stores = state.monitoring.stores();
+        let memory_info =
+            MemoryInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
+        response["memory"] = serde_json::to_value(memory_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Stats {
+        let stores = state.monitoring.stores();
+        let stats_info = StatsInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
+        response["stats"] = serde_json::to_value(stats_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Replication {
+        let repl_info = ReplicationInfo::collect().await;
+        response["replication"] = serde_json::to_value(repl_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Keyspace {
+        let stores = state.monitoring.stores();
+        let keyspace_info =
+            KeyspaceInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
+        response["keyspace"] = serde_json::to_value(keyspace_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    Ok(Json(response))
+}
+
+/// SLOWLOG endpoint - get slow query log
+pub async fn slowlog(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let count = params.get("count").and_then(|s| s.parse::<usize>().ok());
+
+    let entries = state.monitoring.slow_log().get(count).await;
+    let total = state.monitoring.slow_log().len().await;
+
+    Ok(Json(serde_json::json!({
+        "entries": entries,
+        "total": total
+    })))
+}
+
+/// MEMORY USAGE endpoint - get memory usage for a key
+pub async fn memory_usage(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let key_manager = KeyManager::new(
+        state.kv_store.clone(),
+        state.hash_store.clone(),
+        state.list_store.clone(),
+        state.set_store.clone(),
+        state.sorted_set_store.clone(),
+    );
+
+    let stores = state.monitoring.stores();
+    let key_type = key_manager.key_type(&key).await?;
+
+    let usage = MemoryUsage::calculate_with_stores(
+        key_type, &key, &stores.0, &stores.1, &stores.2, &stores.3, &stores.4,
+    )
+    .await
+    .ok_or_else(|| SynapError::KeyNotFound(key.clone()))?;
+
+    Ok(Json(serde_json::to_value(usage).map_err(|e| {
+        SynapError::SerializationError(e.to_string())
+    })?))
+}
+
+/// CLIENT LIST endpoint - get active connections
+pub async fn client_list(
+    State(_state): State<AppState>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    // TODO: Implement client tracking when WebSocket tracking is added
+    Ok(Json(serde_json::json!({
+        "clients": [],
+        "count": 0
+    })))
 }
 
 // ==================== Hash REST Endpoints ====================

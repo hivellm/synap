@@ -1,6 +1,7 @@
 use rmcp::model::CallToolRequestParam;
 use serde_json::json;
 use std::sync::Arc;
+use synap_server::monitoring::MonitoringManager;
 use synap_server::{AppState, KVStore, QueueConfig, QueueManager, ServerConfig, handle_mcp_tool};
 
 #[tokio::test]
@@ -8,23 +9,35 @@ async fn test_mcp_kv_get() {
     let config = ServerConfig::default();
     let kv_store = Arc::new(KVStore::new(config.to_kv_config()));
     let hash_store = Arc::new(synap_server::core::HashStore::new());
+    let kv_store_clone = kv_store.clone();
 
+    let list_store = Arc::new(synap_server::core::ListStore::new());
+    let set_store = Arc::new(synap_server::core::SetStore::new());
+    let sorted_set_store = Arc::new(synap_server::core::SortedSetStore::new());
+    let monitoring = Arc::new(MonitoringManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
-        hash_store,
-        list_store: Arc::new(synap_server::core::ListStore::new()),
-        set_store: Arc::new(synap_server::core::SetStore::new()),
-        sorted_set_store: Arc::new(synap_server::core::SortedSetStore::new()),
+        hash_store: hash_store.clone(),
+        list_store,
+        set_store,
+        sorted_set_store,
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
         consumer_group_manager: None,
         pubsub_router: None,
         persistence: None,
+        monitoring,
     });
 
-    // Set a value first
-    kv_store
+    // Set a value first (use clone before moving to state)
+    kv_store_clone
         .set("test_key", b"test_value".to_vec(), None)
         .await
         .unwrap();
@@ -43,18 +56,30 @@ async fn test_mcp_kv_get() {
 async fn test_mcp_kv_set() {
     let config = ServerConfig::default();
     let hash_store = Arc::new(synap_server::core::HashStore::new());
+    let kv_store = Arc::new(KVStore::new(config.to_kv_config()));
+    let list_store = Arc::new(synap_server::core::ListStore::new());
+    let set_store = Arc::new(synap_server::core::SetStore::new());
+    let sorted_set_store = Arc::new(synap_server::core::SortedSetStore::new());
+    let monitoring = Arc::new(MonitoringManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
     let state = Arc::new(AppState {
-        kv_store: Arc::new(KVStore::new(config.to_kv_config())),
+        kv_store,
         hash_store,
-        list_store: Arc::new(synap_server::core::ListStore::new()),
-        set_store: Arc::new(synap_server::core::SetStore::new()),
-        sorted_set_store: Arc::new(synap_server::core::SortedSetStore::new()),
+        list_store,
+        set_store,
+        sorted_set_store,
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
         consumer_group_manager: None,
         pubsub_router: None,
         persistence: None,
+        monitoring,
     });
 
     let request = CallToolRequestParam {
@@ -71,7 +96,7 @@ async fn test_mcp_kv_set() {
     let result = handle_mcp_tool(request, state.clone()).await;
     assert!(result.is_ok());
 
-    // Verify it was set
+    // Verify it was set (use state.kv_store since state owns it)
     let value = state.kv_store.get("mcp_key").await.unwrap();
     assert!(value.is_some());
 }
@@ -81,23 +106,35 @@ async fn test_mcp_kv_delete() {
     let config = ServerConfig::default();
     let kv_store = Arc::new(KVStore::new(config.to_kv_config()));
     let hash_store = Arc::new(synap_server::core::HashStore::new());
+    let kv_store_clone = kv_store.clone();
 
+    let list_store = Arc::new(synap_server::core::ListStore::new());
+    let set_store = Arc::new(synap_server::core::SetStore::new());
+    let sorted_set_store = Arc::new(synap_server::core::SortedSetStore::new());
+    let monitoring = Arc::new(MonitoringManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
-        hash_store,
-        list_store: Arc::new(synap_server::core::ListStore::new()),
-        set_store: Arc::new(synap_server::core::SetStore::new()),
-        sorted_set_store: Arc::new(synap_server::core::SortedSetStore::new()),
+        hash_store: hash_store.clone(),
+        list_store,
+        set_store,
+        sorted_set_store,
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
         consumer_group_manager: None,
         pubsub_router: None,
         persistence: None,
+        monitoring,
     });
 
-    // Set then delete
-    kv_store
+    // Set then delete (use clone before moving to state)
+    kv_store_clone
         .set("to_del", b"value".to_vec(), None)
         .await
         .unwrap();
@@ -110,8 +147,8 @@ async fn test_mcp_kv_delete() {
     let result = handle_mcp_tool(request, state.clone()).await;
     assert!(result.is_ok());
 
-    // Verify deleted
-    let value = kv_store.get("to_del").await.unwrap();
+    // Verify deleted (kv_store was moved into state, use clone)
+    let value = kv_store_clone.get("to_del").await.unwrap();
     assert!(value.is_none());
 }
 
@@ -126,18 +163,30 @@ async fn test_mcp_queue_publish() {
     let queue_manager = Arc::new(QueueManager::new(QueueConfig::default()));
     let hash_store = Arc::new(synap_server::core::HashStore::new());
 
+    let kv_store = Arc::new(KVStore::new(config.to_kv_config()));
+    let list_store = Arc::new(synap_server::core::ListStore::new());
+    let set_store = Arc::new(synap_server::core::SetStore::new());
+    let sorted_set_store = Arc::new(synap_server::core::SortedSetStore::new());
+    let monitoring = Arc::new(MonitoringManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
     let state = Arc::new(AppState {
-        kv_store: Arc::new(KVStore::new(config.to_kv_config())),
+        kv_store,
         hash_store,
-        list_store: Arc::new(synap_server::core::ListStore::new()),
-        set_store: Arc::new(synap_server::core::SetStore::new()),
-        sorted_set_store: Arc::new(synap_server::core::SortedSetStore::new()),
+        list_store,
+        set_store,
+        sorted_set_store,
         queue_manager: Some(queue_manager.clone()),
         stream_manager: None,
         partition_manager: None,
         consumer_group_manager: None,
         pubsub_router: None,
         persistence: None,
+        monitoring,
     });
 
     // Create queue

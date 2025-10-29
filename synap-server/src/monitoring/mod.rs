@@ -22,8 +22,8 @@ mod info;
 mod memory_usage;
 mod slowlog;
 
-pub use client_list::{ClientInfo, ClientList};
-pub use info::{InfoSection, ServerInfo};
+pub use client_list::{ClientInfo, ClientList, ClientListManager};
+pub use info::{InfoSection, KeyspaceInfo, MemoryInfo, ReplicationInfo, ServerInfo, StatsInfo};
 pub use memory_usage::MemoryUsage;
 pub use slowlog::{SlowLog, SlowLogEntry, SlowLogManager};
 

@@ -17,7 +17,7 @@ impl MemoryUsage {
     /// Calculate memory usage for a key (simplified version)
     /// Takes stores directly to avoid KeyManager dependency issue
     pub async fn calculate_with_stores(
-        key_manager: &KeyManager,
+        key_type: crate::core::KeyType,
         key: &str,
         kv_store: &crate::core::KVStore,
         hash_store: &crate::core::HashStore,
@@ -26,8 +26,6 @@ impl MemoryUsage {
         sorted_set_store: &crate::core::SortedSetStore,
     ) -> Option<MemoryUsage> {
         use crate::core::KeyType;
-
-        let key_type = key_manager.key_type(key).await.ok()?;
 
         let bytes = match key_type {
             KeyType::String => {

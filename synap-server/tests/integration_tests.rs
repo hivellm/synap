@@ -2,6 +2,7 @@ use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
+use synap_server::monitoring::MonitoringManager;
 use synap_server::{AppState, KVConfig, KVStore, create_router};
 use tokio::net::TcpListener;
 
@@ -10,6 +11,13 @@ async fn spawn_test_server() -> String {
     let kv_store = Arc::new(KVStore::new(KVConfig::default()));
     let hash_store = Arc::new(synap_server::core::HashStore::new());
 
+    let monitoring = Arc::new(MonitoringManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        Arc::new(synap_server::core::ListStore::new()),
+        Arc::new(synap_server::core::SetStore::new()),
+        Arc::new(synap_server::core::SortedSetStore::new()),
+    ));
     let state = AppState {
         kv_store,
         hash_store,
@@ -22,6 +30,7 @@ async fn spawn_test_server() -> String {
         persistence: None,
         consumer_group_manager: None,
         partition_manager: None,
+        monitoring,
     };
     let app = create_router(
         state,
