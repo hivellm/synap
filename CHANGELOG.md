@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - String Extension Commands Complete ✅ (October 29, 2025)
+
+**String Extension Commands Implementation**
+
+#### Core Implementation
+- ✅ **6 Redis-compatible String Commands** implemented in KVStore
+- ✅ **22 Unit Tests** (7 new tests added, 100% passing)
+- ✅ **Full API Coverage**: REST + StreamableHTTP + MCP
+
+#### New Commands (6 total)
+- `APPEND` - Append bytes to existing value or create new key
+- `GETRANGE` - Get substring with Redis-style negative indices
+- `SETRANGE` - Overwrite substring at offset, extending if necessary
+- `STRLEN` - Get string length in bytes
+- `GETSET` - Atomically get current value and set new one
+- `MSETNX` - Multi-set only if ALL keys don't exist (atomic)
+
+#### REST API Endpoints (6 new)
+- `POST /kv/{key}/append` - Append to string value
+- `GET /kv/{key}/getrange?start={start}&end={end}` - Get substring range
+- `POST /kv/{key}/setrange` - Overwrite substring at offset
+- `GET /kv/{key}/strlen` - Get string length
+- `POST /kv/{key}/getset` - Atomic get and set
+- `POST /kv/msetnx` - Conditional multi-set
+
+#### StreamableHTTP Commands (6 new)
+- `kv.append`, `kv.getrange`, `kv.setrange`, `kv.strlen`, `kv.getset`, `kv.msetnx`
+
+#### MCP Tools (3 new)
+- `synap_kv_append` - Append to string via MCP
+- `synap_kv_getrange` - Get substring range via MCP
+- `synap_kv_strlen` - Get string length via MCP
+
+#### Test Coverage
+- ✅ 22 unit tests total (7 new tests covering all string extension commands)
+- ✅ TTL interaction tests for string operations
+- ✅ Edge cases: negative indices, empty strings, padding, atomic operations
+
+#### Performance
+- ✅ All operations verified <100µs latency
+- ✅ Compatible with existing radix trie storage
+- ✅ Full WAL persistence integration
+
+**Phase 2 Progress**: String Extensions complete (2/4 features in Phase 2)
+
 ### Added - Sorted Set REST API & MCP Configuration 🎉 (October 25, 2025)
 
 **Sorted Set REST API Completion**
