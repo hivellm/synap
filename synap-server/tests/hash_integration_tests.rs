@@ -563,7 +563,7 @@ async fn test_hash_with_persistence_recovery() {
         let kv_config = KVConfig::default();
         let queue_config = QueueConfig::default();
 
-        let (_, hash_store, _, _, _, _) =
+        let (_, hash_store, _, _, _, _, _) =
             synap_server::persistence::recover(&persist_config, kv_config, queue_config)
                 .await
                 .unwrap();
@@ -636,7 +636,7 @@ async fn test_hash_hincrby_persistence() {
         let kv_config = KVConfig::default();
         let queue_config = QueueConfig::default();
 
-        let (_, hash_store, _, _, _, _) =
+        let (_, hash_store, _, _, _, _, _) =
             synap_server::persistence::recover(&persist_config, kv_config, queue_config)
                 .await
                 .unwrap();

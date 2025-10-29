@@ -42,6 +42,13 @@ pub fn create_router(
         .route("/kv/get/{key}", get(handlers::kv_get))
         .route("/kv/del/{key}", delete(handlers::kv_delete))
         .route("/kv/stats", get(handlers::kv_stats))
+        // String extension endpoints
+        .route("/kv/{key}/append", post(handlers::kv_append))
+        .route("/kv/{key}/getrange", get(handlers::kv_getrange))
+        .route("/kv/{key}/setrange", post(handlers::kv_setrange))
+        .route("/kv/{key}/strlen", get(handlers::kv_strlen))
+        .route("/kv/{key}/getset", post(handlers::kv_getset))
+        .route("/kv/msetnx", post(handlers::kv_msetnx))
         // Hash endpoints
         .route("/hash/{key}/set", post(handlers::hash_set))
         .route("/hash/{key}/{field}", get(handlers::hash_get))

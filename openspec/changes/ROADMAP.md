@@ -40,7 +40,7 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 | Feature | Status | Change ID | Target | Duration |
 |---------|--------|-----------|--------|----------|
 | **Sorted Sets** | ✅ Complete (95%) | `add-sorted-set-data-structure` | v0.7.0-alpha | 6 weeks |
-| **String Extensions** | ⏳ Pending | `add-string-commands` | v0.6.0-alpha | 2 weeks |
+| **String Extensions** | ✅ Complete | `add-string-commands` | v0.6.0-alpha | 2 weeks |
 | **Key Management** | ⏳ Pending | `add-key-management` | v0.6.0-alpha | 2 weeks |
 | **Enhanced Monitoring** | ⏳ Pending | `add-info-commands` | v0.6.0-alpha | 3 weeks |
 
@@ -51,7 +51,7 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 - INFO command variants
 - Enhanced statistics
 
-**Progress**: 1/4 (25%) - Sorted Sets 95% complete (ready for release)
+**Progress**: 2/4 (50%) - Sorted Sets 95% complete, String Extensions complete ✅
 
 ## Phase 3: Transactions & Scripting (v0.7.0)
 
@@ -100,20 +100,20 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 
 ### By Phase
 - **Phase 1**: 100% (3/3 features complete) ✅
-- **Phase 2**: 0% (0/4 features complete)
+- **Phase 2**: 50% (2/4 features complete) - Sorted Set + String Extensions complete ✅
 - **Phase 3**: 0% (0/2 features complete)
 - **Phase 4**: 0% (0/4 features complete)
 
 ### Overall
 - **Total Features**: 13
-- **Completed**: 3 ✅
+- **Completed**: 5 ✅ (Hash, List, Set, Sorted Set, String Extensions)
 - **In Progress**: 0 🔄
-- **Planned**: 10 📋
-- **Completion**: 23.1%
+- **Planned**: 9 📋
+- **Completion**: 38.5%
 
 ### By Priority
 - **CRITICAL**: 100% (3/3) ✅
-- **HIGH**: 0% (0/6)
+- **HIGH**: 33.3% (2/6) - Sorted Set + String Extensions complete ✅
 - **MEDIUM**: 0% (0/4)
 
 ## Active Changes
@@ -139,10 +139,10 @@ Currently active OpenSpec changes:
 
 ### Phase 2: Advanced Operations
 
-4. ✅ **add-sorted-set-data-structure** (READY FOR RELEASE - 95%)
-   - Status: Core + API + Tests + Persistence COMPLETE
-   - Target: v0.7.0-alpha
-   - Progress: 190/200 tasks (95%)
+4. ✅ **add-sorted-set-data-structure** (COMPLETE & ARCHIVED)
+   - Status: Archived to `archive/2025-10-29-add-sorted-set-data-structure/`
+   - Target: v0.7.0-alpha (implemented in v0.6.0-alpha)
+   - Progress: 190/200 tasks (95% - core features complete, benchmarks deferred to v1.1)
    - Completed:
      * ✅ Phase 1: Core Implementation (100%)
      * ✅ Phase 2: Range & Ranking (100%)
@@ -152,10 +152,12 @@ Currently active OpenSpec changes:
    - Optional:
      * 📊 Phase 6: Benchmarking (deferred to v1.1)
 
-5. 📋 **add-string-extensions** (DRAFT)
-   - Status: Proposal created
+5. ✅ **add-string-extensions** (COMPLETE)
+   - Status: Complete - all 6 commands implemented with full test coverage
    - Target: v0.6.0-alpha
-   - ~50 tasks, 2 weeks
+   - 6 commands: APPEND, GETRANGE, SETRANGE, STRLEN, GETSET, MSETNX
+   - 22 unit tests (including TTL edge cases)
+   - REST + StreamableHTTP + MCP API coverage
 
 6. 📋 **add-key-management** (DRAFT)
    - Status: Proposal created
@@ -207,20 +209,21 @@ Currently active OpenSpec changes:
 1. ✅ Archive `implement-hash-data-structure` - DONE
 2. ✅ Archive `add-list-data-structure` - DONE
 3. ✅ Archive `add-set-data-structure` - DONE (2025-10-25)
-4. [ ] Fix persistence test compilation errors (if any)
-5. [ ] Tag v0.6.0-alpha release with Hash + List + Set
-6. [ ] Tag v1.0.0-rc1 (all core features complete)
+4. ✅ Archive `add-sorted-set-data-structure` - DONE (2025-10-29)
+5. [ ] Fix persistence test compilation errors (if any)
+6. [ ] Tag v0.6.0-alpha release with Hash + List + Set + Sorted Set
+7. [ ] Tag v1.0.0-rc1 (all core features complete)
 
 ### Short Term (Next 1-2 months)
-1. ✅ Hashes, Lists, Sets - ALL COMPLETE
-2. Begin Sorted Sets implementation (`add-sorted-set-data-structure`)
+1. ✅ Hashes, Lists, Sets, Sorted Sets - ALL COMPLETE
+2. Begin String Extensions implementation (`add-string-extensions`)
 3. Release v1.0.0 stable (production ready)
 
 ### Medium Term (Next 6 months)
-1. Begin Sorted Sets implementation
+1. ✅ Sorted Sets - COMPLETE (archived)
 2. Add String command extensions
 3. Implement key management commands
-4. Release v0.6.0-alpha
+4. Release v0.7.0-alpha with Sorted Sets
 
 ### Long Term (6-18 months)
 1. Implement transactions (MULTI/EXEC/WATCH)
@@ -234,6 +237,9 @@ Currently active OpenSpec changes:
 - ✅ Hashes: 15 commands, 100% complete, all targets met
 - ✅ Lists: 16 commands, 100% complete, all targets met
 - ✅ Sets: 14 commands, 85% complete (core features done, benchmarks deferred)
+
+### Phase 2 Targets
+- ✅ Sorted Sets: 18 commands, 95% complete (core features done, benchmarks deferred to v1.1)
 
 ### Overall Targets
 - **Compatibility**: 80% Redis command coverage in target structures
@@ -275,7 +281,8 @@ graph TD
 
 ---
 
-**Last Updated**: 2025-10-24  
-**Next Review**: After Phase 2 begins (Sorted Sets)  
-**Phase 1 Status**: ✅ **COMPLETE** (3/3 data structures implemented)
+**Last Updated**: 2025-10-29  
+**Next Review**: After Phase 2 String Extensions begins  
+**Phase 1 Status**: ✅ **COMPLETE** (3/3 data structures implemented)  
+**Phase 2 Status**: 🔄 **IN PROGRESS** (1/4 features complete - Sorted Set done ✅)
 

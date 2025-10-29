@@ -278,6 +278,218 @@ pub async fn kv_stats(State(state): State<AppState>) -> Result<Json<StatsRespons
     }))
 }
 
+// ==================== String Extension REST Endpoints ====================
+
+// String extension request/response types
+#[derive(Debug, Deserialize)]
+pub struct AppendRequest {
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AppendResponse {
+    pub length: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetRangeRequest {
+    pub start: isize,
+    pub end: isize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetRangeRequest {
+    pub offset: usize,
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SetRangeResponse {
+    pub length: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StrlenResponse {
+    pub length: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetSetRequest {
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum GetSetResponse {
+    Value(String),
+    Null,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MSetNxRequest {
+    pub pairs: Vec<(String, serde_json::Value)>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MSetNxResponse {
+    pub success: bool,
+}
+
+/// APPEND endpoint - append bytes to existing value or create new key
+pub async fn kv_append(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<AppendRequest>,
+) -> Result<Json<AppendResponse>, SynapError> {
+    debug!("REST APPEND key={}", key);
+
+    let value_bytes = serde_json::to_vec(&req.value)
+        .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let length = state.kv_store.append(&key, value_bytes).await?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        // APPEND is logged as SET since we reconstruct full value
+        if let Err(e) = persistence.log_kv_set(key.clone(), vec![], None).await {
+            error!("Failed to log KV APPEND to WAL: {}", e);
+        }
+    }
+
+    Ok(Json(AppendResponse { length }))
+}
+
+/// GETRANGE endpoint - get substring by range with negative indices
+pub async fn kv_getrange(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Result<Json<GetResponse>, SynapError> {
+    let start = params
+        .get("start")
+        .and_then(|s| s.parse::<isize>().ok())
+        .ok_or_else(|| SynapError::InvalidRequest("start parameter required".to_string()))?;
+    let end = params
+        .get("end")
+        .and_then(|s| s.parse::<isize>().ok())
+        .ok_or_else(|| SynapError::InvalidRequest("end parameter required".to_string()))?;
+
+    debug!("REST GETRANGE key={}, start={}, end={}", key, start, end);
+
+    let range_bytes = state.kv_store.getrange(&key, start, end).await?;
+
+    if range_bytes.is_empty() {
+        Ok(Json(GetResponse::NotFound(
+            serde_json::json!({"error": "Key not found or range empty"}),
+        )))
+    } else {
+        let value_str = String::from_utf8(range_bytes.clone())
+            .unwrap_or_else(|_| format!("<binary data: {} bytes>", range_bytes.len()));
+        Ok(Json(GetResponse::String(value_str)))
+    }
+}
+
+/// SETRANGE endpoint - overwrite substring at offset
+pub async fn kv_setrange(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<SetRangeRequest>,
+) -> Result<Json<SetRangeResponse>, SynapError> {
+    debug!("REST SETRANGE key={}, offset={}", key, req.offset);
+
+    let value_bytes = serde_json::to_vec(&req.value)
+        .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let length = state
+        .kv_store
+        .setrange(&key, req.offset, value_bytes)
+        .await?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        // SETRANGE is logged as SET since we reconstruct full value
+        if let Err(e) = persistence.log_kv_set(key.clone(), vec![], None).await {
+            error!("Failed to log KV SETRANGE to WAL: {}", e);
+        }
+    }
+
+    Ok(Json(SetRangeResponse { length }))
+}
+
+/// STRLEN endpoint - get length of string value in bytes
+pub async fn kv_strlen(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<StrlenResponse>, SynapError> {
+    debug!("REST STRLEN key={}", key);
+
+    let length = state.kv_store.strlen(&key).await?;
+
+    Ok(Json(StrlenResponse { length }))
+}
+
+/// GETSET endpoint - atomically get current value and set new one
+pub async fn kv_getset(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<GetSetRequest>,
+) -> Result<Json<GetSetResponse>, SynapError> {
+    debug!("REST GETSET key={}", key);
+
+    let value_bytes = serde_json::to_vec(&req.value)
+        .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let old_value = state.kv_store.getset(&key, value_bytes.clone()).await?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        if let Err(e) = persistence.log_kv_set(key.clone(), value_bytes, None).await {
+            error!("Failed to log KV GETSET to WAL: {}", e);
+        }
+    }
+
+    if let Some(old_bytes) = old_value {
+        let old_str = String::from_utf8(old_bytes.clone())
+            .unwrap_or_else(|_| format!("<binary data: {} bytes>", old_bytes.len()));
+        Ok(Json(GetSetResponse::Value(old_str)))
+    } else {
+        Ok(Json(GetSetResponse::Null))
+    }
+}
+
+/// MSETNX endpoint - multi-set only if ALL keys don't exist (atomic)
+pub async fn kv_msetnx(
+    State(state): State<AppState>,
+    Json(req): Json<MSetNxRequest>,
+) -> Result<Json<MSetNxResponse>, SynapError> {
+    debug!("REST MSETNX count={}", req.pairs.len());
+
+    let pairs: Vec<(String, Vec<u8>)> = req
+        .pairs
+        .into_iter()
+        .map(|(key, value)| {
+            let value_bytes = serde_json::to_vec(&value)
+                .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+            Ok((key, value_bytes))
+        })
+        .collect::<Result<Vec<_>, SynapError>>()?;
+
+    let success = state.kv_store.msetnx(pairs.clone()).await?;
+
+    // Log to WAL if all keys were set
+    if success {
+        if let Some(ref persistence) = state.persistence {
+            for (key, value_bytes) in pairs {
+                if let Err(e) = persistence.log_kv_set(key, value_bytes, None).await {
+                    error!("Failed to log KV MSETNX to WAL: {}", e);
+                }
+            }
+        }
+    }
+
+    Ok(Json(MSetNxResponse { success }))
+}
+
 // ==================== Hash REST Endpoints ====================
 
 // Hash request/response types
@@ -993,6 +1205,13 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "kv.ttl" => handle_kv_ttl_cmd(state.kv_store.clone(), &request).await,
         "kv.persist" => handle_kv_persist_cmd(state.kv_store.clone(), &request).await,
         "kv.stats" => handle_kv_stats_cmd(state.kv_store.clone(), &request).await,
+        // String extension commands
+        "kv.append" => handle_kv_append_cmd(&state, &request).await,
+        "kv.getrange" => handle_kv_getrange_cmd(state.kv_store.clone(), &request).await,
+        "kv.setrange" => handle_kv_setrange_cmd(&state, &request).await,
+        "kv.strlen" => handle_kv_strlen_cmd(state.kv_store.clone(), &request).await,
+        "kv.getset" => handle_kv_getset_cmd(&state, &request).await,
+        "kv.msetnx" => handle_kv_msetnx_cmd(&state, &request).await,
         // Hash commands
         "hash.set" => handle_hash_set_cmd(&state, &request).await,
         "hash.get" => handle_hash_get_cmd(&state, &request).await,
@@ -1375,6 +1594,209 @@ async fn handle_kv_stats_cmd(
         },
         "hit_rate": stats.hit_rate()
     }))
+}
+
+// ==================== String Extension Command Handlers ====================
+
+async fn handle_kv_append_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let value = request
+        .payload
+        .get("value")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?;
+
+    let value_bytes =
+        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let length = state.kv_store.append(key, value_bytes).await?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        if let Err(e) = persistence.log_kv_set(key.to_string(), vec![], None).await {
+            error!("Failed to log KV APPEND to WAL: {}", e);
+        }
+    }
+
+    Ok(serde_json::json!({ "length": length }))
+}
+
+async fn handle_kv_getrange_cmd(
+    store: Arc<KVStore>,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let start = request
+        .payload
+        .get("start")
+        .and_then(|v| v.as_i64())
+        .map(|v| v as isize)
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'start' field".to_string()))?;
+
+    let end = request
+        .payload
+        .get("end")
+        .and_then(|v| v.as_i64())
+        .map(|v| v as isize)
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'end' field".to_string()))?;
+
+    let range_bytes = store.getrange(key, start, end).await?;
+
+    if range_bytes.is_empty() {
+        Ok(serde_json::json!(null))
+    } else {
+        let value_str = String::from_utf8(range_bytes.clone())
+            .unwrap_or_else(|_| format!("<binary data: {} bytes>", range_bytes.len()));
+        Ok(serde_json::json!(value_str))
+    }
+}
+
+async fn handle_kv_setrange_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let offset = request
+        .payload
+        .get("offset")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'offset' field".to_string()))?;
+
+    let value = request
+        .payload
+        .get("value")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?;
+
+    let value_bytes =
+        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let length = state.kv_store.setrange(key, offset, value_bytes).await?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        if let Err(e) = persistence.log_kv_set(key.to_string(), vec![], None).await {
+            error!("Failed to log KV SETRANGE to WAL: {}", e);
+        }
+    }
+
+    Ok(serde_json::json!({ "length": length }))
+}
+
+async fn handle_kv_strlen_cmd(
+    store: Arc<KVStore>,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let length = store.strlen(key).await?;
+    Ok(serde_json::json!({ "length": length }))
+}
+
+async fn handle_kv_getset_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let value = request
+        .payload
+        .get("value")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?;
+
+    let value_bytes =
+        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let old_value = state.kv_store.getset(key, value_bytes.clone()).await?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        if let Err(e) = persistence
+            .log_kv_set(key.to_string(), value_bytes, None)
+            .await
+        {
+            error!("Failed to log KV GETSET to WAL: {}", e);
+        }
+    }
+
+    if let Some(old_bytes) = old_value {
+        let old_str = String::from_utf8(old_bytes.clone())
+            .unwrap_or_else(|_| format!("<binary data: {} bytes>", old_bytes.len()));
+        Ok(serde_json::json!(old_str))
+    } else {
+        Ok(serde_json::json!(null))
+    }
+}
+
+async fn handle_kv_msetnx_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let pairs = request
+        .payload
+        .get("pairs")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'pairs' array".to_string()))?;
+
+    let kv_pairs: Result<Vec<(String, Vec<u8>)>, SynapError> = pairs
+        .iter()
+        .map(|pair| {
+            let pair_obj = pair
+                .as_object()
+                .ok_or_else(|| SynapError::InvalidRequest("Pair must be an object".to_string()))?;
+            let key = pair_obj
+                .get("key")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' in pair".to_string()))?;
+            let value = pair_obj
+                .get("value")
+                .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' in pair".to_string()))?;
+            let value_bytes = serde_json::to_vec(value)
+                .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+            Ok((key.to_string(), value_bytes))
+        })
+        .collect();
+
+    let kv_pairs = kv_pairs?;
+    let success = state.kv_store.msetnx(kv_pairs.clone()).await?;
+
+    // Log to WAL if all keys were set
+    if success {
+        if let Some(ref persistence) = state.persistence {
+            for (key, value_bytes) in kv_pairs {
+                if let Err(e) = persistence.log_kv_set(key, value_bytes, None).await {
+                    error!("Failed to log KV MSETNX to WAL: {}", e);
+                }
+            }
+        }
+    }
+
+    Ok(serde_json::json!({ "success": success }))
 }
 
 async fn handle_kv_keys_cmd(

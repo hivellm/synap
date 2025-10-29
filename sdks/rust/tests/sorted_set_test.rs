@@ -1,11 +1,9 @@
 use synap_sdk::{SynapClient, SynapConfig};
 
-mod common;
-
 #[tokio::test]
 async fn test_sorted_set_basic_operations() {
-    let server_url = common::start_test_server().await;
-    let config = SynapConfig::new(&server_url);
+    // Note: These are interface tests - will fail if server not running
+    let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).unwrap();
 
     // ZADD - Add members
@@ -93,8 +91,8 @@ async fn test_sorted_set_basic_operations() {
 
 #[tokio::test]
 async fn test_sorted_set_range_operations() {
-    let server_url = common::start_test_server().await;
-    let config = SynapConfig::new(&server_url);
+    // Note: These are interface tests - will fail if server not running
+    let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).unwrap();
 
     // Add test data
@@ -144,8 +142,8 @@ async fn test_sorted_set_range_operations() {
 
 #[tokio::test]
 async fn test_sorted_set_increment() {
-    let server_url = common::start_test_server().await;
-    let config = SynapConfig::new(&server_url);
+    // Note: These are interface tests - will fail if server not running
+    let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).unwrap();
 
     // ZINCRBY - Increment score
@@ -174,8 +172,8 @@ async fn test_sorted_set_increment() {
 
 #[tokio::test]
 async fn test_sorted_set_pop_operations() {
-    let server_url = common::start_test_server().await;
-    let config = SynapConfig::new(&server_url);
+    // Note: These are interface tests - will fail if server not running
+    let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).unwrap();
 
     // Add test data
@@ -210,8 +208,8 @@ async fn test_sorted_set_pop_operations() {
 
 #[tokio::test]
 async fn test_sorted_set_remove_range() {
-    let server_url = common::start_test_server().await;
-    let config = SynapConfig::new(&server_url);
+    // Note: These are interface tests - will fail if server not running
+    let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).unwrap();
 
     // Add test data
@@ -250,8 +248,8 @@ async fn test_sorted_set_remove_range() {
 
 #[tokio::test]
 async fn test_sorted_set_set_operations() {
-    let server_url = common::start_test_server().await;
-    let config = SynapConfig::new(&server_url);
+    // Note: These are interface tests - will fail if server not running
+    let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).unwrap();
 
     // Create two sorted sets
@@ -290,8 +288,8 @@ async fn test_sorted_set_set_operations() {
 
 #[tokio::test]
 async fn test_sorted_set_stats() {
-    let server_url = common::start_test_server().await;
-    let config = SynapConfig::new(&server_url);
+    // Note: These are interface tests - will fail if server not running
+    let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).unwrap();
 
     // Add some data
