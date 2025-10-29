@@ -1,5 +1,9 @@
 # Tasks: Add String Command Extensions
 
+> **Status**: ✅ Complete  
+> **Completion Date**: October 29, 2025  
+> **Note**: Integration tests and benchmarks deferred to v1.1
+
 ## Core (6 commands, ~50 tasks, 2 weeks)
 
 ### Implementation

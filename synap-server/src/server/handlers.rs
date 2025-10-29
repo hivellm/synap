@@ -1,5 +1,6 @@
 use crate::core::{
     HashStore, KVStore, KeyManager, Message, QueueManager, SortedSetStore, SynapError,
+    TransactionManager,
 };
 use crate::monitoring::{
     InfoSection, KeyspaceInfo, MemoryInfo, MemoryUsage, ReplicationInfo, ServerInfo, StatsInfo,
@@ -36,6 +37,7 @@ pub struct AppState {
     pub pubsub_router: Option<Arc<crate::core::PubSubRouter>>,
     pub persistence: Option<Arc<crate::persistence::PersistenceLayer>>,
     pub monitoring: Arc<crate::monitoring::MonitoringManager>,
+    pub transaction_manager: Arc<TransactionManager>,
 }
 
 // Request/Response types for REST API
@@ -776,6 +778,102 @@ pub async fn client_list(
     })))
 }
 
+// ==================== Transaction REST Endpoints ====================
+
+#[derive(Debug, Deserialize)]
+pub struct WatchRequest {
+    pub keys: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MultiResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum ExecResponse {
+    Success { results: Vec<serde_json::Value> },
+    Aborted { aborted: bool },
+}
+
+/// MULTI endpoint - start a transaction
+pub async fn transaction_multi(
+    State(state): State<AppState>,
+) -> Result<Json<MultiResponse>, SynapError> {
+    // For REST API, we'll use a client_id based on request context
+    // In production, this should come from authentication/session
+    let client_id = "rest_client".to_string();
+
+    debug!("REST MULTI client_id={}", client_id);
+    state.transaction_manager.multi(client_id)?;
+
+    Ok(Json(MultiResponse {
+        success: true,
+        message: "Transaction started".to_string(),
+    }))
+}
+
+/// DISCARD endpoint - discard current transaction
+pub async fn transaction_discard(
+    State(state): State<AppState>,
+) -> Result<Json<MultiResponse>, SynapError> {
+    let client_id = "rest_client";
+
+    debug!("REST DISCARD client_id={}", client_id);
+    state.transaction_manager.discard(client_id)?;
+
+    Ok(Json(MultiResponse {
+        success: true,
+        message: "Transaction discarded".to_string(),
+    }))
+}
+
+/// WATCH endpoint - watch keys for changes
+pub async fn transaction_watch(
+    State(state): State<AppState>,
+    Json(req): Json<WatchRequest>,
+) -> Result<Json<MultiResponse>, SynapError> {
+    let client_id = "rest_client";
+
+    debug!("REST WATCH client_id={}, keys={:?}", client_id, req.keys);
+    state.transaction_manager.watch(client_id, req.keys)?;
+
+    Ok(Json(MultiResponse {
+        success: true,
+        message: "Keys watched".to_string(),
+    }))
+}
+
+/// UNWATCH endpoint - unwatch all keys
+pub async fn transaction_unwatch(
+    State(state): State<AppState>,
+) -> Result<Json<MultiResponse>, SynapError> {
+    let client_id = "rest_client";
+
+    debug!("REST UNWATCH client_id={}", client_id);
+    state.transaction_manager.unwatch(client_id)?;
+
+    Ok(Json(MultiResponse {
+        success: true,
+        message: "Keys unwatched".to_string(),
+    }))
+}
+
+/// EXEC endpoint - execute transaction
+pub async fn transaction_exec(
+    State(state): State<AppState>,
+) -> Result<Json<ExecResponse>, SynapError> {
+    let client_id = "rest_client";
+
+    debug!("REST EXEC client_id={}", client_id);
+    match state.transaction_manager.exec(client_id).await? {
+        Some(results) => Ok(Json(ExecResponse::Success { results })),
+        None => Ok(Json(ExecResponse::Aborted { aborted: true })),
+    }
+}
+
 // ==================== Hash REST Endpoints ====================
 
 // Hash request/response types
@@ -1511,6 +1609,12 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "slowlog.reset" => handle_slowlog_reset_cmd(state.clone(), &request).await,
         "memory.usage" => handle_memory_usage_cmd(state.clone(), &request).await,
         "client.list" => handle_client_list_cmd(state.clone(), &request).await,
+        // Transaction commands
+        "transaction.multi" => handle_transaction_multi_cmd(state.clone(), &request).await,
+        "transaction.exec" => handle_transaction_exec_cmd(state.clone(), &request).await,
+        "transaction.discard" => handle_transaction_discard_cmd(state.clone(), &request).await,
+        "transaction.watch" => handle_transaction_watch_cmd(state.clone(), &request).await,
+        "transaction.unwatch" => handle_transaction_unwatch_cmd(state.clone(), &request).await,
         // Hash commands
         "hash.set" => handle_hash_set_cmd(&state, &request).await,
         "hash.get" => handle_hash_get_cmd(&state, &request).await,
@@ -4895,6 +4999,122 @@ async fn handle_client_list_cmd(
         "clients": [],
         "count": 0
     }))
+}
+
+// ============================================================================
+// Transaction StreamableHTTP Command Handlers
+// ============================================================================
+
+async fn handle_transaction_multi_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    // Get client_id from request payload, default to request_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&request.request_id);
+
+    debug!("StreamableHTTP MULTI client_id={}", client_id);
+    state.transaction_manager.multi(client_id.to_string())?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Transaction started"
+    }))
+}
+
+async fn handle_transaction_discard_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&request.request_id);
+
+    debug!("StreamableHTTP DISCARD client_id={}", client_id);
+    state.transaction_manager.discard(client_id)?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Transaction discarded"
+    }))
+}
+
+async fn handle_transaction_watch_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&request.request_id);
+
+    let keys = request
+        .payload
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'keys' field".to_string()))?
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
+
+    debug!(
+        "StreamableHTTP WATCH client_id={}, keys={:?}",
+        client_id, keys
+    );
+    state.transaction_manager.watch(client_id, keys)?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Keys watched"
+    }))
+}
+
+async fn handle_transaction_unwatch_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&request.request_id);
+
+    debug!("StreamableHTTP UNWATCH client_id={}", client_id);
+    state.transaction_manager.unwatch(client_id)?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Keys unwatched"
+    }))
+}
+
+async fn handle_transaction_exec_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&request.request_id);
+
+    debug!("StreamableHTTP EXEC client_id={}", client_id);
+    match state.transaction_manager.exec(client_id).await? {
+        Some(results) => Ok(serde_json::json!({
+            "success": true,
+            "results": results
+        })),
+        None => Ok(serde_json::json!({
+            "aborted": true,
+            "message": "Transaction aborted: watched keys changed"
+        })),
+    }
 }
 
 // ============================================================================

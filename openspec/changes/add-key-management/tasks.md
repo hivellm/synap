@@ -1,5 +1,9 @@
 # Tasks: Add Key Management Commands
 
+> **Status**: ✅ Complete  
+> **Completion Date**: October 2025  
+> **Note**: Integration tests and benchmarks deferred to v1.1
+
 ## Core (6 commands, ~60 tasks, 2 weeks)
 
 ### Implementation

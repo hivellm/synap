@@ -1,5 +1,9 @@
 # Tasks: Add Bitmap Operations
 
+> **Status**: 📋 Pending  
+> **Target**: v0.8.0-alpha  
+> **Priority**: Medium (Phase 4)
+
 ## Core (8 commands, ~70 tasks, 3 weeks)
 
 ### Implementation

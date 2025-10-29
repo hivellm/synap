@@ -1,6 +1,7 @@
 use rmcp::model::{CallToolRequestParam, CallToolResult, Content, ErrorData};
 use serde_json::json;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::server::AppState;
 
@@ -39,6 +40,9 @@ pub async fn handle_mcp_tool(
         "synap_sortedset_zadd" => handle_sortedset_zadd(request, state).await,
         "synap_sortedset_zrange" => handle_sortedset_zrange(request, state).await,
         "synap_sortedset_zrank" => handle_sortedset_zrank(request, state).await,
+        // Transaction tools (2)
+        "synap_transaction_multi" => handle_transaction_multi(request, state).await,
+        "synap_transaction_exec" => handle_transaction_exec(request, state).await,
         _ => Err(ErrorData::invalid_params("Unknown tool", None)),
     }
 }
@@ -853,4 +857,74 @@ async fn handle_sortedset_zrank(
     Ok(CallToolResult::success(vec![Content::text(
         json!({"rank": rank, "key": key, "member": member}).to_string(),
     )]))
+}
+
+// ==================== Transaction MCP Handlers ====================
+
+async fn handle_transaction_multi(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    // Get client_id from args or generate one
+    let client_id = match args.get("client_id").and_then(|v| v.as_str()) {
+        Some(id) => id.to_string(),
+        None => Uuid::new_v4().to_string(),
+    };
+
+    state
+        .transaction_manager
+        .multi(client_id.clone())
+        .map_err(|e| ErrorData::internal_error(format!("Transaction multi failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({
+            "success": true,
+            "message": "Transaction started",
+            "client_id": client_id
+        })
+        .to_string(),
+    )]))
+}
+
+async fn handle_transaction_exec(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let client_id = args
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing client_id", None))?
+        .to_string();
+
+    match state
+        .transaction_manager
+        .exec(&client_id)
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("Transaction exec failed: {}", e), None))?
+    {
+        Some(results) => Ok(CallToolResult::success(vec![Content::text(
+            json!({
+                "success": true,
+                "results": results
+            })
+            .to_string(),
+        )])),
+        None => Ok(CallToolResult::success(vec![Content::text(
+            json!({
+                "aborted": true,
+                "message": "Transaction aborted: watched keys changed"
+            })
+            .to_string(),
+        )])),
+    }
 }

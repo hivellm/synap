@@ -21,6 +21,13 @@ async fn test_mcp_kv_get() {
         set_store.clone(),
         sorted_set_store.clone(),
     ));
+    let transaction_manager = Arc::new(synap_server::core::TransactionManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
         hash_store: hash_store.clone(),
@@ -34,6 +41,7 @@ async fn test_mcp_kv_get() {
         pubsub_router: None,
         persistence: None,
         monitoring,
+        transaction_manager,
     });
 
     // Set a value first (use clone before moving to state)
@@ -67,6 +75,13 @@ async fn test_mcp_kv_set() {
         set_store.clone(),
         sorted_set_store.clone(),
     ));
+    let transaction_manager = Arc::new(synap_server::core::TransactionManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
     let state = Arc::new(AppState {
         kv_store,
         hash_store,
@@ -80,6 +95,7 @@ async fn test_mcp_kv_set() {
         pubsub_router: None,
         persistence: None,
         monitoring,
+        transaction_manager,
     });
 
     let request = CallToolRequestParam {
@@ -118,6 +134,13 @@ async fn test_mcp_kv_delete() {
         set_store.clone(),
         sorted_set_store.clone(),
     ));
+    let transaction_manager = Arc::new(synap_server::core::TransactionManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
         hash_store: hash_store.clone(),
@@ -131,6 +154,7 @@ async fn test_mcp_kv_delete() {
         pubsub_router: None,
         persistence: None,
         monitoring,
+        transaction_manager,
     });
 
     // Set then delete (use clone before moving to state)
@@ -174,6 +198,13 @@ async fn test_mcp_queue_publish() {
         set_store.clone(),
         sorted_set_store.clone(),
     ));
+    let transaction_manager = Arc::new(synap_server::core::TransactionManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
     let state = Arc::new(AppState {
         kv_store,
         hash_store,
@@ -187,6 +218,7 @@ async fn test_mcp_queue_publish() {
         pubsub_router: None,
         persistence: None,
         monitoring,
+        transaction_manager,
     });
 
     // Create queue

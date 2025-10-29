@@ -21,6 +21,14 @@ pub fn create_test_app_state_with_stores(
         sorted_set_store.clone(),
     ));
 
+    let transaction_manager = Arc::new(synap_server::core::TransactionManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
+
     AppState {
         kv_store,
         hash_store,
@@ -34,5 +42,6 @@ pub fn create_test_app_state_with_stores(
         pubsub_router: None,
         persistence: None,
         monitoring,
+        transaction_manager,
     }
 }

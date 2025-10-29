@@ -1,5 +1,9 @@
 # Tasks: Add Geospatial Indexes
 
+> **Status**: 📋 Pending  
+> **Target**: v0.8.0-alpha  
+> **Priority**: Medium (Phase 4)
+
 ## Core (7 commands, ~90 tasks, 4 weeks)
 
 ### Implementation

@@ -39,6 +39,11 @@ pub fn get_mcp_tools(config: &McpConfig) -> Vec<Tool> {
         tools.extend(get_sortedset_tools());
     }
 
+    // Transaction Tools (2)
+    if config.enable_transaction_tools {
+        tools.extend(get_transaction_tools());
+    }
+
     tools
 }
 
@@ -583,9 +588,10 @@ fn get_sortedset_tools() -> Vec<Tool> {
 // - Set Tools (3): synap_set_add, synap_set_members, synap_set_inter
 // - Queue Tools (1): synap_queue_publish
 // - Sorted Set Tools (3): synap_sortedset_zadd, synap_sortedset_zrange, synap_sortedset_zrank
+// - Transaction Tools (2): synap_transaction_multi, synap_transaction_exec
 //
 // Default enabled (4 tools): KV (3) + Queue (1)
-// Maximum tools: 16 (if all categories enabled)
+// Maximum tools: 18 (if all categories enabled)
 //
 // Cursor MCP Limit Considerations:
 // - Cursor has a limit on the number of MCP tools it can handle efficiently
@@ -594,3 +600,55 @@ fn get_sortedset_tools() -> Vec<Tool> {
 //
 // Note: All functionality is also available via REST API and StreamableHTTP,
 // so disabling MCP tools doesn't reduce available features
+
+fn get_transaction_tools() -> Vec<Tool> {
+    vec![
+        Tool {
+            name: Cow::Borrowed("synap_transaction_multi"),
+            title: Some("Start Transaction".to_string()),
+            description: Some(Cow::Borrowed(
+                "Start a new transaction. After calling this, all subsequent commands will be queued until EXEC is called.",
+            )),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "client_id": {
+                        "type": "string",
+                        "description": "Unique client identifier (optional, auto-generated if not provided)"
+                    }
+                }
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_transaction_exec"),
+            title: Some("Execute Transaction".to_string()),
+            description: Some(Cow::Borrowed(
+                "Execute all queued commands in the transaction atomically. Returns results array or null if transaction was aborted due to watched keys changing.",
+            )),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "client_id": {
+                        "type": "string",
+                        "description": "Unique client identifier (must match the one used in MULTI)"
+                    }
+                },
+                "required": ["client_id"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
+    ]
+}

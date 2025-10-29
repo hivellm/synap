@@ -61,6 +61,12 @@ pub fn create_router(
         .route("/slowlog", get(handlers::slowlog))
         .route("/memory/{key}/usage", get(handlers::memory_usage))
         .route("/clients", get(handlers::client_list))
+        // Transaction endpoints
+        .route("/transaction/multi", post(handlers::transaction_multi))
+        .route("/transaction/exec", post(handlers::transaction_exec))
+        .route("/transaction/discard", post(handlers::transaction_discard))
+        .route("/transaction/watch", post(handlers::transaction_watch))
+        .route("/transaction/unwatch", post(handlers::transaction_unwatch))
         // Hash endpoints
         .route("/hash/{key}/set", post(handlers::hash_set))
         .route("/hash/{key}/{field}", get(handlers::hash_get))

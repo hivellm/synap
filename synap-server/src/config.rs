@@ -105,6 +105,10 @@ pub struct McpConfig {
     /// Enable Sorted Set tools (synap_sortedset_zadd, synap_sortedset_zrange, synap_sortedset_zrank)
     #[serde(default)]
     pub enable_sortedset_tools: bool,
+
+    /// Enable Transaction tools (synap_transaction_multi, synap_transaction_exec)
+    #[serde(default)]
+    pub enable_transaction_tools: bool,
 }
 
 fn default_true() -> bool {
@@ -114,12 +118,13 @@ fn default_true() -> bool {
 impl Default for McpConfig {
     fn default() -> Self {
         Self {
-            enable_kv_tools: true,         // Essential - always enabled by default
-            enable_hash_tools: false,      // Optional
-            enable_list_tools: false,      // Optional
-            enable_set_tools: false,       // Optional
-            enable_queue_tools: true,      // Essential - enabled by default
-            enable_sortedset_tools: false, // Optional
+            enable_kv_tools: true,           // Essential - always enabled by default
+            enable_hash_tools: false,        // Optional
+            enable_list_tools: false,        // Optional
+            enable_set_tools: false,         // Optional
+            enable_queue_tools: true,        // Essential - enabled by default
+            enable_sortedset_tools: false,   // Optional
+            enable_transaction_tools: false, // Optional
         }
     }
 }

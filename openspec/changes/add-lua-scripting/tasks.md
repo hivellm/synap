@@ -1,5 +1,9 @@
 # Tasks: Add Lua Scripting Support
 
+> **Status**: 📋 Pending  
+> **Target**: v0.7.0-alpha  
+> **Priority**: High (Phase 3)
+
 ## Core (6 commands, ~150 tasks, 8 weeks)
 
 ### Implementation

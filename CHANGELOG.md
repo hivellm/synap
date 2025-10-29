@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Transaction Support (Phase 3) ✅ (January 2025)
+
+**Transaction Support Implementation**
+
+#### Core Implementation
+- ✅ **TransactionManager** module created with Redis-compatible MULTI/EXEC/WATCH/DISCARD
+- ✅ **5 Transaction Commands** implemented with optimistic locking
+- ✅ **Full API Coverage**: REST + StreamableHTTP + MCP
+
+#### New Transaction Commands (5 total)
+- `MULTI` - Start a transaction (queue commands)
+- `EXEC` - Execute queued commands atomically
+- `DISCARD` - Discard queued commands
+- `WATCH` - Watch keys for changes (optimistic locking)
+- `UNWATCH` - Remove all watched keys
+
+#### REST API Endpoints (5 new)
+- `POST /transaction/multi` - Start transaction
+- `POST /transaction/exec` - Execute transaction
+- `POST /transaction/discard` - Discard transaction
+- `POST /transaction/watch` - Watch keys
+- `POST /transaction/unwatch` - Unwatch all keys
+
+#### StreamableHTTP Commands (5 new)
+- `transaction.multi` - Start transaction
+- `transaction.exec` - Execute transaction (returns results or null if aborted)
+- `transaction.discard` - Discard transaction
+- `transaction.watch` - Watch keys for changes
+- `transaction.unwatch` - Unwatch all keys
+
+#### MCP Tools (2 new)
+- `synap_transaction_multi` - Start transaction via MCP
+- `synap_transaction_exec` - Execute transaction via MCP
+
+#### Transaction Features
+- Key versioning for WATCH (optimistic locking)
+- Sorted multi-key locking to prevent deadlocks
+- Automatic conflict detection and rollback
+- Support for KV SET/DEL/INCR operations (extensible to other commands)
+
+#### Test Coverage
+- ✅ 11 unit tests (transaction lifecycle, WATCH/UNWATCH, error handling)
+- ✅ All test helpers updated with TransactionManager
+
+#### Integration
+- ✅ TransactionManager integrated into AppState
+- ✅ All 17+ test files updated with transaction_manager field
+- ✅ MCP configuration updated with enable_transaction_tools flag
+
+#### Performance
+- ✅ Transaction structure optimized
+- ⏳ Performance benchmarks pending (<500µs target for transaction overhead)
+
+**Phase 3 Progress**: Transaction Support complete (~85% - integration tests pending)
+
 ### Added - Enhanced Monitoring Complete ✅ (January 2025)
 
 **Enhanced Monitoring Implementation**

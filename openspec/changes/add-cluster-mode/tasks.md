@@ -1,5 +1,10 @@
 # Tasks: Add Cluster Mode
 
+> **Status**: 📋 Deferred  
+> **Target**: v0.8.0-alpha  
+> **Priority**: Medium (Phase 4)  
+> **Note**: High complexity, requires 2-3 engineers, deferred due to resource constraints
+
 ## Core (15+ commands, ~300 tasks, 12 weeks)
 
 ### Implementation

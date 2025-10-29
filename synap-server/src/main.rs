@@ -289,6 +289,17 @@ async fn main() -> Result<()> {
     ));
     info!("Monitoring manager initialized");
 
+    // Create transaction manager
+    use synap_server::core::TransactionManager;
+    let transaction_manager = Arc::new(TransactionManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
+    info!("Transaction manager initialized");
+
     // Create application state with persistence and streams
     let app_state = AppState {
         kv_store,
@@ -303,6 +314,7 @@ async fn main() -> Result<()> {
         pubsub_router,
         persistence,
         monitoring,
+        transaction_manager,
     };
 
     // Initialize Prometheus metrics

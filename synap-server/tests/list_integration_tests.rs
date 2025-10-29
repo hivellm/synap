@@ -27,6 +27,14 @@ async fn spawn_test_server() -> String {
         sorted_set_store.clone(),
     ));
 
+    let transaction_manager = Arc::new(synap_server::core::TransactionManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
+
     let app_state = AppState {
         kv_store,
         hash_store,
@@ -40,6 +48,7 @@ async fn spawn_test_server() -> String {
         consumer_group_manager: None,
         partition_manager: None,
         monitoring,
+        transaction_manager,
     };
 
     let app = create_router(

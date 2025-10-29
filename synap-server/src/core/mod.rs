@@ -11,6 +11,7 @@ pub mod queue;
 pub mod set;
 pub mod sorted_set;
 pub mod stream;
+pub mod transaction;
 pub mod types;
 
 pub use cache::{CacheLayer, CacheStats};
@@ -37,4 +38,5 @@ pub use sorted_set::{
     ZAddOptions,
 };
 pub use stream::{RoomStats, StreamConfig, StreamEvent, StreamManager};
+pub use transaction::{Transaction, TransactionCommand, TransactionManager};
 pub use types::{EvictionPolicy, KVConfig, KVStats, StoredValue};
