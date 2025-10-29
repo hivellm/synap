@@ -2,7 +2,6 @@
 //!
 //! Track memory usage per key across stores
 
-use crate::core::KeyType;
 use serde::Serialize;
 
 /// Memory usage for a key

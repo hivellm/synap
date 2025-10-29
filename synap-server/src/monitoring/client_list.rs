@@ -4,7 +4,7 @@
 
 use serde::Serialize;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 use tokio::sync::RwLock;
 
 /// Client information
