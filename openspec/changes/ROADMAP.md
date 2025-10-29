@@ -41,7 +41,7 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 |---------|--------|-----------|--------|----------|
 | **Sorted Sets** | ✅ Complete (95%) | `add-sorted-set-data-structure` | v0.7.0-alpha | 6 weeks |
 | **String Extensions** | ✅ Complete | `add-string-commands` | v0.6.0-alpha | 2 weeks |
-| **Key Management** | ⏳ Pending | `add-key-management` | v0.6.0-alpha | 2 weeks |
+| **Key Management** | ✅ Complete | `add-key-management` | v0.6.0-alpha | 2 weeks |
 | **Enhanced Monitoring** | ⏳ Pending | `add-info-commands` | v0.6.0-alpha | 3 weeks |
 
 **Deliverables**:
@@ -51,7 +51,7 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 - INFO command variants
 - Enhanced statistics
 
-**Progress**: 2/4 (50%) - Sorted Sets 95% complete, String Extensions complete ✅
+**Progress**: 3/4 (75%) - Sorted Sets 95% complete, String Extensions + Key Management complete ✅
 
 ## Phase 3: Transactions & Scripting (v0.7.0)
 
@@ -100,20 +100,20 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 
 ### By Phase
 - **Phase 1**: 100% (3/3 features complete) ✅
-- **Phase 2**: 50% (2/4 features complete) - Sorted Set + String Extensions complete ✅
+- **Phase 2**: 75% (3/4 features complete) - Sorted Set + String Extensions + Key Management complete ✅
 - **Phase 3**: 0% (0/2 features complete)
 - **Phase 4**: 0% (0/4 features complete)
 
 ### Overall
 - **Total Features**: 13
-- **Completed**: 5 ✅ (Hash, List, Set, Sorted Set, String Extensions)
+- **Completed**: 6 ✅ (Hash, List, Set, Sorted Set, String Extensions, Key Management)
 - **In Progress**: 0 🔄
 - **Planned**: 9 📋
-- **Completion**: 38.5%
+- **Completion**: 46.2%
 
 ### By Priority
 - **CRITICAL**: 100% (3/3) ✅
-- **HIGH**: 33.3% (2/6) - Sorted Set + String Extensions complete ✅
+- **HIGH**: 50% (3/6) - Sorted Set + String Extensions + Key Management complete ✅
 - **MEDIUM**: 0% (0/4)
 
 ## Active Changes
@@ -159,10 +159,12 @@ Currently active OpenSpec changes:
    - 22 unit tests (including TTL edge cases)
    - REST + StreamableHTTP + MCP API coverage
 
-6. 📋 **add-key-management** (DRAFT)
-   - Status: Proposal created
+6. ✅ **add-key-management** (COMPLETE)
+   - Status: Complete - all 6 commands implemented with full test coverage
    - Target: v0.6.0-alpha
-   - ~60 tasks, 2 weeks
+   - 6 commands: TYPE, EXISTS, RENAME, RENAMENX, COPY, RANDOMKEY
+   - 11 unit tests (all data types covered: KV, Hash, List, Set, SortedSet)
+   - REST + StreamableHTTP + MCP API coverage
 
 7. 📋 **add-enhanced-monitoring** (DRAFT)
    - Status: Proposal created
