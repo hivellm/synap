@@ -13,6 +13,10 @@ pub async fn handle_mcp_tool(
         "synap_kv_get" => handle_kv_get(request, state).await,
         "synap_kv_set" => handle_kv_set(request, state).await,
         "synap_kv_delete" => handle_kv_delete(request, state).await,
+        // String Extension tools (3)
+        "synap_kv_append" => handle_kv_append(request, state).await,
+        "synap_kv_getrange" => handle_kv_getrange(request, state).await,
+        "synap_kv_strlen" => handle_kv_strlen(request, state).await,
         // Essential Hash tools (3)
         "synap_hash_set" => handle_hash_set(request, state).await,
         "synap_hash_get" => handle_hash_get(request, state).await,
@@ -152,6 +156,112 @@ async fn handle_kv_delete(
 
     Ok(CallToolResult::success(vec![Content::text(
         json!({"deleted": deleted}).to_string(),
+    )]))
+}
+
+// ==================== String Extension MCP Handlers ====================
+
+async fn handle_kv_append(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let value_str = args
+        .get("value")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing value", None))?;
+
+    let value_bytes = value_str.as_bytes().to_vec();
+
+    let length = state
+        .kv_store
+        .append(key, value_bytes.clone())
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("APPEND failed: {}", e), None))?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        if let Err(e) = persistence
+            .log_kv_set(key.to_string(), value_bytes, None)
+            .await
+        {
+            tracing::error!("Failed to log KV APPEND to WAL (MCP): {}", e);
+        }
+    }
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"length": length, "key": key}).to_string(),
+    )]))
+}
+
+async fn handle_kv_getrange(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let start = args
+        .get("start")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| ErrorData::invalid_params("Missing start", None))? as isize;
+
+    let end = args
+        .get("end")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| ErrorData::invalid_params("Missing end", None))? as isize;
+
+    let range_bytes = state
+        .kv_store
+        .getrange(key, start, end)
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("GETRANGE failed: {}", e), None))?;
+
+    let response = String::from_utf8(range_bytes).unwrap_or_else(|_| "<binary data>".to_string());
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"range": response}).to_string(),
+    )]))
+}
+
+async fn handle_kv_strlen(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let length = state
+        .kv_store
+        .strlen(key)
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("STRLEN failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"length": length, "key": key}).to_string(),
     )]))
 }
 

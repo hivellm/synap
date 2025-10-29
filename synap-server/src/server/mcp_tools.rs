@@ -9,7 +9,7 @@ use crate::config::McpConfig;
 pub fn get_mcp_tools(config: &McpConfig) -> Vec<Tool> {
     let mut tools = Vec::new();
 
-    // KV Store Tools (3 essential)
+    // KV Store Tools (6 total: 3 essential + 3 string extensions)
     if config.enable_kv_tools {
         tools.extend(get_kv_tools());
     }
@@ -113,6 +113,89 @@ fn get_kv_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
+        // String Extension tools (3)
+        Tool {
+            name: Cow::Borrowed("synap_kv_append"),
+            title: Some("Append to String".to_string()),
+            description: Some(Cow::Borrowed(
+                "Append bytes to an existing value, or create new key with value if it doesn't exist",
+            )),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The key to append to"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "The value to append"
+                    }
+                },
+                "required": ["key", "value"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_kv_getrange"),
+            title: Some("Get String Range".to_string()),
+            description: Some(Cow::Borrowed(
+                "Get substring using Redis-style negative indices. start and end are inclusive. Negative indices count from the end (-1 = last byte)",
+            )),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The key to get range from"
+                    },
+                    "start": {
+                        "type": "integer",
+                        "description": "Start index (inclusive). Negative indices count from end"
+                    },
+                    "end": {
+                        "type": "integer",
+                        "description": "End index (inclusive). Negative indices count from end"
+                    }
+                },
+                "required": ["key", "start", "end"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_kv_strlen"),
+            title: Some("Get String Length".to_string()),
+            description: Some(Cow::Borrowed("Get the length of the string value in bytes")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The key to get length for"
+                    }
+                },
+                "required": ["key"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
         },
     ]
 }
