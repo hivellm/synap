@@ -15,25 +15,31 @@ async fn spawn_test_server() -> String {
     };
     let kv_store = Arc::new(KVStore::new(config));
     let hash_store = Arc::new(synap_server::core::HashStore::new());
+    let list_store = Arc::new(synap_server::core::ListStore::new());
+    let set_store = Arc::new(synap_server::core::SetStore::new());
+    let sorted_set_store = Arc::new(synap_server::core::SortedSetStore::new());
+    
+    let monitoring = Arc::new(synap_server::monitoring::MonitoringManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
+    
     let state = AppState {
         kv_store,
         hash_store,
-        list_store: Arc::new(synap_server::core::ListStore::new()),
-        set_store: Arc::new(synap_server::core::SetStore::new()),
-        sorted_set_store: Arc::new(synap_server::core::SortedSetStore::new()),
+        list_store,
+        set_store,
+        sorted_set_store,
         queue_manager: None,
         stream_manager: None,
         pubsub_router: None,
         persistence: None,
         consumer_group_manager: None,
         partition_manager: None,
-        monitoring: Arc::new(synap_server::monitoring::MonitoringManager::new(
-            kv_store.clone(),
-            hash_store.clone(),
-            Arc::new(synap_server::core::ListStore::new()),
-            Arc::new(synap_server::core::SetStore::new()),
-            Arc::new(synap_server::core::SortedSetStore::new()),
-        )),
+        monitoring,
     };
     let app = create_router(
         state,
