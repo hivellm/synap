@@ -1506,6 +1506,12 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "key.renamenx" => handle_key_renamenx_cmd(&state, &request).await,
         "key.copy" => handle_key_copy_cmd(&state, &request).await,
         "key.randomkey" => handle_key_randomkey_cmd(state.clone(), &request).await,
+        // Monitoring commands
+        "info" => handle_info_cmd(state.clone(), &request).await,
+        "slowlog.get" => handle_slowlog_get_cmd(state.clone(), &request).await,
+        "slowlog.reset" => handle_slowlog_reset_cmd(state.clone(), &request).await,
+        "memory.usage" => handle_memory_usage_cmd(state.clone(), &request).await,
+        "client.list" => handle_client_list_cmd(state.clone(), &request).await,
         // Hash commands
         "hash.set" => handle_hash_set_cmd(&state, &request).await,
         "hash.get" => handle_hash_get_cmd(&state, &request).await,
