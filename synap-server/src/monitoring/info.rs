@@ -5,7 +5,6 @@
 use crate::core::{HashStore, KVStore, ListStore, SetStore, SortedSetStore};
 use serde::Serialize;
 use std::sync::Arc;
-use std::time::Duration;
 
 /// INFO command output sections
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
