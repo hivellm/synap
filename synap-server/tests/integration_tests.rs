@@ -394,3 +394,89 @@ async fn test_stats() {
     assert!(body["operations"]["sets"].as_u64().unwrap() >= 1);
     assert!(body["operations"]["gets"].as_u64().unwrap() >= 1);
 }
+
+// ==================== Transaction Integration Tests ====================
+
+#[tokio::test]
+async fn test_transaction_multi_exec() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Start transaction
+    let multi_res = client
+        .post(format!("{}/transaction/multi", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(multi_res.status(), 200);
+
+    // Execute transaction (empty - should work)
+    let exec_res = client
+        .post(format!("{}/transaction/exec", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(exec_res.status(), 200);
+    let exec_body: serde_json::Value = exec_res.json().await.unwrap();
+    // EXEC returns either {success: true, results: [...]} or {aborted: true}
+    assert!(exec_body["success"].as_bool().is_some() || exec_body["results"].is_array());
+}
+
+#[tokio::test]
+async fn test_transaction_discard() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Start transaction
+    let multi_res = client
+        .post(format!("{}/transaction/multi", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(multi_res.status(), 200);
+
+    // Discard transaction
+    let discard_res = client
+        .post(format!("{}/transaction/discard", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(discard_res.status(), 200);
+    let discard_body: serde_json::Value = discard_res.json().await.unwrap();
+    assert!(discard_body["success"].as_bool().unwrap_or(false));
+}
+
+#[tokio::test]
+async fn test_transaction_watch_unwatch() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Start transaction
+    let multi_res = client
+        .post(format!("{}/transaction/multi", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(multi_res.status(), 200);
+
+    // Watch keys
+    let watch_res = client
+        .post(format!("{}/transaction/watch", base_url))
+        .json(&json!({
+            "keys": ["key1", "key2"]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(watch_res.status(), 200);
+
+    // Unwatch
+    let unwatch_res = client
+        .post(format!("{}/transaction/unwatch", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unwatch_res.status(), 200);
+    let unwatch_body: serde_json::Value = unwatch_res.json().await.unwrap();
+    assert!(unwatch_body["success"].as_bool().unwrap_or(false));
+}

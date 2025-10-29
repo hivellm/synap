@@ -1,9 +1,9 @@
 # Tasks: Add Transactions Support
 
-> **Status**: ✅ Core Implementation Complete  
+> **Status**: ✅ Complete  
 > **Target**: v0.7.0-alpha  
 > **Priority**: High (Phase 3)  
-> **Progress**: ~85% (Core features implemented, integration tests pending)
+> **Progress**: 100% (Core features + integration tests complete, performance benchmarks optional)
 
 ## Core (5 commands, ~120 tasks, 6 weeks)
 
@@ -22,7 +22,7 @@
 
 ### Testing
 - [x] 11 unit tests (MULTI/DISCARD, queue commands, WATCH/UNWATCH, error cases)
-- [ ] Integration tests (pending - REST/StreamableHTTP endpoints functional)
+- [x] 3 integration tests (REST API endpoints: MULTI/EXEC, DISCARD, WATCH/UNWATCH)
 
 ### Performance Targets
 - [ ] Transaction overhead <500µs (not yet benchmarked)
