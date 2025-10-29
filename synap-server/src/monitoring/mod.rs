@@ -12,10 +12,8 @@
 //! - CLIENT LIST: Active connection tracking
 
 use crate::core::{HashStore, KVStore, ListStore, SetStore, SortedSetStore};
-use serde::Serialize;
 use std::sync::Arc;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::RwLock;
+use std::time::Instant;
 
 mod client_list;
 mod info;

@@ -16,7 +16,7 @@ async fn spawn_test_server() -> String {
     let list_store = Arc::new(synap_server::core::ListStore::new());
     let set_store = Arc::new(synap_server::core::SetStore::new());
     let sorted_set_store = Arc::new(synap_server::core::SortedSetStore::new());
-    
+
     let monitoring = Arc::new(synap_server::monitoring::MonitoringManager::new(
         kv_store.clone(),
         hash_store.clone(),
@@ -24,7 +24,7 @@ async fn spawn_test_server() -> String {
         set_store.clone(),
         sorted_set_store.clone(),
     ));
-    
+
     let state = AppState {
         kv_store,
         hash_store,

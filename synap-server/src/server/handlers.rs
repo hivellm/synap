@@ -2,8 +2,7 @@ use crate::core::{
     HashStore, KVStore, KeyManager, Message, QueueManager, SortedSetStore, SynapError,
 };
 use crate::monitoring::{
-    ClientList, InfoSection, KeyspaceInfo, MemoryInfo, MemoryUsage, ReplicationInfo, ServerInfo,
-    SlowLogManager, StatsInfo,
+    InfoSection, KeyspaceInfo, MemoryInfo, MemoryUsage, ReplicationInfo, ServerInfo, StatsInfo,
 };
 use crate::protocol::{Request, Response};
 use axum::{
@@ -4790,30 +4789,37 @@ async fn handle_info_cmd(
 
     if section == InfoSection::All || section == InfoSection::Server {
         let server_info = ServerInfo::collect(state.monitoring.uptime_secs(), 15500).await;
-        response["server"] = serde_json::to_value(server_info).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+        response["server"] = serde_json::to_value(server_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
     }
 
     if section == InfoSection::All || section == InfoSection::Memory {
         let stores = state.monitoring.stores();
-        let memory_info = MemoryInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
-        response["memory"] = serde_json::to_value(memory_info).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+        let memory_info =
+            MemoryInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
+        response["memory"] = serde_json::to_value(memory_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
     }
 
     if section == InfoSection::All || section == InfoSection::Stats {
         let stores = state.monitoring.stores();
         let stats_info = StatsInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
-        response["stats"] = serde_json::to_value(stats_info).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+        response["stats"] = serde_json::to_value(stats_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
     }
 
     if section == InfoSection::All || section == InfoSection::Replication {
         let repl_info = ReplicationInfo::collect().await;
-        response["replication"] = serde_json::to_value(repl_info).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+        response["replication"] = serde_json::to_value(repl_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
     }
 
     if section == InfoSection::All || section == InfoSection::Keyspace {
         let stores = state.monitoring.stores();
-        let keyspace_info = KeyspaceInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
-        response["keyspace"] = serde_json::to_value(keyspace_info).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+        let keyspace_info =
+            KeyspaceInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
+        response["keyspace"] = serde_json::to_value(keyspace_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
     }
 
     Ok(response)
@@ -4872,18 +4878,12 @@ async fn handle_memory_usage_cmd(
     let key_type = key_manager.key_type(key).await?;
 
     let usage = MemoryUsage::calculate_with_stores(
-        key_type,
-        key,
-        &stores.0,
-        &stores.1,
-        &stores.2,
-        &stores.3,
-        &stores.4,
+        key_type, key, &stores.0, &stores.1, &stores.2, &stores.3, &stores.4,
     )
     .await
     .ok_or_else(|| SynapError::KeyNotFound(key.to_string()))?;
 
-    Ok(serde_json::to_value(usage).map_err(|e| SynapError::SerializationError(e.to_string()))?)
+    serde_json::to_value(usage).map_err(|e| SynapError::SerializationError(e.to_string()))
 }
 
 async fn handle_client_list_cmd(
