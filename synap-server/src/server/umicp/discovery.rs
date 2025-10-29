@@ -101,11 +101,14 @@ mod tests {
         };
         let operations = service.list_operations();
 
-        // With default config, should have 4 operations (3 KV + 1 Queue)
+        // With default config, should have 10 operations:
+        // - 9 KV tools (3 essential + 3 string extensions + 3 key management)
+        // - 1 Queue tool
+        // Transaction tools are disabled by default
         assert_eq!(
             operations.len(),
-            4,
-            "Expected 13 operations, got {}",
+            10,
+            "Expected 10 operations with default config (9 KV + 1 Queue), got {}",
             operations.len()
         );
 
@@ -113,10 +116,18 @@ mod tests {
         let op_names: Vec<String> = operations.iter().map(|op| op.name.clone()).collect();
 
         // Verify only default-enabled operations are present
-        // KV operations (3) - enabled by default
+        // KV operations (9 total: 3 essential + 3 string extensions + 3 key management) - enabled by default
         assert!(op_names.contains(&"synap_kv_get".to_string()));
         assert!(op_names.contains(&"synap_kv_set".to_string()));
         assert!(op_names.contains(&"synap_kv_delete".to_string()));
+        // String extensions (3)
+        assert!(op_names.contains(&"synap_kv_append".to_string()));
+        assert!(op_names.contains(&"synap_kv_getrange".to_string()));
+        assert!(op_names.contains(&"synap_kv_strlen".to_string()));
+        // Key management (3)
+        assert!(op_names.contains(&"synap_key_type".to_string()));
+        assert!(op_names.contains(&"synap_key_exists".to_string()));
+        assert!(op_names.contains(&"synap_key_rename".to_string()));
 
         // Queue operations (1) - enabled by default
         assert!(op_names.contains(&"synap_queue_publish".to_string()));
