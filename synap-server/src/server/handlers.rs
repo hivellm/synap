@@ -4772,6 +4772,132 @@ async fn handle_pubsub_info_cmd(
 }
 
 // ============================================================================
+// Monitoring StreamableHTTP Command Handlers
+// ============================================================================
+
+async fn handle_info_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let section = request
+        .payload
+        .get("section")
+        .and_then(|v| v.as_str())
+        .unwrap_or("all");
+    let section = InfoSection::from_str(section);
+
+    let mut response = serde_json::json!({});
+
+    if section == InfoSection::All || section == InfoSection::Server {
+        let server_info = ServerInfo::collect(state.monitoring.uptime_secs(), 15500).await;
+        response["server"] = serde_json::to_value(server_info).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Memory {
+        let stores = state.monitoring.stores();
+        let memory_info = MemoryInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
+        response["memory"] = serde_json::to_value(memory_info).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Stats {
+        let stores = state.monitoring.stores();
+        let stats_info = StatsInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
+        response["stats"] = serde_json::to_value(stats_info).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Replication {
+        let repl_info = ReplicationInfo::collect().await;
+        response["replication"] = serde_json::to_value(repl_info).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Keyspace {
+        let stores = state.monitoring.stores();
+        let keyspace_info = KeyspaceInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
+        response["keyspace"] = serde_json::to_value(keyspace_info).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    Ok(response)
+}
+
+async fn handle_slowlog_get_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let count = request
+        .payload
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
+
+    let entries = state.monitoring.slow_log().get(count).await;
+    let total = state.monitoring.slow_log().len().await;
+
+    Ok(serde_json::json!({
+        "entries": entries,
+        "total": total
+    }))
+}
+
+async fn handle_slowlog_reset_cmd(
+    state: AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let count = state.monitoring.slow_log().reset().await;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "cleared": count
+    }))
+}
+
+async fn handle_memory_usage_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let key_manager = KeyManager::new(
+        state.kv_store.clone(),
+        state.hash_store.clone(),
+        state.list_store.clone(),
+        state.set_store.clone(),
+        state.sorted_set_store.clone(),
+    );
+
+    let stores = state.monitoring.stores();
+    let key_type = key_manager.key_type(key).await?;
+
+    let usage = MemoryUsage::calculate_with_stores(
+        key_type,
+        key,
+        &stores.0,
+        &stores.1,
+        &stores.2,
+        &stores.3,
+        &stores.4,
+    )
+    .await
+    .ok_or_else(|| SynapError::KeyNotFound(key.to_string()))?;
+
+    Ok(serde_json::to_value(usage).map_err(|e| SynapError::SerializationError(e.to_string()))?)
+}
+
+async fn handle_client_list_cmd(
+    _state: AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    // TODO: Implement client tracking when WebSocket tracking is added
+    Ok(serde_json::json!({
+        "clients": [],
+        "count": 0
+    }))
+}
+
+// ============================================================================
 // Event Streams StreamableHTTP Command Handlers
 // ============================================================================
 
