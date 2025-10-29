@@ -61,7 +61,7 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 
 | Feature | Status | Change ID | Target | Duration |
 |---------|--------|-----------|--------|----------|
-| **Transactions** | ⏳ Pending | `add-transactions-support` | v0.7.0-alpha | 6 weeks |
+| **Transactions** | ✅ Complete | `add-transactions-support` | v0.7.0-alpha | 6 weeks |
 | **Lua Scripting** | ⏳ Pending | `add-lua-scripting` | v0.7.0-alpha | 8 weeks |
 
 **Deliverables**:
@@ -101,19 +101,19 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 ### By Phase
 - **Phase 1**: 100% (3/3 features complete) ✅
 - **Phase 2**: 100% (4/4 features complete) ✅ - Sorted Set + String Extensions + Key Management + Enhanced Monitoring
-- **Phase 3**: 0% (0/2 features complete)
+- **Phase 3**: 50% (1/2 features complete) - Transactions ✅
 - **Phase 4**: 0% (0/4 features complete)
 
 ### Overall
 - **Total Features**: 13
-- **Completed**: 7 ✅ (Hash, List, Set, Sorted Set, String Extensions, Key Management, Enhanced Monitoring)
+- **Completed**: 8 ✅ (Hash, List, Set, Sorted Set, String Extensions, Key Management, Enhanced Monitoring, Transactions)
 - **In Progress**: 0 🔄
-- **Planned**: 9 📋
-- **Completion**: 53.8%
+- **Planned**: 5 📋
+- **Completion**: 61.5%
 
 ### By Priority
 - **CRITICAL**: 100% (3/3) ✅
-- **HIGH**: 66.7% (4/6) - Sorted Set + String Extensions + Key Management + Enhanced Monitoring complete ✅
+- **HIGH**: 83.3% (5/6) - Sorted Set + String Extensions + Key Management + Enhanced Monitoring + Transactions complete ✅
 - **MEDIUM**: 0% (0/4)
 
 ## Active Changes
@@ -175,10 +175,12 @@ Currently active OpenSpec changes:
 
 ### Phase 3: Transactions & Scripting
 
-8. 📋 **add-transactions-support** (DRAFT)
-   - Status: Proposal created
+8. ✅ **add-transactions-support** (COMPLETE)
+   - Status: Complete - All 5 commands implemented (MULTI/EXEC/DISCARD/WATCH/UNWATCH)
    - Target: v0.7.0-alpha
-   - ~120 tasks, 6 weeks
+   - 11 unit tests + 3 integration tests
+   - REST + StreamableHTTP + MCP API coverage
+   - Progress: 100% (core features + integration tests complete)
 
 9. 📋 **add-lua-scripting** (DRAFT)
    - Status: Proposal created
@@ -285,8 +287,9 @@ graph TD
 
 ---
 
-**Last Updated**: 2025-10-29  
-**Next Review**: After Phase 2 String Extensions begins  
+**Last Updated**: 2025-01-XX  
+**Next Review**: After Phase 3 Lua Scripting begins  
 **Phase 1 Status**: ✅ **COMPLETE** (3/3 data structures implemented)  
-**Phase 2 Status**: 🔄 **IN PROGRESS** (1/4 features complete - Sorted Set done ✅)
+**Phase 2 Status**: ✅ **COMPLETE** (4/4 features complete)  
+**Phase 3 Status**: 🔄 **IN PROGRESS** (1/2 features complete - Transactions done ✅)
 
