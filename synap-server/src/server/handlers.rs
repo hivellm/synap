@@ -3478,6 +3478,21 @@ async fn handle_queue_purge_cmd(
 
 // ==================== Sorted Set Command Handlers ====================
 
+fn serialize_scored_members(members: Vec<crate::core::ScoredMember>) -> Vec<serde_json::Value> {
+    members
+        .into_iter()
+        .map(|m| {
+            let member_str = String::from_utf8(m.member.clone())
+                .unwrap_or_else(|_| format!("<binary data: {} bytes>", m.member.len()));
+
+            json!({
+                "member": member_str,
+                "score": m.score,
+            })
+        })
+        .collect()
+}
+
 async fn handle_sortedset_zadd_cmd(
     state: &AppState,
     request: &Request,
@@ -3491,6 +3506,7 @@ async fn handle_sortedset_zadd_cmd(
     let member = request
         .payload
         .get("member")
+        .and_then(|v| v.as_str())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
 
     let score = request
@@ -3499,8 +3515,7 @@ async fn handle_sortedset_zadd_cmd(
         .and_then(|v| v.as_f64())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'score' field".to_string()))?;
 
-    let member_bytes =
-        serde_json::to_vec(member).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    let member_bytes = member.as_bytes().to_vec();
 
     let opts = crate::core::ZAddOptions {
         nx: request
@@ -3556,8 +3571,15 @@ async fn handle_sortedset_zrem_cmd(
         .and_then(|v| v.as_array())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'members' array".to_string()))?;
 
-    let member_bytes: Result<Vec<Vec<u8>>, _> = members.iter().map(serde_json::to_vec).collect();
-    let member_bytes = member_bytes.map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    let member_bytes: Result<Vec<Vec<u8>>, SynapError> = members
+        .iter()
+        .map(|m| {
+            m.as_str().map(|s| s.as_bytes().to_vec()).ok_or_else(|| {
+                SynapError::InvalidRequest("All 'members' entries must be strings".to_string())
+            })
+        })
+        .collect();
+    let member_bytes = member_bytes?;
 
     let removed = state.sorted_set_store.zrem(key, &member_bytes);
 
@@ -3614,6 +3636,7 @@ async fn handle_sortedset_zincrby_cmd(
     let member = request
         .payload
         .get("member")
+        .and_then(|v| v.as_str())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
 
     let increment = request
@@ -3622,8 +3645,7 @@ async fn handle_sortedset_zincrby_cmd(
         .and_then(|v| v.as_f64())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'increment' field".to_string()))?;
 
-    let member_bytes =
-        serde_json::to_vec(member).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    let member_bytes = member.as_bytes().to_vec();
 
     let new_score = state.sorted_set_store.zincrby(key, member_bytes, increment);
 
@@ -3659,6 +3681,7 @@ async fn handle_sortedset_zrange_cmd(
         .unwrap_or(false);
 
     let members = state.sorted_set_store.zrange(key, start, stop, with_scores);
+    let members = serialize_scored_members(members);
 
     Ok(serde_json::json!({ "members": members, "key": key }))
 }
@@ -3694,6 +3717,7 @@ async fn handle_sortedset_zrevrange_cmd(
     let members = state
         .sorted_set_store
         .zrevrange(key, start, stop, with_scores);
+    let members = serialize_scored_members(members);
 
     Ok(serde_json::json!({ "members": members, "key": key }))
 }
@@ -3786,8 +3810,10 @@ async fn handle_sortedset_zpopmin_cmd(
         .unwrap_or(1) as usize;
 
     let members = state.sorted_set_store.zpopmin(key, count);
+    let result_count = members.len();
+    let serialized = serialize_scored_members(members);
 
-    Ok(serde_json::json!({ "members": members, "count": members.len(), "key": key }))
+    Ok(serde_json::json!({ "members": serialized, "count": result_count, "key": key }))
 }
 
 async fn handle_sortedset_zpopmax_cmd(
@@ -3807,8 +3833,10 @@ async fn handle_sortedset_zpopmax_cmd(
         .unwrap_or(1) as usize;
 
     let members = state.sorted_set_store.zpopmax(key, count);
+    let result_count = members.len();
+    let serialized = serialize_scored_members(members);
 
-    Ok(serde_json::json!({ "members": members, "count": members.len(), "key": key }))
+    Ok(serde_json::json!({ "members": serialized, "count": result_count, "key": key }))
 }
 
 async fn handle_sortedset_zrangebyscore_cmd(
@@ -3842,6 +3870,7 @@ async fn handle_sortedset_zrangebyscore_cmd(
     let members = state
         .sorted_set_store
         .zrangebyscore(key, min, max, with_scores);
+    let members = serialize_scored_members(members);
 
     Ok(serde_json::json!({ "members": members, "key": key }))
 }
@@ -4027,8 +4056,15 @@ async fn handle_sortedset_zmscore_cmd(
         .and_then(|v| v.as_array())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'members' array".to_string()))?;
 
-    let member_bytes: Result<Vec<Vec<u8>>, _> = members.iter().map(serde_json::to_vec).collect();
-    let member_bytes = member_bytes.map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    let member_bytes: Result<Vec<Vec<u8>>, SynapError> = members
+        .iter()
+        .map(|m| {
+            m.as_str().map(|s| s.as_bytes().to_vec()).ok_or_else(|| {
+                SynapError::InvalidRequest("All 'members' entries must be strings".to_string())
+            })
+        })
+        .collect();
+    let member_bytes = member_bytes?;
 
     let scores = state.sorted_set_store.zmscore(key, &member_bytes);
 
