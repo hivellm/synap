@@ -216,7 +216,7 @@ Currently active OpenSpec changes:
 2. ✅ Archive `add-list-data-structure` - DONE
 3. ✅ Archive `add-set-data-structure` - DONE (2025-10-25)
 4. ✅ Archive `add-sorted-set-data-structure` - DONE (2025-10-29)
-5. [ ] Fix persistence test compilation errors (if any)
+5. ✅ Fix persistence test compilation errors (if any) - DONE (2025-01-XX)
 6. [ ] Tag v0.6.0-alpha release with Hash + List + Set + Sorted Set
 7. [ ] Tag v1.0.0-rc1 (all core features complete)
 
