@@ -9,7 +9,8 @@ use std::time::Duration;
 use synap_server::persistence::PersistenceLayer;
 use synap_server::persistence::types::{FsyncMode, PersistenceConfig, SnapshotConfig, WALConfig};
 use synap_server::{
-    AppState, KVConfig, KVStore, QueueConfig, QueueManager, ServerConfig, create_router,
+    AppState, KVConfig, KVStore, QueueConfig, QueueManager, ScriptManager, ServerConfig,
+    create_router,
 };
 use tokio::net::TcpListener;
 
@@ -20,17 +21,39 @@ async fn spawn_test_server() -> String {
     let hash_store = Arc::new(synap_server::core::HashStore::new());
     let queue_manager = Arc::new(QueueManager::new(QueueConfig::default()));
 
+    let list_store = Arc::new(synap_server::core::ListStore::new());
+    let set_store = Arc::new(synap_server::core::SetStore::new());
+    let sorted_set_store = Arc::new(synap_server::core::SortedSetStore::new());
+    let monitoring = Arc::new(synap_server::monitoring::MonitoringManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
+    let transaction_manager = Arc::new(synap_server::core::TransactionManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
     let app_state = AppState {
         kv_store,
         hash_store,
-        list_store: Arc::new(synap_server::core::ListStore::new()),
-        set_store: Arc::new(synap_server::core::SetStore::new()),
+        list_store,
+        set_store,
+        sorted_set_store,
+        hyperloglog_store: Arc::new(synap_server::core::HyperLogLogStore::new()),
         queue_manager: Some(queue_manager),
         stream_manager: None,
         pubsub_router: None,
         persistence: None,
         consumer_group_manager: None,
         partition_manager: None,
+        monitoring,
+        transaction_manager,
+        script_manager: Arc::new(ScriptManager::default()),
     };
 
     let app = create_router(
@@ -40,6 +63,7 @@ async fn spawn_test_server() -> String {
             requests_per_second: 100,
             burst_size: 10,
         },
+        synap_server::config::McpConfig::default(),
     );
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -561,7 +585,7 @@ async fn test_hash_with_persistence_recovery() {
         let kv_config = KVConfig::default();
         let queue_config = QueueConfig::default();
 
-        let (_, hash_store, _, _, _, _) =
+        let (_, hash_store, _, _, _, _, _) =
             synap_server::persistence::recover(&persist_config, kv_config, queue_config)
                 .await
                 .unwrap();
@@ -634,7 +658,7 @@ async fn test_hash_hincrby_persistence() {
         let kv_config = KVConfig::default();
         let queue_config = QueueConfig::default();
 
-        let (_, hash_store, _, _, _, _) =
+        let (_, hash_store, _, _, _, _, _) =
             synap_server::persistence::recover(&persist_config, kv_config, queue_config)
                 .await
                 .unwrap();

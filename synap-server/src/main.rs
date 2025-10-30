@@ -2,13 +2,15 @@ use anyhow::Result;
 use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use synap_server::core::{HashStore, ListStore, SetStore};
+use std::time::Duration;
+use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
+use synap_server::monitoring::MonitoringManager;
 use synap_server::persistence::{PersistenceLayer, recover};
 use synap_server::replication::NodeRole;
 use synap_server::{
     AppState, ConsumerGroupConfig, ConsumerGroupManager, KVStore, PartitionConfig,
-    PartitionManager, PubSubRouter, QueueManager, ServerConfig, StreamConfig, StreamManager,
-    create_router, init_metrics,
+    PartitionManager, PubSubRouter, QueueManager, ScriptManager, ServerConfig, StreamConfig,
+    StreamManager, create_router, init_metrics,
 };
 use tracing::{info, warn};
 
@@ -132,6 +134,7 @@ async fn main() -> Result<()> {
         hash_store_recovered,
         list_store_recovered,
         _set_store_recovered,
+        _sorted_set_store_recovered,
         queue_manager,
         _wal_offset,
     ): (
@@ -139,18 +142,20 @@ async fn main() -> Result<()> {
         Option<Arc<HashStore>>,
         Option<Arc<ListStore>>,
         Option<Arc<SetStore>>,
+        Option<Arc<SortedSetStore>>,
         Option<Arc<QueueManager>>,
         u64,
     ) = if config.persistence.enabled {
         info!("Persistence enabled, attempting recovery...");
         match recover(&config.persistence, kv_config.clone(), queue_config.clone()).await {
-            Ok((kv, hs, ls, ss, qm, offset)) => {
+            Ok((kv, hs, ls, ss, zs, qm, offset)) => {
                 info!("Recovery successful, WAL offset: {}", offset);
                 (
                     Arc::new(kv),
                     hs.map(Arc::new),
                     ls.map(Arc::new),
                     ss.map(Arc::new),
+                    zs.map(Arc::new),
                     qm.map(Arc::new),
                     offset,
                 )
@@ -162,6 +167,7 @@ async fn main() -> Result<()> {
                     Some(Arc::new(HashStore::new())),
                     Some(Arc::new(ListStore::new())),
                     Some(Arc::new(SetStore::new())),
+                    Some(Arc::new(SortedSetStore::new())),
                     if config.queue.enabled {
                         Some(Arc::new(QueueManager::new(queue_config.clone())))
                     } else {
@@ -178,6 +184,7 @@ async fn main() -> Result<()> {
             Some(Arc::new(HashStore::new())),
             Some(Arc::new(ListStore::new())),
             Some(Arc::new(SetStore::new())),
+            Some(Arc::new(SortedSetStore::new())),
             if config.queue.enabled {
                 Some(Arc::new(QueueManager::new(queue_config.clone())))
             } else {
@@ -268,25 +275,65 @@ async fn main() -> Result<()> {
     let set_store = Arc::new(synap_server::core::SetStore::new());
     info!("Set store initialized");
 
+    // Use sorted set store (fresh or recovered)
+    let sorted_set_store = _sorted_set_store_recovered
+        .unwrap_or_else(|| Arc::new(synap_server::core::SortedSetStore::new()));
+    info!("Sorted set store initialized");
+
+    // Create HyperLogLog store
+    use synap_server::core::HyperLogLogStore;
+    let hyperloglog_store = Arc::new(HyperLogLogStore::new());
+    info!("HyperLogLog store initialized");
+
+    // Create monitoring manager
+    let monitoring = Arc::new(MonitoringManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
+    info!("Monitoring manager initialized");
+
+    // Create transaction manager
+    use synap_server::core::TransactionManager;
+    let transaction_manager = Arc::new(TransactionManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
+    info!("Transaction manager initialized");
+
+    // Create script manager (Lua scripting)
+    let script_manager = Arc::new(ScriptManager::new(Duration::from_secs(5)));
+    info!("Script manager initialized (default timeout: 5s)");
+
     // Create application state with persistence and streams
     let app_state = AppState {
         kv_store,
         hash_store,
         list_store,
         set_store,
+        sorted_set_store,
+        hyperloglog_store,
         queue_manager,
         stream_manager,
         partition_manager,
         consumer_group_manager,
         pubsub_router,
         persistence,
+        monitoring,
+        transaction_manager,
+        script_manager,
     };
 
     // Initialize Prometheus metrics
     init_metrics();
 
     // Create router with rate limiting
-    let app = create_router(app_state, config.rate_limit.clone());
+    let app = create_router(app_state, config.rate_limit.clone(), config.mcp.clone());
 
     if config.rate_limit.enabled {
         info!(

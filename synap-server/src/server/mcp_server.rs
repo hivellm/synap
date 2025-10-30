@@ -1,4 +1,5 @@
 use super::{AppState, get_mcp_tools, handle_mcp_tool};
+use crate::config::McpConfig;
 use rmcp::model::{
     CallToolRequestParam, CallToolResult, ErrorData, Implementation, ProtocolVersion,
     ServerCapabilities, ServerInfo,
@@ -9,6 +10,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct SynapMcpService {
     pub state: Arc<AppState>,
+    pub mcp_config: McpConfig,
 }
 
 impl rmcp::ServerHandler for SynapMcpService {
@@ -36,7 +38,7 @@ impl rmcp::ServerHandler for SynapMcpService {
     ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
         use rmcp::model::ListToolsResult;
 
-        let tools = get_mcp_tools();
+        let tools = get_mcp_tools(&self.mcp_config);
 
         Ok(ListToolsResult {
             tools,

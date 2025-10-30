@@ -12,7 +12,11 @@ use tower_http::{
 };
 
 /// Create the Axum router with all endpoints
-pub fn create_router(state: AppState, rate_limit_config: crate::config::RateLimitConfig) -> Router {
+pub fn create_router(
+    state: AppState,
+    rate_limit_config: crate::config::RateLimitConfig,
+    mcp_config: crate::config::McpConfig,
+) -> Router {
     // CORS configuration
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -21,10 +25,10 @@ pub fn create_router(state: AppState, rate_limit_config: crate::config::RateLimi
 
     // Create MCP router (stateless)
     let state_arc = Arc::new(state.clone());
-    let mcp_router = create_mcp_router(state_arc.clone());
+    let mcp_router = create_mcp_router(state_arc.clone(), mcp_config.clone());
 
     // Create UMICP router
-    let umicp_router = create_umicp_router(state_arc.clone());
+    let umicp_router = create_umicp_router(state_arc.clone(), mcp_config.clone());
 
     // Create main API router with state
     let api_router = Router::new()
@@ -38,6 +42,31 @@ pub fn create_router(state: AppState, rate_limit_config: crate::config::RateLimi
         .route("/kv/get/{key}", get(handlers::kv_get))
         .route("/kv/del/{key}", delete(handlers::kv_delete))
         .route("/kv/stats", get(handlers::kv_stats))
+        // String extension endpoints
+        .route("/kv/{key}/append", post(handlers::kv_append))
+        .route("/kv/{key}/getrange", get(handlers::kv_getrange))
+        .route("/kv/{key}/setrange", post(handlers::kv_setrange))
+        .route("/kv/{key}/strlen", get(handlers::kv_strlen))
+        .route("/kv/{key}/getset", post(handlers::kv_getset))
+        .route("/kv/msetnx", post(handlers::kv_msetnx))
+        // Key Management endpoints
+        .route("/key/{key}/type", get(handlers::key_type))
+        .route("/key/{key}/exists", get(handlers::key_exists))
+        .route("/key/{key}/rename", post(handlers::key_rename))
+        .route("/key/{key}/renamenx", post(handlers::key_renamenx))
+        .route("/key/{key}/copy", post(handlers::key_copy))
+        .route("/key/randomkey", get(handlers::key_randomkey))
+        // Monitoring endpoints
+        .route("/info", get(handlers::info))
+        .route("/slowlog", get(handlers::slowlog))
+        .route("/memory/{key}/usage", get(handlers::memory_usage))
+        .route("/clients", get(handlers::client_list))
+        // Transaction endpoints
+        .route("/transaction/multi", post(handlers::transaction_multi))
+        .route("/transaction/exec", post(handlers::transaction_exec))
+        .route("/transaction/discard", post(handlers::transaction_discard))
+        .route("/transaction/watch", post(handlers::transaction_watch))
+        .route("/transaction/unwatch", post(handlers::transaction_unwatch))
         // Hash endpoints
         .route("/hash/{key}/set", post(handlers::hash_set))
         .route("/hash/{key}/{field}", get(handlers::hash_get))
@@ -66,6 +95,76 @@ pub fn create_router(state: AppState, rate_limit_config: crate::config::RateLimi
         .route("/set/union", post(handlers::set_union))
         .route("/set/diff", post(handlers::set_diff))
         .route("/set/stats", get(handlers::set_stats))
+        // Sorted Set endpoints
+        .route("/sortedset/{key}/zadd", post(handlers::sortedset_zadd))
+        .route("/sortedset/{key}/zrem", post(handlers::sortedset_zrem))
+        .route(
+            "/sortedset/{key}/{member}/zscore",
+            get(handlers::sortedset_zscore),
+        )
+        .route("/sortedset/{key}/zcard", get(handlers::sortedset_zcard))
+        .route(
+            "/sortedset/{key}/zincrby",
+            post(handlers::sortedset_zincrby),
+        )
+        .route("/sortedset/{key}/zrange", get(handlers::sortedset_zrange))
+        .route(
+            "/sortedset/{key}/zrevrange",
+            get(handlers::sortedset_zrevrange),
+        )
+        .route(
+            "/sortedset/{key}/{member}/zrank",
+            get(handlers::sortedset_zrank),
+        )
+        .route(
+            "/sortedset/zinterstore",
+            post(handlers::sortedset_zinterstore),
+        )
+        .route(
+            "/sortedset/zunionstore",
+            post(handlers::sortedset_zunionstore),
+        )
+        .route(
+            "/sortedset/zdiffstore",
+            post(handlers::sortedset_zdiffstore),
+        )
+        .route(
+            "/sortedset/{key}/{member}/zrevrank",
+            get(handlers::sortedset_zrevrank),
+        )
+        .route("/sortedset/{key}/zcount", get(handlers::sortedset_zcount))
+        .route(
+            "/sortedset/{key}/zmscore",
+            post(handlers::sortedset_zmscore),
+        )
+        .route(
+            "/sortedset/{key}/zrangebyscore",
+            get(handlers::sortedset_zrangebyscore),
+        )
+        .route(
+            "/sortedset/{key}/zpopmin",
+            post(handlers::sortedset_zpopmin),
+        )
+        .route(
+            "/sortedset/{key}/zpopmax",
+            post(handlers::sortedset_zpopmax),
+        )
+        .route(
+            "/sortedset/{key}/zremrangebyrank",
+            post(handlers::sortedset_zremrangebyrank),
+        )
+        .route(
+            "/sortedset/{key}/zremrangebyscore",
+            post(handlers::sortedset_zremrangebyscore),
+        )
+        .route("/sortedset/stats", get(handlers::sortedset_stats))
+        // Lua scripting endpoints
+        .route("/script/eval", post(handlers::script_eval))
+        .route("/script/evalsha", post(handlers::script_evalsha))
+        .route("/script/load", post(handlers::script_load))
+        .route("/script/exists", post(handlers::script_exists))
+        .route("/script/flush", post(handlers::script_flush))
+        .route("/script/kill", post(handlers::script_kill))
         // List endpoints
         .route("/list/{key}/lpush", post(handlers::list_lpush))
         .route("/list/{key}/lpushx", post(handlers::list_lpushx))
@@ -205,7 +304,7 @@ pub fn create_router(state: AppState, rate_limit_config: crate::config::RateLimi
 }
 
 /// Create MCP router with StreamableHTTP service
-fn create_mcp_router(state: Arc<AppState>) -> Router {
+fn create_mcp_router(state: Arc<AppState>, mcp_config: crate::config::McpConfig) -> Router {
     use hyper_util::service::TowerToHyperService;
     use rmcp::transport::streamable_http_server::StreamableHttpService;
     use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
@@ -215,6 +314,7 @@ fn create_mcp_router(state: Arc<AppState>) -> Router {
         move || {
             Ok(SynapMcpService {
                 state: state.clone(),
+                mcp_config: mcp_config.clone(),
             })
         },
         LocalSessionManager::default().into(),
@@ -242,10 +342,13 @@ fn create_mcp_router(state: Arc<AppState>) -> Router {
 }
 
 /// Create UMICP router with discovery and message endpoints
-fn create_umicp_router(state: Arc<AppState>) -> Router {
+fn create_umicp_router(state: Arc<AppState>, mcp_config: crate::config::McpConfig) -> Router {
     use super::umicp::{UmicpState, transport};
 
-    let umicp_state = UmicpState { app_state: state };
+    let umicp_state = UmicpState {
+        app_state: state,
+        mcp_config,
+    };
 
     Router::new()
         .route("/umicp", post(transport::umicp_handler))

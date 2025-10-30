@@ -1,7 +1,9 @@
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use std::sync::Arc;
-use synap_server::{AppState, KVStore, ServerConfig, StreamConfig, StreamManager, create_router};
+use synap_server::{
+    AppState, KVStore, ScriptManager, ServerConfig, StreamConfig, StreamManager, create_router,
+};
 use tokio::net::TcpListener;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -14,17 +16,40 @@ async fn spawn_test_server() -> String {
     stream_mgr.clone().start_compaction_task();
 
     let hash_store = Arc::new(synap_server::core::HashStore::new());
+    let kv_store = Arc::new(KVStore::new(kv_config));
+    let list_store = Arc::new(synap_server::core::ListStore::new());
+    let set_store = Arc::new(synap_server::core::SetStore::new());
+    let sorted_set_store = Arc::new(synap_server::core::SortedSetStore::new());
+    let monitoring = Arc::new(synap_server::monitoring::MonitoringManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
+    let transaction_manager = Arc::new(synap_server::core::TransactionManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        list_store.clone(),
+        set_store.clone(),
+        sorted_set_store.clone(),
+    ));
     let app_state = AppState {
-        kv_store: Arc::new(KVStore::new(kv_config)),
+        kv_store,
         hash_store,
-        list_store: Arc::new(synap_server::core::ListStore::new()),
-        set_store: Arc::new(synap_server::core::SetStore::new()),
+        list_store,
+        set_store,
+        sorted_set_store,
+        hyperloglog_store: Arc::new(synap_server::core::HyperLogLogStore::new()),
         queue_manager: None,
         stream_manager: Some(stream_mgr),
         pubsub_router: None,
         persistence: None,
         consumer_group_manager: None,
         partition_manager: None,
+        monitoring,
+        transaction_manager,
+        script_manager: Arc::new(ScriptManager::default()),
     };
 
     let app = create_router(
@@ -34,6 +59,7 @@ async fn spawn_test_server() -> String {
             requests_per_second: 100,
             burst_size: 10,
         },
+        synap_server::config::McpConfig::default(),
     );
 
     // Bind to random port

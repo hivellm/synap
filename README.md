@@ -12,15 +12,19 @@ Synap is a modern, high-performance data infrastructure system built in Rust, co
 
 ## 🎯 Overview
 
-Synap provides seven core capabilities in a single, cohesive system:
+Synap provides multiple core capabilities in a single, cohesive system:
 
 1. **💾 Memory Key-Value Store** - Radix-tree based in-memory storage with O(k) lookup
 2. **#️⃣ Hash Data Structure** - Field-value maps within keys (Redis-compatible HSET, HGET, etc.) ✅ **v0.6.0**
 3. **📋 List Data Structure** - Ordered sequences with LPUSH, RPOP, LRANGE (Redis-compatible) ✅ **v0.6.0**
 4. **🔷 Set Data Structure** - Unordered unique collections with SADD, SREM, SINTER, SUNION (Redis-compatible) ✅ **v0.6.0**
-5. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
-6. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
-7. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
+5. **📊 Sorted Set Data Structure** - Scored members with ranking (ZADD, ZRANGE, ZRANK, ZINTER/ZUNION) ✅ **v0.7.0**
+6. **🔢 HyperLogLog** - Probabilistic cardinality estimation with ~0.81% error (~12KB memory) 🔄 **v0.8.0-alpha** (In Progress)
+7. **📜 Lua Scripting** - Server-side scripting with EVAL/EVALSHA and redis.call() bridge ✅ **v0.7.0**
+8. **🔄 Transactions** - MULTI/EXEC/WATCH/DISCARD with optimistic locking ✅ **v0.7.0**
+9. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
+10. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
+11. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
 
 ## ✨ Key Features
 
@@ -685,9 +689,9 @@ See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) for complete authentication
 **✅ Phase 2 (Q4 2025)**: Event Streams, Pub/Sub, Persistence - **COMPLETE**  
 **✅ Phase 3 (Q1 2026)**: Master-Slave Replication with TCP - **COMPLETE**  
 **✅ Redis Phase 1 (Oct 2025)**: Hash, List, Set Data Structures + 5 SDKs - **COMPLETE** 🎉  
-**✅ MCP Integration**: Model Context Protocol - **COMPLETE**  
+**✅ MCP Integration**: Model Context Protocol with Configurable Tools - **COMPLETE**  
 **✅ UMICP Integration**: Universal Matrix Inter-Communication Protocol - **COMPLETE**  
-**⏳ Redis Phase 2**: Sorted Sets, String Extensions, Key Management  
+**🔄 Redis Phase 2**: Sorted Sets (80%), String Extensions, Key Management  
 **⏳ Phase 4 (Q2 2026)**: Clustering, Sharding, GUI Dashboard, Distribution packages
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for details.

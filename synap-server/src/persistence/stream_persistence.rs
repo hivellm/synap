@@ -169,7 +169,8 @@ impl StreamPersistence {
         };
 
         // Serialize
-        let data = bincode::serialize(&event_with_offset)?;
+        let data = bincode::serde::encode_to_vec(&event_with_offset, bincode::config::legacy())
+            .map_err(|e| PersistenceError::SerializationError(e.to_string()))?;
         let size = data.len() as u64;
         let checksum = crc32fast::hash(&data);
 
@@ -266,8 +267,11 @@ impl StreamPersistence {
                 break;
             }
 
-            match bincode::deserialize::<StreamEvent>(&data) {
-                Ok(event) => {
+            match bincode::serde::decode_from_slice::<StreamEvent, _>(
+                &data,
+                bincode::config::legacy(),
+            ) {
+                Ok((event, _)) => {
                     let event_offset = event.offset;
                     // Only include events >= from_offset
                     if event_offset >= from_offset {

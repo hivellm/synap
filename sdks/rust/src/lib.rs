@@ -42,6 +42,7 @@ mod queue_reactive;
 pub mod reactive;
 pub mod rx; // RxJS-style reactive programming
 pub mod set;
+pub mod sorted_set;
 pub mod stream;
 mod stream_reactive;
 pub mod types;
@@ -55,4 +56,5 @@ pub use pubsub::PubSubManager;
 pub use queue::QueueManager;
 pub use reactive::{MessageStream, SubscriptionHandle};
 pub use set::SetManager;
+pub use sorted_set::{ScoredMember, SortedSetManager, SortedSetStats};
 pub use stream::StreamManager;

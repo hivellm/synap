@@ -1,6 +1,7 @@
 use rmcp::model::{CallToolRequestParam, CallToolResult, Content, ErrorData};
 use serde_json::json;
 use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::server::AppState;
 
@@ -13,6 +14,14 @@ pub async fn handle_mcp_tool(
         "synap_kv_get" => handle_kv_get(request, state).await,
         "synap_kv_set" => handle_kv_set(request, state).await,
         "synap_kv_delete" => handle_kv_delete(request, state).await,
+        // String Extension tools (3)
+        "synap_kv_append" => handle_kv_append(request, state).await,
+        "synap_kv_getrange" => handle_kv_getrange(request, state).await,
+        "synap_kv_strlen" => handle_kv_strlen(request, state).await,
+        // Key Management tools (3)
+        "synap_key_type" => handle_key_type(request, state).await,
+        "synap_key_exists" => handle_key_exists(request, state).await,
+        "synap_key_rename" => handle_key_rename(request, state).await,
         // Essential Hash tools (3)
         "synap_hash_set" => handle_hash_set(request, state).await,
         "synap_hash_get" => handle_hash_get(request, state).await,
@@ -27,6 +36,13 @@ pub async fn handle_mcp_tool(
         "synap_set_inter" => handle_set_inter(request, state).await,
         // Essential Queue tool (1)
         "synap_queue_publish" => handle_queue_publish(request, state).await,
+        // Essential Sorted Set tools (3)
+        "synap_sortedset_zadd" => handle_sortedset_zadd(request, state).await,
+        "synap_sortedset_zrange" => handle_sortedset_zrange(request, state).await,
+        "synap_sortedset_zrank" => handle_sortedset_zrank(request, state).await,
+        // Transaction tools (2)
+        "synap_transaction_multi" => handle_transaction_multi(request, state).await,
+        "synap_transaction_exec" => handle_transaction_exec(request, state).await,
         _ => Err(ErrorData::invalid_params("Unknown tool", None)),
     }
 }
@@ -148,6 +164,215 @@ async fn handle_kv_delete(
 
     Ok(CallToolResult::success(vec![Content::text(
         json!({"deleted": deleted}).to_string(),
+    )]))
+}
+
+// ==================== String Extension MCP Handlers ====================
+
+async fn handle_kv_append(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let value_str = args
+        .get("value")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing value", None))?;
+
+    let value_bytes = value_str.as_bytes().to_vec();
+
+    let length = state
+        .kv_store
+        .append(key, value_bytes.clone())
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("APPEND failed: {}", e), None))?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        if let Err(e) = persistence
+            .log_kv_set(key.to_string(), value_bytes, None)
+            .await
+        {
+            tracing::error!("Failed to log KV APPEND to WAL (MCP): {}", e);
+        }
+    }
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"length": length, "key": key}).to_string(),
+    )]))
+}
+
+async fn handle_kv_getrange(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let start = args
+        .get("start")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| ErrorData::invalid_params("Missing start", None))? as isize;
+
+    let end = args
+        .get("end")
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| ErrorData::invalid_params("Missing end", None))? as isize;
+
+    let range_bytes = state
+        .kv_store
+        .getrange(key, start, end)
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("GETRANGE failed: {}", e), None))?;
+
+    let response = String::from_utf8(range_bytes).unwrap_or_else(|_| "<binary data>".to_string());
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"range": response}).to_string(),
+    )]))
+}
+
+async fn handle_kv_strlen(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let length = state
+        .kv_store
+        .strlen(key)
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("STRLEN failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"length": length, "key": key}).to_string(),
+    )]))
+}
+
+// ==================== Key Management MCP Handlers ====================
+
+async fn handle_key_type(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let manager = crate::core::KeyManager::new(
+        state.kv_store.clone(),
+        state.hash_store.clone(),
+        state.list_store.clone(),
+        state.set_store.clone(),
+        state.sorted_set_store.clone(),
+    );
+
+    let key_type = manager
+        .key_type(key)
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("TYPE failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"key": key, "type": key_type.as_str()}).to_string(),
+    )]))
+}
+
+async fn handle_key_exists(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let manager = crate::core::KeyManager::new(
+        state.kv_store.clone(),
+        state.hash_store.clone(),
+        state.list_store.clone(),
+        state.set_store.clone(),
+        state.sorted_set_store.clone(),
+    );
+
+    let exists = manager
+        .exists(key)
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("EXISTS failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"key": key, "exists": exists}).to_string(),
+    )]))
+}
+
+async fn handle_key_rename(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let source = args
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing source", None))?;
+
+    let destination = args
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing destination", None))?;
+
+    let manager = crate::core::KeyManager::new(
+        state.kv_store.clone(),
+        state.hash_store.clone(),
+        state.list_store.clone(),
+        state.set_store.clone(),
+        state.sorted_set_store.clone(),
+    );
+
+    manager
+        .rename(source, destination)
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("RENAME failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"success": true, "source": source, "destination": destination}).to_string(),
     )]))
 }
 
@@ -527,4 +752,179 @@ async fn handle_set_inter(
     Ok(CallToolResult::success(vec![Content::text(
         json!({"intersection": intersection, "count": intersection.len()}).to_string(),
     )]))
+}
+
+async fn handle_sortedset_zadd(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let member = args
+        .get("member")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing member", None))?;
+
+    let score = args
+        .get("score")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| ErrorData::invalid_params("Missing or invalid score", None))?;
+
+    let member_bytes = member.as_bytes().to_vec();
+    let opts = crate::core::ZAddOptions::default();
+
+    let (added, _) = state.sorted_set_store.zadd(key, member_bytes, score, &opts);
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"added": added > 0, "key": key, "member": member, "score": score}).to_string(),
+    )]))
+}
+
+async fn handle_sortedset_zrange(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let start = args.get("start").and_then(|v| v.as_i64()).unwrap_or(0);
+
+    let stop = args.get("stop").and_then(|v| v.as_i64()).unwrap_or(-1);
+
+    let with_scores = args
+        .get("withscores")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    let members = state.sorted_set_store.zrange(key, start, stop, with_scores);
+
+    let result: Vec<serde_json::Value> = members
+        .iter()
+        .map(|sm| {
+            if with_scores {
+                json!({
+                    "member": String::from_utf8_lossy(&sm.member),
+                    "score": sm.score
+                })
+            } else {
+                json!(String::from_utf8_lossy(&sm.member))
+            }
+        })
+        .collect();
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"members": result, "count": result.len()}).to_string(),
+    )]))
+}
+
+async fn handle_sortedset_zrank(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    let member = args
+        .get("member")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing member", None))?;
+
+    let member_bytes = member.as_bytes();
+    let rank = state.sorted_set_store.zrank(key, member_bytes);
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({"rank": rank, "key": key, "member": member}).to_string(),
+    )]))
+}
+
+// ==================== Transaction MCP Handlers ====================
+
+async fn handle_transaction_multi(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    // Get client_id from args or generate one
+    let client_id = match args.get("client_id").and_then(|v| v.as_str()) {
+        Some(id) => id.to_string(),
+        None => Uuid::new_v4().to_string(),
+    };
+
+    state
+        .transaction_manager
+        .multi(client_id.clone())
+        .map_err(|e| ErrorData::internal_error(format!("Transaction multi failed: {}", e), None))?;
+
+    Ok(CallToolResult::success(vec![Content::text(
+        json!({
+            "success": true,
+            "message": "Transaction started",
+            "client_id": client_id
+        })
+        .to_string(),
+    )]))
+}
+
+async fn handle_transaction_exec(
+    request: CallToolRequestParam,
+    state: Arc<AppState>,
+) -> Result<CallToolResult, ErrorData> {
+    let args = request
+        .arguments
+        .as_ref()
+        .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
+
+    let client_id = args
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| ErrorData::invalid_params("Missing client_id", None))?
+        .to_string();
+
+    match state
+        .transaction_manager
+        .exec(&client_id)
+        .await
+        .map_err(|e| ErrorData::internal_error(format!("Transaction exec failed: {}", e), None))?
+    {
+        Some(results) => Ok(CallToolResult::success(vec![Content::text(
+            json!({
+                "success": true,
+                "results": results
+            })
+            .to_string(),
+        )])),
+        None => Ok(CallToolResult::success(vec![Content::text(
+            json!({
+                "aborted": true,
+                "message": "Transaction aborted: watched keys changed"
+            })
+            .to_string(),
+        )])),
+    }
 }

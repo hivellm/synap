@@ -1,6 +1,6 @@
 //! Set Manager tests
 
-use synap_sdk::{SetManager, SynapClient, SynapConfig};
+use synap_sdk::{SynapClient, SynapConfig};
 
 #[tokio::test]
 async fn test_set_add_rem() {

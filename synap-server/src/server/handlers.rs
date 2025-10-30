@@ -1,5 +1,12 @@
-use crate::core::{HashStore, KVStore, Message, QueueManager, SynapError};
+use crate::core::{
+    HashStore, HyperLogLogStore, KVStore, KeyManager, Message, QueueManager, SortedSetStore,
+    SynapError, TransactionManager,
+};
+use crate::monitoring::{
+    InfoSection, KeyspaceInfo, MemoryInfo, MemoryUsage, ReplicationInfo, ServerInfo, StatsInfo,
+};
 use crate::protocol::{Request, Response};
+use crate::scripting::{ScriptExecContext, ScriptManager};
 use axum::{
     Json,
     extract::{
@@ -11,8 +18,8 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::HashMap;
 use std::sync::Arc;
+use std::{collections::HashMap, time::Duration};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 
@@ -23,12 +30,17 @@ pub struct AppState {
     pub hash_store: Arc<HashStore>,
     pub list_store: Arc<crate::core::ListStore>,
     pub set_store: Arc<crate::core::SetStore>,
+    pub sorted_set_store: Arc<SortedSetStore>,
+    pub hyperloglog_store: Arc<HyperLogLogStore>,
     pub queue_manager: Option<Arc<QueueManager>>,
     pub stream_manager: Option<Arc<crate::core::StreamManager>>,
     pub partition_manager: Option<Arc<crate::core::PartitionManager>>,
     pub consumer_group_manager: Option<Arc<crate::core::ConsumerGroupManager>>,
     pub pubsub_router: Option<Arc<crate::core::PubSubRouter>>,
     pub persistence: Option<Arc<crate::persistence::PersistenceLayer>>,
+    pub monitoring: Arc<crate::monitoring::MonitoringManager>,
+    pub transaction_manager: Arc<TransactionManager>,
+    pub script_manager: Arc<ScriptManager>,
 }
 
 // Request/Response types for REST API
@@ -74,6 +86,62 @@ pub struct OperationStats {
     pub dels: u64,
     pub hits: u64,
     pub misses: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EvalScriptRequest {
+    pub script: String,
+    #[serde(default)]
+    pub keys: Vec<String>,
+    #[serde(default)]
+    pub args: Vec<serde_json::Value>,
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct EvalScriptResponse {
+    pub result: serde_json::Value,
+    pub sha1: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EvalShaRequest {
+    pub sha1: String,
+    #[serde(default)]
+    pub keys: Vec<String>,
+    #[serde(default)]
+    pub args: Vec<serde_json::Value>,
+    pub timeout_ms: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ScriptLoadRequest {
+    pub script: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ScriptLoadResponse {
+    pub sha1: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ScriptExistsRequest {
+    pub hashes: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ScriptExistsResponse {
+    pub exists: Vec<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ScriptFlushResponse {
+    pub cleared: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ScriptKillResponse {
+    pub terminated: bool,
 }
 
 /// Health check endpoint
@@ -275,6 +343,594 @@ pub async fn kv_stats(State(state): State<AppState>) -> Result<Json<StatsRespons
         },
         hit_rate: stats.hit_rate(),
     }))
+}
+
+// ==================== String Extension REST Endpoints ====================
+
+// String extension request/response types
+#[derive(Debug, Deserialize)]
+pub struct AppendRequest {
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AppendResponse {
+    pub length: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetRangeRequest {
+    pub start: isize,
+    pub end: isize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SetRangeRequest {
+    pub offset: usize,
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SetRangeResponse {
+    pub length: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StrlenResponse {
+    pub length: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GetSetRequest {
+    pub value: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum GetSetResponse {
+    Value(String),
+    Null,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MSetNxRequest {
+    pub pairs: Vec<(String, serde_json::Value)>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MSetNxResponse {
+    pub success: bool,
+}
+
+/// APPEND endpoint - append bytes to existing value or create new key
+pub async fn kv_append(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<AppendRequest>,
+) -> Result<Json<AppendResponse>, SynapError> {
+    debug!("REST APPEND key={}", key);
+
+    let value_bytes = serde_json::to_vec(&req.value)
+        .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let length = state.kv_store.append(&key, value_bytes).await?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        // APPEND is logged as SET since we reconstruct full value
+        if let Err(e) = persistence.log_kv_set(key.clone(), vec![], None).await {
+            error!("Failed to log KV APPEND to WAL: {}", e);
+        }
+    }
+
+    Ok(Json(AppendResponse { length }))
+}
+
+/// GETRANGE endpoint - get substring by range with negative indices
+pub async fn kv_getrange(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+) -> Result<Json<GetResponse>, SynapError> {
+    let start = params
+        .get("start")
+        .and_then(|s| s.parse::<isize>().ok())
+        .ok_or_else(|| SynapError::InvalidRequest("start parameter required".to_string()))?;
+    let end = params
+        .get("end")
+        .and_then(|s| s.parse::<isize>().ok())
+        .ok_or_else(|| SynapError::InvalidRequest("end parameter required".to_string()))?;
+
+    debug!("REST GETRANGE key={}, start={}, end={}", key, start, end);
+
+    let range_bytes = state.kv_store.getrange(&key, start, end).await?;
+
+    if range_bytes.is_empty() {
+        Ok(Json(GetResponse::NotFound(
+            serde_json::json!({"error": "Key not found or range empty"}),
+        )))
+    } else {
+        let value_str = String::from_utf8(range_bytes.clone())
+            .unwrap_or_else(|_| format!("<binary data: {} bytes>", range_bytes.len()));
+        Ok(Json(GetResponse::String(value_str)))
+    }
+}
+
+/// SETRANGE endpoint - overwrite substring at offset
+pub async fn kv_setrange(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<SetRangeRequest>,
+) -> Result<Json<SetRangeResponse>, SynapError> {
+    debug!("REST SETRANGE key={}, offset={}", key, req.offset);
+
+    let value_bytes = serde_json::to_vec(&req.value)
+        .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let length = state
+        .kv_store
+        .setrange(&key, req.offset, value_bytes)
+        .await?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        // SETRANGE is logged as SET since we reconstruct full value
+        if let Err(e) = persistence.log_kv_set(key.clone(), vec![], None).await {
+            error!("Failed to log KV SETRANGE to WAL: {}", e);
+        }
+    }
+
+    Ok(Json(SetRangeResponse { length }))
+}
+
+/// STRLEN endpoint - get length of string value in bytes
+pub async fn kv_strlen(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<StrlenResponse>, SynapError> {
+    debug!("REST STRLEN key={}", key);
+
+    let length = state.kv_store.strlen(&key).await?;
+
+    Ok(Json(StrlenResponse { length }))
+}
+
+/// GETSET endpoint - atomically get current value and set new one
+pub async fn kv_getset(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<GetSetRequest>,
+) -> Result<Json<GetSetResponse>, SynapError> {
+    debug!("REST GETSET key={}", key);
+
+    let value_bytes = serde_json::to_vec(&req.value)
+        .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let old_value = state.kv_store.getset(&key, value_bytes.clone()).await?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        if let Err(e) = persistence.log_kv_set(key.clone(), value_bytes, None).await {
+            error!("Failed to log KV GETSET to WAL: {}", e);
+        }
+    }
+
+    if let Some(old_bytes) = old_value {
+        let old_str = String::from_utf8(old_bytes.clone())
+            .unwrap_or_else(|_| format!("<binary data: {} bytes>", old_bytes.len()));
+        Ok(Json(GetSetResponse::Value(old_str)))
+    } else {
+        Ok(Json(GetSetResponse::Null))
+    }
+}
+
+/// MSETNX endpoint - multi-set only if ALL keys don't exist (atomic)
+pub async fn kv_msetnx(
+    State(state): State<AppState>,
+    Json(req): Json<MSetNxRequest>,
+) -> Result<Json<MSetNxResponse>, SynapError> {
+    debug!("REST MSETNX count={}", req.pairs.len());
+
+    let pairs: Vec<(String, Vec<u8>)> = req
+        .pairs
+        .into_iter()
+        .map(|(key, value)| {
+            let value_bytes = serde_json::to_vec(&value)
+                .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+            Ok((key, value_bytes))
+        })
+        .collect::<Result<Vec<_>, SynapError>>()?;
+
+    let success = state.kv_store.msetnx(pairs.clone()).await?;
+
+    // Log to WAL if all keys were set
+    if success {
+        if let Some(ref persistence) = state.persistence {
+            for (key, value_bytes) in pairs {
+                if let Err(e) = persistence.log_kv_set(key, value_bytes, None).await {
+                    error!("Failed to log KV MSETNX to WAL: {}", e);
+                }
+            }
+        }
+    }
+
+    Ok(Json(MSetNxResponse { success }))
+}
+
+// ==================== Key Management REST Endpoints ====================
+
+/// Helper to create KeyManager from AppState
+fn create_key_manager(state: &AppState) -> KeyManager {
+    KeyManager::new(
+        state.kv_store.clone(),
+        state.hash_store.clone(),
+        state.list_store.clone(),
+        state.set_store.clone(),
+        state.sorted_set_store.clone(),
+    )
+}
+
+#[derive(Debug, Serialize)]
+pub struct TypeResponse {
+    pub key: String,
+    pub r#type: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RenameRequest {
+    pub destination: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RenameResponse {
+    pub success: bool,
+    pub source: String,
+    pub destination: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CopyRequest {
+    pub destination: String,
+    pub replace: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CopyResponse {
+    pub success: bool,
+    pub source: String,
+    pub destination: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RandomKeyResponse {
+    pub key: Option<String>,
+}
+
+/// TYPE endpoint - get the type of a key
+pub async fn key_type(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<TypeResponse>, SynapError> {
+    debug!("REST TYPE key={}", key);
+
+    let manager = create_key_manager(&state);
+    let key_type = manager.key_type(&key).await?;
+
+    Ok(Json(TypeResponse {
+        key,
+        r#type: key_type.as_str().to_string(),
+    }))
+}
+
+/// EXISTS endpoint - check if key exists (cross-store)
+pub async fn key_exists(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST EXISTS key={}", key);
+
+    let manager = create_key_manager(&state);
+    let exists = manager.exists(&key).await?;
+
+    Ok(Json(serde_json::json!({
+        "key": key,
+        "exists": exists
+    })))
+}
+
+/// RENAME endpoint - rename a key atomically
+pub async fn key_rename(
+    State(state): State<AppState>,
+    Path(source): Path<String>,
+    Json(req): Json<RenameRequest>,
+) -> Result<Json<RenameResponse>, SynapError> {
+    debug!(
+        "REST RENAME source={}, destination={}",
+        source, req.destination
+    );
+
+    let manager = create_key_manager(&state);
+    manager.rename(&source, &req.destination).await?;
+
+    // Log to WAL if persistence is enabled
+    if state.persistence.is_some() {
+        // RENAME is logged as a copy + delete sequence
+        // TODO: Add specific RENAME operation to WAL
+    }
+
+    Ok(Json(RenameResponse {
+        success: true,
+        source,
+        destination: req.destination,
+    }))
+}
+
+/// RENAMENX endpoint - rename key only if destination doesn't exist
+pub async fn key_renamenx(
+    State(state): State<AppState>,
+    Path(source): Path<String>,
+    Json(req): Json<RenameRequest>,
+) -> Result<Json<RenameResponse>, SynapError> {
+    debug!(
+        "REST RENAMENX source={}, destination={}",
+        source, req.destination
+    );
+
+    let manager = create_key_manager(&state);
+    let success = manager.renamenx(&source, &req.destination).await?;
+
+    if !success {
+        return Err(SynapError::InvalidRequest(
+            "Destination key already exists".to_string(),
+        ));
+    }
+
+    Ok(Json(RenameResponse {
+        success: true,
+        source,
+        destination: req.destination,
+    }))
+}
+
+/// COPY endpoint - copy key to destination
+pub async fn key_copy(
+    State(state): State<AppState>,
+    Path(source): Path<String>,
+    Json(req): Json<CopyRequest>,
+) -> Result<Json<CopyResponse>, SynapError> {
+    debug!(
+        "REST COPY source={}, destination={}, replace={:?}",
+        source, req.destination, req.replace
+    );
+
+    let manager = create_key_manager(&state);
+    let success = manager
+        .copy(&source, &req.destination, req.replace.unwrap_or(false))
+        .await?;
+
+    if !success {
+        return Err(SynapError::InvalidRequest(
+            "Destination key already exists and replace=false".to_string(),
+        ));
+    }
+
+    Ok(Json(CopyResponse {
+        success: true,
+        source,
+        destination: req.destination,
+    }))
+}
+
+/// RANDOMKEY endpoint - get a random key
+pub async fn key_randomkey(
+    State(state): State<AppState>,
+) -> Result<Json<RandomKeyResponse>, SynapError> {
+    debug!("REST RANDOMKEY");
+
+    let manager = create_key_manager(&state);
+    let random_key = manager.randomkey().await?;
+
+    Ok(Json(RandomKeyResponse { key: random_key }))
+}
+
+// ==================== Monitoring REST Endpoints ====================
+
+/// INFO endpoint - get server information
+pub async fn info(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let section = params.get("section").map(|s| s.as_str()).unwrap_or("all");
+    let section = InfoSection::from_str(section);
+
+    let mut response = serde_json::json!({});
+
+    if section == InfoSection::All || section == InfoSection::Server {
+        let server_info = ServerInfo::collect(state.monitoring.uptime_secs(), 15500).await;
+        response["server"] = serde_json::to_value(server_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Memory {
+        let stores = state.monitoring.stores();
+        let memory_info =
+            MemoryInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
+        response["memory"] = serde_json::to_value(memory_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Stats {
+        let stores = state.monitoring.stores();
+        let stats_info = StatsInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
+        response["stats"] = serde_json::to_value(stats_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Replication {
+        let repl_info = ReplicationInfo::collect().await;
+        response["replication"] = serde_json::to_value(repl_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Keyspace {
+        let stores = state.monitoring.stores();
+        let keyspace_info =
+            KeyspaceInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
+        response["keyspace"] = serde_json::to_value(keyspace_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    Ok(Json(response))
+}
+
+/// SLOWLOG endpoint - get slow query log
+pub async fn slowlog(
+    State(state): State<AppState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let count = params.get("count").and_then(|s| s.parse::<usize>().ok());
+
+    let entries = state.monitoring.slow_log().get(count).await;
+    let total = state.monitoring.slow_log().len().await;
+
+    Ok(Json(serde_json::json!({
+        "entries": entries,
+        "total": total
+    })))
+}
+
+/// MEMORY USAGE endpoint - get memory usage for a key
+pub async fn memory_usage(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let key_manager = KeyManager::new(
+        state.kv_store.clone(),
+        state.hash_store.clone(),
+        state.list_store.clone(),
+        state.set_store.clone(),
+        state.sorted_set_store.clone(),
+    );
+
+    let stores = state.monitoring.stores();
+    let key_type = key_manager.key_type(&key).await?;
+
+    let usage = MemoryUsage::calculate_with_stores(
+        key_type, &key, &stores.0, &stores.1, &stores.2, &stores.3, &stores.4,
+    )
+    .await
+    .ok_or_else(|| SynapError::KeyNotFound(key.clone()))?;
+
+    Ok(Json(serde_json::to_value(usage).map_err(|e| {
+        SynapError::SerializationError(e.to_string())
+    })?))
+}
+
+/// CLIENT LIST endpoint - get active connections
+pub async fn client_list(
+    State(_state): State<AppState>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    // TODO: Implement client tracking when WebSocket tracking is added
+    Ok(Json(serde_json::json!({
+        "clients": [],
+        "count": 0
+    })))
+}
+
+// ==================== Transaction REST Endpoints ====================
+
+#[derive(Debug, Deserialize)]
+pub struct WatchRequest {
+    pub keys: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MultiResponse {
+    pub success: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(untagged)]
+pub enum ExecResponse {
+    Success { results: Vec<serde_json::Value> },
+    Aborted { aborted: bool },
+}
+
+/// MULTI endpoint - start a transaction
+pub async fn transaction_multi(
+    State(state): State<AppState>,
+) -> Result<Json<MultiResponse>, SynapError> {
+    // For REST API, we'll use a client_id based on request context
+    // In production, this should come from authentication/session
+    let client_id = "rest_client".to_string();
+
+    debug!("REST MULTI client_id={}", client_id);
+    state.transaction_manager.multi(client_id)?;
+
+    Ok(Json(MultiResponse {
+        success: true,
+        message: "Transaction started".to_string(),
+    }))
+}
+
+/// DISCARD endpoint - discard current transaction
+pub async fn transaction_discard(
+    State(state): State<AppState>,
+) -> Result<Json<MultiResponse>, SynapError> {
+    let client_id = "rest_client";
+
+    debug!("REST DISCARD client_id={}", client_id);
+    state.transaction_manager.discard(client_id)?;
+
+    Ok(Json(MultiResponse {
+        success: true,
+        message: "Transaction discarded".to_string(),
+    }))
+}
+
+/// WATCH endpoint - watch keys for changes
+pub async fn transaction_watch(
+    State(state): State<AppState>,
+    Json(req): Json<WatchRequest>,
+) -> Result<Json<MultiResponse>, SynapError> {
+    let client_id = "rest_client";
+
+    debug!("REST WATCH client_id={}, keys={:?}", client_id, req.keys);
+    state.transaction_manager.watch(client_id, req.keys)?;
+
+    Ok(Json(MultiResponse {
+        success: true,
+        message: "Keys watched".to_string(),
+    }))
+}
+
+/// UNWATCH endpoint - unwatch all keys
+pub async fn transaction_unwatch(
+    State(state): State<AppState>,
+) -> Result<Json<MultiResponse>, SynapError> {
+    let client_id = "rest_client";
+
+    debug!("REST UNWATCH client_id={}", client_id);
+    state.transaction_manager.unwatch(client_id)?;
+
+    Ok(Json(MultiResponse {
+        success: true,
+        message: "Keys unwatched".to_string(),
+    }))
+}
+
+/// EXEC endpoint - execute transaction
+pub async fn transaction_exec(
+    State(state): State<AppState>,
+) -> Result<Json<ExecResponse>, SynapError> {
+    let client_id = "rest_client";
+
+    debug!("REST EXEC client_id={}", client_id);
+    match state.transaction_manager.exec(client_id).await? {
+        Some(results) => Ok(Json(ExecResponse::Success { results })),
+        None => Ok(Json(ExecResponse::Aborted { aborted: true })),
+    }
 }
 
 // ==================== Hash REST Endpoints ====================
@@ -992,6 +1648,32 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "kv.ttl" => handle_kv_ttl_cmd(state.kv_store.clone(), &request).await,
         "kv.persist" => handle_kv_persist_cmd(state.kv_store.clone(), &request).await,
         "kv.stats" => handle_kv_stats_cmd(state.kv_store.clone(), &request).await,
+        // String extension commands
+        "kv.append" => handle_kv_append_cmd(&state, &request).await,
+        "kv.getrange" => handle_kv_getrange_cmd(state.kv_store.clone(), &request).await,
+        "kv.setrange" => handle_kv_setrange_cmd(&state, &request).await,
+        "kv.strlen" => handle_kv_strlen_cmd(state.kv_store.clone(), &request).await,
+        "kv.getset" => handle_kv_getset_cmd(&state, &request).await,
+        "kv.msetnx" => handle_kv_msetnx_cmd(&state, &request).await,
+        // Key Management commands
+        "key.type" => handle_key_type_cmd(state.clone(), &request).await,
+        "key.exists" => handle_key_exists_cmd(state.clone(), &request).await,
+        "key.rename" => handle_key_rename_cmd(&state, &request).await,
+        "key.renamenx" => handle_key_renamenx_cmd(&state, &request).await,
+        "key.copy" => handle_key_copy_cmd(&state, &request).await,
+        "key.randomkey" => handle_key_randomkey_cmd(state.clone(), &request).await,
+        // Monitoring commands
+        "info" => handle_info_cmd(state.clone(), &request).await,
+        "slowlog.get" => handle_slowlog_get_cmd(state.clone(), &request).await,
+        "slowlog.reset" => handle_slowlog_reset_cmd(state.clone(), &request).await,
+        "memory.usage" => handle_memory_usage_cmd(state.clone(), &request).await,
+        "client.list" => handle_client_list_cmd(state.clone(), &request).await,
+        // Transaction commands
+        "transaction.multi" => handle_transaction_multi_cmd(state.clone(), &request).await,
+        "transaction.exec" => handle_transaction_exec_cmd(state.clone(), &request).await,
+        "transaction.discard" => handle_transaction_discard_cmd(state.clone(), &request).await,
+        "transaction.watch" => handle_transaction_watch_cmd(state.clone(), &request).await,
+        "transaction.unwatch" => handle_transaction_unwatch_cmd(state.clone(), &request).await,
         // Hash commands
         "hash.set" => handle_hash_set_cmd(&state, &request).await,
         "hash.get" => handle_hash_get_cmd(&state, &request).await,
@@ -1033,6 +1715,35 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "queue.list" => handle_queue_list_cmd(&state, &request).await,
         "queue.stats" => handle_queue_stats_cmd(&state, &request).await,
         "queue.purge" => handle_queue_purge_cmd(&state, &request).await,
+        // Sorted Set commands
+        "sortedset.zadd" => handle_sortedset_zadd_cmd(&state, &request).await,
+        "sortedset.zrem" => handle_sortedset_zrem_cmd(&state, &request).await,
+        "sortedset.zscore" => handle_sortedset_zscore_cmd(&state, &request).await,
+        "sortedset.zcard" => handle_sortedset_zcard_cmd(&state, &request).await,
+        "sortedset.zincrby" => handle_sortedset_zincrby_cmd(&state, &request).await,
+        "sortedset.zrange" => handle_sortedset_zrange_cmd(&state, &request).await,
+        "sortedset.zrevrange" => handle_sortedset_zrevrange_cmd(&state, &request).await,
+        "sortedset.zrank" => handle_sortedset_zrank_cmd(&state, &request).await,
+        "sortedset.zrevrank" => handle_sortedset_zrevrank_cmd(&state, &request).await,
+        "sortedset.zcount" => handle_sortedset_zcount_cmd(&state, &request).await,
+        "sortedset.zpopmin" => handle_sortedset_zpopmin_cmd(&state, &request).await,
+        "sortedset.zpopmax" => handle_sortedset_zpopmax_cmd(&state, &request).await,
+        "sortedset.zrangebyscore" => handle_sortedset_zrangebyscore_cmd(&state, &request).await,
+        "sortedset.zremrangebyrank" => handle_sortedset_zremrangebyrank_cmd(&state, &request).await,
+        "sortedset.zremrangebyscore" => {
+            handle_sortedset_zremrangebyscore_cmd(&state, &request).await
+        }
+        "sortedset.zinterstore" => handle_sortedset_zinterstore_cmd(&state, &request).await,
+        "sortedset.zunionstore" => handle_sortedset_zunionstore_cmd(&state, &request).await,
+        "sortedset.zdiffstore" => handle_sortedset_zdiffstore_cmd(&state, &request).await,
+        "sortedset.zmscore" => handle_sortedset_zmscore_cmd(&state, &request).await,
+        "sortedset.stats" => handle_sortedset_stats_cmd(&state, &request).await,
+        "script.eval" => handle_script_eval_cmd(&state, &request).await,
+        "script.evalsha" => handle_script_evalsha_cmd(&state, &request).await,
+        "script.load" => handle_script_load_cmd(&state, &request).await,
+        "script.exists" => handle_script_exists_cmd(&state, &request).await,
+        "script.flush" => handle_script_flush_cmd(&state, &request).await,
+        "script.kill" => handle_script_kill_cmd(&state, &request).await,
         "pubsub.subscribe" => handle_pubsub_subscribe_cmd(&state, &request).await,
         "pubsub.publish" => handle_pubsub_publish_cmd(&state, &request).await,
         "pubsub.unsubscribe" => handle_pubsub_unsubscribe_cmd(&state, &request).await,
@@ -1350,6 +2061,360 @@ async fn handle_kv_stats_cmd(
             "misses": stats.misses,
         },
         "hit_rate": stats.hit_rate()
+    }))
+}
+
+// ==================== String Extension Command Handlers ====================
+
+async fn handle_kv_append_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let value = request
+        .payload
+        .get("value")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?;
+
+    let value_bytes =
+        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let length = state.kv_store.append(key, value_bytes).await?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        if let Err(e) = persistence.log_kv_set(key.to_string(), vec![], None).await {
+            error!("Failed to log KV APPEND to WAL: {}", e);
+        }
+    }
+
+    Ok(serde_json::json!({ "length": length }))
+}
+
+async fn handle_kv_getrange_cmd(
+    store: Arc<KVStore>,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let start = request
+        .payload
+        .get("start")
+        .and_then(|v| v.as_i64())
+        .map(|v| v as isize)
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'start' field".to_string()))?;
+
+    let end = request
+        .payload
+        .get("end")
+        .and_then(|v| v.as_i64())
+        .map(|v| v as isize)
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'end' field".to_string()))?;
+
+    let range_bytes = store.getrange(key, start, end).await?;
+
+    if range_bytes.is_empty() {
+        Ok(serde_json::json!(null))
+    } else {
+        let value_str = String::from_utf8(range_bytes.clone())
+            .unwrap_or_else(|_| format!("<binary data: {} bytes>", range_bytes.len()));
+        Ok(serde_json::json!(value_str))
+    }
+}
+
+async fn handle_kv_setrange_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let offset = request
+        .payload
+        .get("offset")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize)
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'offset' field".to_string()))?;
+
+    let value = request
+        .payload
+        .get("value")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?;
+
+    let value_bytes =
+        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let length = state.kv_store.setrange(key, offset, value_bytes).await?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        if let Err(e) = persistence.log_kv_set(key.to_string(), vec![], None).await {
+            error!("Failed to log KV SETRANGE to WAL: {}", e);
+        }
+    }
+
+    Ok(serde_json::json!({ "length": length }))
+}
+
+async fn handle_kv_strlen_cmd(
+    store: Arc<KVStore>,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let length = store.strlen(key).await?;
+    Ok(serde_json::json!({ "length": length }))
+}
+
+async fn handle_kv_getset_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let value = request
+        .payload
+        .get("value")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?;
+
+    let value_bytes =
+        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let old_value = state.kv_store.getset(key, value_bytes.clone()).await?;
+
+    // Log to WAL (async, non-blocking)
+    if let Some(ref persistence) = state.persistence {
+        if let Err(e) = persistence
+            .log_kv_set(key.to_string(), value_bytes, None)
+            .await
+        {
+            error!("Failed to log KV GETSET to WAL: {}", e);
+        }
+    }
+
+    if let Some(old_bytes) = old_value {
+        let old_str = String::from_utf8(old_bytes.clone())
+            .unwrap_or_else(|_| format!("<binary data: {} bytes>", old_bytes.len()));
+        Ok(serde_json::json!(old_str))
+    } else {
+        Ok(serde_json::json!(null))
+    }
+}
+
+async fn handle_kv_msetnx_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let pairs = request
+        .payload
+        .get("pairs")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'pairs' array".to_string()))?;
+
+    let kv_pairs: Result<Vec<(String, Vec<u8>)>, SynapError> = pairs
+        .iter()
+        .map(|pair| {
+            let pair_obj = pair
+                .as_object()
+                .ok_or_else(|| SynapError::InvalidRequest("Pair must be an object".to_string()))?;
+            let key = pair_obj
+                .get("key")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' in pair".to_string()))?;
+            let value = pair_obj
+                .get("value")
+                .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' in pair".to_string()))?;
+            let value_bytes = serde_json::to_vec(value)
+                .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+            Ok((key.to_string(), value_bytes))
+        })
+        .collect();
+
+    let kv_pairs = kv_pairs?;
+    let success = state.kv_store.msetnx(kv_pairs.clone()).await?;
+
+    // Log to WAL if all keys were set
+    if success {
+        if let Some(ref persistence) = state.persistence {
+            for (key, value_bytes) in kv_pairs {
+                if let Err(e) = persistence.log_kv_set(key, value_bytes, None).await {
+                    error!("Failed to log KV MSETNX to WAL: {}", e);
+                }
+            }
+        }
+    }
+
+    Ok(serde_json::json!({ "success": success }))
+}
+
+// ==================== Key Management StreamableHTTP Handlers ====================
+
+async fn handle_key_type_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let manager = create_key_manager(&state);
+    let key_type = manager.key_type(key).await?;
+
+    Ok(serde_json::json!({
+        "key": key,
+        "type": key_type.as_str()
+    }))
+}
+
+async fn handle_key_exists_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let manager = create_key_manager(&state);
+    let exists = manager.exists(key).await?;
+
+    Ok(serde_json::json!({
+        "key": key,
+        "exists": exists
+    }))
+}
+
+async fn handle_key_rename_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let source = request
+        .payload
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'source' field".to_string()))?;
+
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let manager = create_key_manager(state);
+    manager.rename(source, destination).await?;
+
+    // TODO: Log RENAME to WAL when persistence is enabled
+    // RENAME operation would be logged as a copy + delete sequence
+
+    Ok(serde_json::json!({
+        "success": true,
+        "source": source,
+        "destination": destination
+    }))
+}
+
+async fn handle_key_renamenx_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let source = request
+        .payload
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'source' field".to_string()))?;
+
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let manager = create_key_manager(state);
+    let success = manager.renamenx(source, destination).await?;
+
+    if !success {
+        return Err(SynapError::InvalidRequest(
+            "Destination key already exists".to_string(),
+        ));
+    }
+
+    Ok(serde_json::json!({
+        "success": true,
+        "source": source,
+        "destination": destination
+    }))
+}
+
+async fn handle_key_copy_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let source = request
+        .payload
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'source' field".to_string()))?;
+
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let replace = request
+        .payload
+        .get("replace")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let manager = create_key_manager(state);
+    let success = manager.copy(source, destination, replace).await?;
+
+    if !success {
+        return Err(SynapError::InvalidRequest(
+            "Destination key already exists and replace=false".to_string(),
+        ));
+    }
+
+    Ok(serde_json::json!({
+        "success": true,
+        "source": source,
+        "destination": destination
+    }))
+}
+
+async fn handle_key_randomkey_cmd(
+    state: AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let manager = create_key_manager(&state);
+    let random_key = manager.randomkey().await?;
+
+    Ok(serde_json::json!({
+        "key": random_key
     }))
 }
 
@@ -2476,6 +3541,846 @@ async fn handle_queue_purge_cmd(
     Ok(serde_json::json!({ "purged": count }))
 }
 
+// ==================== Sorted Set Command Handlers ====================
+
+fn serialize_scored_members(members: Vec<crate::core::ScoredMember>) -> Vec<serde_json::Value> {
+    members
+        .into_iter()
+        .map(|m| {
+            let member_str = String::from_utf8(m.member.clone())
+                .unwrap_or_else(|_| format!("<binary data: {} bytes>", m.member.len()));
+
+            json!({
+                "member": member_str,
+                "score": m.score,
+            })
+        })
+        .collect()
+}
+
+async fn handle_sortedset_zadd_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let member = request
+        .payload
+        .get("member")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
+
+    let score = request
+        .payload
+        .get("score")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'score' field".to_string()))?;
+
+    let member_bytes = member.as_bytes().to_vec();
+
+    let opts = crate::core::ZAddOptions {
+        nx: request
+            .payload
+            .get("nx")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        xx: request
+            .payload
+            .get("xx")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        gt: request
+            .payload
+            .get("gt")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        lt: request
+            .payload
+            .get("lt")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        ch: request
+            .payload
+            .get("ch")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+        incr: request
+            .payload
+            .get("incr")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false),
+    };
+
+    let (added, changed) = state.sorted_set_store.zadd(key, member_bytes, score, &opts);
+
+    Ok(serde_json::json!({ "added": added, "changed": changed, "key": key }))
+}
+
+async fn handle_sortedset_zrem_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let members = request
+        .payload
+        .get("members")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'members' array".to_string()))?;
+
+    let member_bytes: Result<Vec<Vec<u8>>, SynapError> = members
+        .iter()
+        .map(|m| {
+            m.as_str().map(|s| s.as_bytes().to_vec()).ok_or_else(|| {
+                SynapError::InvalidRequest("All 'members' entries must be strings".to_string())
+            })
+        })
+        .collect();
+    let member_bytes = member_bytes?;
+
+    let removed = state.sorted_set_store.zrem(key, &member_bytes);
+
+    Ok(serde_json::json!({ "removed": removed, "key": key }))
+}
+
+async fn handle_sortedset_zscore_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let member = request
+        .payload
+        .get("member")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
+
+    let member_bytes = member.as_bytes();
+    let score = state.sorted_set_store.zscore(key, member_bytes);
+
+    Ok(serde_json::json!({ "score": score, "key": key, "member": member }))
+}
+
+async fn handle_sortedset_zcard_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let count = state.sorted_set_store.zcard(key);
+
+    Ok(serde_json::json!({ "count": count, "key": key }))
+}
+
+async fn handle_sortedset_zincrby_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let member = request
+        .payload
+        .get("member")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
+
+    let increment = request
+        .payload
+        .get("increment")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'increment' field".to_string()))?;
+
+    let member_bytes = member.as_bytes().to_vec();
+
+    let new_score = state.sorted_set_store.zincrby(key, member_bytes, increment);
+
+    Ok(serde_json::json!({ "score": new_score, "key": key }))
+}
+
+async fn handle_sortedset_zrange_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let start = request
+        .payload
+        .get("start")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+
+    let stop = request
+        .payload
+        .get("stop")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(-1);
+
+    let with_scores = request
+        .payload
+        .get("withscores")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let members = state.sorted_set_store.zrange(key, start, stop, with_scores);
+    let members = serialize_scored_members(members);
+
+    Ok(serde_json::json!({ "members": members, "key": key }))
+}
+
+async fn handle_sortedset_zrevrange_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let start = request
+        .payload
+        .get("start")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+
+    let stop = request
+        .payload
+        .get("stop")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(-1);
+
+    let with_scores = request
+        .payload
+        .get("withscores")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let members = state
+        .sorted_set_store
+        .zrevrange(key, start, stop, with_scores);
+    let members = serialize_scored_members(members);
+
+    Ok(serde_json::json!({ "members": members, "key": key }))
+}
+
+async fn handle_sortedset_zrank_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let member = request
+        .payload
+        .get("member")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
+
+    let member_bytes = member.as_bytes();
+    let rank = state.sorted_set_store.zrank(key, member_bytes);
+
+    Ok(serde_json::json!({ "rank": rank, "key": key, "member": member }))
+}
+
+async fn handle_sortedset_zrevrank_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let member = request
+        .payload
+        .get("member")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
+
+    let member_bytes = member.as_bytes();
+    let rank = state.sorted_set_store.zrevrank(key, member_bytes);
+
+    Ok(serde_json::json!({ "rank": rank, "key": key, "member": member }))
+}
+
+async fn handle_sortedset_zcount_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let min = request
+        .payload
+        .get("min")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::NEG_INFINITY);
+
+    let max = request
+        .payload
+        .get("max")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::INFINITY);
+
+    let count = state.sorted_set_store.zcount(key, min, max);
+
+    Ok(serde_json::json!({ "count": count, "key": key }))
+}
+
+async fn handle_sortedset_zpopmin_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let count = request
+        .payload
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1) as usize;
+
+    let members = state.sorted_set_store.zpopmin(key, count);
+    let result_count = members.len();
+    let serialized = serialize_scored_members(members);
+
+    Ok(serde_json::json!({ "members": serialized, "count": result_count, "key": key }))
+}
+
+async fn handle_sortedset_zpopmax_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let count = request
+        .payload
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1) as usize;
+
+    let members = state.sorted_set_store.zpopmax(key, count);
+    let result_count = members.len();
+    let serialized = serialize_scored_members(members);
+
+    Ok(serde_json::json!({ "members": serialized, "count": result_count, "key": key }))
+}
+
+async fn handle_sortedset_zrangebyscore_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let min = request
+        .payload
+        .get("min")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::NEG_INFINITY);
+
+    let max = request
+        .payload
+        .get("max")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::INFINITY);
+
+    let with_scores = request
+        .payload
+        .get("withscores")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let members = state
+        .sorted_set_store
+        .zrangebyscore(key, min, max, with_scores);
+    let members = serialize_scored_members(members);
+
+    Ok(serde_json::json!({ "members": members, "key": key }))
+}
+
+async fn handle_sortedset_zremrangebyrank_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let start = request
+        .payload
+        .get("start")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+
+    let stop = request
+        .payload
+        .get("stop")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(-1);
+
+    let removed = state.sorted_set_store.zremrangebyrank(key, start, stop);
+
+    Ok(serde_json::json!({ "removed": removed, "key": key }))
+}
+
+async fn handle_sortedset_zremrangebyscore_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let min = request
+        .payload
+        .get("min")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::NEG_INFINITY);
+
+    let max = request
+        .payload
+        .get("max")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(f64::INFINITY);
+
+    let removed = state.sorted_set_store.zremrangebyscore(key, min, max);
+
+    Ok(serde_json::json!({ "removed": removed, "key": key }))
+}
+
+async fn handle_sortedset_zinterstore_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let keys = request
+        .payload
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'keys' array".to_string()))?;
+
+    let key_strs: Vec<&str> = keys.iter().filter_map(|v| v.as_str()).collect();
+
+    let weights = request
+        .payload
+        .get("weights")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<f64>>());
+
+    let aggregate_str = request
+        .payload
+        .get("aggregate")
+        .and_then(|v| v.as_str())
+        .unwrap_or("sum");
+
+    let aggregate = match aggregate_str.to_lowercase().as_str() {
+        "min" => crate::core::Aggregate::Min,
+        "max" => crate::core::Aggregate::Max,
+        _ => crate::core::Aggregate::Sum,
+    };
+
+    let count =
+        state
+            .sorted_set_store
+            .zinterstore(destination, &key_strs, weights.as_deref(), aggregate);
+
+    Ok(serde_json::json!({ "count": count, "destination": destination }))
+}
+
+async fn handle_sortedset_zunionstore_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let keys = request
+        .payload
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'keys' array".to_string()))?;
+
+    let key_strs: Vec<&str> = keys.iter().filter_map(|v| v.as_str()).collect();
+
+    let weights = request
+        .payload
+        .get("weights")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().filter_map(|v| v.as_f64()).collect::<Vec<f64>>());
+
+    let aggregate_str = request
+        .payload
+        .get("aggregate")
+        .and_then(|v| v.as_str())
+        .unwrap_or("sum");
+
+    let aggregate = match aggregate_str.to_lowercase().as_str() {
+        "min" => crate::core::Aggregate::Min,
+        "max" => crate::core::Aggregate::Max,
+        _ => crate::core::Aggregate::Sum,
+    };
+
+    let count =
+        state
+            .sorted_set_store
+            .zunionstore(destination, &key_strs, weights.as_deref(), aggregate);
+
+    Ok(serde_json::json!({ "count": count, "destination": destination }))
+}
+
+async fn handle_sortedset_zdiffstore_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let keys = request
+        .payload
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'keys' array".to_string()))?;
+
+    let key_strs: Vec<&str> = keys.iter().filter_map(|v| v.as_str()).collect();
+
+    let count = state.sorted_set_store.zdiffstore(destination, &key_strs);
+
+    Ok(serde_json::json!({ "count": count, "destination": destination }))
+}
+
+async fn handle_sortedset_zmscore_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let members = request
+        .payload
+        .get("members")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'members' array".to_string()))?;
+
+    let member_bytes: Result<Vec<Vec<u8>>, SynapError> = members
+        .iter()
+        .map(|m| {
+            m.as_str().map(|s| s.as_bytes().to_vec()).ok_or_else(|| {
+                SynapError::InvalidRequest("All 'members' entries must be strings".to_string())
+            })
+        })
+        .collect();
+    let member_bytes = member_bytes?;
+
+    let scores = state.sorted_set_store.zmscore(key, &member_bytes);
+
+    Ok(serde_json::json!({ "scores": scores, "key": key }))
+}
+
+async fn handle_sortedset_stats_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let stats = state.sorted_set_store.stats();
+
+    Ok(serde_json::json!({
+        "total_keys": stats.total_keys,
+        "total_members": stats.total_members,
+        "avg_members_per_key": stats.avg_members_per_key,
+        "memory_bytes": stats.memory_bytes,
+    }))
+}
+
+// ==================== Lua Scripting Handlers ====================
+
+pub async fn script_eval(
+    State(state): State<AppState>,
+    Json(req): Json<EvalScriptRequest>,
+) -> Result<Json<EvalScriptResponse>, SynapError> {
+    let context = ScriptExecContext {
+        kv_store: state.kv_store.clone(),
+        hash_store: state.hash_store.clone(),
+        list_store: state.list_store.clone(),
+        set_store: state.set_store.clone(),
+        sorted_set_store: state.sorted_set_store.clone(),
+    };
+    let args = json_args_to_strings(req.args);
+    let timeout = req.timeout_ms.map(Duration::from_millis);
+
+    let (result, sha1) = state
+        .script_manager
+        .eval(context, &req.script, req.keys, args, timeout)
+        .await?;
+
+    Ok(Json(EvalScriptResponse { result, sha1 }))
+}
+
+pub async fn script_evalsha(
+    State(state): State<AppState>,
+    Json(req): Json<EvalShaRequest>,
+) -> Result<Json<EvalScriptResponse>, SynapError> {
+    let context = ScriptExecContext {
+        kv_store: state.kv_store.clone(),
+        hash_store: state.hash_store.clone(),
+        list_store: state.list_store.clone(),
+        set_store: state.set_store.clone(),
+        sorted_set_store: state.sorted_set_store.clone(),
+    };
+    let args = json_args_to_strings(req.args);
+    let timeout = req.timeout_ms.map(Duration::from_millis);
+
+    let result = state
+        .script_manager
+        .evalsha(context, &req.sha1, req.keys, args, timeout)
+        .await?;
+
+    Ok(Json(EvalScriptResponse {
+        result,
+        sha1: req.sha1,
+    }))
+}
+
+pub async fn script_load(
+    State(state): State<AppState>,
+    Json(req): Json<ScriptLoadRequest>,
+) -> Result<Json<ScriptLoadResponse>, SynapError> {
+    let sha1 = state.script_manager.load_script(&req.script);
+    Ok(Json(ScriptLoadResponse { sha1 }))
+}
+
+pub async fn script_exists(
+    State(state): State<AppState>,
+    Json(req): Json<ScriptExistsRequest>,
+) -> Result<Json<ScriptExistsResponse>, SynapError> {
+    let exists = state.script_manager.script_exists(&req.hashes);
+    Ok(Json(ScriptExistsResponse { exists }))
+}
+
+pub async fn script_flush(
+    State(state): State<AppState>,
+) -> Result<Json<ScriptFlushResponse>, SynapError> {
+    let cleared = state.script_manager.flush();
+    Ok(Json(ScriptFlushResponse { cleared }))
+}
+
+pub async fn script_kill(
+    State(state): State<AppState>,
+) -> Result<Json<ScriptKillResponse>, SynapError> {
+    let terminated = state.script_manager.kill_running();
+    Ok(Json(ScriptKillResponse { terminated }))
+}
+
+fn json_args_to_strings(args: Vec<serde_json::Value>) -> Vec<String> {
+    args.into_iter()
+        .map(|value| match value {
+            serde_json::Value::String(s) => s,
+            serde_json::Value::Null => String::new(),
+            other => other.to_string(),
+        })
+        .collect()
+}
+
+fn extract_string_list(
+    payload: &serde_json::Value,
+    field: &str,
+) -> Result<Vec<String>, SynapError> {
+    match payload.get(field) {
+        Some(serde_json::Value::Array(items)) => Ok(items
+            .iter()
+            .map(|v| match v {
+                serde_json::Value::String(s) => s.clone(),
+                serde_json::Value::Null => String::new(),
+                other => other.to_string(),
+            })
+            .collect()),
+        Some(_) => Err(SynapError::InvalidRequest(format!(
+            "{} must be an array",
+            field
+        ))),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn extract_json_list(
+    payload: &serde_json::Value,
+    field: &str,
+) -> Result<Vec<serde_json::Value>, SynapError> {
+    match payload.get(field) {
+        Some(serde_json::Value::Array(items)) => Ok(items.clone()),
+        Some(_) => Err(SynapError::InvalidRequest(format!(
+            "{} must be an array",
+            field
+        ))),
+        None => Ok(Vec::new()),
+    }
+}
+
+async fn handle_script_eval_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let script = request
+        .payload
+        .get("script")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'script' field".into()))?;
+
+    let keys = extract_string_list(&request.payload, "keys")?;
+    let args = json_args_to_strings(extract_json_list(&request.payload, "args")?);
+    let timeout = request
+        .payload
+        .get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .map(Duration::from_millis);
+
+    let context = ScriptExecContext {
+        kv_store: state.kv_store.clone(),
+        hash_store: state.hash_store.clone(),
+        list_store: state.list_store.clone(),
+        set_store: state.set_store.clone(),
+        sorted_set_store: state.sorted_set_store.clone(),
+    };
+
+    let (result, sha1) = state
+        .script_manager
+        .eval(context, script, keys, args, timeout)
+        .await?;
+
+    Ok(json!({ "result": result, "sha1": sha1 }))
+}
+
+async fn handle_script_evalsha_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let sha1 = request
+        .payload
+        .get("sha1")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'sha1' field".into()))?;
+
+    let keys = extract_string_list(&request.payload, "keys")?;
+    let args = json_args_to_strings(extract_json_list(&request.payload, "args")?);
+    let timeout = request
+        .payload
+        .get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .map(Duration::from_millis);
+
+    let context = ScriptExecContext {
+        kv_store: state.kv_store.clone(),
+        hash_store: state.hash_store.clone(),
+        list_store: state.list_store.clone(),
+        set_store: state.set_store.clone(),
+        sorted_set_store: state.sorted_set_store.clone(),
+    };
+
+    let result = state
+        .script_manager
+        .evalsha(context, sha1, keys, args, timeout)
+        .await?;
+
+    Ok(json!({ "result": result, "sha1": sha1 }))
+}
+
+async fn handle_script_load_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let script = request
+        .payload
+        .get("script")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'script' field".into()))?;
+
+    let sha1 = state.script_manager.load_script(script);
+    Ok(json!({ "sha1": sha1 }))
+}
+
+async fn handle_script_exists_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let hashes = extract_string_list(&request.payload, "hashes")?;
+    let exists = state.script_manager.script_exists(&hashes);
+    Ok(json!({ "exists": exists }))
+}
+
+async fn handle_script_flush_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let cleared = state.script_manager.flush();
+    Ok(json!({ "cleared": cleared }))
+}
+
+async fn handle_script_kill_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let terminated = state.script_manager.kill_running();
+    Ok(json!({ "terminated": terminated }))
+}
+
 // ============================================================================
 // Pub/Sub WebSocket Handler
 // ============================================================================
@@ -3298,6 +5203,249 @@ async fn handle_pubsub_info_cmd(
             "Topic '{}' not found",
             topic
         ))),
+    }
+}
+
+// ============================================================================
+// Monitoring StreamableHTTP Command Handlers
+// ============================================================================
+
+async fn handle_info_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let section = request
+        .payload
+        .get("section")
+        .and_then(|v| v.as_str())
+        .unwrap_or("all");
+    let section = InfoSection::from_str(section);
+
+    let mut response = serde_json::json!({});
+
+    if section == InfoSection::All || section == InfoSection::Server {
+        let server_info = ServerInfo::collect(state.monitoring.uptime_secs(), 15500).await;
+        response["server"] = serde_json::to_value(server_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Memory {
+        let stores = state.monitoring.stores();
+        let memory_info =
+            MemoryInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
+        response["memory"] = serde_json::to_value(memory_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Stats {
+        let stores = state.monitoring.stores();
+        let stats_info = StatsInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
+        response["stats"] = serde_json::to_value(stats_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Replication {
+        let repl_info = ReplicationInfo::collect().await;
+        response["replication"] = serde_json::to_value(repl_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    if section == InfoSection::All || section == InfoSection::Keyspace {
+        let stores = state.monitoring.stores();
+        let keyspace_info =
+            KeyspaceInfo::collect(stores.0, stores.1, stores.2, stores.3, stores.4).await;
+        response["keyspace"] = serde_json::to_value(keyspace_info)
+            .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    }
+
+    Ok(response)
+}
+
+async fn handle_slowlog_get_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let count = request
+        .payload
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
+
+    let entries = state.monitoring.slow_log().get(count).await;
+    let total = state.monitoring.slow_log().len().await;
+
+    Ok(serde_json::json!({
+        "entries": entries,
+        "total": total
+    }))
+}
+
+async fn handle_slowlog_reset_cmd(
+    state: AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let count = state.monitoring.slow_log().reset().await;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "cleared": count
+    }))
+}
+
+async fn handle_memory_usage_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let key_manager = KeyManager::new(
+        state.kv_store.clone(),
+        state.hash_store.clone(),
+        state.list_store.clone(),
+        state.set_store.clone(),
+        state.sorted_set_store.clone(),
+    );
+
+    let stores = state.monitoring.stores();
+    let key_type = key_manager.key_type(key).await?;
+
+    let usage = MemoryUsage::calculate_with_stores(
+        key_type, key, &stores.0, &stores.1, &stores.2, &stores.3, &stores.4,
+    )
+    .await
+    .ok_or_else(|| SynapError::KeyNotFound(key.to_string()))?;
+
+    serde_json::to_value(usage).map_err(|e| SynapError::SerializationError(e.to_string()))
+}
+
+async fn handle_client_list_cmd(
+    _state: AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    // TODO: Implement client tracking when WebSocket tracking is added
+    Ok(serde_json::json!({
+        "clients": [],
+        "count": 0
+    }))
+}
+
+// ============================================================================
+// Transaction StreamableHTTP Command Handlers
+// ============================================================================
+
+async fn handle_transaction_multi_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    // Get client_id from request payload, default to request_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&request.request_id);
+
+    debug!("StreamableHTTP MULTI client_id={}", client_id);
+    state.transaction_manager.multi(client_id.to_string())?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Transaction started"
+    }))
+}
+
+async fn handle_transaction_discard_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&request.request_id);
+
+    debug!("StreamableHTTP DISCARD client_id={}", client_id);
+    state.transaction_manager.discard(client_id)?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Transaction discarded"
+    }))
+}
+
+async fn handle_transaction_watch_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&request.request_id);
+
+    let keys = request
+        .payload
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'keys' field".to_string()))?
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
+
+    debug!(
+        "StreamableHTTP WATCH client_id={}, keys={:?}",
+        client_id, keys
+    );
+    state.transaction_manager.watch(client_id, keys)?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Keys watched"
+    }))
+}
+
+async fn handle_transaction_unwatch_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&request.request_id);
+
+    debug!("StreamableHTTP UNWATCH client_id={}", client_id);
+    state.transaction_manager.unwatch(client_id)?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "message": "Keys unwatched"
+    }))
+}
+
+async fn handle_transaction_exec_cmd(
+    state: AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or(&request.request_id);
+
+    debug!("StreamableHTTP EXEC client_id={}", client_id);
+    match state.transaction_manager.exec(client_id).await? {
+        Some(results) => Ok(serde_json::json!({
+            "success": true,
+            "results": results
+        })),
+        None => Ok(serde_json::json!({
+            "aborted": true,
+            "message": "Transaction aborted: watched keys changed"
+        })),
     }
 }
 
@@ -4654,4 +6802,462 @@ pub async fn list_stats(
             brpop_count: stats.brpop_count,
         },
     }))
+}
+
+// ==================== Sorted Set Handlers ====================
+
+#[derive(Debug, Deserialize)]
+pub struct ZAddRequest {
+    pub member: serde_json::Value,
+    pub score: f64,
+    #[serde(default)]
+    pub nx: bool,
+    #[serde(default)]
+    pub xx: bool,
+    #[serde(default)]
+    pub gt: bool,
+    #[serde(default)]
+    pub lt: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ZRemRequest {
+    pub members: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ZInterstoreRequest {
+    pub destination: String,
+    pub keys: Vec<String>,
+    #[serde(default)]
+    pub weights: Option<Vec<f64>>,
+    #[serde(default)]
+    pub aggregate: String, // "sum", "min", "max"
+}
+
+/// POST /sortedset/:key/zadd - Add member with score
+pub async fn sortedset_zadd(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ZAddRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!(
+        "REST ZADD key={} member={:?} score={}",
+        key, req.member, req.score
+    );
+
+    let member = serde_json::to_vec(&req.member)
+        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize member: {}", e)))?;
+
+    let opts = crate::core::ZAddOptions {
+        nx: req.nx,
+        xx: req.xx,
+        gt: req.gt,
+        lt: req.lt,
+        ch: false,
+        incr: false,
+    };
+
+    let (added, _) = state.sorted_set_store.zadd(&key, member, req.score, &opts);
+
+    Ok(Json(json!({ "added": added, "key": key })))
+}
+
+/// POST /sortedset/:key/zrem - Remove members
+pub async fn sortedset_zrem(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ZRemRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST ZREM key={} members={:?}", key, req.members);
+
+    let members: Result<Vec<Vec<u8>>, _> = req.members.iter().map(serde_json::to_vec).collect();
+
+    let members = members
+        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize members: {}", e)))?;
+
+    let removed = state.sorted_set_store.zrem(&key, &members);
+
+    Ok(Json(json!({ "removed": removed, "key": key })))
+}
+
+/// GET /sortedset/:key/:member/zscore - Get score of member
+pub async fn sortedset_zscore(
+    State(state): State<AppState>,
+    Path((key, member)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST ZSCORE key={} member={}", key, member);
+
+    let member_bytes = member.as_bytes();
+    let score = state.sorted_set_store.zscore(&key, member_bytes);
+
+    Ok(Json(
+        json!({ "score": score, "key": key, "member": member }),
+    ))
+}
+
+/// GET /sortedset/:key/zcard - Get cardinality
+pub async fn sortedset_zcard(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST ZCARD key={}", key);
+
+    let count = state.sorted_set_store.zcard(&key);
+
+    Ok(Json(json!({ "count": count, "key": key })))
+}
+
+/// POST /sortedset/:key/zincrby - Increment score
+pub async fn sortedset_zincrby(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ZAddRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!(
+        "REST ZINCRBY key={} member={:?} increment={}",
+        key, req.member, req.score
+    );
+
+    let member = serde_json::to_vec(&req.member)
+        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize member: {}", e)))?;
+
+    let new_score = state.sorted_set_store.zincrby(&key, member, req.score);
+
+    Ok(Json(json!({ "score": new_score, "key": key })))
+}
+
+/// GET /sortedset/:key/zrange - Get range by rank
+pub async fn sortedset_zrange(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let start: i64 = params
+        .get("start")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let stop: i64 = params
+        .get("stop")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(-1);
+    let with_scores = params
+        .get("withscores")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+
+    debug!(
+        "REST ZRANGE key={} start={} stop={} withscores={}",
+        key, start, stop, with_scores
+    );
+
+    let members = state
+        .sorted_set_store
+        .zrange(&key, start, stop, with_scores);
+
+    Ok(Json(json!({ "members": members, "key": key })))
+}
+
+/// GET /sortedset/:key/zrevrange - Get reverse range by rank
+pub async fn sortedset_zrevrange(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let start: i64 = params
+        .get("start")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let stop: i64 = params
+        .get("stop")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(-1);
+    let with_scores = params
+        .get("withscores")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+
+    debug!(
+        "REST ZREVRANGE key={} start={} stop={} withscores={}",
+        key, start, stop, with_scores
+    );
+
+    let members = state
+        .sorted_set_store
+        .zrevrange(&key, start, stop, with_scores);
+
+    Ok(Json(json!({ "members": members, "key": key })))
+}
+
+/// GET /sortedset/:key/:member/zrank - Get rank of member
+pub async fn sortedset_zrank(
+    State(state): State<AppState>,
+    Path((key, member)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST ZRANK key={} member={}", key, member);
+
+    let member_bytes = member.as_bytes();
+    let rank = state.sorted_set_store.zrank(&key, member_bytes);
+
+    Ok(Json(json!({ "rank": rank, "key": key, "member": member })))
+}
+
+/// POST /sortedset/zinterstore - Intersection
+pub async fn sortedset_zinterstore(
+    State(state): State<AppState>,
+    Json(req): Json<ZInterstoreRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!(
+        "REST ZINTERSTORE dest={} keys={:?}",
+        req.destination, req.keys
+    );
+
+    let keys: Vec<&str> = req.keys.iter().map(|s| s.as_str()).collect();
+    let weights = req.weights.as_deref();
+
+    let aggregate = match req.aggregate.to_lowercase().as_str() {
+        "min" => crate::core::Aggregate::Min,
+        "max" => crate::core::Aggregate::Max,
+        _ => crate::core::Aggregate::Sum,
+    };
+
+    let count = state
+        .sorted_set_store
+        .zinterstore(&req.destination, &keys, weights, aggregate);
+
+    Ok(Json(
+        json!({ "count": count, "destination": req.destination }),
+    ))
+}
+
+/// POST /sortedset/zunionstore - Union
+pub async fn sortedset_zunionstore(
+    State(state): State<AppState>,
+    Json(req): Json<ZInterstoreRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!(
+        "REST ZUNIONSTORE dest={} keys={:?}",
+        req.destination, req.keys
+    );
+
+    let keys: Vec<&str> = req.keys.iter().map(|s| s.as_str()).collect();
+    let weights = req.weights.as_deref();
+
+    let aggregate = match req.aggregate.to_lowercase().as_str() {
+        "min" => crate::core::Aggregate::Min,
+        "max" => crate::core::Aggregate::Max,
+        _ => crate::core::Aggregate::Sum,
+    };
+
+    let count = state
+        .sorted_set_store
+        .zunionstore(&req.destination, &keys, weights, aggregate);
+
+    Ok(Json(
+        json!({ "count": count, "destination": req.destination }),
+    ))
+}
+
+/// GET /sortedset/stats - Get sorted set statistics
+pub async fn sortedset_stats(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST SORTEDSET STATS");
+
+    let stats = state.sorted_set_store.stats();
+
+    Ok(Json(json!({
+        "total_keys": stats.total_keys,
+        "total_members": stats.total_members,
+        "avg_members_per_key": stats.avg_members_per_key,
+        "memory_bytes": stats.memory_bytes,
+    })))
+}
+
+/// GET /sortedset/:key/:member/zrevrank - Get reverse rank of member
+pub async fn sortedset_zrevrank(
+    State(state): State<AppState>,
+    Path((key, member)): Path<(String, String)>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST ZREVRANK key={} member={}", key, member);
+
+    let member_bytes = member.as_bytes();
+    let rank = state.sorted_set_store.zrevrank(&key, member_bytes);
+
+    Ok(Json(json!({ "rank": rank, "key": key, "member": member })))
+}
+
+/// GET /sortedset/:key/zcount - Count members in score range
+pub async fn sortedset_zcount(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let min: f64 = params
+        .get("min")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(f64::NEG_INFINITY);
+    let max: f64 = params
+        .get("max")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(f64::INFINITY);
+
+    debug!("REST ZCOUNT key={} min={} max={}", key, min, max);
+
+    let count = state.sorted_set_store.zcount(&key, min, max);
+
+    Ok(Json(json!({ "count": count, "key": key })))
+}
+
+/// POST /sortedset/:key/zmscore - Get multiple scores
+pub async fn sortedset_zmscore(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<ZRemRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST ZMSCORE key={} members={:?}", key, req.members);
+
+    let members: Result<Vec<Vec<u8>>, _> = req.members.iter().map(serde_json::to_vec).collect();
+    let members = members
+        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize members: {}", e)))?;
+
+    let scores = state.sorted_set_store.zmscore(&key, &members);
+
+    Ok(Json(json!({ "scores": scores, "key": key })))
+}
+
+/// GET /sortedset/:key/zrangebyscore - Get range by score
+pub async fn sortedset_zrangebyscore(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let min: f64 = params
+        .get("min")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(f64::NEG_INFINITY);
+    let max: f64 = params
+        .get("max")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(f64::INFINITY);
+    let with_scores = params
+        .get("withscores")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+
+    debug!(
+        "REST ZRANGEBYSCORE key={} min={} max={} withscores={}",
+        key, min, max, with_scores
+    );
+
+    let members = state
+        .sorted_set_store
+        .zrangebyscore(&key, min, max, with_scores);
+
+    Ok(Json(json!({ "members": members, "key": key })))
+}
+
+/// POST /sortedset/:key/zpopmin - Pop minimum scored members
+pub async fn sortedset_zpopmin(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let count: usize = params
+        .get("count")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+
+    debug!("REST ZPOPMIN key={} count={}", key, count);
+
+    let members = state.sorted_set_store.zpopmin(&key, count);
+
+    Ok(Json(
+        json!({ "members": members, "count": members.len(), "key": key }),
+    ))
+}
+
+/// POST /sortedset/:key/zpopmax - Pop maximum scored members
+pub async fn sortedset_zpopmax(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let count: usize = params
+        .get("count")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+
+    debug!("REST ZPOPMAX key={} count={}", key, count);
+
+    let members = state.sorted_set_store.zpopmax(&key, count);
+
+    Ok(Json(
+        json!({ "members": members, "count": members.len(), "key": key }),
+    ))
+}
+
+/// POST /sortedset/:key/zremrangebyrank - Remove members by rank range
+pub async fn sortedset_zremrangebyrank(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let start: i64 = params
+        .get("start")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let stop: i64 = params
+        .get("stop")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(-1);
+
+    debug!(
+        "REST ZREMRANGEBYRANK key={} start={} stop={}",
+        key, start, stop
+    );
+
+    let removed = state.sorted_set_store.zremrangebyrank(&key, start, stop);
+
+    Ok(Json(json!({ "removed": removed, "key": key })))
+}
+
+/// POST /sortedset/:key/zremrangebyscore - Remove members by score range
+pub async fn sortedset_zremrangebyscore(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    let min: f64 = params
+        .get("min")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(f64::NEG_INFINITY);
+    let max: f64 = params
+        .get("max")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(f64::INFINITY);
+
+    debug!("REST ZREMRANGEBYSCORE key={} min={} max={}", key, min, max);
+
+    let removed = state.sorted_set_store.zremrangebyscore(&key, min, max);
+
+    Ok(Json(json!({ "removed": removed, "key": key })))
+}
+
+/// POST /sortedset/zdiffstore - Difference store
+pub async fn sortedset_zdiffstore(
+    State(state): State<AppState>,
+    Json(req): Json<ZInterstoreRequest>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!(
+        "REST ZDIFFSTORE dest={} keys={:?}",
+        req.destination, req.keys
+    );
+
+    let keys: Vec<&str> = req.keys.iter().map(|s| s.as_str()).collect();
+    let count = state.sorted_set_store.zdiffstore(&req.destination, &keys);
+
+    Ok(Json(
+        json!({ "count": count, "destination": req.destination }),
+    ))
 }

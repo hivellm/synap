@@ -1,9 +1,10 @@
 # Add String Command Extensions
 
-> **Status**: Draft  
+> **Status**: ✅ Complete  
 > **Priority**: Medium (Phase 2)  
 > **Target**: v0.6.0-alpha  
-> **Duration**: 2 weeks
+> **Duration**: 2 weeks  
+> **Completed**: October 29, 2025
 
 ## Why
 

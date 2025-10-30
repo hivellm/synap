@@ -19,7 +19,6 @@ async fn test_observe_event_filtering() {
             .observe_event("users", "user.login", Some(0), Duration::from_millis(100));
 
     // Stream should be created and filter by event type
-    assert!(true, "Filtered stream created successfully");
 
     handle.unsubscribe();
 }
@@ -40,7 +39,6 @@ async fn test_observe_event_filter_exclusion() {
     );
 
     // Should only emit order.created events
-    assert!(true, "Filter excludes non-matching events");
 
     handle.unsubscribe();
 }
@@ -57,8 +55,6 @@ async fn test_observe_events_all() {
         client
             .stream()
             .observe_events("test-room", Some(0), Duration::from_millis(100));
-
-    assert!(true, "Event stream created successfully");
 
     handle.unsubscribe();
 }
@@ -172,11 +168,10 @@ async fn test_stream_cancellation_immediate() {
     // Stream should stop quickly
     let result = tokio::time::timeout(Duration::from_millis(100), stream.next()).await;
 
-    match result {
-        Err(_) => assert!(true, "Stream timed out as expected"),
-        Ok(None) => assert!(true, "Stream ended as expected"),
-        Ok(Some(_)) => panic!("Stream should not emit after cancellation"),
+    if let Ok(Some(_)) = result {
+        panic!("Stream should not emit after cancellation");
     }
+    // Expected: timeout or stream ended
 }
 
 #[tokio::test]
@@ -193,7 +188,6 @@ async fn test_stream_offset_tracking() {
             .observe_events("offset-test", Some(42), Duration::from_millis(100));
 
     // Should start from offset 42
-    assert!(true, "Offset tracking initialized");
 
     handle.unsubscribe();
 }

@@ -115,8 +115,14 @@ impl From<serde_json::Error> for ReplicationError {
     }
 }
 
-impl From<bincode::Error> for ReplicationError {
-    fn from(e: bincode::Error) -> Self {
+impl From<bincode::error::EncodeError> for ReplicationError {
+    fn from(e: bincode::error::EncodeError) -> Self {
+        ReplicationError::SerializationError(e.to_string())
+    }
+}
+
+impl From<bincode::error::DecodeError> for ReplicationError {
+    fn from(e: bincode::error::DecodeError) -> Self {
         ReplicationError::SerializationError(e.to_string())
     }
 }

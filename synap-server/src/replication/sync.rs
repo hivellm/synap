@@ -68,7 +68,8 @@ pub async fn create_snapshot_with_streams(
     }
 
     // Serialize operations
-    let data = bincode::serialize(&operations).map_err(|e| e.to_string())?;
+    let data = bincode::serde::encode_to_vec(&operations, bincode::config::legacy())
+        .map_err(|e| e.to_string())?;
 
     // Calculate checksum
     let checksum = crc32fast::hash(&data);
@@ -92,7 +93,8 @@ pub async fn create_snapshot_with_streams(
     );
 
     // Combine metadata + data
-    let mut result = bincode::serialize(&metadata).map_err(|e| e.to_string())?;
+    let mut result = bincode::serde::encode_to_vec(&metadata, bincode::config::legacy())
+        .map_err(|e| e.to_string())?;
     result.extend_from_slice(&data);
 
     Ok(result)
@@ -110,9 +112,9 @@ pub async fn apply_snapshot_with_streams(
     snapshot: &[u8],
 ) -> Result<u64, String> {
     // Deserialize metadata
-    let metadata: SnapshotMetadata = bincode::deserialize(snapshot).map_err(|e| e.to_string())?;
-
-    let metadata_size = bincode::serialized_size(&metadata).map_err(|e| e.to_string())? as usize;
+    let (metadata, metadata_size): (SnapshotMetadata, usize) =
+        bincode::serde::decode_from_slice(snapshot, bincode::config::legacy())
+            .map_err(|e| e.to_string())?;
     let data = &snapshot[metadata_size..];
 
     // Verify checksum
@@ -125,7 +127,9 @@ pub async fn apply_snapshot_with_streams(
     }
 
     // Deserialize operations
-    let operations: Vec<Operation> = bincode::deserialize(data).map_err(|e| e.to_string())?;
+    let (operations, _): (Vec<Operation>, _) =
+        bincode::serde::decode_from_slice(data, bincode::config::legacy())
+            .map_err(|e| e.to_string())?;
 
     info!(
         "Applying snapshot: {} operations ({} keys, {} streams), offset: {}",

@@ -2,7 +2,8 @@ use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
-use synap_server::{AppState, KVConfig, KVStore, create_router};
+use synap_server::monitoring::MonitoringManager;
+use synap_server::{AppState, KVConfig, KVStore, ScriptManager, create_router};
 use tokio::net::TcpListener;
 
 /// Helper to spawn a test server
@@ -10,17 +11,36 @@ async fn spawn_test_server() -> String {
     let kv_store = Arc::new(KVStore::new(KVConfig::default()));
     let hash_store = Arc::new(synap_server::core::HashStore::new());
 
+    let monitoring = Arc::new(MonitoringManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        Arc::new(synap_server::core::ListStore::new()),
+        Arc::new(synap_server::core::SetStore::new()),
+        Arc::new(synap_server::core::SortedSetStore::new()),
+    ));
+    let transaction_manager = Arc::new(synap_server::core::TransactionManager::new(
+        kv_store.clone(),
+        hash_store.clone(),
+        Arc::new(synap_server::core::ListStore::new()),
+        Arc::new(synap_server::core::SetStore::new()),
+        Arc::new(synap_server::core::SortedSetStore::new()),
+    ));
     let state = AppState {
         kv_store,
         hash_store,
         list_store: Arc::new(synap_server::core::ListStore::new()),
         set_store: Arc::new(synap_server::core::SetStore::new()),
+        sorted_set_store: Arc::new(synap_server::core::SortedSetStore::new()),
+        hyperloglog_store: Arc::new(synap_server::core::HyperLogLogStore::new()),
         queue_manager: None,
         stream_manager: None,
         pubsub_router: None,
         persistence: None,
         consumer_group_manager: None,
         partition_manager: None,
+        monitoring,
+        transaction_manager,
+        script_manager: Arc::new(ScriptManager::default()),
     };
     let app = create_router(
         state,
@@ -29,6 +49,7 @@ async fn spawn_test_server() -> String {
             requests_per_second: 100,
             burst_size: 10,
         },
+        synap_server::config::McpConfig::default(),
     );
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -374,4 +395,90 @@ async fn test_stats() {
     assert!(body["total_keys"].as_u64().unwrap() >= 1);
     assert!(body["operations"]["sets"].as_u64().unwrap() >= 1);
     assert!(body["operations"]["gets"].as_u64().unwrap() >= 1);
+}
+
+// ==================== Transaction Integration Tests ====================
+
+#[tokio::test]
+async fn test_transaction_multi_exec() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Start transaction
+    let multi_res = client
+        .post(format!("{}/transaction/multi", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(multi_res.status(), 200);
+
+    // Execute transaction (empty - should work)
+    let exec_res = client
+        .post(format!("{}/transaction/exec", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(exec_res.status(), 200);
+    let exec_body: serde_json::Value = exec_res.json().await.unwrap();
+    // EXEC returns either {success: true, results: [...]} or {aborted: true}
+    assert!(exec_body["success"].as_bool().is_some() || exec_body["results"].is_array());
+}
+
+#[tokio::test]
+async fn test_transaction_discard() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Start transaction
+    let multi_res = client
+        .post(format!("{}/transaction/multi", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(multi_res.status(), 200);
+
+    // Discard transaction
+    let discard_res = client
+        .post(format!("{}/transaction/discard", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(discard_res.status(), 200);
+    let discard_body: serde_json::Value = discard_res.json().await.unwrap();
+    assert!(discard_body["success"].as_bool().unwrap_or(false));
+}
+
+#[tokio::test]
+async fn test_transaction_watch_unwatch() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Start transaction
+    let multi_res = client
+        .post(format!("{}/transaction/multi", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(multi_res.status(), 200);
+
+    // Watch keys
+    let watch_res = client
+        .post(format!("{}/transaction/watch", base_url))
+        .json(&json!({
+            "keys": ["key1", "key2"]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(watch_res.status(), 200);
+
+    // Unwatch
+    let unwatch_res = client
+        .post(format!("{}/transaction/unwatch", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(unwatch_res.status(), 200);
+    let unwatch_body: serde_json::Value = unwatch_res.json().await.unwrap();
+    assert!(unwatch_body["success"].as_bool().unwrap_or(false));
 }

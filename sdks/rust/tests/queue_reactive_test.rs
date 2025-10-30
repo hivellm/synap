@@ -15,13 +15,12 @@ async fn test_observe_messages_with_options() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).unwrap();
 
-    let (mut stream, handle) =
+    let (_stream, handle) =
         client
             .queue()
             .observe_messages("test-queue", "consumer-1", Duration::from_millis(100));
 
     // Stream should be created successfully
-    assert!(true, "Stream created successfully");
 
     // Cleanup
     handle.unsubscribe();
@@ -197,11 +196,10 @@ async fn test_stream_cancellation() {
     let result = tokio::time::timeout(Duration::from_millis(100), _stream.next()).await;
 
     // Either timeout or None (stream ended)
-    match result {
-        Err(_) => assert!(true, "Stream timed out as expected"),
-        Ok(None) => assert!(true, "Stream ended as expected"),
-        Ok(Some(_)) => panic!("Stream should not emit after cancellation"),
+    if let Ok(Some(_)) = result {
+        panic!("Stream should not emit after cancellation");
     }
+    // Expected: timeout or stream ended
 }
 
 #[tokio::test]

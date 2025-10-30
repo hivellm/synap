@@ -19,6 +19,8 @@ pub use discovery::SynapDiscoveryService;
 pub struct UmicpState {
     /// Synap AppState reference
     pub app_state: std::sync::Arc<crate::server::AppState>,
+    /// MCP configuration for tool selection
+    pub mcp_config: crate::config::McpConfig,
 }
 
 /// Health check for UMICP endpoint

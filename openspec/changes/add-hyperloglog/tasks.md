@@ -1,5 +1,9 @@
 # Tasks: Add HyperLogLog Support
 
+> **Status**: 📋 Pending  
+> **Target**: v0.8.0-alpha  
+> **Priority**: Medium (Phase 4)
+
 ## Core (3 commands, ~40 tasks, 2 weeks)
 
 ### Implementation

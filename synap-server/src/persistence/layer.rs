@@ -558,6 +558,189 @@ impl PersistenceLayer {
         Ok(())
     }
 
+    /// Log a Sorted Set ADD operation (ZADD)
+    #[allow(clippy::too_many_arguments)]
+    pub async fn log_zadd(
+        &self,
+        key: String,
+        member: Vec<u8>,
+        score: f64,
+        nx: bool,
+        xx: bool,
+        gt: bool,
+        lt: bool,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ZAdd {
+            key,
+            member,
+            score,
+            nx,
+            xx,
+            gt,
+            lt,
+        };
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a Sorted Set REMOVE operation (ZREM)
+    pub async fn log_zrem(&self, key: String, members: Vec<Vec<u8>>) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ZRem { key, members };
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a Sorted Set INCREMENT BY operation (ZINCRBY)
+    pub async fn log_zincrby(
+        &self,
+        key: String,
+        member: Vec<u8>,
+        increment: f64,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ZIncrBy {
+            key,
+            member,
+            increment,
+        };
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a Sorted Set REMOVE RANGE BY RANK operation (ZREMRANGEBYRANK)
+    pub async fn log_zremrangebyrank(
+        &self,
+        key: String,
+        start: i64,
+        stop: i64,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ZRemRangeByRank { key, start, stop };
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a Sorted Set REMOVE RANGE BY SCORE operation (ZREMRANGEBYSCORE)
+    pub async fn log_zremrangebyscore(
+        &self,
+        key: String,
+        min: f64,
+        max: f64,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ZRemRangeByScore { key, min, max };
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a Sorted Set INTER STORE operation (ZINTERSTORE)
+    pub async fn log_zinterstore(
+        &self,
+        destination: String,
+        keys: Vec<String>,
+        weights: Option<Vec<f64>>,
+        aggregate: String,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ZInterStore {
+            destination,
+            keys,
+            weights,
+            aggregate,
+        };
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a Sorted Set UNION STORE operation (ZUNIONSTORE)
+    pub async fn log_zunionstore(
+        &self,
+        destination: String,
+        keys: Vec<String>,
+        weights: Option<Vec<f64>>,
+        aggregate: String,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ZUnionStore {
+            destination,
+            keys,
+            weights,
+            aggregate,
+        };
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
+    /// Log a Sorted Set DIFF STORE operation (ZDIFFSTORE)
+    pub async fn log_zdiffstore(
+        &self,
+        destination: String,
+        keys: Vec<String>,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::ZDiffStore { destination, keys };
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
     /// No explicit flush needed with AsyncWAL (group commit handles it)
     pub async fn flush(&self) -> super::types::Result<()> {
         // AsyncWAL handles batching and flushing automatically

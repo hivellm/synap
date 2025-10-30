@@ -217,8 +217,8 @@ async fn test_pubsub_list_topics() {
     let result = client.pubsub().list_topics().await;
 
     assert!(result.is_ok(), "List topics failed: {:?}", result.err());
-    let topics = result.unwrap();
-    assert!(topics.is_empty() || topics.len() > 0); // May or may not have topics
+    let _topics = result.unwrap();
+    // May or may not have topics - just verify the call succeeds
 }
 
 #[tokio::test]

@@ -39,10 +39,10 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 
 | Feature | Status | Change ID | Target | Duration |
 |---------|--------|-----------|--------|----------|
-| **Sorted Sets** | ⏳ Pending | `add-sorted-set-data-structure` | v0.6.0-alpha | 6 weeks |
-| **String Extensions** | ⏳ Pending | `add-string-commands` | v0.6.0-alpha | 2 weeks |
-| **Key Management** | ⏳ Pending | `add-key-management` | v0.6.0-alpha | 2 weeks |
-| **Enhanced Monitoring** | ⏳ Pending | `add-info-commands` | v0.6.0-alpha | 3 weeks |
+| **Sorted Sets** | ✅ Complete (95%) | `add-sorted-set-data-structure` | v0.7.0-alpha | 6 weeks |
+| **String Extensions** | ✅ Complete | `add-string-commands` | v0.6.0-alpha | 2 weeks |
+| **Key Management** | ✅ Complete | `add-key-management` | v0.6.0-alpha | 2 weeks |
+| **Enhanced Monitoring** | ✅ Complete | `add-info-commands` | v0.6.0-alpha | 3 weeks |
 
 **Deliverables**:
 - 25+ Sorted Set commands (ZADD, ZRANGE, ZRANK, etc.)
@@ -51,7 +51,7 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 - INFO command variants
 - Enhanced statistics
 
-**Progress**: 0/4 (0%)
+**Progress**: 4/4 (100%) - All Phase 2 features complete! ✅ (Sorted Sets 95%, String Extensions, Key Management, Enhanced Monitoring)
 
 ## Phase 3: Transactions & Scripting (v0.7.0)
 
@@ -61,8 +61,8 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 
 | Feature | Status | Change ID | Target | Duration |
 |---------|--------|-----------|--------|----------|
-| **Transactions** | ⏳ Pending | `add-transactions-support` | v0.7.0-alpha | 6 weeks |
-| **Lua Scripting** | ⏳ Pending | `add-lua-scripting` | v0.7.0-alpha | 8 weeks |
+| **Transactions** | ✅ Complete | `add-transactions-support` | v0.7.0-alpha | 6 weeks |
+| **Lua Scripting** | ✅ Complete | `add-lua-scripting` | v0.7.0-alpha | 8 weeks |
 
 **Deliverables**:
 - MULTI/EXEC/DISCARD
@@ -71,7 +71,7 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 - Script loading and caching
 - Timeout enforcement
 
-**Progress**: 0/2 (0%)
+**Progress**: 2/2 (100%) ✅
 
 ## Phase 4: Cluster & Enterprise (v0.8.0+)
 
@@ -100,20 +100,20 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 
 ### By Phase
 - **Phase 1**: 100% (3/3 features complete) ✅
-- **Phase 2**: 0% (0/4 features complete)
-- **Phase 3**: 0% (0/2 features complete)
+- **Phase 2**: 100% (4/4 features complete) ✅ - Sorted Set + String Extensions + Key Management + Enhanced Monitoring
+- **Phase 3**: 100% (2/2 features complete) - Transactions ✅ + Lua Scripting ✅
 - **Phase 4**: 0% (0/4 features complete)
 
 ### Overall
 - **Total Features**: 13
-- **Completed**: 3 ✅
+- **Completed**: 9 ✅ (Hash, List, Set, Sorted Set, String Extensions, Key Management, Enhanced Monitoring, Transactions, Lua Scripting)
 - **In Progress**: 0 🔄
-- **Planned**: 10 📋
-- **Completion**: 23.1%
+- **Planned**: 5 📋
+- **Completion**: 69.2%
 
 ### By Priority
 - **CRITICAL**: 100% (3/3) ✅
-- **HIGH**: 0% (0/6)
+- **HIGH**: 100% (6/6) - Sorted Set + String Extensions + Key Management + Enhanced Monitoring + Transactions + Lua Scripting complete ✅
 - **MEDIUM**: 0% (0/4)
 
 ## Active Changes
@@ -139,37 +139,54 @@ Currently active OpenSpec changes:
 
 ### Phase 2: Advanced Operations
 
-4. 📋 **add-sorted-set-data-structure** (DRAFT)
-   - Status: Proposal created
-   - Target: v0.6.0-alpha
-   - ~200 tasks, 6 weeks
+4. ✅ **add-sorted-set-data-structure** (COMPLETE & ARCHIVED)
+   - Status: Archived to `archive/2025-10-29-add-sorted-set-data-structure/`
+   - Target: v0.7.0-alpha (implemented in v0.6.0-alpha)
+   - Progress: 190/200 tasks (95% - core features complete, benchmarks deferred to v1.1)
+   - Completed:
+     * ✅ Phase 1: Core Implementation (100%)
+     * ✅ Phase 2: Range & Ranking (100%)
+     * ✅ Phase 3: Advanced Operations (100%)
+     * ✅ Phase 4: API Exposure (100%)
+     * ✅ Phase 5: Persistence Integration (100%)
+   - Optional:
+     * 📊 Phase 6: Benchmarking (deferred to v1.1)
 
-5. 📋 **add-string-extensions** (DRAFT)
-   - Status: Proposal created
+5. ✅ **add-string-extensions** (COMPLETE)
+   - Status: Complete - all 6 commands implemented with full test coverage
    - Target: v0.6.0-alpha
-   - ~50 tasks, 2 weeks
+   - 6 commands: APPEND, GETRANGE, SETRANGE, STRLEN, GETSET, MSETNX
+   - 22 unit tests (including TTL edge cases)
+   - REST + StreamableHTTP + MCP API coverage
 
-6. 📋 **add-key-management** (DRAFT)
-   - Status: Proposal created
+6. ✅ **add-key-management** (COMPLETE)
+   - Status: Complete - all 6 commands implemented with full test coverage
    - Target: v0.6.0-alpha
-   - ~60 tasks, 2 weeks
+   - 6 commands: TYPE, EXISTS, RENAME, RENAMENX, COPY, RANDOMKEY
+   - 11 unit tests (all data types covered: KV, Hash, List, Set, SortedSet)
+   - REST + StreamableHTTP + MCP API coverage
 
-7. 📋 **add-enhanced-monitoring** (DRAFT)
-   - Status: Proposal created
+7. ✅ **add-enhanced-monitoring** (COMPLETE)
+   - Status: Complete - Enhanced Monitoring with INFO, SLOWLOG, MEMORY USAGE, CLIENT LIST
    - Target: v0.6.0-alpha
-   - ~80 tasks, 3 weeks
+   - 4 REST endpoints + 5 StreamableHTTP commands
+   - MonitoringManager integrated into AppState
+   - All test files updated
 
 ### Phase 3: Transactions & Scripting
 
-8. 📋 **add-transactions-support** (DRAFT)
-   - Status: Proposal created
+8. ✅ **add-transactions-support** (COMPLETE)
+   - Status: Complete - All 5 commands implemented (MULTI/EXEC/DISCARD/WATCH/UNWATCH)
    - Target: v0.7.0-alpha
-   - ~120 tasks, 6 weeks
+   - 11 unit tests + 3 integration tests
+   - REST + StreamableHTTP + MCP API coverage
+   - Progress: 100% (core features + integration tests complete)
 
-9. 📋 **add-lua-scripting** (DRAFT)
-   - Status: Proposal created
+9. ✅ **add-lua-scripting** (COMPLETE)
+   - Status: Complete - All core features implemented (EVAL, EVALSHA, SCRIPT commands, redis.call bridge)
    - Target: v0.7.0-alpha
-   - ~150 tasks, 8 weeks
+   - 30 integration tests, full API coverage (REST + StreamableHTTP + MCP)
+   - Progress: 100% (core features + tests complete, performance benchmarks optional)
 
 ### Phase 4: Cluster & Specialized
 
@@ -199,20 +216,21 @@ Currently active OpenSpec changes:
 1. ✅ Archive `implement-hash-data-structure` - DONE
 2. ✅ Archive `add-list-data-structure` - DONE
 3. ✅ Archive `add-set-data-structure` - DONE (2025-10-25)
-4. [ ] Fix persistence test compilation errors (if any)
-5. [ ] Tag v0.6.0-alpha release with Hash + List + Set
-6. [ ] Tag v1.0.0-rc1 (all core features complete)
+4. ✅ Archive `add-sorted-set-data-structure` - DONE (2025-10-29)
+5. ✅ Fix persistence test compilation errors (if any) - DONE (2025-01-XX)
+6. [ ] Tag v0.6.0-alpha release with Hash + List + Set + Sorted Set
+7. [ ] Tag v1.0.0-rc1 (all core features complete)
 
 ### Short Term (Next 1-2 months)
-1. ✅ Hashes, Lists, Sets - ALL COMPLETE
-2. Begin Sorted Sets implementation (`add-sorted-set-data-structure`)
+1. ✅ Hashes, Lists, Sets, Sorted Sets - ALL COMPLETE
+2. Begin String Extensions implementation (`add-string-extensions`)
 3. Release v1.0.0 stable (production ready)
 
 ### Medium Term (Next 6 months)
-1. Begin Sorted Sets implementation
+1. ✅ Sorted Sets - COMPLETE (archived)
 2. Add String command extensions
 3. Implement key management commands
-4. Release v0.6.0-alpha
+4. Release v0.7.0-alpha with Sorted Sets
 
 ### Long Term (6-18 months)
 1. Implement transactions (MULTI/EXEC/WATCH)
@@ -226,6 +244,9 @@ Currently active OpenSpec changes:
 - ✅ Hashes: 15 commands, 100% complete, all targets met
 - ✅ Lists: 16 commands, 100% complete, all targets met
 - ✅ Sets: 14 commands, 85% complete (core features done, benchmarks deferred)
+
+### Phase 2 Targets
+- ✅ Sorted Sets: 18 commands, 95% complete (core features done, benchmarks deferred to v1.1)
 
 ### Overall Targets
 - **Compatibility**: 80% Redis command coverage in target structures
@@ -267,7 +288,9 @@ graph TD
 
 ---
 
-**Last Updated**: 2025-10-24  
-**Next Review**: After Phase 2 begins (Sorted Sets)  
-**Phase 1 Status**: ✅ **COMPLETE** (3/3 data structures implemented)
+**Last Updated**: 2025-01-XX  
+**Next Review**: After Phase 3 Lua Scripting begins  
+**Phase 1 Status**: ✅ **COMPLETE** (3/3 data structures implemented)  
+**Phase 2 Status**: ✅ **COMPLETE** (4/4 features complete)  
+**Phase 3 Status**: ✅ **COMPLETE** (2/2 features complete - Transactions ✅ + Lua Scripting ✅)
 

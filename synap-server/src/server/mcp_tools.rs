@@ -2,15 +2,59 @@ use rmcp::model::{Tool, ToolAnnotations};
 use serde_json::json;
 use std::borrow::Cow;
 
-/// Get essential MCP tools (reduced set for Cursor compatibility)
-/// Only the most commonly used tools are exposed to stay within Cursor's limits
-pub fn get_mcp_tools() -> Vec<Tool> {
+use crate::config::McpConfig;
+
+/// Get MCP tools based on configuration
+/// Tools can be selectively enabled/disabled to stay within Cursor's MCP tool limits
+pub fn get_mcp_tools(config: &McpConfig) -> Vec<Tool> {
+    let mut tools = Vec::new();
+
+    // KV Store Tools (9 total: 3 essential + 3 string extensions + 3 key management)
+    if config.enable_kv_tools {
+        tools.extend(get_kv_tools());
+    }
+
+    // Hash Tools (3)
+    if config.enable_hash_tools {
+        tools.extend(get_hash_tools());
+    }
+
+    // List Tools (3)
+    if config.enable_list_tools {
+        tools.extend(get_list_tools());
+    }
+
+    // Set Tools (3)
+    if config.enable_set_tools {
+        tools.extend(get_set_tools());
+    }
+
+    // Queue Tools (1)
+    if config.enable_queue_tools {
+        tools.extend(get_queue_tools());
+    }
+
+    // Sorted Set Tools (3)
+    if config.enable_sortedset_tools {
+        tools.extend(get_sortedset_tools());
+    }
+
+    // Transaction Tools (2)
+    if config.enable_transaction_tools {
+        tools.extend(get_transaction_tools());
+    }
+
+    tools
+}
+
+fn get_kv_tools() -> Vec<Tool> {
     vec![
-        // KV Store Tools (3 essential)
         Tool {
             name: Cow::Borrowed("synap_kv_get"),
             title: Some("Get Key-Value".to_string()),
-            description: Some(Cow::Borrowed("Retrieve a value from the key-value store (returns string by default)")),
+            description: Some(Cow::Borrowed(
+                "Retrieve a value from the key-value store (returns string by default)",
+            )),
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -75,7 +119,171 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
         },
-        // Hash Tools (3 essential)
+        // String Extension tools (3)
+        Tool {
+            name: Cow::Borrowed("synap_kv_append"),
+            title: Some("Append to String".to_string()),
+            description: Some(Cow::Borrowed(
+                "Append bytes to an existing value, or create new key with value if it doesn't exist",
+            )),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The key to append to"
+                    },
+                    "value": {
+                        "type": "string",
+                        "description": "The value to append"
+                    }
+                },
+                "required": ["key", "value"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_kv_getrange"),
+            title: Some("Get String Range".to_string()),
+            description: Some(Cow::Borrowed(
+                "Get substring using Redis-style negative indices. start and end are inclusive. Negative indices count from the end (-1 = last byte)",
+            )),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The key to get range from"
+                    },
+                    "start": {
+                        "type": "integer",
+                        "description": "Start index (inclusive). Negative indices count from end"
+                    },
+                    "end": {
+                        "type": "integer",
+                        "description": "End index (inclusive). Negative indices count from end"
+                    }
+                },
+                "required": ["key", "start", "end"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_kv_strlen"),
+            title: Some("Get String Length".to_string()),
+            description: Some(Cow::Borrowed("Get the length of the string value in bytes")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The key to get length for"
+                    }
+                },
+                "required": ["key"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        // Key Management tools (3)
+        Tool {
+            name: Cow::Borrowed("synap_key_type"),
+            title: Some("Get Key Type".to_string()),
+            description: Some(Cow::Borrowed(
+                "Get the type of a key across all stores (string, hash, list, set, zset, none)",
+            )),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The key to get type for"
+                    }
+                },
+                "required": ["key"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_key_exists"),
+            title: Some("Check Key Exists".to_string()),
+            description: Some(Cow::Borrowed(
+                "Check if a key exists in any store (KV, Hash, List, Set, SortedSet)",
+            )),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "The key to check"
+                    }
+                },
+                "required": ["key"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_key_rename"),
+            title: Some("Rename Key".to_string()),
+            description: Some(Cow::Borrowed(
+                "Rename a key atomically, overwriting destination if it exists. Works across all data types.",
+            )),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "Source key name"
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": "Destination key name"
+                    }
+                },
+                "required": ["source", "destination"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
+    ]
+}
+
+fn get_hash_tools() -> Vec<Tool> {
+    vec![
         Tool {
             name: Cow::Borrowed("synap_hash_set"),
             title: Some("Set Hash Field".to_string()),
@@ -136,7 +344,11 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
         },
-        // List Tools (3 essential)
+    ]
+}
+
+fn get_list_tools() -> Vec<Tool> {
+    vec![
         Tool {
             name: Cow::Borrowed("synap_list_push"),
             title: Some("Push to List".to_string()),
@@ -201,7 +413,11 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
         },
-        // Set Tools (3 essential)
+    ]
+}
+
+fn get_set_tools() -> Vec<Tool> {
+    vec![
         Tool {
             name: Cow::Borrowed("synap_set_add"),
             title: Some("Add Set Members".to_string()),
@@ -268,19 +484,163 @@ pub fn get_mcp_tools() -> Vec<Tool> {
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
         },
-        // Queue Tools (1 essential)
+    ]
+}
+
+fn get_queue_tools() -> Vec<Tool> {
+    vec![Tool {
+        name: Cow::Borrowed("synap_queue_publish"),
+        title: Some("Publish to Queue".to_string()),
+        description: Some(Cow::Borrowed("Publish a message to a queue")),
+        input_schema: json!({
+            "type": "object",
+            "properties": {
+                "queue": {"type": "string"},
+                "message": {"type": "string"},
+                "priority": {"type": "integer", "minimum": 0, "maximum": 9, "default": 5}
+            },
+            "required": ["queue", "message"]
+        })
+        .as_object()
+        .unwrap()
+        .clone()
+        .into(),
+        output_schema: None,
+        icons: None,
+        annotations: Some(ToolAnnotations::new().read_only(false)),
+    }]
+}
+
+fn get_sortedset_tools() -> Vec<Tool> {
+    vec![
         Tool {
-            name: Cow::Borrowed("synap_queue_publish"),
-            title: Some("Publish to Queue".to_string()),
-            description: Some(Cow::Borrowed("Publish a message to a queue")),
+            name: Cow::Borrowed("synap_sortedset_zadd"),
+            title: Some("Add to Sorted Set".to_string()),
+            description: Some(Cow::Borrowed("Add member with score to sorted set")),
             input_schema: json!({
                 "type": "object",
                 "properties": {
-                    "queue": {"type": "string"},
-                    "message": {"type": "string"},
-                    "priority": {"type": "integer", "minimum": 0, "maximum": 9, "default": 5}
+                    "key": {"type": "string", "description": "Sorted set key"},
+                    "member": {"type": "string", "description": "Member to add"},
+                    "score": {"type": "number", "description": "Score value"}
                 },
-                "required": ["queue", "message"]
+                "required": ["key", "member", "score"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_sortedset_zrange"),
+            title: Some("Get Sorted Set Range".to_string()),
+            description: Some(Cow::Borrowed("Get range of members by rank (0-based index)")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Sorted set key"},
+                    "start": {"type": "integer", "default": 0, "description": "Start index (supports negative)"},
+                    "stop": {"type": "integer", "default": -1, "description": "Stop index (supports negative, -1 = last)"},
+                    "withscores": {"type": "boolean", "default": true, "description": "Include scores in output"}
+                },
+                "required": ["key"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_sortedset_zrank"),
+            title: Some("Get Sorted Set Rank".to_string()),
+            description: Some(Cow::Borrowed("Get rank of member in sorted set (0-based, lowest score = rank 0)")),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "key": {"type": "string", "description": "Sorted set key"},
+                    "member": {"type": "string", "description": "Member to find rank for"}
+                },
+                "required": ["key", "member"]
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+        },
+    ]
+}
+
+// MCP Tools Configuration
+//
+// Available tool categories (can be enabled/disabled in config.yml):
+// - KV Tools (3): synap_kv_get, synap_kv_set, synap_kv_delete
+// - Hash Tools (3): synap_hash_get, synap_hash_set, synap_hash_getall
+// - List Tools (3): synap_list_push, synap_list_pop, synap_list_range
+// - Set Tools (3): synap_set_add, synap_set_members, synap_set_inter
+// - Queue Tools (1): synap_queue_publish
+// - Sorted Set Tools (3): synap_sortedset_zadd, synap_sortedset_zrange, synap_sortedset_zrank
+// - Transaction Tools (2): synap_transaction_multi, synap_transaction_exec
+//
+// Default enabled (4 tools): KV (3) + Queue (1)
+// Maximum tools: 18 (if all categories enabled)
+//
+// Cursor MCP Limit Considerations:
+// - Cursor has a limit on the number of MCP tools it can handle efficiently
+// - Default configuration keeps only essential tools enabled (KV + Queue)
+// - Additional tools can be enabled as needed in config.yml under mcp section
+//
+// Note: All functionality is also available via REST API and StreamableHTTP,
+// so disabling MCP tools doesn't reduce available features
+
+fn get_transaction_tools() -> Vec<Tool> {
+    vec![
+        Tool {
+            name: Cow::Borrowed("synap_transaction_multi"),
+            title: Some("Start Transaction".to_string()),
+            description: Some(Cow::Borrowed(
+                "Start a new transaction. After calling this, all subsequent commands will be queued until EXEC is called.",
+            )),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "client_id": {
+                        "type": "string",
+                        "description": "Unique client identifier (optional, auto-generated if not provided)"
+                    }
+                }
+            })
+            .as_object()
+            .unwrap()
+            .clone()
+            .into(),
+            output_schema: None,
+            icons: None,
+            annotations: Some(ToolAnnotations::new().read_only(false)),
+        },
+        Tool {
+            name: Cow::Borrowed("synap_transaction_exec"),
+            title: Some("Execute Transaction".to_string()),
+            description: Some(Cow::Borrowed(
+                "Execute all queued commands in the transaction atomically. Returns results array or null if transaction was aborted due to watched keys changing.",
+            )),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "client_id": {
+                        "type": "string",
+                        "description": "Unique client identifier (must match the one used in MULTI)"
+                    }
+                },
+                "required": ["client_id"]
             })
             .as_object()
             .unwrap()
@@ -292,15 +652,3 @@ pub fn get_mcp_tools() -> Vec<Tool> {
         },
     ]
 }
-
-// Note: Removed 8 less-frequently used tools to meet Cursor's MCP tool limits:
-// - synap_kv_scan (use KV get with known keys instead)
-// - synap_hash_del (use synap_kv_delete on the hash key)
-// - synap_hash_incrby (use hash_set with calculated value)
-// - synap_list_len (use list_range and count elements)
-// - synap_list_rpoplpush (use list_pop + list_push manually)
-// - synap_queue_consume (use REST API for consumption)
-// - synap_stream_publish (use REST API for streams)
-// - synap_pubsub_publish (use REST API for pub/sub)
-//
-// All removed functionality is still available via REST API and StreamableHTTP

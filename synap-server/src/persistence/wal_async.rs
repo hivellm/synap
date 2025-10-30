@@ -95,8 +95,9 @@ impl AsyncWAL {
             }
 
             // Try to deserialize
-            match bincode::deserialize::<WALEntry>(&data) {
-                Ok(entry) => {
+            match bincode::serde::decode_from_slice::<WALEntry, _>(&data, bincode::config::legacy())
+            {
+                Ok((entry, _)) => {
                     max_offset = max_offset.max(entry.offset);
                 }
                 Err(_) => {
@@ -211,7 +212,7 @@ impl AsyncWAL {
     /// Write a single entry to the writer
     async fn write_entry(writer: &mut BufWriter<File>, entry: &WALEntry) -> Result<()> {
         // Serialize entry
-        let data = bincode::serialize(entry)?;
+        let data = bincode::serde::encode_to_vec(entry, bincode::config::legacy())?;
         let checksum = crc32fast::hash(&data);
 
         // Write entry format: size (u64) + checksum (u32) + data
@@ -288,8 +289,9 @@ impl AsyncWAL {
             }
 
             // Deserialize
-            match bincode::deserialize::<WALEntry>(&data) {
-                Ok(entry) => {
+            match bincode::serde::decode_from_slice::<WALEntry, _>(&data, bincode::config::legacy())
+            {
+                Ok((entry, _)) => {
                     if entry.offset >= from_offset {
                         entries.push(entry);
                     }
