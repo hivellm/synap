@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0-rc1] - 2025-01-30
+
 ### Added - Lua Scripting Support (Phase 3) ✅ (January 2025)
 
 **Lua Scripting Implementation - Complete**
@@ -358,6 +360,8 @@ mcp:
 - No data migration required
 
 **Tests**: 261/261 passing (100% success rate) ✅
+
+---
 
 ## [0.6.0-alpha] - 2025-10-25
 
@@ -2039,7 +2043,8 @@ These limitations will be addressed in future phases.
 - 📝 Documentation
 - 🔒 Security
 
-[Unreleased]: https://github.com/hivellm/synap/compare/v0.6.0-alpha...HEAD
+[Unreleased]: https://github.com/hivellm/synap/compare/v0.7.0-rc1...HEAD
+[0.7.0-rc1]: https://github.com/hivellm/synap/compare/v0.6.0-alpha...v0.7.0-rc1
 [0.6.0-alpha]: https://github.com/hivellm/synap/compare/v0.3.0...v0.6.0-alpha
 [0.3.0]: https://github.com/hivellm/synap/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/hivellm/synap/compare/v0.1.0-alpha...v0.2.0
