@@ -25,6 +25,15 @@ pub use info::{InfoSection, KeyspaceInfo, MemoryInfo, ReplicationInfo, ServerInf
 pub use memory_usage::MemoryUsage;
 pub use slowlog::{SlowLog, SlowLogEntry, SlowLogManager};
 
+/// Type alias for store references tuple (to reduce complexity)
+pub type StoreRefs = (
+    Arc<KVStore>,
+    Arc<HashStore>,
+    Arc<ListStore>,
+    Arc<SetStore>,
+    Arc<SortedSetStore>,
+);
+
 /// Monitoring manager for collecting and serving monitoring data
 #[derive(Clone)]
 pub struct MonitoringManager {
@@ -73,15 +82,7 @@ impl MonitoringManager {
     }
 
     /// Get all store references
-    pub fn stores(
-        &self,
-    ) -> (
-        Arc<KVStore>,
-        Arc<HashStore>,
-        Arc<ListStore>,
-        Arc<SetStore>,
-        Arc<SortedSetStore>,
-    ) {
+    pub fn stores(&self) -> StoreRefs {
         (
             self.kv_store.clone(),
             self.hash_store.clone(),

@@ -149,9 +149,13 @@ pub struct TransactionManager {
     key_versions: Arc<RwLock<HashMap<String, KeyVersion>>>,
     /// Store references for executing commands
     kv_store: Arc<KVStore>,
+    #[allow(dead_code)] // Reserved for future Hash transaction operations
     hash_store: Arc<HashStore>,
+    #[allow(dead_code)] // Reserved for future List transaction operations
     list_store: Arc<ListStore>,
+    #[allow(dead_code)] // Reserved for future Set transaction operations
     set_store: Arc<SetStore>,
+    #[allow(dead_code)] // Reserved for future SortedSet transaction operations
     sorted_set_store: Arc<SortedSetStore>,
 }
 

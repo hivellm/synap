@@ -86,6 +86,12 @@ pub struct ClientListManager {
     clients: Arc<RwLock<Vec<ClientInfo>>>,
 }
 
+impl Default for ClientListManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClientListManager {
     /// Create a new client list manager
     pub fn new() -> Self {
@@ -114,6 +120,11 @@ impl ClientListManager {
     /// Get client count
     pub async fn len(&self) -> usize {
         self.clients.read().await.len()
+    }
+
+    /// Check if client list is empty
+    pub async fn is_empty(&self) -> bool {
+        self.clients.read().await.is_empty()
     }
 }
 

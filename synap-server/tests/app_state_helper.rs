@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
 use synap_server::monitoring::MonitoringManager;
-use synap_server::{AppState, KVConfig, KVStore};
+use synap_server::{AppState, KVStore};
 
 /// Create a default AppState for testing
 pub fn create_test_app_state_with_stores(

@@ -55,6 +55,12 @@ pub struct SlowLogManager {
     next_id: Arc<RwLock<u64>>,
 }
 
+impl Default for SlowLogManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SlowLogManager {
     /// Create a new slow log manager
     pub fn new() -> Self {
@@ -116,6 +122,11 @@ impl SlowLogManager {
     /// Get slow log length
     pub async fn len(&self) -> usize {
         self.entries.read().await.len()
+    }
+
+    /// Check if slow log is empty
+    pub async fn is_empty(&self) -> bool {
+        self.entries.read().await.is_empty()
     }
 
     /// Get configuration

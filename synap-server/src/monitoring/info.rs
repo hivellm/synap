@@ -4,6 +4,7 @@
 
 use crate::core::{HashStore, KVStore, ListStore, SetStore, SortedSetStore};
 use serde::Serialize;
+use std::str::FromStr;
 use std::sync::Arc;
 
 /// INFO command output sections
@@ -18,10 +19,11 @@ pub enum InfoSection {
     Keyspace,
 }
 
-impl InfoSection {
-    /// Parse section from string (Redis-style)
-    pub fn from_str(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
+impl FromStr for InfoSection {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.to_lowercase().as_str() {
             "server" => Self::Server,
             "memory" => Self::Memory,
             "stats" => Self::Stats,
@@ -29,7 +31,15 @@ impl InfoSection {
             "cluster" => Self::Cluster,
             "keyspace" => Self::Keyspace,
             _ => Self::All,
-        }
+        })
+    }
+}
+
+impl InfoSection {
+    /// Parse section from string (Redis-style, convenience method)
+    #[allow(clippy::should_implement_trait)] // Kept for convenience, FromStr also exists
+    pub fn from_str(s: &str) -> Self {
+        <Self as FromStr>::from_str(s).unwrap_or(Self::All)
     }
 }
 
