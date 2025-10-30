@@ -44,6 +44,7 @@ async fn spawn_test_server() -> String {
         list_store,
         set_store,
         sorted_set_store,
+        hyperloglog_store: Arc::new(synap_server::core::HyperLogLogStore::new()),
         queue_manager: Some(queue_manager),
         stream_manager: None,
         pubsub_router: None,

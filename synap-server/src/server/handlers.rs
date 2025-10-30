@@ -4164,7 +4164,7 @@ pub async fn script_eval(
         sorted_set_store: state.sorted_set_store.clone(),
     };
     let args = json_args_to_strings(req.args);
-    let timeout = req.timeout_ms.map(|ms| Duration::from_millis(ms));
+    let timeout = req.timeout_ms.map(Duration::from_millis);
 
     let (result, sha1) = state
         .script_manager
@@ -4186,7 +4186,7 @@ pub async fn script_evalsha(
         sorted_set_store: state.sorted_set_store.clone(),
     };
     let args = json_args_to_strings(req.args);
-    let timeout = req.timeout_ms.map(|ms| Duration::from_millis(ms));
+    let timeout = req.timeout_ms.map(Duration::from_millis);
 
     let result = state
         .script_manager

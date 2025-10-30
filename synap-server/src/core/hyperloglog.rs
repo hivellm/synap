@@ -18,8 +18,8 @@
 use super::error::{Result, SynapError};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -83,10 +83,10 @@ impl HyperLogLogValue {
             let hash = self.hash_element(&element);
             let j = (hash & ((1 << HLL_P) - 1)) as usize; // Register index
             let w = hash >> HLL_P; // Remaining bits
-            
+
             // Count leading zeros + 1
             let rho = self.leading_zeros(w) + 1;
-            
+
             if self.registers[j] < rho {
                 self.registers[j] = rho;
                 estimated_added += 1;
@@ -112,10 +112,9 @@ impl HyperLogLogValue {
         let mut estimate = alpha * (HLL_REGISTER_COUNT as f64).powi(2) / sum;
 
         // Small range correction
-        if estimate <= 5.0 * HLL_REGISTER_COUNT as f64 / 2.0 {
-            if zero_registers > 0 {
-                estimate = HLL_REGISTER_COUNT as f64 * (HLL_REGISTER_COUNT as f64 / zero_registers as f64).ln();
-            }
+        if estimate <= 5.0 * HLL_REGISTER_COUNT as f64 / 2.0 && zero_registers > 0 {
+            estimate = HLL_REGISTER_COUNT as f64
+                * (HLL_REGISTER_COUNT as f64 / zero_registers as f64).ln();
         }
 
         // Large range correction
@@ -148,7 +147,7 @@ impl HyperLogLogValue {
     fn leading_zeros(&self, value: u64) -> u8 {
         if value == 0 {
             // All remaining bits are zero, return max
-            return (64 - HLL_P) as u8;
+            return 64 - HLL_P;
         }
         value.leading_zeros() as u8
     }
@@ -281,7 +280,7 @@ impl HyperLogLogStore {
 
             let source_shard = self.shard(source_key);
             let source_map = source_shard.read();
-            
+
             if let Some(source_hll) = source_map.get(source_key) {
                 if !source_hll.is_expired() {
                     source_hlls.push(source_hll.clone());
@@ -310,4 +309,3 @@ impl HyperLogLogStore {
         self.stats.write().reset();
     }
 }
-

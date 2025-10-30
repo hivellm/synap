@@ -1,7 +1,7 @@
 //! Test helper utilities for creating AppState instances
 
 use std::sync::Arc;
-use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
+use synap_server::core::{HashStore, HyperLogLogStore, ListStore, SetStore, SortedSetStore};
 use synap_server::monitoring::MonitoringManager;
 use synap_server::{AppState, KVConfig, KVStore, ScriptManager};
 
@@ -30,6 +30,7 @@ pub fn create_test_app_state() -> AppState {
     ));
 
     let script_manager = Arc::new(ScriptManager::default());
+    let hyperloglog_store = Arc::new(HyperLogLogStore::new());
 
     AppState {
         kv_store,
@@ -37,6 +38,7 @@ pub fn create_test_app_state() -> AppState {
         list_store,
         set_store,
         sorted_set_store,
+        hyperloglog_store,
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
