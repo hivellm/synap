@@ -158,6 +158,13 @@ pub fn create_router(
             post(handlers::sortedset_zremrangebyscore),
         )
         .route("/sortedset/stats", get(handlers::sortedset_stats))
+        // Lua scripting endpoints
+        .route("/script/eval", post(handlers::script_eval))
+        .route("/script/evalsha", post(handlers::script_evalsha))
+        .route("/script/load", post(handlers::script_load))
+        .route("/script/exists", post(handlers::script_exists))
+        .route("/script/flush", post(handlers::script_flush))
+        .route("/script/kill", post(handlers::script_kill))
         // List endpoints
         .route("/list/{key}/lpush", post(handlers::list_lpush))
         .route("/list/{key}/lpushx", post(handlers::list_lpushx))

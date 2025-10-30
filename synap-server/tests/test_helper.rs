@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
 use synap_server::monitoring::MonitoringManager;
-use synap_server::{AppState, KVConfig, KVStore};
+use synap_server::{AppState, KVConfig, KVStore, ScriptManager};
 
 /// Create a default AppState for testing
 pub fn create_test_app_state() -> AppState {
@@ -29,6 +29,8 @@ pub fn create_test_app_state() -> AppState {
         sorted_set_store.clone(),
     ));
 
+    let script_manager = Arc::new(ScriptManager::default());
+
     AppState {
         kv_store,
         hash_store,
@@ -43,5 +45,6 @@ pub fn create_test_app_state() -> AppState {
         persistence: None,
         monitoring,
         transaction_manager,
+        script_manager,
     }
 }

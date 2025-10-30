@@ -62,7 +62,7 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 | Feature | Status | Change ID | Target | Duration |
 |---------|--------|-----------|--------|----------|
 | **Transactions** | ✅ Complete | `add-transactions-support` | v0.7.0-alpha | 6 weeks |
-| **Lua Scripting** | ⏳ Pending | `add-lua-scripting` | v0.7.0-alpha | 8 weeks |
+| **Lua Scripting** | ✅ Complete | `add-lua-scripting` | v0.7.0-alpha | 8 weeks |
 
 **Deliverables**:
 - MULTI/EXEC/DISCARD
@@ -71,7 +71,7 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 - Script loading and caching
 - Timeout enforcement
 
-**Progress**: 0/2 (0%)
+**Progress**: 2/2 (100%) ✅
 
 ## Phase 4: Cluster & Enterprise (v0.8.0+)
 
@@ -101,19 +101,19 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 ### By Phase
 - **Phase 1**: 100% (3/3 features complete) ✅
 - **Phase 2**: 100% (4/4 features complete) ✅ - Sorted Set + String Extensions + Key Management + Enhanced Monitoring
-- **Phase 3**: 50% (1/2 features complete) - Transactions ✅
+- **Phase 3**: 100% (2/2 features complete) - Transactions ✅ + Lua Scripting ✅
 - **Phase 4**: 0% (0/4 features complete)
 
 ### Overall
 - **Total Features**: 13
-- **Completed**: 8 ✅ (Hash, List, Set, Sorted Set, String Extensions, Key Management, Enhanced Monitoring, Transactions)
+- **Completed**: 9 ✅ (Hash, List, Set, Sorted Set, String Extensions, Key Management, Enhanced Monitoring, Transactions, Lua Scripting)
 - **In Progress**: 0 🔄
 - **Planned**: 5 📋
-- **Completion**: 61.5%
+- **Completion**: 69.2%
 
 ### By Priority
 - **CRITICAL**: 100% (3/3) ✅
-- **HIGH**: 83.3% (5/6) - Sorted Set + String Extensions + Key Management + Enhanced Monitoring + Transactions complete ✅
+- **HIGH**: 100% (6/6) - Sorted Set + String Extensions + Key Management + Enhanced Monitoring + Transactions + Lua Scripting complete ✅
 - **MEDIUM**: 0% (0/4)
 
 ## Active Changes
@@ -182,10 +182,11 @@ Currently active OpenSpec changes:
    - REST + StreamableHTTP + MCP API coverage
    - Progress: 100% (core features + integration tests complete)
 
-9. 📋 **add-lua-scripting** (DRAFT)
-   - Status: Proposal created
+9. ✅ **add-lua-scripting** (COMPLETE)
+   - Status: Complete - All core features implemented (EVAL, EVALSHA, SCRIPT commands, redis.call bridge)
    - Target: v0.7.0-alpha
-   - ~150 tasks, 8 weeks
+   - 30 integration tests, full API coverage (REST + StreamableHTTP + MCP)
+   - Progress: 100% (core features + tests complete, performance benchmarks optional)
 
 ### Phase 4: Cluster & Specialized
 
@@ -291,5 +292,5 @@ graph TD
 **Next Review**: After Phase 3 Lua Scripting begins  
 **Phase 1 Status**: ✅ **COMPLETE** (3/3 data structures implemented)  
 **Phase 2 Status**: ✅ **COMPLETE** (4/4 features complete)  
-**Phase 3 Status**: 🔄 **IN PROGRESS** (1/2 features complete - Transactions done ✅)
+**Phase 3 Status**: ✅ **COMPLETE** (2/2 features complete - Transactions ✅ + Lua Scripting ✅)
 

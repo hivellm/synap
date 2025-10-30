@@ -1,7 +1,9 @@
 use futures_util::{SinkExt, StreamExt};
 use serde_json::json;
 use std::sync::Arc;
-use synap_server::{AppState, KVStore, ServerConfig, StreamConfig, StreamManager, create_router};
+use synap_server::{
+    AppState, KVStore, ScriptManager, ServerConfig, StreamConfig, StreamManager, create_router,
+};
 use tokio::net::TcpListener;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -46,6 +48,7 @@ async fn spawn_test_server() -> String {
         partition_manager: None,
         monitoring,
         transaction_manager,
+        script_manager: Arc::new(ScriptManager::default()),
     };
 
     let app = create_router(

@@ -9,7 +9,8 @@ use std::time::Duration;
 use synap_server::persistence::PersistenceLayer;
 use synap_server::persistence::types::{FsyncMode, PersistenceConfig, SnapshotConfig, WALConfig};
 use synap_server::{
-    AppState, KVConfig, KVStore, QueueConfig, QueueManager, ServerConfig, create_router,
+    AppState, KVConfig, KVStore, QueueConfig, QueueManager, ScriptManager, ServerConfig,
+    create_router,
 };
 use tokio::net::TcpListener;
 
@@ -51,6 +52,7 @@ async fn spawn_test_server() -> String {
         partition_manager: None,
         monitoring,
         transaction_manager,
+        script_manager: Arc::new(ScriptManager::default()),
     };
 
     let app = create_router(

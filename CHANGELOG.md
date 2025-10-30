@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Lua Scripting Support (Phase 3) ✅ (January 2025)
+
+**Lua Scripting Implementation - Complete**
+
+#### Core Implementation
+- ✅ **ScriptManager** module created with mlua interpreter integration
+- ✅ **6 Scripting Commands** implemented: EVAL, EVALSHA, SCRIPT LOAD/EXISTS/FLUSH/KILL
+- ✅ **Full API Coverage**: REST + StreamableHTTP + MCP
+- ✅ **30 integration tests** covering all features
+
+#### New Scripting Commands (6 total)
+- `EVAL` - Execute Lua script with keys and arguments
+- `EVALSHA` - Execute cached script by SHA1 hash
+- `SCRIPT LOAD` - Load script into cache and return SHA1
+- `SCRIPT EXISTS` - Check if scripts exist in cache (by SHA1)
+- `SCRIPT FLUSH` - Remove all scripts from cache
+- `SCRIPT KILL` - Kill currently running script (timeout enforcement)
+
+#### redis.call() Bridge
+- ✅ Complete bridge to Synap core commands (KV, Hash, List, Set, SortedSet)
+- ✅ TTL operations support (EXPIRE, TTL, PERSIST)
+- ✅ Redis-compatible return types (arrays, strings, integers, nil)
+- ✅ Proper error handling and argument validation
+
+#### Security & Sandboxing
+- ✅ Sandboxed Lua environment (dangerous functions disabled)
+- ✅ Disabled globals: `load`, `require`, `collectgarbage`, `os`, `io`, `dofile`, `loadfile`, `loadstring`, `string.dump`
+- ✅ Timeout enforcement (tokio::time::timeout, default 5s)
+
+#### Script Caching
+- ✅ SHA1-based script caching
+- ✅ LRU-style cache management
+- ✅ Cache persistence across EVAL/EVALSHA calls
+
+#### REST API Endpoints (6 new)
+- `POST /script/eval` - Execute Lua script
+- `POST /script/evalsha` - Execute cached script
+- `POST /script/load` - Load script into cache
+- `POST /script/exists` - Check script existence
+- `POST /script/flush` - Flush script cache
+- `POST /script/kill` - Kill running script
+
+#### StreamableHTTP Commands (6 new)
+- `script.eval` - Execute script with keys/args
+- `script.evalsha` - Execute cached script
+- `script.load` - Load and cache script
+- `script.exists` - Check script existence
+- `script.flush` - Clear script cache
+- `script.kill` - Kill running script
+
+#### MCP Tools (2 new)
+- `synap_script_eval` - Execute script via MCP
+- `synap_script_load` - Load script via MCP
+
+#### Test Coverage
+- ✅ 30 integration tests (eval, evalsha, caching, sandboxing, redis.call bridge)
+- ✅ Comprehensive sorted set operations testing
+- ✅ Sandbox security validation
+- ✅ Error handling and timeout tests
+
+#### Integration
+- ✅ ScriptManager integrated into AppState
+- ✅ ScriptExecContext for redis.call bridge
+- ✅ All test helpers updated with script_manager field
+
+**Phase 3 Progress**: Lua Scripting complete ✅ (100% - all core features implemented and tested)
+
 ### Added - Transaction Support (Phase 3) ✅ (January 2025)
 
 **Transaction Support Implementation**

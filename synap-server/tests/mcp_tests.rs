@@ -2,7 +2,9 @@ use rmcp::model::CallToolRequestParam;
 use serde_json::json;
 use std::sync::Arc;
 use synap_server::monitoring::MonitoringManager;
-use synap_server::{AppState, KVStore, QueueConfig, QueueManager, ServerConfig, handle_mcp_tool};
+use synap_server::{
+    AppState, KVStore, QueueConfig, QueueManager, ScriptManager, ServerConfig, handle_mcp_tool,
+};
 
 #[tokio::test]
 async fn test_mcp_kv_get() {
@@ -42,6 +44,7 @@ async fn test_mcp_kv_get() {
         persistence: None,
         monitoring,
         transaction_manager,
+        script_manager: Arc::new(ScriptManager::default()),
     });
 
     // Set a value first (use clone before moving to state)
@@ -96,6 +99,7 @@ async fn test_mcp_kv_set() {
         persistence: None,
         monitoring,
         transaction_manager,
+        script_manager: Arc::new(ScriptManager::default()),
     });
 
     let request = CallToolRequestParam {
@@ -155,6 +159,7 @@ async fn test_mcp_kv_delete() {
         persistence: None,
         monitoring,
         transaction_manager,
+        script_manager: Arc::new(ScriptManager::default()),
     });
 
     // Set then delete (use clone before moving to state)
@@ -219,6 +224,7 @@ async fn test_mcp_queue_publish() {
         persistence: None,
         monitoring,
         transaction_manager,
+        script_manager: Arc::new(ScriptManager::default()),
     });
 
     // Create queue

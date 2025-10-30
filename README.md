@@ -12,16 +12,19 @@ Synap is a modern, high-performance data infrastructure system built in Rust, co
 
 ## 🎯 Overview
 
-Synap provides seven core capabilities in a single, cohesive system:
+Synap provides multiple core capabilities in a single, cohesive system:
 
 1. **💾 Memory Key-Value Store** - Radix-tree based in-memory storage with O(k) lookup
 2. **#️⃣ Hash Data Structure** - Field-value maps within keys (Redis-compatible HSET, HGET, etc.) ✅ **v0.6.0**
 3. **📋 List Data Structure** - Ordered sequences with LPUSH, RPOP, LRANGE (Redis-compatible) ✅ **v0.6.0**
 4. **🔷 Set Data Structure** - Unordered unique collections with SADD, SREM, SINTER, SUNION (Redis-compatible) ✅ **v0.6.0**
-5. **📊 Sorted Set Data Structure** - Scored members with ranking (ZADD, ZRANGE, ZRANK, ZINTER/ZUNION) 🔄 **v0.7.0-alpha** (80% complete)
-6. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
-7. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
-8. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
+5. **📊 Sorted Set Data Structure** - Scored members with ranking (ZADD, ZRANGE, ZRANK, ZINTER/ZUNION) ✅ **v0.7.0**
+6. **🔢 HyperLogLog** - Probabilistic cardinality estimation with ~0.81% error (~12KB memory) 🔄 **v0.8.0-alpha** (In Progress)
+7. **📜 Lua Scripting** - Server-side scripting with EVAL/EVALSHA and redis.call() bridge ✅ **v0.7.0**
+8. **🔄 Transactions** - MULTI/EXEC/WATCH/DISCARD with optimistic locking ✅ **v0.7.0**
+9. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
+10. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
+11. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
 
 ## ✨ Key Features
 

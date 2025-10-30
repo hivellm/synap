@@ -2,14 +2,15 @@ use anyhow::Result;
 use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
 use synap_server::monitoring::MonitoringManager;
 use synap_server::persistence::{PersistenceLayer, recover};
 use synap_server::replication::NodeRole;
 use synap_server::{
     AppState, ConsumerGroupConfig, ConsumerGroupManager, KVStore, PartitionConfig,
-    PartitionManager, PubSubRouter, QueueManager, ServerConfig, StreamConfig, StreamManager,
-    create_router, init_metrics,
+    PartitionManager, PubSubRouter, QueueManager, ScriptManager, ServerConfig, StreamConfig,
+    StreamManager, create_router, init_metrics,
 };
 use tracing::{info, warn};
 
@@ -279,6 +280,11 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| Arc::new(synap_server::core::SortedSetStore::new()));
     info!("Sorted set store initialized");
 
+    // Create HyperLogLog store
+    use synap_server::core::HyperLogLogStore;
+    let hyperloglog_store = Arc::new(HyperLogLogStore::new());
+    info!("HyperLogLog store initialized");
+
     // Create monitoring manager
     let monitoring = Arc::new(MonitoringManager::new(
         kv_store.clone(),
@@ -300,6 +306,10 @@ async fn main() -> Result<()> {
     ));
     info!("Transaction manager initialized");
 
+    // Create script manager (Lua scripting)
+    let script_manager = Arc::new(ScriptManager::new(Duration::from_secs(5)));
+    info!("Script manager initialized (default timeout: 5s)");
+
     // Create application state with persistence and streams
     let app_state = AppState {
         kv_store,
@@ -307,6 +317,7 @@ async fn main() -> Result<()> {
         list_store,
         set_store,
         sorted_set_store,
+        hyperloglog_store,
         queue_manager,
         stream_manager,
         partition_manager,
@@ -315,6 +326,7 @@ async fn main() -> Result<()> {
         persistence,
         monitoring,
         transaction_manager,
+        script_manager,
     };
 
     // Initialize Prometheus metrics

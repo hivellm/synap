@@ -5,7 +5,7 @@ use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
-use synap_server::{AppState, KVConfig, KVStore, create_router};
+use synap_server::{AppState, KVConfig, KVStore, ScriptManager, create_router};
 use tokio::net::TcpListener;
 
 async fn spawn_test_server() -> String {
@@ -49,6 +49,7 @@ async fn spawn_test_server() -> String {
         partition_manager: None,
         monitoring,
         transaction_manager,
+        script_manager: Arc::new(ScriptManager::default()),
     };
     let app = create_router(
         state,

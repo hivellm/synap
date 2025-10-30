@@ -40,6 +40,9 @@ compact_str.workspace = true
 rmcp = { version = "0.8.2", features = ["server", "transport-streamable-http-server"] }
 hyper = "1.7"
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
+mlua = { version = "0.11.4", features = ["lua54", "async", "send", "serialize", "vendored"] }
+sha1 = "0.10"
+hex = "0.4"
 
 # UMICP (Universal Matrix Intelligent Communication Protocol)
 umicp-core = { version = "0.2.3", features = ["websocket", "http2"] }

@@ -94,7 +94,7 @@ Create `.cursorrules` or `.vscode/settings.json`:
 ```rust
 use rmcp::model::CallToolRequestParam;
 use serde_json::json;
-use synap_server::{AppState, handle_mcp_tool};
+use synap_server::{AppState, ScriptManager, handle_mcp_tool};
 
 // Setup state
 let state = Arc::new(AppState {
@@ -105,6 +105,8 @@ let state = Arc::new(AppState {
     consumer_group_manager: None,
     pubsub_router: Some(Arc::new(PubSubRouter::new())),
     persistence: None,
+    script_manager: Arc::new(ScriptManager::default()),
+    // ... initialize monitoring and transaction managers as needed
 });
 
 // Call MCP tool

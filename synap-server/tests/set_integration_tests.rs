@@ -5,7 +5,9 @@ use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
-use synap_server::{AppState, KVStore, QueueConfig, QueueManager, ServerConfig, create_router};
+use synap_server::{
+    AppState, KVStore, QueueConfig, QueueManager, ScriptManager, ServerConfig, create_router,
+};
 use tokio::net::TcpListener;
 
 /// Spawn a test server with set support
@@ -48,6 +50,7 @@ async fn spawn_test_server() -> String {
         partition_manager: None,
         monitoring,
         transaction_manager,
+        script_manager: Arc::new(ScriptManager::default()),
     };
 
     let app = create_router(
