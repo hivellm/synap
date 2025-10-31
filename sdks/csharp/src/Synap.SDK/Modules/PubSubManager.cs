@@ -59,11 +59,18 @@ public sealed class PubSubManager
         var data = new Dictionary<string, object?>
         {
             ["topic"] = topic,
-            ["payload"] = message  // ✅ FIX: Use "payload" instead of "message" to match server API
+            ["payload"] = message
         };
         using var response = await _client.ExecuteAsync("pubsub.publish", topic, data, cancellationToken).ConfigureAwait(false);
 
-        if (response.RootElement.TryGetProperty("subscribers_matched", out var delivered))
+        // Try to extract from payload if it's a StreamableHTTP envelope
+        var root = response.RootElement;
+        if (root.TryGetProperty("payload", out var payloadElement))
+        {
+            root = payloadElement;
+        }
+
+        if (root.TryGetProperty("subscribers_matched", out var delivered))
         {
             return delivered.GetInt32();
         }
@@ -80,8 +87,15 @@ public sealed class PubSubManager
     {
         using var response = await _client.ExecuteAsync("pubsub.stats", "*", null, cancellationToken).ConfigureAwait(false);
 
+        // Try to extract from payload if it's a StreamableHTTP envelope
+        var root = response.RootElement;
+        if (root.TryGetProperty("payload", out var payloadElement))
+        {
+            root = payloadElement;
+        }
+
         var result = new Dictionary<string, JsonElement>();
-        foreach (var property in response.RootElement.EnumerateObject())
+        foreach (var property in root.EnumerateObject())
         {
             result[property.Name] = property.Value;
         }
@@ -89,4 +103,3 @@ public sealed class PubSubManager
         return result;
     }
 }
-

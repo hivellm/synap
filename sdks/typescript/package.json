@@ -62,16 +62,16 @@
     "uuid": "^11.0.3"
   },
   "devDependencies": {
-    "@types/node": "^22.10.2",
+    "@types/node": "^24.9.2",
     "@types/uuid": "^10.0.0",
     "@typescript-eslint/eslint-plugin": "^8.18.1",
     "@typescript-eslint/parser": "^8.18.1",
-    "@vitest/coverage-v8": "^4.0.3",
+    "@vitest/coverage-v8": "^4.0.5",
     "eslint": "^9.17.0",
     "prettier": "^3.4.2",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
-    "vitest": "^4.0.3"
+    "vitest": "^4.0.5"
   },
   "engines": {
     "node": ">=18.0.0"
@@ -80,4 +80,3 @@
     "access": "public"
   }
 }
-

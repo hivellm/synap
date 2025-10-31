@@ -1706,6 +1706,10 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "list.lpos" => handle_list_lpos_cmd(&state, &request).await,
         "list.rpoplpush" => handle_list_rpoplpush_cmd(&state, &request).await,
         "list.stats" => handle_list_stats_cmd(&state, &request).await,
+        "hyperloglog.pfadd" => handle_hyperloglog_pfadd_cmd(&state, &request).await,
+        "hyperloglog.pfcount" => handle_hyperloglog_pfcount_cmd(&state, &request).await,
+        "hyperloglog.pfmerge" => handle_hyperloglog_pfmerge_cmd(&state, &request).await,
+        "hyperloglog.stats" => handle_hyperloglog_stats_cmd(&state, &request).await,
         "queue.create" => handle_queue_create_cmd(&state, &request).await,
         "queue.delete" => handle_queue_delete_cmd(&state, &request).await,
         "queue.publish" => handle_queue_publish_cmd(&state, &request).await,
@@ -3276,6 +3280,133 @@ async fn handle_list_stats_cmd(
             "blpop_count": stats.blpop_count,
             "brpop_count": stats.brpop_count,
         }
+    }))
+}
+
+// ==================== HyperLogLog Command Handlers ====================
+
+fn parse_hyperloglog_element(value: &serde_json::Value) -> Result<Vec<u8>, SynapError> {
+    if let Some(s) = value.as_str() {
+        return Ok(s.as_bytes().to_vec());
+    }
+
+    if let Some(array) = value.as_array() {
+        let mut bytes = Vec::with_capacity(array.len());
+        for item in array {
+            let byte = item.as_u64().ok_or_else(|| {
+                SynapError::InvalidValue(
+                    "HyperLogLog element arrays must contain integers".to_string(),
+                )
+            })?;
+
+            if byte > u8::MAX as u64 {
+                return Err(SynapError::InvalidValue(
+                    "HyperLogLog element byte out of range (0-255)".to_string(),
+                ));
+            }
+
+            bytes.push(byte as u8);
+        }
+
+        return Ok(bytes);
+    }
+
+    if value.is_null() {
+        return Err(SynapError::InvalidValue(
+            "HyperLogLog elements cannot be null".to_string(),
+        ));
+    }
+
+    serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))
+}
+
+async fn handle_hyperloglog_pfadd_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let elements = request
+        .payload
+        .get("elements")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'elements' array".to_string()))?
+        .iter()
+        .map(parse_hyperloglog_element)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let ttl_secs = request.payload.get("ttl_secs").and_then(|v| v.as_u64());
+
+    let added = state.hyperloglog_store.pfadd(key, elements, ttl_secs)?;
+
+    Ok(serde_json::json!({ "key": key, "added": added }))
+}
+
+async fn handle_hyperloglog_pfcount_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let count = state.hyperloglog_store.pfcount(key)?;
+
+    Ok(serde_json::json!({ "key": key, "count": count }))
+}
+
+async fn handle_hyperloglog_pfmerge_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let sources = request
+        .payload
+        .get("sources")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'sources' array".to_string()))?
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .map(|s| s.to_string())
+                .ok_or_else(|| SynapError::InvalidValue("Source keys must be strings".to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if sources.is_empty() {
+        return Err(SynapError::InvalidRequest(
+            "HyperLogLog pfmerge requires at least one source key".to_string(),
+        ));
+    }
+
+    let count = state.hyperloglog_store.pfmerge(destination, sources)?;
+
+    Ok(serde_json::json!({ "destination": destination, "count": count }))
+}
+
+async fn handle_hyperloglog_stats_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let stats = state.hyperloglog_store.stats();
+
+    Ok(serde_json::json!({
+        "total_hlls": stats.total_hlls,
+        "total_cardinality": stats.total_cardinality,
+        "pfadd_count": stats.pfadd_count,
+        "pfcount_count": stats.pfcount_count,
+        "pfmerge_count": stats.pfmerge_count,
     }))
 }
 
@@ -6489,6 +6620,35 @@ pub struct ListOperationStats {
     pub brpop_count: u64,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct HyperLogLogAddRequest {
+    pub elements: Vec<String>,
+    pub ttl_secs: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HyperLogLogAddResponse {
+    pub key: String,
+    pub added: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HyperLogLogCountResponse {
+    pub key: String,
+    pub count: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct HyperLogLogMergeRequest {
+    pub sources: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HyperLogLogMergeResponse {
+    pub destination: String,
+    pub count: u64,
+}
+
 /// POST /list/:key/lpush - Push element(s) to left (front)
 pub async fn list_lpush(
     State(state): State<AppState>,
@@ -6802,6 +6962,85 @@ pub async fn list_stats(
             brpop_count: stats.brpop_count,
         },
     }))
+}
+
+// ==================== HyperLogLog REST Handlers ====================
+
+/// POST /hyperloglog/:key/pfadd - Add elements to HyperLogLog structure
+pub async fn hyperloglog_pfadd(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<HyperLogLogAddRequest>,
+) -> Result<Json<HyperLogLogAddResponse>, SynapError> {
+    debug!(
+        "REST PFADD key={} count={} ttl_secs={:?}",
+        key,
+        req.elements.len(),
+        req.ttl_secs
+    );
+
+    if req.elements.is_empty() {
+        return Ok(Json(HyperLogLogAddResponse { key, added: 0 }));
+    }
+
+    let elements: Vec<Vec<u8>> = req
+        .elements
+        .into_iter()
+        .map(|element| element.into_bytes())
+        .collect();
+
+    let added = state
+        .hyperloglog_store
+        .pfadd(&key, elements, req.ttl_secs)?;
+
+    Ok(Json(HyperLogLogAddResponse { key, added }))
+}
+
+/// GET /hyperloglog/:key/pfcount - Estimate cardinality of HyperLogLog structure
+pub async fn hyperloglog_pfcount(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+) -> Result<Json<HyperLogLogCountResponse>, SynapError> {
+    debug!("REST PFCOUNT key={}", key);
+
+    let count = state.hyperloglog_store.pfcount(&key)?;
+
+    Ok(Json(HyperLogLogCountResponse { key, count }))
+}
+
+/// POST /hyperloglog/:destination/pfmerge - Merge multiple HyperLogLog structures
+pub async fn hyperloglog_pfmerge(
+    State(state): State<AppState>,
+    Path(destination): Path<String>,
+    Json(req): Json<HyperLogLogMergeRequest>,
+) -> Result<Json<HyperLogLogMergeResponse>, SynapError> {
+    debug!(
+        "REST PFMERGE destination={} sources={:?}",
+        destination, req.sources
+    );
+
+    if req.sources.is_empty() {
+        return Err(SynapError::InvalidRequest(
+            "HyperLogLog merge requires at least one source key".to_string(),
+        ));
+    }
+
+    let sources = req.sources;
+
+    let count = state.hyperloglog_store.pfmerge(&destination, sources)?;
+
+    Ok(Json(HyperLogLogMergeResponse { destination, count }))
+}
+
+/// GET /hyperloglog/stats - Retrieve HyperLogLog statistics
+pub async fn hyperloglog_stats(
+    State(state): State<AppState>,
+) -> Result<Json<crate::core::HyperLogLogStats>, SynapError> {
+    debug!("REST HYPERLOGLOG STATS");
+
+    let stats = state.hyperloglog_store.stats();
+
+    Ok(Json(stats))
 }
 
 // ==================== Sorted Set Handlers ====================

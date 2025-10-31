@@ -82,7 +82,7 @@ public sealed class PubSubManagerTests : IDisposable
     public async Task PublishAsync_ReturnsDeliveredCount()
     {
         // Arrange
-        var responseContent = JsonSerializer.Serialize(new { delivered = 5 });
+        var responseContent = JsonSerializer.Serialize(new { subscribers_matched = 5 });
         _httpHandlerMock.Protected()
             .Setup<Task<HttpResponseMessage>>(
                 "SendAsync",

@@ -329,7 +329,7 @@ async fn test_script_expire_and_ttl() {
 
     let body: serde_json::Value = eval_res.json().await.unwrap();
     let ttl_value = body["result"].as_i64().unwrap();
-    assert!(ttl_value >= 0 && ttl_value <= 10);
+    assert!((0..=10).contains(&ttl_value));
 
     let ttl_after = client
         .post(format!("{}/script/eval", base_url))
