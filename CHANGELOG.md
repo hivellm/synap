@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0-rc2] - 2025-01-31
+
+### Fixed
+- Fixed `pfadd` method signature to include `ttl_secs` parameter in HyperLogLog implementation
+- Corrected HyperLogLog stats response format (removed nested `operations` wrapper)
+- Fixed clippy warning `manual_range_contains` in Lua scripting tests
+- Updated TypeScript SDK dependencies (vitest 4.0.5, @types/node 24.9.2)
+- Fixed C# SDK PubSubManager to correctly extract `subscribers_matched` from response
+- Restored and fixed PubSubManager.cs with proper payload envelope support
+- Removed duplicate code in HashManagerTests.cs
+
+### Added
+- Full HyperLogLog server support (PFADD, PFCOUNT, PFMERGE) across REST and StreamableHTTP protocols
+- TTL-aware HyperLogLog store with statistics reporting and sharded cardinality tracking
+- Comprehensive unit tests for the HyperLogLog core and integration tests covering REST + StreamableHTTP flows
+
 ## [0.7.0-rc1] - 2025-01-30
 
 ### Added - Lua Scripting Support (Phase 3) ✅ (January 2025)
