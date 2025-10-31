@@ -9,7 +9,7 @@ public sealed class SetManager
 {
     private readonly SynapClient _client;
 
-    internal SetManager(SynapClient client)
+    public SetManager(SynapClient client)
     {
         _client = client;
     }

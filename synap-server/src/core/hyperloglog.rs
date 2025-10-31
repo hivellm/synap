@@ -19,7 +19,7 @@ use super::error::{Result, SynapError};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher;
+use std::collections::hash_map::{DefaultHasher, Entry};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -53,6 +53,14 @@ impl HyperLogLogValue {
             created_at: now,
             updated_at: now,
         }
+    }
+
+    /// Update TTL configuration and reset TTL timer
+    pub fn set_ttl(&mut self, ttl_secs: Option<u64>) {
+        self.ttl_secs = ttl_secs;
+        let now = Self::current_timestamp();
+        self.created_at = now;
+        self.updated_at = now;
     }
 
     /// Get current Unix timestamp
@@ -219,22 +227,33 @@ impl HyperLogLogStore {
     }
 
     /// PFADD - Add element(s) to HyperLogLog
-    pub fn pfadd(&self, key: &str, elements: Vec<Vec<u8>>) -> Result<usize> {
+    pub fn pfadd(&self, key: &str, elements: Vec<Vec<u8>>, ttl_secs: Option<u64>) -> Result<usize> {
         let shard = self.shard(key);
         let mut map = shard.write();
 
-        // Check expiration first
+        // Remove expired value if present
         if let Some(existing_hll) = map.get(key) {
             if existing_hll.is_expired() {
                 map.remove(key);
             }
         }
 
-        let hll = map
-            .entry(key.to_string())
-            .or_insert_with(|| HyperLogLogValue::new(None));
+        let added = match map.entry(key.to_string()) {
+            Entry::Occupied(mut entry) => {
+                let hll = entry.get_mut();
+                if let Some(ttl) = ttl_secs {
+                    hll.set_ttl(Some(ttl));
+                }
+                hll.pfadd(elements)
+            }
+            Entry::Vacant(vacant) => {
+                let mut hll = HyperLogLogValue::new(ttl_secs);
+                let added = hll.pfadd(elements);
+                vacant.insert(hll);
+                added
+            }
+        };
 
-        let added = hll.pfadd(elements);
         self.stats.write().pfadd_count += 1;
 
         Ok(added)
@@ -271,6 +290,11 @@ impl HyperLogLogStore {
             .entry(dest_key.to_string())
             .or_insert_with(|| HyperLogLogValue::new(None));
 
+        if dest_hll.is_expired() {
+            let ttl = dest_hll.ttl_secs;
+            *dest_hll = HyperLogLogValue::new(ttl);
+        }
+
         // Collect source HLLs
         let mut source_hlls = Vec::new();
         for source_key in &source_keys {
@@ -301,11 +325,94 @@ impl HyperLogLogStore {
 
     /// Get statistics
     pub fn stats(&self) -> HyperLogLogStats {
-        self.stats.read().clone()
+        let mut stats = self.stats.read().clone();
+
+        let mut total_hlls = 0usize;
+        let mut total_cardinality = 0u64;
+
+        for shard in &self.shards {
+            let map = shard.read();
+            for value in map.values() {
+                if value.is_expired() {
+                    continue;
+                }
+
+                total_hlls += 1;
+                total_cardinality = total_cardinality.saturating_add(value.pfcount());
+            }
+        }
+
+        stats.total_hlls = total_hlls;
+        stats.total_cardinality = total_cardinality;
+
+        stats
     }
 
     /// Reset statistics
     pub fn reset_stats(&self) {
         self.stats.write().reset();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    fn pfadd_and_pfcount_work() {
+        let store = HyperLogLogStore::new();
+
+        let added = store
+            .pfadd(
+                "visitors",
+                vec![b"user:1".to_vec(), b"user:2".to_vec(), b"user:3".to_vec()],
+                None,
+            )
+            .unwrap();
+
+        assert!(added >= 1);
+
+        let count = store.pfcount("visitors").unwrap();
+        assert!(count >= 3);
+    }
+
+    #[test]
+    fn pfmerge_merges_sources() {
+        let store = HyperLogLogStore::new();
+
+        store
+            .pfadd("source:a", vec![b"alpha".to_vec(), b"beta".to_vec()], None)
+            .unwrap();
+        store
+            .pfadd("source:b", vec![b"gamma".to_vec(), b"delta".to_vec()], None)
+            .unwrap();
+
+        let merged = store
+            .pfmerge("dest", vec!["source:a".into(), "source:b".into()])
+            .unwrap();
+
+        assert!(merged >= 3);
+    }
+
+    #[test]
+    fn pfadd_respects_ttl() {
+        let store = HyperLogLogStore::new();
+
+        store
+            .pfadd("temp", vec![b"user:1".to_vec()], Some(1))
+            .unwrap();
+
+        // Should be accessible immediately
+        assert!(store.pfcount("temp").is_ok());
+
+        thread::sleep(Duration::from_secs(2));
+
+        let result = store.pfcount("temp");
+        assert!(matches!(
+            result,
+            Err(SynapError::KeyExpired) | Err(SynapError::NotFound)
+        ));
     }
 }

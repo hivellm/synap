@@ -9,7 +9,7 @@ public sealed class HashManager
 {
     private readonly SynapClient _client;
 
-    internal HashManager(SynapClient client)
+    public HashManager(SynapClient client)
     {
         _client = client;
     }

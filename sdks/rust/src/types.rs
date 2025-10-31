@@ -65,3 +65,13 @@ pub struct KVStats {
     pub total_memory_bytes: usize,
     pub hit_rate: f64,
 }
+
+/// HyperLogLog statistics
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HyperLogLogStats {
+    pub total_hlls: u64,
+    pub pfadd_count: u64,
+    pub pfcount_count: u64,
+    pub pfmerge_count: u64,
+    pub total_cardinality: u64,
+}

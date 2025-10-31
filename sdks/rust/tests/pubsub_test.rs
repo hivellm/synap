@@ -12,6 +12,7 @@ fn timestamp_millis() -> u128 {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_publish_correct_payload_field() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");
@@ -28,6 +29,7 @@ async fn test_pubsub_publish_correct_payload_field() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_publish_different_types() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");
@@ -71,6 +73,7 @@ async fn test_pubsub_publish_different_types() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_publish_with_priority() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");
@@ -83,6 +86,7 @@ async fn test_pubsub_publish_with_priority() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_rapid_publishing() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");
@@ -113,6 +117,7 @@ async fn test_pubsub_rapid_publishing() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_large_payload() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");
@@ -126,6 +131,7 @@ async fn test_pubsub_large_payload() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_nested_objects() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");
@@ -150,6 +156,7 @@ async fn test_pubsub_nested_objects() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_subscribe_topics() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");
@@ -167,6 +174,7 @@ async fn test_pubsub_subscribe_topics() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_subscribe_single_topic() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");
@@ -183,6 +191,7 @@ async fn test_pubsub_subscribe_single_topic() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_unsubscribe() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");
@@ -203,6 +212,7 @@ async fn test_pubsub_unsubscribe() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_list_topics() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");
@@ -222,6 +232,7 @@ async fn test_pubsub_list_topics() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_wildcard_subscriptions() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");
@@ -247,6 +258,7 @@ async fn test_pubsub_wildcard_subscriptions() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_multiple_subscribers() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");
@@ -273,6 +285,7 @@ async fn test_pubsub_multiple_subscribers() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_publish_with_headers() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");
@@ -293,6 +306,7 @@ async fn test_pubsub_publish_with_headers() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_publish_all_priorities() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");
@@ -310,6 +324,7 @@ async fn test_pubsub_publish_all_priorities() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_pubsub_empty_topics_list() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).expect("Failed to create client");

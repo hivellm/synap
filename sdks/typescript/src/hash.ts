@@ -36,133 +36,136 @@ export class HashManager {
    * Get field from hash
    */
   async get(key: string, field: string): Promise<string | null> {
-    const response = await this.client.sendCommand('hash.get', {
+    const response = await this.client.sendCommand<{ value?: string }>('hash.get', {
       key,
       field,
     });
-    return response.payload?.value || null;
+    return response?.value ?? null;
   }
 
   /**
    * Get all fields and values from hash
    */
   async getAll(key: string): Promise<Record<string, string>> {
-    const response = await this.client.sendCommand('hash.getall', {
+    const response = await this.client.sendCommand<{ fields?: Record<string, string> }>('hash.getall', {
       key,
     });
-    return response.payload?.fields || {};
+    return response?.fields ?? {};
   }
 
   /**
    * Delete field from hash
    */
   async del(key: string, field: string): Promise<number> {
-    const response = await this.client.sendCommand('hash.del', {
+    const response = await this.client.sendCommand<{ deleted?: number }>('hash.del', {
       key,
       field,
     });
-    return response.payload?.deleted || 0;
+    return response?.deleted ?? 0;
   }
 
   /**
    * Check if field exists in hash
    */
   async exists(key: string, field: string): Promise<boolean> {
-    const response = await this.client.sendCommand('hash.exists', {
+    const response = await this.client.sendCommand<{ exists?: boolean }>('hash.exists', {
       key,
       field,
     });
-    return response.payload?.exists || false;
+    return response?.exists ?? false;
   }
 
   /**
    * Get all field names in hash
    */
   async keys(key: string): Promise<string[]> {
-    const response = await this.client.sendCommand('hash.keys', {
+    const response = await this.client.sendCommand<{ fields?: string[] }>('hash.keys', {
       key,
     });
-    return response.payload?.fields || [];
+    return response?.fields ?? [];
   }
 
   /**
    * Get all values in hash
    */
   async values(key: string): Promise<string[]> {
-    const response = await this.client.sendCommand('hash.values', {
+    const response = await this.client.sendCommand<{ values?: string[] }>('hash.values', {
       key,
     });
-    return response.payload?.values || [];
+    return response?.values ?? [];
   }
 
   /**
    * Get number of fields in hash
    */
   async len(key: string): Promise<number> {
-    const response = await this.client.sendCommand('hash.len', {
+    const response = await this.client.sendCommand<{ length?: number }>('hash.len', {
       key,
     });
-    return response.payload?.length || 0;
+    return response?.length ?? 0;
   }
 
   /**
    * Set multiple fields in hash
    */
   async mset(key: string, fields: Record<string, string | number>): Promise<boolean> {
-    const response = await this.client.sendCommand('hash.mset', {
+    const response = await this.client.sendCommand<{ success?: boolean }>('hash.mset', {
       key,
       fields: Object.fromEntries(
         Object.entries(fields).map(([k, v]) => [k, String(v)])
       ),
     });
-    return response.success || false;
+    return response?.success ?? false;
   }
 
   /**
    * Get multiple fields from hash
    */
   async mget(key: string, fields: string[]): Promise<Record<string, string | null>> {
-    const response = await this.client.sendCommand('hash.mget', {
-      key,
-      fields,
-    });
-    return response.payload?.values || {};
+    const response = await this.client.sendCommand<{ values?: Record<string, string | null> }>(
+      'hash.mget',
+      {
+        key,
+        fields,
+      }
+    );
+    return response?.values ?? {};
   }
 
   /**
    * Increment field value by integer
    */
   async incrBy(key: string, field: string, increment: number): Promise<number> {
-    const response = await this.client.sendCommand('hash.incrby', {
+    const response = await this.client.sendCommand<{ value?: number }>('hash.incrby', {
       key,
       field,
       increment,
     });
-    return response.payload?.value || 0;
+    return response?.value ?? 0;
   }
 
   /**
    * Increment field value by float
    */
   async incrByFloat(key: string, field: string, increment: number): Promise<number> {
-    const response = await this.client.sendCommand('hash.incrbyfloat', {
+    const response = await this.client.sendCommand<{ value?: number }>('hash.incrbyfloat', {
       key,
       field,
       increment,
     });
-    return response.payload?.value || 0;
+    return response?.value ?? 0;
   }
 
   /**
    * Set field only if it doesn't exist
    */
   async setNX(key: string, field: string, value: string | number): Promise<boolean> {
-    const response = await this.client.sendCommand('hash.setnx', {
+    const response = await this.client.sendCommand<{ created?: boolean }>('hash.setnx', {
       key,
       field,
       value: String(value),
     });
-    return response.payload?.created || false;
+    return response?.created ?? false;
   }
 }
 

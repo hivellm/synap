@@ -1,6 +1,7 @@
 use synap_sdk::{SynapClient, SynapConfig};
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_sorted_set_basic_operations() {
     // Note: These are interface tests - will fail if server not running
     let config = SynapConfig::new("http://localhost:15500");
@@ -90,6 +91,7 @@ async fn test_sorted_set_basic_operations() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_sorted_set_range_operations() {
     // Note: These are interface tests - will fail if server not running
     let config = SynapConfig::new("http://localhost:15500");
@@ -141,6 +143,7 @@ async fn test_sorted_set_range_operations() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_sorted_set_increment() {
     // Note: These are interface tests - will fail if server not running
     let config = SynapConfig::new("http://localhost:15500");
@@ -171,6 +174,7 @@ async fn test_sorted_set_increment() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_sorted_set_pop_operations() {
     // Note: These are interface tests - will fail if server not running
     let config = SynapConfig::new("http://localhost:15500");
@@ -207,6 +211,7 @@ async fn test_sorted_set_pop_operations() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_sorted_set_remove_range() {
     // Note: These are interface tests - will fail if server not running
     let config = SynapConfig::new("http://localhost:15500");
@@ -247,6 +252,7 @@ async fn test_sorted_set_remove_range() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_sorted_set_set_operations() {
     // Note: These are interface tests - will fail if server not running
     let config = SynapConfig::new("http://localhost:15500");
@@ -287,6 +293,7 @@ async fn test_sorted_set_set_operations() {
 }
 
 #[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_sorted_set_stats() {
     // Note: These are interface tests - will fail if server not running
     let config = SynapConfig::new("http://localhost:15500");

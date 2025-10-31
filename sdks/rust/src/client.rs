@@ -2,8 +2,8 @@
 
 use crate::error::{Result, SynapError};
 use crate::{
-    HashManager, KVStore, ListManager, PubSubManager, QueueManager, SetManager, SortedSetManager,
-    StreamManager,
+    HashManager, HyperLogLogManager, KVStore, ListManager, PubSubManager, QueueManager,
+    ScriptManager, SetManager, SortedSetManager, StreamManager, TransactionManager,
 };
 use reqwest::Client;
 use serde_json::Value;
@@ -126,6 +126,21 @@ impl SynapClient {
     /// Get the Pub/Sub manager interface
     pub fn pubsub(&self) -> PubSubManager {
         PubSubManager::new(self.clone())
+    }
+
+    /// Get the Transaction manager interface
+    pub fn transaction(&self) -> TransactionManager {
+        TransactionManager::new(self.clone())
+    }
+
+    /// Get the scripting manager interface
+    pub fn script(&self) -> ScriptManager {
+        ScriptManager::new(self.clone())
+    }
+
+    /// Get the HyperLogLog manager interface
+    pub fn hyperloglog(&self) -> HyperLogLogManager {
+        HyperLogLogManager::new(self.clone())
     }
 
     /// Send a StreamableHTTP command
@@ -252,6 +267,27 @@ mod tests {
         let client = SynapClient::new(config).unwrap();
         let _queue = client.queue();
         // Just verify it doesn't panic
+    }
+
+    #[test]
+    fn test_client_transaction_interface() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let _tx = client.transaction();
+    }
+
+    #[test]
+    fn test_client_script_interface() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let _script = client.script();
+    }
+
+    #[test]
+    fn test_client_hyperloglog_interface() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let _hll = client.hyperloglog();
     }
 
     #[test]

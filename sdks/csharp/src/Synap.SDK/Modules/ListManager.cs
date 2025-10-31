@@ -9,7 +9,7 @@ public sealed class ListManager
 {
     private readonly SynapClient _client;
 
-    internal ListManager(SynapClient client)
+    public ListManager(SynapClient client)
     {
         _client = client;
     }

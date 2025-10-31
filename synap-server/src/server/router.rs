@@ -184,6 +184,20 @@ pub fn create_router(
             post(handlers::list_rpoplpush),
         )
         .route("/list/stats", get(handlers::list_stats))
+        // HyperLogLog endpoints
+        .route(
+            "/hyperloglog/{key}/pfadd",
+            post(handlers::hyperloglog_pfadd),
+        )
+        .route(
+            "/hyperloglog/{key}/pfcount",
+            get(handlers::hyperloglog_pfcount),
+        )
+        .route(
+            "/hyperloglog/{destination}/pfmerge",
+            post(handlers::hyperloglog_pfmerge),
+        )
+        .route("/hyperloglog/stats", get(handlers::hyperloglog_stats))
         // Persistence endpoints
         .route("/snapshot", post(handlers::trigger_snapshot))
         // Event Stream endpoints

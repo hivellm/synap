@@ -1,4 +1,7 @@
-using Moq;
+using System.Collections.Generic;
+using System.Net;
+using System.Net.Http;
+using System.Text;
 using Synap.SDK.Modules;
 using System.Text.Json;
 using Xunit;
@@ -7,115 +10,69 @@ namespace Synap.SDK.Tests.Modules;
 
 public sealed class SetManagerTests
 {
-    private readonly Mock<SynapClient> _mockClient;
-    private readonly SetManager _setManager;
-
-    public SetManagerTests()
-    {
-        var config = new SynapConfig("http://localhost:15500");
-        _mockClient = new Mock<SynapClient>(config);
-        _setManager = new SetManager(_mockClient.Object);
-    }
-
     [Fact]
     public async Task AddAsync_ShouldReturnAddedCount()
     {
-        // Arrange
-        var responseJson = JsonSerializer.Serialize(new { added = 3 });
-        var response = JsonDocument.Parse(responseJson);
-        _mockClient
-            .Setup(c => c.ExecuteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(response);
+        using var testClient = CreateClient(new { added = 3 });
+        var manager = new SetManager(testClient.Client);
 
-        // Act
-        var result = await _setManager.AddAsync("tags", new List<string> { "python", "redis" });
+        var result = await manager.AddAsync("tags", new List<string> { "python", "redis" });
 
-        // Assert
         Assert.Equal(3, result);
     }
 
     [Fact]
     public async Task RemAsync_ShouldReturnRemovedCount()
     {
-        // Arrange
-        var responseJson = JsonSerializer.Serialize(new { removed = 1 });
-        var response = JsonDocument.Parse(responseJson);
-        _mockClient
-            .Setup(c => c.ExecuteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(response);
+        using var testClient = CreateClient(new { removed = 1 });
+        var manager = new SetManager(testClient.Client);
 
-        // Act
-        var result = await _setManager.RemAsync("tags", new List<string> { "redis" });
+        var result = await manager.RemAsync("tags", new List<string> { "redis" });
 
-        // Assert
         Assert.Equal(1, result);
     }
 
     [Fact]
     public async Task IsMemberAsync_ShouldReturnTrue()
     {
-        // Arrange
-        var responseJson = JsonSerializer.Serialize(new { is_member = true });
-        var response = JsonDocument.Parse(responseJson);
-        _mockClient
-            .Setup(c => c.ExecuteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(response);
+        using var testClient = CreateClient(new { is_member = true });
+        var manager = new SetManager(testClient.Client);
 
-        // Act
-        var result = await _setManager.IsMemberAsync("tags", "python");
+        var result = await manager.IsMemberAsync("tags", "python");
 
-        // Assert
         Assert.True(result);
     }
 
     [Fact]
     public async Task MembersAsync_ShouldReturnMembers()
     {
-        // Arrange
-        var responseJson = JsonSerializer.Serialize(new { members = new[] { "python", "redis" } });
-        var response = JsonDocument.Parse(responseJson);
-        _mockClient
-            .Setup(c => c.ExecuteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(response);
+        using var testClient = CreateClient(new { members = new[] { "python", "redis" } });
+        var manager = new SetManager(testClient.Client);
 
-        // Act
-        var result = await _setManager.MembersAsync("tags");
+        var result = await manager.MembersAsync("tags");
 
-        // Assert
         Assert.Equal(2, result.Count);
     }
 
     [Fact]
     public async Task CardAsync_ShouldReturnCardinality()
     {
-        // Arrange
-        var responseJson = JsonSerializer.Serialize(new { cardinality = 3 });
-        var response = JsonDocument.Parse(responseJson);
-        _mockClient
-            .Setup(c => c.ExecuteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(response);
+        using var testClient = CreateClient(new { cardinality = 3 });
+        var manager = new SetManager(testClient.Client);
 
-        // Act
-        var result = await _setManager.CardAsync("tags");
+        var result = await manager.CardAsync("tags");
 
-        // Assert
         Assert.Equal(3, result);
     }
 
     [Fact]
     public async Task InterAsync_ShouldReturnIntersection()
     {
-        // Arrange
-        var responseJson = JsonSerializer.Serialize(new { members = new[] { "python" } });
-        var response = JsonDocument.Parse(responseJson);
-        _mockClient
-            .Setup(c => c.ExecuteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(response);
+        using var testClient = CreateClient(new { members = new[] { "python" } });
+        var manager = new SetManager(testClient.Client);
 
-        // Act
-        var result = await _setManager.InterAsync(new List<string> { "tags1", "tags2" });
+        var result = await manager.InterAsync(new List<string> { "tags1", "tags2" });
 
-        // Assert
         Assert.Single(result);
         Assert.Equal("python", result[0]);
     }
@@ -123,18 +80,75 @@ public sealed class SetManagerTests
     [Fact]
     public async Task UnionAsync_ShouldReturnUnion()
     {
-        // Arrange
-        var responseJson = JsonSerializer.Serialize(new { members = new[] { "python", "redis", "typescript" } });
-        var response = JsonDocument.Parse(responseJson);
-        _mockClient
-            .Setup(c => c.ExecuteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Dictionary<string, object?>>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(response);
+        using var testClient = CreateClient(new { members = new[] { "python", "redis", "typescript" } });
+        var manager = new SetManager(testClient.Client);
 
-        // Act
-        var result = await _setManager.UnionAsync(new List<string> { "tags1", "tags2" });
+        var result = await manager.UnionAsync(new List<string> { "tags1", "tags2" });
 
-        // Assert
         Assert.Equal(3, result.Count);
+    }
+
+    private static TestSynapClient CreateClient(object response)
+    {
+        var json = response switch
+        {
+            string s => s,
+            JsonDocument doc => doc.RootElement.GetRawText(),
+            _ => JsonSerializer.Serialize(response)
+        };
+
+        return new TestSynapClient(json);
+    }
+
+    private sealed class TestSynapClient : IDisposable
+    {
+        private readonly HttpClient _httpClient;
+
+        public TestSynapClient(params string[] responses)
+        {
+            var handler = new StubHttpMessageHandler(responses);
+            _httpClient = new HttpClient(handler)
+            {
+                BaseAddress = new Uri("http://localhost:15500"),
+            };
+
+            Client = new SynapClient(new SynapConfig("http://localhost:15500"), _httpClient);
+        }
+
+        public SynapClient Client { get; }
+
+        public void Dispose()
+        {
+            Client.Dispose();
+            _httpClient.Dispose();
+        }
+    }
+
+    private sealed class StubHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly Queue<string> _responses;
+
+        public StubHttpMessageHandler(IEnumerable<string> responses)
+        {
+            _responses = new Queue<string>(responses);
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (_responses.Count == 0)
+            {
+                throw new InvalidOperationException("No configured response for request.");
+            }
+
+            var json = _responses.Dequeue();
+
+            var message = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json"),
+            };
+
+            return Task.FromResult(message);
+        }
     }
 }
 

@@ -34,6 +34,7 @@
 pub mod client;
 pub mod error;
 pub mod hash;
+pub mod hyperloglog;
 pub mod kv;
 pub mod list;
 pub mod pubsub;
@@ -41,20 +42,32 @@ pub mod queue;
 mod queue_reactive;
 pub mod reactive;
 pub mod rx; // RxJS-style reactive programming
+pub mod scripting;
 pub mod set;
 pub mod sorted_set;
 pub mod stream;
 mod stream_reactive;
+pub mod transactions;
 pub mod types;
 
 pub use client::{SynapClient, SynapConfig};
 pub use error::{Result, SynapError};
 pub use hash::HashManager;
+pub use hyperloglog::HyperLogLogManager;
 pub use kv::KVStore;
 pub use list::ListManager;
 pub use pubsub::PubSubManager;
 pub use queue::QueueManager;
 pub use reactive::{MessageStream, SubscriptionHandle};
+pub use scripting::{
+    ScriptEvalOptions, ScriptEvalResponse, ScriptExistsResponse, ScriptFlushResponse,
+    ScriptKillResponse, ScriptManager,
+};
 pub use set::SetManager;
 pub use sorted_set::{ScoredMember, SortedSetManager, SortedSetStats};
 pub use stream::StreamManager;
+pub use transactions::{
+    TransactionCommandClient, TransactionExecResult, TransactionManager, TransactionOptions,
+    TransactionResponse,
+};
+pub use types::HyperLogLogStats;

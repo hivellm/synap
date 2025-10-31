@@ -76,6 +76,14 @@ export interface RetryOptions {
   backoffMultiplier?: number;
 }
 
+/**
+ * Command execution options shared by multiple modules (e.g., transactions)
+ */
+export interface CommandOptions {
+  /** Optional transaction client identifier to associate commands with MULTI/EXEC */
+  clientId?: string;
+}
+
 // ==================== KEY-VALUE STORE ====================
 
 /**
@@ -397,4 +405,14 @@ export type JSONValue =
  * Serializable payload
  */
 export type Payload = Record<string, JSONValue>;
+
+// ==================== HYPERLOGLOG ====================
+
+export interface HyperLogLogStats {
+  total_hlls: number;
+  pfadd_count: number;
+  pfcount_count: number;
+  pfmerge_count: number;
+  total_cardinality: number;
+}
 

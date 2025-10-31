@@ -15,6 +15,13 @@
 
 import { SynapClient } from './client';
 
+function extractPayload<T>(response: T | { payload: T }): T {
+  if (response && typeof response === 'object' && 'payload' in (response as Record<string, unknown>)) {
+    return (response as { payload: T }).payload;
+  }
+  return response as T;
+}
+
 /**
  * A member with its score
  */
@@ -48,56 +55,76 @@ export class SortedSetManager {
    * ```
    */
   async add(key: string, member: string, score: number): Promise<boolean> {
-    const response = await this.client.sendCommand('sortedset.zadd', {
-      key,
-      member,
-      score,
-    });
-    return response.payload?.added > 0 || false;
+    const response = await this.client.sendCommand<{ added?: number } | { payload: { added?: number } }>(
+      'sortedset.zadd',
+      {
+        key,
+        member,
+        score,
+      }
+    );
+    const payload = extractPayload(response);
+    return (payload?.added ?? 0) > 0;
   }
 
   /**
    * Remove members from sorted set (ZREM)
    */
   async rem(key: string, ...members: string[]): Promise<number> {
-    const response = await this.client.sendCommand('sortedset.zrem', {
-      key,
-      members,
-    });
-    return response.payload?.removed || 0;
+    const response = await this.client.sendCommand<{ removed?: number } | { payload: { removed?: number } }>(
+      'sortedset.zrem',
+      {
+        key,
+        members,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.removed ?? 0;
   }
 
   /**
    * Get score of a member (ZSCORE)
    */
   async score(key: string, member: string): Promise<number | null> {
-    const response = await this.client.sendCommand('sortedset.zscore', {
-      key,
-      member,
-    });
-    return response.payload?.score ?? null;
+    const response = await this.client.sendCommand<{ score?: number } | { payload: { score?: number } }>(
+      'sortedset.zscore',
+      {
+        key,
+        member,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.score ?? null;
   }
 
   /**
    * Get cardinality (number of members) (ZCARD)
    */
   async card(key: string): Promise<number> {
-    const response = await this.client.sendCommand('sortedset.zcard', {
-      key,
-    });
-    return response.payload?.count || 0;
+    const response = await this.client.sendCommand<{ count?: number } | { payload: { count?: number } }>(
+      'sortedset.zcard',
+      {
+        key,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.count ?? 0;
   }
 
   /**
    * Increment score of member (ZINCRBY)
    */
   async incrBy(key: string, member: string, increment: number): Promise<number> {
-    const response = await this.client.sendCommand('sortedset.zincrby', {
-      key,
-      member,
-      increment,
-    });
-    return response.payload?.score || 0;
+    const response = await this.client.sendCommand<{ score?: number } | { payload: { score?: number } }>(
+      'sortedset.zincrby',
+      {
+        key,
+        member,
+        increment,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.score ?? 0;
   }
 
   /**
@@ -120,13 +147,17 @@ export class SortedSetManager {
     stop: number = -1,
     withScores: boolean = false
   ): Promise<ScoredMember[]> {
-    const response = await this.client.sendCommand('sortedset.zrange', {
-      key,
-      start,
-      stop,
-      withscores: withScores,
-    });
-    return response.payload?.members || [];
+    const response = await this.client.sendCommand<{ members?: ScoredMember[] } | { payload: { members?: ScoredMember[] } }>(
+      'sortedset.zrange',
+      {
+        key,
+        start,
+        stop,
+        withscores: withScores,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.members ?? [];
   }
 
   /**
@@ -138,47 +169,63 @@ export class SortedSetManager {
     stop: number = -1,
     withScores: boolean = false
   ): Promise<ScoredMember[]> {
-    const response = await this.client.sendCommand('sortedset.zrevrange', {
-      key,
-      start,
-      stop,
-      withscores: withScores,
-    });
-    return response.payload?.members || [];
+    const response = await this.client.sendCommand<{ members?: ScoredMember[] } | { payload: { members?: ScoredMember[] } }>(
+      'sortedset.zrevrange',
+      {
+        key,
+        start,
+        stop,
+        withscores: withScores,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.members ?? [];
   }
 
   /**
    * Get rank of member (0-based, lowest score = rank 0) (ZRANK)
    */
   async rank(key: string, member: string): Promise<number | null> {
-    const response = await this.client.sendCommand('sortedset.zrank', {
-      key,
-      member,
-    });
-    return response.payload?.rank ?? null;
+    const response = await this.client.sendCommand<{ rank?: number } | { payload: { rank?: number } }>(
+      'sortedset.zrank',
+      {
+        key,
+        member,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.rank ?? null;
   }
 
   /**
    * Get reverse rank of member (0-based, highest score = rank 0) (ZREVRANK)
    */
   async revRank(key: string, member: string): Promise<number | null> {
-    const response = await this.client.sendCommand('sortedset.zrevrank', {
-      key,
-      member,
-    });
-    return response.payload?.rank ?? null;
+    const response = await this.client.sendCommand<{ rank?: number } | { payload: { rank?: number } }>(
+      'sortedset.zrevrank',
+      {
+        key,
+        member,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.rank ?? null;
   }
 
   /**
    * Count members with scores in range (ZCOUNT)
    */
   async count(key: string, min: number, max: number): Promise<number> {
-    const response = await this.client.sendCommand('sortedset.zcount', {
-      key,
-      min,
-      max,
-    });
-    return response.payload?.count || 0;
+    const response = await this.client.sendCommand<{ count?: number } | { payload: { count?: number } }>(
+      'sortedset.zcount',
+      {
+        key,
+        min,
+        max,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.count ?? 0;
   }
 
   /**
@@ -190,59 +237,79 @@ export class SortedSetManager {
     max: number,
     withScores: boolean = false
   ): Promise<ScoredMember[]> {
-    const response = await this.client.sendCommand('sortedset.zrangebyscore', {
-      key,
-      min,
-      max,
-      withscores: withScores,
-    });
-    return response.payload?.members || [];
+    const response = await this.client.sendCommand<{ members?: ScoredMember[] } | { payload: { members?: ScoredMember[] } }>(
+      'sortedset.zrangebyscore',
+      {
+        key,
+        min,
+        max,
+        withscores: withScores,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.members ?? [];
   }
 
   /**
    * Pop minimum scored members (ZPOPMIN)
    */
   async popMin(key: string, count: number = 1): Promise<ScoredMember[]> {
-    const response = await this.client.sendCommand('sortedset.zpopmin', {
-      key,
-      count,
-    });
-    return response.payload?.members || [];
+    const response = await this.client.sendCommand<{ members?: ScoredMember[] } | { payload: { members?: ScoredMember[] } }>(
+      'sortedset.zpopmin',
+      {
+        key,
+        count,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.members ?? [];
   }
 
   /**
    * Pop maximum scored members (ZPOPMAX)
    */
   async popMax(key: string, count: number = 1): Promise<ScoredMember[]> {
-    const response = await this.client.sendCommand('sortedset.zpopmax', {
-      key,
-      count,
-    });
-    return response.payload?.members || [];
+    const response = await this.client.sendCommand<{ members?: ScoredMember[] } | { payload: { members?: ScoredMember[] } }>(
+      'sortedset.zpopmax',
+      {
+        key,
+        count,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.members ?? [];
   }
 
   /**
    * Remove members by rank range (ZREMRANGEBYRANK)
    */
   async remRangeByRank(key: string, start: number, stop: number): Promise<number> {
-    const response = await this.client.sendCommand('sortedset.zremrangebyrank', {
-      key,
-      start,
-      stop,
-    });
-    return response.payload?.removed || 0;
+    const response = await this.client.sendCommand<{ removed?: number } | { payload: { removed?: number } }>(
+      'sortedset.zremrangebyrank',
+      {
+        key,
+        start,
+        stop,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.removed ?? 0;
   }
 
   /**
    * Remove members by score range (ZREMRANGEBYSCORE)
    */
   async remRangeByScore(key: string, min: number, max: number): Promise<number> {
-    const response = await this.client.sendCommand('sortedset.zremrangebyscore', {
-      key,
-      min,
-      max,
-    });
-    return response.payload?.removed || 0;
+    const response = await this.client.sendCommand<{ removed?: number } | { payload: { removed?: number } }>(
+      'sortedset.zremrangebyscore',
+      {
+        key,
+        min,
+        max,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.removed ?? 0;
   }
 
   /**
@@ -265,13 +332,17 @@ export class SortedSetManager {
     weights?: number[],
     aggregate: 'sum' | 'min' | 'max' = 'sum'
   ): Promise<number> {
-    const response = await this.client.sendCommand('sortedset.zinterstore', {
-      destination,
-      keys,
-      weights,
-      aggregate,
-    });
-    return response.payload?.count || 0;
+    const response = await this.client.sendCommand<{ count?: number } | { payload: { count?: number } }>(
+      'sortedset.zinterstore',
+      {
+        destination,
+        keys,
+        weights,
+        aggregate,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.count ?? 0;
   }
 
   /**
@@ -283,32 +354,44 @@ export class SortedSetManager {
     weights?: number[],
     aggregate: 'sum' | 'min' | 'max' = 'sum'
   ): Promise<number> {
-    const response = await this.client.sendCommand('sortedset.zunionstore', {
-      destination,
-      keys,
-      weights,
-      aggregate,
-    });
-    return response.payload?.count || 0;
+    const response = await this.client.sendCommand<{ count?: number } | { payload: { count?: number } }>(
+      'sortedset.zunionstore',
+      {
+        destination,
+        keys,
+        weights,
+        aggregate,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.count ?? 0;
   }
 
   /**
    * Compute difference and store in destination (ZDIFFSTORE)
    */
   async diffStore(destination: string, keys: string[]): Promise<number> {
-    const response = await this.client.sendCommand('sortedset.zdiffstore', {
-      destination,
-      keys,
-    });
-    return response.payload?.count || 0;
+    const response = await this.client.sendCommand<{ count?: number } | { payload: { count?: number } }>(
+      'sortedset.zdiffstore',
+      {
+        destination,
+        keys,
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.count ?? 0;
   }
 
   /**
    * Get statistics
    */
   async stats(): Promise<SortedSetStats> {
-    const response = await this.client.sendCommand('sortedset.stats', {});
-    return response.payload || {
+    const response = await this.client.sendCommand<SortedSetStats | { payload: SortedSetStats }>(
+      'sortedset.stats',
+      {}
+    );
+    const payload = extractPayload(response);
+    return payload ?? {
       total_keys: 0,
       total_members: 0,
       avg_members_per_key: 0,

@@ -37,6 +37,9 @@ import { SortedSetManager } from './sorted-set';
 import { QueueManager } from './queue';
 import { StreamManager } from './stream';
 import { PubSubManager } from './pubsub';
+import { TransactionManager } from './transactions';
+import { ScriptManager } from './scripting';
+import { HyperLogLogManager } from './hyperloglog';
 
 export type { SynapClientOptions, AuthOptions, RetryOptions } from './types';
 export type {
@@ -57,6 +60,8 @@ export type {
   PubSubSubscriberOptions,
   ProcessedPubSubMessage,
   JSONValue,
+  CommandOptions,
+  HyperLogLogStats,
 } from './types';
 
 export {
@@ -76,6 +81,23 @@ export type { ScoredMember, SortedSetStats } from './sorted-set';
 export { QueueManager } from './queue';
 export { StreamManager } from './stream';
 export { PubSubManager } from './pubsub';
+export {
+  TransactionManager,
+  type TransactionOptions,
+  type TransactionWatchOptions,
+  type TransactionResponse,
+  type TransactionExecResult,
+  type TransactionScope,
+} from './transactions';
+export {
+  ScriptManager,
+  type ScriptEvalOptions,
+  type ScriptEvalResponse,
+  type ScriptExistsResponse,
+  type ScriptFlushResponse,
+  type ScriptKillResponse,
+} from './scripting';
+export { HyperLogLogManager } from './hyperloglog';
 
 /**
  * Main Synap client class
@@ -109,6 +131,15 @@ export class Synap {
   /** Pub/Sub operations */
   public readonly pubsub: PubSubManager;
 
+  /** Transaction operations */
+  public readonly transaction: TransactionManager;
+
+  /** Lua scripting operations */
+  public readonly script: ScriptManager;
+
+  /** HyperLogLog operations */
+  public readonly hyperloglog: HyperLogLogManager;
+
   constructor(options: import('./types').SynapClientOptions = {}) {
     this.client = new SynapClient(options);
     this.kv = new KVStore(this.client);
@@ -119,6 +150,9 @@ export class Synap {
     this.queue = new QueueManager(this.client);
     this.stream = new StreamManager(this.client);
     this.pubsub = new PubSubManager(this.client);
+    this.transaction = new TransactionManager(this.client);
+    this.script = new ScriptManager(this.client);
+    this.hyperloglog = new HyperLogLogManager(this.client);
   }
 
   /**
