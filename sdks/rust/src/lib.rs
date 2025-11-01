@@ -31,6 +31,7 @@
 //! }
 //! ```
 
+pub mod bitmap;
 pub mod client;
 pub mod error;
 pub mod hash;
@@ -50,6 +51,7 @@ mod stream_reactive;
 pub mod transactions;
 pub mod types;
 
+pub use bitmap::{BitmapManager, BitmapOperation, BitmapStats};
 pub use client::{SynapClient, SynapConfig};
 pub use error::{Result, SynapError};
 pub use hash::HashManager;

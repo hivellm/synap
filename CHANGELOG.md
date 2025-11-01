@@ -17,11 +17,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fixed C# SDK PubSubManager to correctly extract `subscribers_matched` from response
 - Restored and fixed PubSubManager.cs with proper payload envelope support
 - Removed duplicate code in HashManagerTests.cs
+- Fixed C# SDK StreamableHTTP request format (correct envelope structure with `command`, `payload`, `request_id`)
+- Fixed C# SDK JSON property mapping (added `[JsonPropertyName]` attributes for snake_case fields)
+- Fixed PHP SDK StreamableHTTP endpoint (`/api/stream` → `/api/v1/command`)
+- Fixed PHP SDK payload extraction (extract data from `payload` field in responses)
+- Fixed PHP SDK tests (`tearDown()` removed null assignments to non-nullable properties)
 
 ### Added
 - Full HyperLogLog server support (PFADD, PFCOUNT, PFMERGE) across REST and StreamableHTTP protocols
 - TTL-aware HyperLogLog store with statistics reporting and sharded cardinality tracking
 - Comprehensive unit tests for the HyperLogLog core and integration tests covering REST + StreamableHTTP flows
+- **Bitmap Operations** - Complete Redis-compatible bitmap implementation:
+  - Core operations: SETBIT, GETBIT, BITCOUNT, BITPOS, BITOP (AND/OR/XOR/NOT), STATS
+  - TTL support and sharded storage (64 shards)
+  - REST API endpoints (6 routes)
+  - StreamableHTTP commands (6 commands)
+  - Integration tests (12 tests)
+- **SDK Updates - Bitmap & HyperLogLog**:
+  - TypeScript SDK v0.3.0-beta.1: BitmapManager + HyperLogLogManager with S2S tests (21 tests)
+  - Rust SDK v0.3.0: BitmapManager + HyperLogLogManager with S2S tests (8 tests)
+  - Python SDK v0.3.0: BitmapManager + HyperLogLogManager with S2S tests
+  - C# SDK v0.3.0: BitmapManager + HyperLogLogManager with S2S tests (8/8 passing)
+  - PHP SDK v0.3.0: BitmapManager + HyperLogLogManager with S2S tests (8/8 passing)
 
 ## [0.7.0-rc1] - 2025-01-30
 

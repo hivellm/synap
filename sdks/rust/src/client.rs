@@ -2,8 +2,8 @@
 
 use crate::error::{Result, SynapError};
 use crate::{
-    HashManager, HyperLogLogManager, KVStore, ListManager, PubSubManager, QueueManager,
-    ScriptManager, SetManager, SortedSetManager, StreamManager, TransactionManager,
+    BitmapManager, HashManager, HyperLogLogManager, KVStore, ListManager, PubSubManager,
+    QueueManager, ScriptManager, SetManager, SortedSetManager, StreamManager, TransactionManager,
 };
 use reqwest::Client;
 use serde_json::Value;
@@ -141,6 +141,11 @@ impl SynapClient {
     /// Get the HyperLogLog manager interface
     pub fn hyperloglog(&self) -> HyperLogLogManager {
         HyperLogLogManager::new(self.clone())
+    }
+
+    /// Get the Bitmap manager interface
+    pub fn bitmap(&self) -> BitmapManager {
+        BitmapManager::new(self.clone())
     }
 
     /// Send a StreamableHTTP command
@@ -288,6 +293,13 @@ mod tests {
         let config = SynapConfig::new("http://localhost:15500");
         let client = SynapClient::new(config).unwrap();
         let _hll = client.hyperloglog();
+    }
+
+    #[test]
+    fn test_client_bitmap_interface() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let _bitmap = client.bitmap();
     }
 
     #[test]
