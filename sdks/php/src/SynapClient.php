@@ -8,7 +8,10 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\RequestOptions;
 use Synap\SDK\Exception\SynapException;
+use Synap\SDK\Module\BitmapManager;
+use Synap\SDK\Module\GeospatialManager;
 use Synap\SDK\Module\HashManager;
+use Synap\SDK\Module\HyperLogLogManager;
 use Synap\SDK\Module\KVStore;
 use Synap\SDK\Module\ListManager;
 use Synap\SDK\Module\PubSubManager;
@@ -30,6 +33,9 @@ class SynapClient
     private ?QueueManager $queue = null;
     private ?StreamManager $stream = null;
     private ?PubSubManager $pubsub = null;
+    private ?BitmapManager $bitmap = null;
+    private ?HyperLogLogManager $hyperloglog = null;
+    private ?GeospatialManager $geospatial = null;
 
     public function __construct(SynapConfig $config)
     {
@@ -104,6 +110,33 @@ class SynapClient
         return $this->pubsub;
     }
 
+    public function bitmap(): BitmapManager
+    {
+        if ($this->bitmap === null) {
+            $this->bitmap = new BitmapManager($this);
+        }
+
+        return $this->bitmap;
+    }
+
+    public function hyperloglog(): HyperLogLogManager
+    {
+        if ($this->hyperloglog === null) {
+            $this->hyperloglog = new HyperLogLogManager($this);
+        }
+
+        return $this->hyperloglog;
+    }
+
+    public function geospatial(): GeospatialManager
+    {
+        if ($this->geospatial === null) {
+            $this->geospatial = new GeospatialManager($this);
+        }
+
+        return $this->geospatial;
+    }
+
     /**
      * Execute StreamableHTTP operation
      *
@@ -115,10 +148,25 @@ class SynapClient
     public function execute(string $operation, string $target, array $data = []): array
     {
         try {
+            // Generate request ID (UUID v4)
+            $requestId = $this->generateUuid();
+
+            // Include target in data if it's not empty (for commands that use 'key' or 'destination')
+            $payloadData = $data;
+            if (! empty($target)) {
+                // Determine field name based on operation
+                if (str_starts_with($operation, 'bitmap.bitop') || str_starts_with($operation, 'hyperloglog.pfmerge')) {
+                    $payloadData['destination'] = $target;
+                } else {
+                    $payloadData['key'] = $target;
+                }
+            }
+
+            // StreamableHTTP format: {command, payload, request_id}
             $payload = [
-                'operation' => $operation,
-                'target' => $target,
-                'data' => $data,
+                'command' => $operation,
+                'payload' => $payloadData,
+                'request_id' => $requestId,
             ];
 
             $options = [
@@ -126,7 +174,7 @@ class SynapClient
                 RequestOptions::HEADERS => $this->buildHeaders(),
             ];
 
-            $response = $this->httpClient->request('POST', '/api/stream', $options);
+            $response = $this->httpClient->request('POST', '/api/v1/command', $options);
             $body = (string) $response->getBody();
 
             if (empty($body)) {
@@ -143,9 +191,9 @@ class SynapClient
                 return [];
             }
 
-            // Check for server error in response
-            if (isset($result['error'])) {
-                $error = $result['error'];
+            // Check for server error in StreamableHTTP response
+            if (isset($result['success']) && $result['success'] === false) {
+                $error = $result['error'] ?? 'Unknown error';
                 $errorMessage = is_string($error) ? $error : json_encode($error);
 
                 assert(is_string($errorMessage));
@@ -158,6 +206,27 @@ class SynapClient
         } catch (GuzzleException $e) {
             throw SynapException::networkError($e->getMessage());
         }
+    }
+
+    /**
+     * Generate UUID v4
+     *
+     * @return string
+     */
+    private function generateUuid(): string
+    {
+        $data = random_bytes(16);
+        $data[6] = chr(ord($data[6]) & 0x0f | 0x40); // Version 4
+        $data[8] = chr(ord($data[8]) & 0x3f | 0x80); // Variant 10
+
+        return sprintf(
+            '%08s-%04s-%04s-%04s-%12s',
+            bin2hex(substr($data, 0, 4)),
+            bin2hex(substr($data, 4, 2)),
+            bin2hex(substr($data, 6, 2)),
+            bin2hex(substr($data, 8, 2)),
+            bin2hex(substr($data, 10, 6))
+        );
     }
 
     /**

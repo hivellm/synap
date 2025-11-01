@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+import uuid
 
 import httpx
 
@@ -15,6 +16,9 @@ from synap_sdk.modules.set import SetManager
 from synap_sdk.modules.pubsub import PubSubManager
 from synap_sdk.modules.queue import QueueManager
 from synap_sdk.modules.stream import StreamManager
+from synap_sdk.modules.bitmap import BitmapManager
+from synap_sdk.modules.hyperloglog import HyperLogLogManager
+from synap_sdk.modules.geospatial import GeospatialManager
 
 
 class SynapClient:
@@ -60,6 +64,9 @@ class SynapClient:
         self._queue: QueueManager | None = None
         self._stream: StreamManager | None = None
         self._pubsub: PubSubManager | None = None
+        self._bitmap: BitmapManager | None = None
+        self._hyperloglog: HyperLogLogManager | None = None
+        self._geospatial: GeospatialManager | None = None
 
     @property
     def kv(self) -> KVStore:
@@ -111,9 +118,82 @@ class SynapClient:
         return self._pubsub
 
     @property
+    def bitmap(self) -> BitmapManager:
+        """Get the Bitmap operations."""
+        if self._bitmap is None:
+            self._bitmap = BitmapManager(self)
+        return self._bitmap
+
+    @property
+    def hyperloglog(self) -> HyperLogLogManager:
+        """Get the HyperLogLog operations."""
+        if self._hyperloglog is None:
+            self._hyperloglog = HyperLogLogManager(self)
+        return self._hyperloglog
+
+    @property
+    def geospatial(self) -> GeospatialManager:
+        """Get the Geospatial operations."""
+        if self._geospatial is None:
+            self._geospatial = GeospatialManager(self)
+        return self._geospatial
+
+    @property
     def config(self) -> SynapConfig:
         """Get the client configuration."""
         return self._config
+
+    async def send_command(
+        self,
+        command: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Send a StreamableHTTP command to the Synap server.
+
+        Args:
+            command: The command name (e.g., 'geospatial.geoadd', 'bitmap.setbit')
+            payload: The command payload data
+
+        Returns:
+            The response payload as a dictionary
+
+        Raises:
+            SynapException: If the operation fails
+        """
+        try:
+            request_id = str(uuid.uuid4())
+            request_payload = {
+                "command": command,
+                "request_id": request_id,
+                "payload": payload or {},
+            }
+
+            response = await self._http_client.post("/api/v1/command", json=request_payload)
+
+            if not response.text:
+                return {}
+
+            try:
+                result = response.json()
+            except Exception as e:
+                raise SynapException.invalid_response(f"Failed to parse JSON response: {e}") from e
+
+            # Check StreamableHTTP envelope
+            if isinstance(result, dict) and not result.get("success", True):
+                error_msg = result.get("error", "Unknown server error")
+                raise SynapException.server_error(str(error_msg))
+
+            if not response.is_success:
+                raise SynapException.http_error(
+                    f"Request failed with status {response.status_code}",
+                    response.status_code,
+                )
+
+            # Extract payload from StreamableHTTP response
+            return result.get("payload", {}) if isinstance(result, dict) else {}
+
+        except httpx.HTTPError as e:
+            raise SynapException.network_error(str(e)) from e
 
     async def execute(
         self,

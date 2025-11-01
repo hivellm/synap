@@ -53,12 +53,13 @@
 - [x] **Lua Scripting (v0.7.0-rc1)** - EVAL/EVALSHA with redis.call() bridge ✅
 - [x] **HyperLogLog (v0.7.0-rc2)** - PFADD/PFCOUNT/PFMERGE with TTL support ✅
 - [x] **Bitmap Operations (v0.7.0-rc2)** - SETBIT/GETBIT/BITCOUNT/BITOP/BITPOS/BITFIELD ✅
-- [x] **SDKs Updated with Redis Structures**: All 5 SDKs support Hash+List+Set+SortedSet+HyperLogLog+Bitmap ✅ **NEW**
-  - TypeScript SDK v0.3.0-beta.1: Bitmap + HyperLogLog + S2S tests
-  - Python SDK v0.3.0: Bitmap + HyperLogLog + S2S tests
-  - Rust SDK v0.3.0: Bitmap + HyperLogLog + S2S tests
-  - C# SDK v0.3.0: Bitmap + HyperLogLog + S2S tests (8/8 passing)
-  - PHP SDK v0.3.0: Bitmap + HyperLogLog + S2S tests (8/8 passing)
+- [x] **Geospatial Indexes (v0.7.0-rc2)** - GEOADD/GEODIST/GEORADIUS/GEORADIUSBYMEMBER/GEOPOS/GEOHASH ✅ **NEW**
+- [x] **SDKs Updated with Redis Structures**: All 5 SDKs support Hash+List+Set+SortedSet+HyperLogLog+Bitmap+Geospatial ✅
+  - TypeScript SDK v0.3.0-beta.1: Bitmap + HyperLogLog + Geospatial + unit tests + S2S tests
+  - Python SDK v0.3.0: Bitmap + HyperLogLog + Geospatial + S2S tests
+  - Rust SDK v0.3.0: Bitmap + HyperLogLog + Geospatial + S2S tests
+  - C# SDK v0.3.0: Bitmap + HyperLogLog + Geospatial + S2S tests
+  - PHP SDK v0.3.0: Bitmap + HyperLogLog + Geospatial + S2S tests
 
 #### 🔵 Optional (Can Ship in v1.1+)
 - [ ] Windows MSI installer

@@ -9,6 +9,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.7.0-rc2] - 2025-01-31
 
+### Added - Geospatial Indexes (January 2025) ✅
+
+**Geospatial Indexes Implementation - Complete**
+
+#### Core Implementation
+- ✅ **GeospatialStore** module created with Redis-compatible geohash encoding (52-bit integer scores)
+- ✅ **Coordinate validation** with proper latitude/longitude range checking
+- ✅ **Haversine distance calculation** supporting meters, kilometers, miles, and feet
+- ✅ **Sorted Set backing** - Uses existing SortedSetStore internally for data persistence
+- ✅ **Statistics tracking** - Total keys, locations, and operation counts
+
+#### Operations Implemented
+- ✅ **GEOADD** - Add geospatial locations with options (NX/XX/CH)
+- ✅ **GEODIST** - Calculate distance between two members
+- ✅ **GEORADIUS** - Query members within radius (with distance/coordinates, count, sorting)
+- ✅ **GEORADIUSBYMEMBER** - Query members within radius of given member
+- ✅ **GEOPOS** - Get coordinates of one or more members
+- ✅ **GEOHASH** - Get geohash strings for members (11-character Redis-compatible format)
+- ✅ **STATS** - Retrieve geospatial statistics
+
+#### API Integration
+- ✅ **REST API** - 7 endpoints:
+  - `POST /geospatial/:key/geoadd`
+  - `GET /geospatial/:key/geodist/:member1/:member2`
+  - `GET /geospatial/:key/georadius`
+  - `GET /geospatial/:key/georadiusbymember/:member`
+  - `POST /geospatial/:key/geopos`
+  - `POST /geospatial/:key/geohash`
+  - `GET /geospatial/stats`
+- ✅ **StreamableHTTP** - 7 commands:
+  - `geospatial.geoadd`
+  - `geospatial.geodist`
+  - `geospatial.georadius`
+  - `geospatial.georadiusbymember`
+  - `geospatial.geopos`
+  - `geospatial.geohash`
+  - `geospatial.stats`
+
+#### Testing
+- ✅ **Integration Tests** - 15 comprehensive tests covering:
+  - GEOADD with multiple locations
+  - GEODIST distance calculations
+  - GEORADIUS queries (with distance/coordinates)
+  - GEORADIUSBYMEMBER queries
+  - GEOPOS coordinate retrieval
+  - GEOHASH string generation
+  - Statistics tracking
+  - Error handling (not found, invalid coordinates)
+  - Both REST and StreamableHTTP protocols
+
+#### SDK Support
+- ✅ **TypeScript SDK** - GeospatialManager with full API + unit tests + S2S tests
+- ✅ **Python SDK** - GeospatialManager with full API + send_command implementation
+- ✅ **Rust SDK** - GeospatialManager with full API + integration
+- ✅ **C# SDK** - GeospatialManager with full API + JSON property mapping
+- ✅ **PHP SDK** - GeospatialManager with full API + StreamableHTTP support
+
+#### Technical Details
+- ✅ **Redis-compatible encoding**: Uses 52-bit integer geohash scores (26 bits lat + 26 bits lon)
+- ✅ **Distance units**: Meters (m), Kilometers (km), Miles (mi), Feet (ft)
+- ✅ **Query options**: withdist, withcoord, count limit, ASC/DESC sorting
+- ✅ **Coordinate precision**: Sub-meter accuracy for typical use cases
+
+## [0.7.0-rc2] - 2025-01-31
+
 ### Fixed
 - Fixed `pfadd` method signature to include `ttl_secs` parameter in HyperLogLog implementation
 - Corrected HyperLogLog stats response format (removed nested `operations` wrapper)

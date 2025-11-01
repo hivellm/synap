@@ -21,6 +21,9 @@ public sealed class SynapClient : IDisposable
     private QueueManager? _queue;
     private StreamManager? _stream;
     private PubSubManager? _pubsub;
+    private BitmapManager? _bitmap;
+    private HyperLogLogManager? _hyperloglog;
+    private GeospatialManager? _geospatial;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SynapClient"/> class.
@@ -99,6 +102,21 @@ public sealed class SynapClient : IDisposable
     public PubSubManager PubSub => _pubsub ??= new PubSubManager(this);
 
     /// <summary>
+    /// Gets the Bitmap operations.
+    /// </summary>
+    public BitmapManager Bitmap => _bitmap ??= new BitmapManager(this);
+
+    /// <summary>
+    /// Gets the HyperLogLog operations.
+    /// </summary>
+    public HyperLogLogManager HyperLogLog => _hyperloglog ??= new HyperLogLogManager(this);
+
+    /// <summary>
+    /// Gets the Geospatial operations.
+    /// </summary>
+    public GeospatialManager Geospatial => _geospatial ??= new GeospatialManager(this);
+
+    /// <summary>
     /// Gets the client configuration.
     /// </summary>
     public SynapConfig Config => _config;
@@ -120,15 +138,23 @@ public sealed class SynapClient : IDisposable
     {
         try
         {
+            // Convert to StreamableHTTP format: { "command": "...", "payload": {...}, "request_id": "..." }
+            var requestPayload = data != null 
+                ? new Dictionary<string, object?>(data) 
+                : new Dictionary<string, object?>();
+            
+            // Don't include target in payload - it's not used by the server
+            // The key/parameters should be in the payload data dictionary
+            
             var payload = new Dictionary<string, object?>
             {
-                ["operation"] = operation,
-                ["target"] = target,
-                ["data"] = data ?? new Dictionary<string, object?>()
+                ["command"] = operation,
+                ["payload"] = requestPayload,
+                ["request_id"] = Guid.NewGuid().ToString()
             };
 
             var response = await _httpClient.PostAsJsonAsync(
-                "/api/stream",
+                "/api/v1/command",
                 payload,
                 cancellationToken).ConfigureAwait(false);
 
@@ -149,18 +175,26 @@ public sealed class SynapClient : IDisposable
                 throw SynapException.InvalidResponse($"Failed to parse JSON response: {ex.Message}");
             }
 
-            // Check for server error in response
-            if (result.RootElement.TryGetProperty("error", out var errorElement))
-            {
-                var errorMessage = errorElement.GetString() ?? "Unknown error";
-                throw SynapException.ServerError(errorMessage);
-            }
-
             if (!response.IsSuccessStatusCode)
             {
                 throw SynapException.HttpError(
                     $"Request failed with status {response.StatusCode}",
                     (int)response.StatusCode);
+            }
+
+            // Check StreamableHTTP envelope for success/error
+            if (result.RootElement.TryGetProperty("success", out var successElement))
+            {
+                var success = successElement.GetBoolean();
+                if (!success)
+                {
+                    var errorMessage = "Unknown error";
+                    if (result.RootElement.TryGetProperty("error", out var errorElement))
+                    {
+                        errorMessage = errorElement.GetString() ?? errorMessage;
+                    }
+                    throw SynapException.ServerError(errorMessage);
+                }
             }
 
             return result;

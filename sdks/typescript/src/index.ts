@@ -40,6 +40,8 @@ import { PubSubManager } from './pubsub';
 import { TransactionManager } from './transactions';
 import { ScriptManager } from './scripting';
 import { HyperLogLogManager } from './hyperloglog';
+import { BitmapManager } from './bitmap';
+import { GeospatialManager } from './geospatial';
 
 export type { SynapClientOptions, AuthOptions, RetryOptions } from './types';
 export type {
@@ -98,6 +100,15 @@ export {
   type ScriptKillResponse,
 } from './scripting';
 export { HyperLogLogManager } from './hyperloglog';
+export { BitmapManager, type BitmapOperation, type BitmapStats } from './bitmap';
+export {
+  GeospatialManager,
+  type DistanceUnit,
+  type GeospatialStats,
+  type Location,
+  type Coordinate,
+  type GeoradiusResult,
+} from './geospatial';
 
 /**
  * Main Synap client class
@@ -140,6 +151,12 @@ export class Synap {
   /** HyperLogLog operations */
   public readonly hyperloglog: HyperLogLogManager;
 
+  /** Bitmap operations */
+  public readonly bitmap: BitmapManager;
+
+  /** Geospatial operations */
+  public readonly geospatial: GeospatialManager;
+
   constructor(options: import('./types').SynapClientOptions = {}) {
     this.client = new SynapClient(options);
     this.kv = new KVStore(this.client);
@@ -153,6 +170,8 @@ export class Synap {
     this.transaction = new TransactionManager(this.client);
     this.script = new ScriptManager(this.client);
     this.hyperloglog = new HyperLogLogManager(this.client);
+    this.bitmap = new BitmapManager(this.client);
+    this.geospatial = new GeospatialManager(this.client);
   }
 
   /**

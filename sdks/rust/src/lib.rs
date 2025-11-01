@@ -34,6 +34,7 @@
 pub mod bitmap;
 pub mod client;
 pub mod error;
+pub mod geospatial;
 pub mod hash;
 pub mod hyperloglog;
 pub mod kv;
@@ -54,6 +55,9 @@ pub mod types;
 pub use bitmap::{BitmapManager, BitmapOperation, BitmapStats};
 pub use client::{SynapClient, SynapConfig};
 pub use error::{Result, SynapError};
+pub use geospatial::{
+    Coordinate, DistanceUnit, GeoradiusResult, GeospatialManager, GeospatialStats, Location,
+};
 pub use hash::HashManager;
 pub use hyperloglog::HyperLogLogManager;
 pub use kv::KVStore;

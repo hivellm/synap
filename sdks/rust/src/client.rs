@@ -2,8 +2,9 @@
 
 use crate::error::{Result, SynapError};
 use crate::{
-    BitmapManager, HashManager, HyperLogLogManager, KVStore, ListManager, PubSubManager,
-    QueueManager, ScriptManager, SetManager, SortedSetManager, StreamManager, TransactionManager,
+    BitmapManager, GeospatialManager, HashManager, HyperLogLogManager, KVStore, ListManager,
+    PubSubManager, QueueManager, ScriptManager, SetManager, SortedSetManager, StreamManager,
+    TransactionManager,
 };
 use reqwest::Client;
 use serde_json::Value;
@@ -146,6 +147,11 @@ impl SynapClient {
     /// Get the Bitmap manager interface
     pub fn bitmap(&self) -> BitmapManager {
         BitmapManager::new(self.clone())
+    }
+
+    /// Get the Geospatial manager interface
+    pub fn geospatial(&self) -> GeospatialManager {
+        GeospatialManager::new(self.clone())
     }
 
     /// Send a StreamableHTTP command
@@ -300,6 +306,13 @@ mod tests {
         let config = SynapConfig::new("http://localhost:15500");
         let client = SynapClient::new(config).unwrap();
         let _bitmap = client.bitmap();
+    }
+
+    #[test]
+    fn test_client_geospatial_interface() {
+        let config = SynapConfig::new("http://localhost:15500");
+        let client = SynapClient::new(config).unwrap();
+        let _geospatial = client.geospatial();
     }
 
     #[test]
