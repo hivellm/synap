@@ -10,6 +10,9 @@ Official TypeScript/JavaScript SDK for [Synap](https://github.com/hivellm/synap)
 ✅ **Queue system** (publish, consume, ACK/NACK)  
 ✅ **Event Streams** - Append-only event logs with replay ✨ NEW  
 ✅ **Pub/Sub** - Topic-based message routing ✨ NEW  
+✅ **Transactions** - MULTI/EXEC/WATCH/DISCARD helpers ✨ NEW  
+✅ **Lua Scripting** - EVAL/EVALSHA with SHA1 caching ✨ NEW  
+✅ **HyperLogLog** - Cardinality estimation (PFADD/PFCOUNT/PFMERGE) ✨ NEW  
 ✅ **Reactive Patterns** with RxJS - Observable-based consumption  
 ✅ **Authentication** (Basic Auth + API Keys)  
 ✅ **Gzip compression** support  
@@ -79,6 +82,74 @@ synap.stream.observeEvents({
 
 // Pub/Sub operations
 await synap.pubsub.publish('user.created', { id: 123, name: 'Alice' });
+
+// Lua script execution
+const evalResult = await synap.script.eval('return redis.call("GET", KEYS[1])', {
+  keys: ['user:1']
+});
+
+// HyperLogLog operations
+await synap.hyperloglog.pfadd('unique:visitors', ['user-1', 'user-2']);
+const visitors = await synap.hyperloglog.pfcount('unique:visitors');
+console.log('Approx unique visitors:', visitors);
+
+// Transactions (client_id ties commands together)
+const clientId = crypto.randomUUID();
+await synap.transaction.multi({ clientId });
+const scoped = synap.transaction.scope(clientId);
+await scoped.kv.set('counter', 1);
+const exec = await synap.transaction.exec({ clientId });
+console.log(exec);
+```
+
+---
+
+## Transactions Helper
+
+```typescript
+const clientId = crypto.randomUUID();
+await synap.transaction.watch({ clientId, keys: ['counter'] });
+await synap.transaction.multi({ clientId });
+const scoped = synap.transaction.scope(clientId);
+await scoped.kv.incr('counter');
+const result = await synap.transaction.exec({ clientId });
+if (result.success) {
+  console.log('TX results:', result.results);
+}
+```
+
+---
+
+## Lua Scripting
+
+```typescript
+const script = `
+  local current = redis.call('GET', KEYS[1])
+  if current then
+    return tonumber(current)
+  end
+  redis.call('SET', KEYS[1], ARGV[1])
+  return tonumber(ARGV[1])
+`;
+
+const response = await synap.script.eval<number>(script, {
+  keys: ['counter'],
+  args: [1],
+});
+
+console.log('Counter value:', response.result, 'cached as', response.sha1);
+```
+
+---
+
+## HyperLogLog Usage
+
+```typescript
+await synap.hyperloglog.pfadd('visitors', ['user:a', 'user:b', 'user:c']);
+const estimate = await synap.hyperloglog.pfcount('visitors');
+console.log('Approx visitors:', estimate);
+
+await synap.hyperloglog.pfmerge('combined', ['visitors', 'visitors-mobile']);
 ```
 
 ---

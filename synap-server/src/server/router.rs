@@ -198,6 +198,16 @@ pub fn create_router(
             post(handlers::hyperloglog_pfmerge),
         )
         .route("/hyperloglog/stats", get(handlers::hyperloglog_stats))
+        // Bitmap endpoints
+        .route("/bitmap/{key}/setbit", post(handlers::bitmap_setbit))
+        .route(
+            "/bitmap/{key}/getbit/{offset}",
+            get(handlers::bitmap_getbit),
+        )
+        .route("/bitmap/{key}/bitcount", get(handlers::bitmap_bitcount))
+        .route("/bitmap/{key}/bitpos", get(handlers::bitmap_bitpos))
+        .route("/bitmap/{destination}/bitop", post(handlers::bitmap_bitop))
+        .route("/bitmap/stats", get(handlers::bitmap_stats))
         // Persistence endpoints
         .route("/snapshot", post(handlers::trigger_snapshot))
         // Event Stream endpoints

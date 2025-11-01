@@ -1,0 +1,34 @@
+{
+  "version": "0.15.0",
+  "installedAt": "2025-10-31T04:09:55.080Z",
+  "updatedAt": "2025-10-31T07:03:54.174Z",
+  "projectId": "synap",
+  "mode": "full",
+  "features": {
+    "openspec": true,
+    "watcher": false,
+    "agent": false,
+    "logging": true,
+    "telemetry": false,
+    "notifications": false,
+    "dryRun": false,
+    "gitHooks": true,
+    "repl": false,
+    "templates": true,
+    "context": true,
+    "health": true,
+    "plugins": false,
+    "parallel": true,
+    "smartContinue": true
+  },
+  "coverageThreshold": 95,
+  "language": "en",
+  "outputLanguage": "en",
+  "cliTools": [],
+  "maxParallelTasks": 5,
+  "timeouts": {
+    "taskExecution": 3600000,
+    "cliResponse": 180000,
+    "testRun": 600000
+  }
+}

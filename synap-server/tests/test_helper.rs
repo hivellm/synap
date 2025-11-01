@@ -31,6 +31,7 @@ pub fn create_test_app_state() -> AppState {
 
     let script_manager = Arc::new(ScriptManager::default());
     let hyperloglog_store = Arc::new(HyperLogLogStore::new());
+    let bitmap_store = Arc::new(synap_server::core::BitmapStore::new());
 
     AppState {
         kv_store,
@@ -39,6 +40,7 @@ pub fn create_test_app_state() -> AppState {
         set_store,
         sorted_set_store,
         hyperloglog_store,
+        bitmap_store,
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,

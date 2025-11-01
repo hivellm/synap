@@ -119,39 +119,32 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\Bolado\\.nuget\\packages\\": {},
-    "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
+    "/home/andre/.nuget/packages/": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "F:\\Node\\hivellm\\synap\\sdks\\csharp\\examples\\BasicUsage\\BasicUsage.csproj",
+      "projectUniqueName": "/mnt/f/Node/hivellm/synap/sdks/csharp/examples/BasicUsage/BasicUsage.csproj",
       "projectName": "BasicUsage",
-      "projectPath": "F:\\Node\\hivellm\\synap\\sdks\\csharp\\examples\\BasicUsage\\BasicUsage.csproj",
-      "packagesPath": "C:\\Users\\Bolado\\.nuget\\packages\\",
-      "outputPath": "F:\\Node\\hivellm\\synap\\sdks\\csharp\\examples\\BasicUsage\\obj\\",
+      "projectPath": "/mnt/f/Node/hivellm/synap/sdks/csharp/examples/BasicUsage/BasicUsage.csproj",
+      "packagesPath": "/home/andre/.nuget/packages/",
+      "outputPath": "/mnt/f/Node/hivellm/synap/sdks/csharp/examples/BasicUsage/obj/",
       "projectStyle": "PackageReference",
-      "fallbackFolders": [
-        "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
-      ],
       "configFilePaths": [
-        "C:\\Users\\Bolado\\AppData\\Roaming\\NuGet\\NuGet.Config",
-        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
-        "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
+        "/home/andre/.nuget/NuGet/NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net8.0"
       ],
       "sources": {
-        "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
         "https://api.nuget.org/v3/index.json": {}
       },
       "frameworks": {
         "net8.0": {
           "targetAlias": "net8.0",
           "projectReferences": {
-            "F:\\Node\\hivellm\\synap\\sdks\\csharp\\src\\Synap.SDK\\Synap.SDK.csproj": {
-              "projectPath": "F:\\Node\\hivellm\\synap\\sdks\\csharp\\src\\Synap.SDK\\Synap.SDK.csproj"
+            "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/Synap.SDK.csproj": {
+              "projectPath": "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/Synap.SDK.csproj"
             }
           }
         }
@@ -160,13 +153,7 @@
         "warnAsError": [
           "NU1605"
         ]
-      },
-      "restoreAuditProperties": {
-        "enableAudit": "true",
-        "auditLevel": "low",
-        "auditMode": "direct"
-      },
-      "SdkAnalysisLevel": "9.0.300"
+      }
     },
     "frameworks": {
       "net8.0": {
@@ -187,7 +174,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.301/PortableRuntimeIdentifierGraph.json"
+        "runtimeIdentifierGraphPath": "/usr/lib/dotnet/sdk/8.0.117/PortableRuntimeIdentifierGraph.json"
       }
     }
   }

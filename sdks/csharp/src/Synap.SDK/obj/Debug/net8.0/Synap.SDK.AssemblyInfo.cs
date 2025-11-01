@@ -12,10 +12,10 @@ using System.Reflection;
 
 [assembly: System.Reflection.AssemblyCompanyAttribute("HiveLLM")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
-[assembly: System.Reflection.AssemblyDescriptionAttribute(("Official C# SDK for Synap - High-Performance In-Memory Key-Value Store & Message " +
-    "Broker"))]
+[assembly: System.Reflection.AssemblyDescriptionAttribute("Official C# SDK for Synap - High-Performance In-Memory Key-Value Store & Message " +
+    "Broker")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("0.2.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.2.0+0239db72e65b3fa7e4efce35a37518ead801a53e")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.2.0+f5aff9876128873ae35acdc0b38682e0b9c4bec6")]
 [assembly: System.Reflection.AssemblyProductAttribute("Synap.SDK")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Synap.SDK")]
 [assembly: System.Reflection.AssemblyVersionAttribute("0.2.0.0")]

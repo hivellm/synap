@@ -32,6 +32,7 @@ pub struct AppState {
     pub set_store: Arc<crate::core::SetStore>,
     pub sorted_set_store: Arc<SortedSetStore>,
     pub hyperloglog_store: Arc<HyperLogLogStore>,
+    pub bitmap_store: Arc<crate::core::BitmapStore>,
     pub queue_manager: Option<Arc<QueueManager>>,
     pub stream_manager: Option<Arc<crate::core::StreamManager>>,
     pub partition_manager: Option<Arc<crate::core::PartitionManager>>,
@@ -1710,6 +1711,12 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "hyperloglog.pfcount" => handle_hyperloglog_pfcount_cmd(&state, &request).await,
         "hyperloglog.pfmerge" => handle_hyperloglog_pfmerge_cmd(&state, &request).await,
         "hyperloglog.stats" => handle_hyperloglog_stats_cmd(&state, &request).await,
+        "bitmap.setbit" => handle_bitmap_setbit_cmd(&state, &request).await,
+        "bitmap.getbit" => handle_bitmap_getbit_cmd(&state, &request).await,
+        "bitmap.bitcount" => handle_bitmap_bitcount_cmd(&state, &request).await,
+        "bitmap.bitpos" => handle_bitmap_bitpos_cmd(&state, &request).await,
+        "bitmap.bitop" => handle_bitmap_bitop_cmd(&state, &request).await,
+        "bitmap.stats" => handle_bitmap_stats_cmd(&state, &request).await,
         "queue.create" => handle_queue_create_cmd(&state, &request).await,
         "queue.delete" => handle_queue_delete_cmd(&state, &request).await,
         "queue.publish" => handle_queue_publish_cmd(&state, &request).await,
@@ -7041,6 +7048,330 @@ pub async fn hyperloglog_stats(
     let stats = state.hyperloglog_store.stats();
 
     Ok(Json(stats))
+}
+
+// ==================== Bitmap Request/Response Types ====================
+
+#[derive(Debug, Deserialize)]
+pub struct BitmapSetBitRequest {
+    pub offset: usize,
+    pub value: u8,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BitmapSetBitResponse {
+    pub key: String,
+    pub old_value: u8,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BitmapGetBitResponse {
+    pub key: String,
+    pub offset: usize,
+    pub value: u8,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BitmapCountRequest {
+    pub start: Option<usize>,
+    pub end: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BitmapCountResponse {
+    pub key: String,
+    pub count: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BitmapPosRequest {
+    pub value: u8,
+    pub start: Option<usize>,
+    pub end: Option<usize>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BitmapPosResponse {
+    pub key: String,
+    pub position: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BitmapOpRequest {
+    pub operation: String, // "AND", "OR", "XOR", "NOT"
+    pub source_keys: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BitmapOpResponse {
+    pub destination: String,
+    pub length: usize,
+}
+
+// ==================== Bitmap REST Handlers ====================
+
+/// POST /bitmap/:key/setbit - Set bit at offset to value (0 or 1)
+pub async fn bitmap_setbit(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<BitmapSetBitRequest>,
+) -> Result<Json<BitmapSetBitResponse>, SynapError> {
+    debug!(
+        "REST SETBIT key={} offset={} value={}",
+        key, req.offset, req.value
+    );
+
+    let old_value = state.bitmap_store.setbit(&key, req.offset, req.value)?;
+
+    Ok(Json(BitmapSetBitResponse { key, old_value }))
+}
+
+/// GET /bitmap/:key/getbit/:offset - Get bit at offset
+pub async fn bitmap_getbit(
+    State(state): State<AppState>,
+    Path((key, offset)): Path<(String, usize)>,
+) -> Result<Json<BitmapGetBitResponse>, SynapError> {
+    debug!("REST GETBIT key={} offset={}", key, offset);
+
+    let value = state.bitmap_store.getbit(&key, offset)?;
+
+    Ok(Json(BitmapGetBitResponse { key, offset, value }))
+}
+
+/// GET /bitmap/:key/bitcount - Count set bits in bitmap
+pub async fn bitmap_bitcount(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<BitmapCountRequest>,
+) -> Result<Json<BitmapCountResponse>, SynapError> {
+    debug!(
+        "REST BITCOUNT key={} start={:?} end={:?}",
+        key, params.start, params.end
+    );
+
+    let count = state
+        .bitmap_store
+        .bitcount(&key, params.start, params.end)?;
+
+    Ok(Json(BitmapCountResponse { key, count }))
+}
+
+/// GET /bitmap/:key/bitpos - Find first bit set to value
+pub async fn bitmap_bitpos(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<BitmapPosRequest>,
+) -> Result<Json<BitmapPosResponse>, SynapError> {
+    debug!(
+        "REST BITPOS key={} value={} start={:?} end={:?}",
+        key, params.value, params.start, params.end
+    );
+
+    let position = state
+        .bitmap_store
+        .bitpos(&key, params.value, params.start, params.end)?;
+
+    Ok(Json(BitmapPosResponse { key, position }))
+}
+
+/// POST /bitmap/:destination/bitop - Perform bitwise operation
+pub async fn bitmap_bitop(
+    State(state): State<AppState>,
+    Path(destination): Path<String>,
+    Json(req): Json<BitmapOpRequest>,
+) -> Result<Json<BitmapOpResponse>, SynapError> {
+    debug!(
+        "REST BITOP destination={} operation={} sources={:?}",
+        destination, req.operation, req.source_keys
+    );
+
+    let operation = req.operation.parse::<crate::core::BitmapOperation>()?;
+    let length = state
+        .bitmap_store
+        .bitop(operation, &destination, &req.source_keys)?;
+
+    Ok(Json(BitmapOpResponse {
+        destination,
+        length,
+    }))
+}
+
+/// GET /bitmap/stats - Retrieve bitmap statistics
+pub async fn bitmap_stats(
+    State(state): State<AppState>,
+) -> Result<Json<crate::core::BitmapStats>, SynapError> {
+    debug!("REST BITMAP STATS");
+
+    let stats = state.bitmap_store.stats();
+
+    Ok(Json(stats))
+}
+
+// ==================== Bitmap StreamableHTTP Command Handlers ====================
+
+async fn handle_bitmap_setbit_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let offset = request
+        .payload
+        .get("offset")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'offset' field".to_string()))?
+        as usize;
+
+    let value = request
+        .payload
+        .get("value")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?
+        as u8;
+
+    let old_value = state.bitmap_store.setbit(key, offset, value)?;
+
+    Ok(serde_json::json!({ "key": key, "offset": offset, "old_value": old_value }))
+}
+
+async fn handle_bitmap_getbit_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let offset = request
+        .payload
+        .get("offset")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'offset' field".to_string()))?
+        as usize;
+
+    let value = state.bitmap_store.getbit(key, offset)?;
+
+    Ok(serde_json::json!({ "key": key, "offset": offset, "value": value }))
+}
+
+async fn handle_bitmap_bitcount_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let start = request
+        .payload
+        .get("start")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
+    let end = request
+        .payload
+        .get("end")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
+
+    let count = state.bitmap_store.bitcount(key, start, end)?;
+
+    Ok(serde_json::json!({ "key": key, "count": count }))
+}
+
+async fn handle_bitmap_bitpos_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let value = request
+        .payload
+        .get("value")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?
+        as u8;
+
+    let start = request
+        .payload
+        .get("start")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
+    let end = request
+        .payload
+        .get("end")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
+
+    let position = state.bitmap_store.bitpos(key, value, start, end)?;
+
+    Ok(serde_json::json!({ "key": key, "position": position }))
+}
+
+async fn handle_bitmap_bitop_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let operation_str = request
+        .payload
+        .get("operation")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'operation' field".to_string()))?;
+
+    let source_keys = request
+        .payload
+        .get("source_keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'source_keys' array".to_string()))?
+        .iter()
+        .map(|v| {
+            v.as_str()
+                .map(|s| s.to_string())
+                .ok_or_else(|| SynapError::InvalidValue("Source keys must be strings".to_string()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let operation = operation_str.parse::<crate::core::BitmapOperation>()?;
+    let length = state
+        .bitmap_store
+        .bitop(operation, destination, &source_keys)?;
+
+    Ok(serde_json::json!({ "destination": destination, "length": length }))
+}
+
+async fn handle_bitmap_stats_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let stats = state.bitmap_store.stats();
+
+    Ok(serde_json::json!({
+        "total_bitmaps": stats.total_bitmaps,
+        "total_bits": stats.total_bits,
+        "setbit_count": stats.setbit_count,
+        "getbit_count": stats.getbit_count,
+        "bitcount_count": stats.bitcount_count,
+        "bitop_count": stats.bitop_count,
+        "bitpos_count": stats.bitpos_count,
+        "bitfield_count": stats.bitfield_count,
+    }))
 }
 
 // ==================== Sorted Set Handlers ====================

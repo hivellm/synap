@@ -32,6 +32,7 @@ async fn spawn_test_server() -> String {
         set_store: Arc::new(synap_server::core::SetStore::new()),
         sorted_set_store: Arc::new(synap_server::core::SortedSetStore::new()),
         hyperloglog_store: Arc::new(synap_server::core::HyperLogLogStore::new()),
+        bitmap_store: Arc::new(synap_server::core::BitmapStore::new()),
         queue_manager: None,
         stream_manager: None,
         pubsub_router: None,

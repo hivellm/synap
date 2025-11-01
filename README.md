@@ -19,7 +19,7 @@ Synap provides multiple core capabilities in a single, cohesive system:
 3. **📋 List Data Structure** - Ordered sequences with LPUSH, RPOP, LRANGE (Redis-compatible) ✅ **v0.6.0**
 4. **🔷 Set Data Structure** - Unordered unique collections with SADD, SREM, SINTER, SUNION (Redis-compatible) ✅ **v0.6.0**
 5. **📊 Sorted Set Data Structure** - Scored members with ranking (ZADD, ZRANGE, ZRANK, ZINTER/ZUNION) ✅ **v0.7.0**
-6. **🔢 HyperLogLog** - Probabilistic cardinality estimation with ~0.81% error (~12KB memory) 🔄 **v0.8.0-alpha** (In Progress)
+6. **🔢 HyperLogLog** - Probabilistic cardinality estimation with ~0.81% error (~12KB memory) ✅ **v0.7.0-rc1** (REST + StreamableHTTP + TTL)
 7. **📜 Lua Scripting** - Server-side scripting with EVAL/EVALSHA and redis.call() bridge ✅ **v0.7.0**
 8. **🔄 Transactions** - MULTI/EXEC/WATCH/DISCARD with optimistic locking ✅ **v0.7.0**
 9. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
@@ -494,7 +494,7 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 **Status**: ✅ Phase 1-3 Complete | ✅ Redis Phase 1 Complete (Hash, List, Set)  
 **Version**: 0.7.0-rc1 (Redis-compatible data structures + Lua Scripting + Transactions + HyperLogLog)  
 **Edition**: Rust 2024 (nightly 1.85+)  
-**Last Updated**: October 25, 2025
+**Last Updated**: October 31, 2025
 
 ### ✅ Implementation Complete
 

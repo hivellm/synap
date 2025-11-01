@@ -285,6 +285,11 @@ async fn main() -> Result<()> {
     let hyperloglog_store = Arc::new(HyperLogLogStore::new());
     info!("HyperLogLog store initialized");
 
+    // Create Bitmap store
+    use synap_server::core::BitmapStore;
+    let bitmap_store = Arc::new(BitmapStore::new());
+    info!("Bitmap store initialized");
+
     // Create monitoring manager
     let monitoring = Arc::new(MonitoringManager::new(
         kv_store.clone(),
@@ -318,6 +323,7 @@ async fn main() -> Result<()> {
         set_store,
         sorted_set_store,
         hyperloglog_store,
+        bitmap_store,
         queue_manager,
         stream_manager,
         partition_manager,

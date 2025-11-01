@@ -1,11 +1,11 @@
 {
   "version": 2,
-  "dgSpecHash": "8Mq+mVi3vbM=",
+  "dgSpecHash": "TU6P+K4qd5JwIDYc+GTAq6CjWfEIzNGeiAHLBdfS+pJ71H7H6AqV0oSZS4liGKI8gAQr8t48nSRTFbrLjY6iCQ==",
   "success": true,
-  "projectFilePath": "F:\\Node\\hivellm\\synap\\sdks\\csharp\\src\\Synap.SDK\\Synap.SDK.csproj",
+  "projectFilePath": "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/Synap.SDK.csproj",
   "expectedPackageFiles": [
-    "C:\\Users\\Bolado\\.nuget\\packages\\microsoft.codeanalysis.netanalyzers\\8.0.0\\microsoft.codeanalysis.netanalyzers.8.0.0.nupkg.sha512",
-    "C:\\Users\\Bolado\\.nuget\\packages\\system.text.json\\8.0.5\\system.text.json.8.0.5.nupkg.sha512"
+    "/home/andre/.nuget/packages/microsoft.codeanalysis.netanalyzers/8.0.0/microsoft.codeanalysis.netanalyzers.8.0.0.nupkg.sha512",
+    "/home/andre/.nuget/packages/system.text.json/8.0.5/system.text.json.8.0.5.nupkg.sha512"
   ],
   "logs": []
 }

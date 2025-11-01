@@ -1,3 +1,4 @@
+pub mod bitmap;
 pub mod cache;
 pub mod consumer_group;
 pub mod error;
@@ -15,6 +16,7 @@ pub mod stream;
 pub mod transaction;
 pub mod types;
 
+pub use bitmap::{BitmapOperation, BitmapStats, BitmapStore, BitmapValue};
 pub use cache::{CacheLayer, CacheStats};
 pub use consumer_group::{
     AssignmentStrategy, ConsumerGroup, ConsumerGroupConfig, ConsumerGroupManager,

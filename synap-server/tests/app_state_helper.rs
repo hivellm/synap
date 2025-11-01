@@ -2,7 +2,9 @@
 
 use std::sync::Arc;
 use std::time::Duration;
-use synap_server::core::{HashStore, HyperLogLogStore, ListStore, SetStore, SortedSetStore};
+use synap_server::core::{
+    BitmapStore, HashStore, HyperLogLogStore, ListStore, SetStore, SortedSetStore,
+};
 use synap_server::monitoring::MonitoringManager;
 use synap_server::{AppState, KVStore, ScriptManager};
 
@@ -33,6 +35,7 @@ pub fn create_test_app_state_with_stores(
     let script_manager = Arc::new(ScriptManager::new(Duration::from_secs(5)));
 
     let hyperloglog_store = Arc::new(HyperLogLogStore::new());
+    let bitmap_store = Arc::new(BitmapStore::new());
 
     AppState {
         kv_store,
@@ -41,6 +44,7 @@ pub fn create_test_app_state_with_stores(
         set_store,
         sorted_set_store,
         hyperloglog_store,
+        bitmap_store,
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,

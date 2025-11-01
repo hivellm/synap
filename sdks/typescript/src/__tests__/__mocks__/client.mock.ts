@@ -58,6 +58,12 @@ function getDefaultResponse(command: string, payload: any): any {
       return handleStreamCommand(action, payload);
     case 'pubsub':
       return handlePubSubCommand(action, payload);
+    case 'transaction':
+      return handleTransactionCommand(action);
+    case 'script':
+      return handleScriptCommand(action, payload);
+    case 'hyperloglog':
+      return handleHyperLogLogCommand(action, payload);
     default:
       return { success: true };
   }
@@ -223,6 +229,63 @@ function handlePubSubCommand(action: string, payload: any): any {
     case 'list':
       return { topics: ['test.topic'] };
     
+    default:
+      return { success: true };
+  }
+}
+
+function handleTransactionCommand(action: string): any {
+  switch (action) {
+    case 'multi':
+      return { success: true, message: 'Transaction started' };
+    case 'discard':
+      return { success: true, message: 'Transaction discarded' };
+    case 'watch':
+      return { success: true, message: 'Keys watched' };
+    case 'unwatch':
+      return { success: true, message: 'Keys unwatched' };
+    case 'exec':
+      return { success: true, results: [] };
+    default:
+      return { success: true };
+  }
+}
+
+function handleScriptCommand(action: string, payload: any): any {
+  switch (action) {
+    case 'eval':
+      return { result: payload?.script ? `result:${payload.script}` : null, sha1: 'mock-sha1' };
+    case 'evalsha':
+      return { result: `sha1:${payload?.sha1 ?? 'unknown'}`, sha1: payload?.sha1 ?? 'unknown' };
+    case 'load':
+      return { sha1: 'mock-sha1' };
+    case 'exists':
+      return { exists: (payload?.hashes ?? []).map(() => true) };
+    case 'flush':
+      return { cleared: 0 };
+    case 'kill':
+      return { terminated: false };
+    default:
+      return { success: true };
+  }
+}
+
+function handleHyperLogLogCommand(action: string, payload: any): any {
+  switch (action) {
+    case 'pfadd':
+      return { added: payload?.elements?.length ?? 0 };
+    case 'pfcount':
+      return { count: 42 };
+    case 'pfmerge':
+      return { count: 42 };
+    case 'stats':
+      return {
+        total_hlls: 1,
+        pfadd_count: 10,
+        pfcount_count: 5,
+        pfmerge_count: 2,
+        total_cardinality: 1234,
+      };
     default:
       return { success: true };
   }

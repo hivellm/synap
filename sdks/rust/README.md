@@ -9,6 +9,9 @@ Official Rust client library for [Synap](https://github.com/hivellm/synap) - Hig
 - 📡 **Event Streams**: Kafka-style event streams **reactive by default** 🔥
 - 🔔 **Pub/Sub**: Topic-based messaging **reactive by default** 🔥
 - 🔄 **Reactive Patterns**: `futures::Stream` for event-driven consumption
+- 🧾 **Transactions**: MULTI/EXEC/WATCH/DISCARD helpers
+- 📜 **Lua Scripting**: EVAL/EVALSHA with SHA1 caching
+- 🔢 **HyperLogLog**: Cardinality estimation (PFADD/PFCOUNT/PFMERGE)
 - ⚡ **StreamableHTTP Protocol**: Single unified endpoint for all operations
 - 🛡️ **Type-Safe**: Leverages Rust's type system for correctness
 - 📦 **Async/Await**: Built on Tokio for high-performance async I/O
@@ -57,6 +60,41 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "message",
         json!({"user": "alice", "text": "Hello!"})
     ).await?;
+
+    // Lua scripting
+    let eval = client
+        .script()
+        .eval::<serde_json::Value>(
+            "return redis.call('GET', KEYS[1])",
+            synap_sdk::ScriptEvalOptions {
+                keys: vec!["user:1".to_string()],
+                args: vec![],
+                timeout_ms: None,
+            },
+        )
+        .await?;
+    println!("Script result: {:?} (sha1={})", eval.result, eval.sha1);
+
+    // HyperLogLog
+    client
+        .hyperloglog()
+        .pfadd("visitors", ["user:a", "user:b", "user:c"])
+        .await?;
+    let visitors = client.hyperloglog().pfcount("visitors").await?;
+    println!("Approx unique visitors: {}", visitors);
+
+    // Transactions
+    let tx = client.transaction();
+    tx.multi(Default::default()).await?;
+    client.kv().set("txn:key", "value", None).await?;
+    match tx.exec(Default::default()).await? {
+        synap_sdk::TransactionExecResult::Success { results } => {
+            println!("TX results: {:?}", results);
+        }
+        synap_sdk::TransactionExecResult::Aborted { message, .. } => {
+            println!("Transaction aborted: {:?}", message);
+        }
+    }
     
     // Reactive event consumption
     use futures::StreamExt;
