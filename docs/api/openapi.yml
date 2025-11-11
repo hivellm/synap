@@ -2767,6 +2767,34 @@ components:
           format: int64
           example: 5000
 
+    HyperLogLogStatsResponse:
+      type: object
+      properties:
+        total_hlls:
+          type: integer
+          description: Total number of HyperLogLog structures
+          example: 50
+        pfadd_count:
+          type: integer
+          format: int64
+          description: Total number of PFADD operations
+          example: 10000
+        pfcount_count:
+          type: integer
+          format: int64
+          description: Total number of PFCOUNT operations
+          example: 5000
+        pfmerge_count:
+          type: integer
+          format: int64
+          description: Total number of PFMERGE operations
+          example: 200
+        total_cardinality:
+          type: integer
+          format: int64
+          description: Sum of estimated cardinalities across all HyperLogLog structures
+          example: 500000
+
 security:
   - BasicAuth: []
   - BearerAuth: []
