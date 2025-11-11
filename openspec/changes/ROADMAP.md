@@ -84,7 +84,7 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 | **Cluster Mode** | ⏳ Pending | `add-cluster-mode` | v0.8.0-alpha | 12 weeks |
 | **Bitmaps** | ✅ Complete | `add-bitmap-operations` | v0.8.0-alpha | 3 weeks |
 | **HyperLogLog** | 🚧 In Progress (PF* commands live, test coverage pending) | `add-hyperloglog` | v0.8.0-alpha | 2 weeks |
-| **Geospatial** | 🚧 In Progress (GEO* commands live, GEOSEARCH/unit tests pending) | `add-geospatial` | v0.8.0-alpha | 4 weeks |
+| **Geospatial** | ✅ Complete | `add-geospatial-indexes` | v0.8.0-alpha | 4 weeks |
 
 **Deliverables**:
 - 16,384 hash slots
@@ -94,7 +94,7 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 - Cardinality estimation
 - Location-based queries
 
-**Progress**: 2/4 complete (Bitmaps ✅, HyperLogLog ✅, 2 in progress)
+**Progress**: 3/4 complete (Bitmaps ✅, HyperLogLog ✅, Geospatial ✅, 1 pending)
 
 ## Overall Progress
 
@@ -102,19 +102,19 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 - **Phase 1**: 100% (3/3 features complete) ✅
 - **Phase 2**: 100% (4/4 features complete) ✅ - Sorted Set + String Extensions + Key Management + Enhanced Monitoring
 - **Phase 3**: 100% (2/2 features complete) - Transactions ✅ + Lua Scripting ✅
-- **Phase 4**: 50% (2/4 features complete - Bitmaps ✅, HyperLogLog ✅)
+- **Phase 4**: 75% (3/4 features complete - Bitmaps ✅, HyperLogLog ✅, Geospatial ✅)
 
 ### Overall
 - **Total Features**: 13
-- **Completed**: 11 ✅ (Hash, List, Set, Sorted Set, String Extensions, Key Management, Enhanced Monitoring, Transactions, Lua Scripting, Bitmaps, HyperLogLog)
+- **Completed**: 12 ✅ (Hash, List, Set, Sorted Set, String Extensions, Key Management, Enhanced Monitoring, Transactions, Lua Scripting, Bitmaps, HyperLogLog, Geospatial)
 - **In Progress**: 0 🔄
-- **Planned**: 4 📋
-- **Completion**: 84.6%
+- **Planned**: 3 📋
+- **Completion**: 92.3%
 
 ### By Priority
 - **CRITICAL**: 100% (3/3) ✅
 - **HIGH**: 100% (6/6) - Sorted Set + String Extensions + Key Management + Enhanced Monitoring + Transactions + Lua Scripting complete ✅
-- **MEDIUM**: 50% (2/4 - Bitmaps ✅, HyperLogLog ✅)
+- **MEDIUM**: 75% (3/4 - Bitmaps ✅, HyperLogLog ✅, Geospatial ✅)
 
 ## Active Changes
 
@@ -205,9 +205,9 @@ Currently active OpenSpec changes:
     - Target: v0.8.0-alpha
     - ~40 tasks, 2 weeks
 
-13. 🚧 **add-geospatial-indexes** (core GEO* commands implemented, GEOSEARCH + unit tests pending)
-    - Status: GEOADD/GEODIST/GEORADIUS/GEORADIUSBYMEMBER/GEOPOS/GEOHASH available via REST + StreamableHTTP
-    - Target: v0.8.0+
+13. ✅ **add-geospatial-indexes** (COMPLETE)
+    - Status: Complete - GEOADD/GEODIST/GEORADIUS/GEORADIUSBYMEMBER/GEOPOS/GEOHASH/GEOSEARCH with 23 unit tests + 17 integration tests + SDK S2S tests
+    - Target: v0.8.0-alpha
     - ~90 tasks, 4 weeks
 
 ## Next Steps

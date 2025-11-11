@@ -451,8 +451,650 @@ impl GeospatialStore {
         )
     }
 
+    /// GEOSEARCH - Advanced geospatial search with FROMMEMBER/FROMLONLAT and BYRADIUS/BYBOX
+    /// Supports both radius-based and bounding box queries
+    #[allow(clippy::too_many_arguments)]
+    pub fn geosearch(
+        &self,
+        key: &str,
+        from_member: Option<&[u8]>,
+        from_lonlat: Option<(f64, f64)>,
+        by_radius: Option<(f64, DistanceUnit)>,
+        by_box: Option<(f64, f64, DistanceUnit)>,
+        with_dist: bool,
+        with_coord: bool,
+        _with_hash: bool,
+        count: Option<usize>,
+        sort: Option<&str>,
+    ) -> Result<Vec<GeospatialRadiusResult>> {
+        // Determine center coordinate
+        let center = if let Some(member) = from_member {
+            let coord = self.get_coordinate(key, member)?;
+            coord.ok_or_else(|| {
+                SynapError::KeyNotFound(format!(
+                    "Member not found in geospatial key: {}",
+                    String::from_utf8_lossy(member)
+                ))
+            })?
+        } else if let Some((lon, lat)) = from_lonlat {
+            Coordinate::new(lat, lon)?
+        } else {
+            return Err(SynapError::InvalidRequest(
+                "Either 'from_member' or 'from_lonlat' must be provided".to_string(),
+            ));
+        };
+
+        // Get all members with their scores
+        let all_members = self.sorted_set_store.zrange(key, 0, -1, true);
+        let mut results = Vec::new();
+
+        if all_members.is_empty() {
+            return Ok(results);
+        }
+
+        // Filter by radius or bounding box
+        for scored_member in all_members {
+            let member_coord = score_to_coordinate(scored_member.score);
+            let include = if let Some((radius, unit)) = by_radius {
+                let radius_meters = match unit {
+                    DistanceUnit::Meters => radius,
+                    DistanceUnit::Kilometers => radius * 1000.0,
+                    DistanceUnit::Miles => radius * 1609.34,
+                    DistanceUnit::Feet => radius * 0.3048,
+                };
+                let distance_meters =
+                    haversine_distance(center, member_coord, DistanceUnit::Meters);
+                distance_meters <= radius_meters
+            } else if let Some((width, height, unit)) = by_box {
+                // Convert box dimensions to meters
+                let width_meters = match unit {
+                    DistanceUnit::Meters => width,
+                    DistanceUnit::Kilometers => width * 1000.0,
+                    DistanceUnit::Miles => width * 1609.34,
+                    DistanceUnit::Feet => width * 0.3048,
+                };
+                let height_meters = match unit {
+                    DistanceUnit::Meters => height,
+                    DistanceUnit::Kilometers => height * 1000.0,
+                    DistanceUnit::Miles => height * 1609.34,
+                    DistanceUnit::Feet => height * 0.3048,
+                };
+
+                // Calculate bounding box
+                // Approximate: 1 degree lat ≈ 111km, 1 degree lon ≈ 111km * cos(lat)
+                let lat_rad = center.lat.to_radians();
+                let lat_degrees_per_meter = 1.0 / 111000.0;
+                let lon_degrees_per_meter = 1.0 / (111000.0 * lat_rad.cos());
+
+                let half_width_deg = (width_meters / 2.0) * lon_degrees_per_meter;
+                let half_height_deg = (height_meters / 2.0) * lat_degrees_per_meter;
+
+                let min_lon = center.lon - half_width_deg;
+                let max_lon = center.lon + half_width_deg;
+                let min_lat = center.lat - half_height_deg;
+                let max_lat = center.lat + half_height_deg;
+
+                member_coord.lon >= min_lon
+                    && member_coord.lon <= max_lon
+                    && member_coord.lat >= min_lat
+                    && member_coord.lat <= max_lat
+            } else {
+                return Err(SynapError::InvalidRequest(
+                    "Either 'by_radius' or 'by_box' must be provided".to_string(),
+                ));
+            };
+
+            if include {
+                let distance = if with_dist {
+                    Some(haversine_distance(
+                        center,
+                        member_coord,
+                        by_radius.map(|(_, u)| u).unwrap_or(DistanceUnit::Meters),
+                    ))
+                } else {
+                    None
+                };
+                let coord = if with_coord { Some(member_coord) } else { None };
+                results.push((scored_member.member, distance, coord));
+            }
+        }
+
+        // Sort by distance (ascending by default)
+        if let Some(sort_str) = sort {
+            match sort_str.to_uppercase().as_str() {
+                "ASC" => {
+                    results.sort_by(|a, b| {
+                        let dist_a = a.1.unwrap_or(f64::INFINITY);
+                        let dist_b = b.1.unwrap_or(f64::INFINITY);
+                        dist_a
+                            .partial_cmp(&dist_b)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                }
+                "DESC" => {
+                    results.sort_by(|a, b| {
+                        let dist_a = a.1.unwrap_or(f64::INFINITY);
+                        let dist_b = b.1.unwrap_or(f64::INFINITY);
+                        dist_b
+                            .partial_cmp(&dist_a)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                }
+                _ => {} // No sort
+            }
+        } else {
+            // Default: sort by distance ascending
+            results.sort_by(|a, b| {
+                let dist_a = a.1.unwrap_or(f64::INFINITY);
+                let dist_b = b.1.unwrap_or(f64::INFINITY);
+                dist_a
+                    .partial_cmp(&dist_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+        }
+
+        // Apply count limit
+        if let Some(limit) = count {
+            results.truncate(limit);
+        }
+
+        // Update statistics
+        {
+            let mut stats = self.stats.write();
+            stats.georadius_count += 1; // Use georadius_count for GEOSEARCH too
+        }
+
+        Ok(results)
+    }
+
     /// Get statistics
     pub fn stats(&self) -> GeospatialStats {
         self.stats.read().clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::sorted_set::SortedSetStore;
+
+    fn create_store() -> GeospatialStore {
+        let sorted_set_store = Arc::new(SortedSetStore::new());
+        GeospatialStore::new(sorted_set_store)
+    }
+
+    #[test]
+    fn test_geoadd_basic() {
+        let store = create_store();
+        let locations = vec![(37.7749, -122.4194, b"San Francisco".to_vec())];
+        let added = store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+        assert_eq!(added, 1);
+    }
+
+    #[test]
+    fn test_geoadd_multiple() {
+        let store = create_store();
+        let locations = vec![
+            (37.7749, -122.4194, b"San Francisco".to_vec()),
+            (40.7128, -74.0060, b"New York".to_vec()),
+            (34.0522, -118.2437, b"Los Angeles".to_vec()),
+        ];
+        let added = store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+        assert_eq!(added, 3);
+    }
+
+    #[test]
+    fn test_geoadd_nx_only_new() {
+        let store = create_store();
+        let locations = vec![(37.7749, -122.4194, b"San Francisco".to_vec())];
+        store
+            .geoadd("cities", locations.clone(), false, false, false)
+            .unwrap();
+
+        // Try to add same member with nx=true (should not update)
+        let added = store
+            .geoadd("cities", locations, true, false, false)
+            .unwrap();
+        assert_eq!(added, 0);
+    }
+
+    #[test]
+    fn test_geoadd_xx_only_existing() {
+        let store = create_store();
+        let locations = vec![(37.7749, -122.4194, b"San Francisco".to_vec())];
+
+        // Try to add with xx=true (should not add new)
+        let added = store
+            .geoadd("cities", locations, false, true, false)
+            .unwrap();
+        assert_eq!(added, 0);
+
+        // Add first, then update with xx=true
+        store
+            .geoadd(
+                "cities",
+                vec![(37.7749, -122.4194, b"San Francisco".to_vec())],
+                false,
+                false,
+                false,
+            )
+            .unwrap();
+        let updated = store
+            .geoadd(
+                "cities",
+                vec![(37.7750, -122.4195, b"San Francisco".to_vec())],
+                false,
+                true,
+                false,
+            )
+            .unwrap();
+        assert_eq!(updated, 0); // xx doesn't add, only updates existing
+    }
+
+    #[test]
+    fn test_geoadd_invalid_coordinates() {
+        let store = create_store();
+        let locations = vec![(91.0, -122.4194, b"Invalid".to_vec())];
+        let result = store.geoadd("cities", locations, false, false, false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_geodist_same_location() {
+        let store = create_store();
+        let locations = vec![(37.7749, -122.4194, b"San Francisco".to_vec())];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+
+        let distance = store
+            .geodist(
+                "cities",
+                b"San Francisco",
+                b"San Francisco",
+                DistanceUnit::Meters,
+            )
+            .unwrap();
+        assert_eq!(distance, Some(0.0));
+    }
+
+    #[test]
+    fn test_geodist_different_locations() {
+        let store = create_store();
+        let locations = vec![
+            (37.7749, -122.4194, b"San Francisco".to_vec()),
+            (40.7128, -74.0060, b"New York".to_vec()),
+        ];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+
+        let distance = store
+            .geodist(
+                "cities",
+                b"San Francisco",
+                b"New York",
+                DistanceUnit::Kilometers,
+            )
+            .unwrap();
+        assert!(distance.is_some());
+        assert!(distance.unwrap() > 4000.0); // SF to NY is ~4100km
+        assert!(distance.unwrap() < 4200.0);
+    }
+
+    #[test]
+    fn test_geodist_member_not_found() {
+        let store = create_store();
+        let locations = vec![(37.7749, -122.4194, b"San Francisco".to_vec())];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+
+        let distance = store
+            .geodist("cities", b"San Francisco", b"Unknown", DistanceUnit::Meters)
+            .unwrap();
+        assert_eq!(distance, None);
+    }
+
+    #[test]
+    fn test_geopos_single() {
+        let store = create_store();
+        let locations = vec![(37.7749, -122.4194, b"San Francisco".to_vec())];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+
+        let coords = store
+            .geopos("cities", &[b"San Francisco".to_vec()])
+            .unwrap();
+        assert_eq!(coords.len(), 1);
+        assert!(coords[0].is_some());
+        let coord = coords[0].unwrap();
+        assert!((coord.lat - 37.7749).abs() < 0.01);
+        assert!((coord.lon - (-122.4194)).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_geopos_multiple() {
+        let store = create_store();
+        let locations = vec![
+            (37.7749, -122.4194, b"San Francisco".to_vec()),
+            (40.7128, -74.0060, b"New York".to_vec()),
+        ];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+
+        let coords = store
+            .geopos("cities", &[b"San Francisco".to_vec(), b"New York".to_vec()])
+            .unwrap();
+        assert_eq!(coords.len(), 2);
+        assert!(coords[0].is_some());
+        assert!(coords[1].is_some());
+    }
+
+    #[test]
+    fn test_geopos_not_found() {
+        let store = create_store();
+        let coords = store.geopos("cities", &[b"Unknown".to_vec()]).unwrap();
+        assert_eq!(coords.len(), 1);
+        assert_eq!(coords[0], None);
+    }
+
+    #[test]
+    fn test_geohash_single() {
+        let store = create_store();
+        let locations = vec![(37.7749, -122.4194, b"San Francisco".to_vec())];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+
+        let hashes = store
+            .geohash("cities", &[b"San Francisco".to_vec()])
+            .unwrap();
+        assert_eq!(hashes.len(), 1);
+        assert!(hashes[0].is_some());
+        assert_eq!(hashes[0].as_ref().unwrap().len(), 11); // Redis uses 11-char geohash
+    }
+
+    #[test]
+    fn test_georadius_within_radius() {
+        let store = create_store();
+        let locations = vec![
+            (37.7749, -122.4194, b"San Francisco".to_vec()),
+            (37.7849, -122.4094, b"Near SF".to_vec()), // ~10km away
+            (40.7128, -74.0060, b"New York".to_vec()), // ~4100km away
+        ];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+
+        let results = store
+            .georadius(
+                "cities",
+                37.7749,
+                -122.4194,
+                50.0,
+                DistanceUnit::Kilometers,
+                false,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(results.len(), 2); // SF and Near SF
+    }
+
+    #[test]
+    fn test_georadius_with_dist() {
+        let store = create_store();
+        let locations = vec![(37.7749, -122.4194, b"San Francisco".to_vec())];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+
+        let results = store
+            .georadius(
+                "cities",
+                37.7749,
+                -122.4194,
+                10.0,
+                DistanceUnit::Kilometers,
+                true,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].1.is_some()); // distance should be present
+        assert!(results[0].1.unwrap() < 1.0); // Should be very close to 0
+    }
+
+    #[test]
+    fn test_georadius_with_coord() {
+        let store = create_store();
+        let locations = vec![(37.7749, -122.4194, b"San Francisco".to_vec())];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+
+        let results = store
+            .georadius(
+                "cities",
+                37.7749,
+                -122.4194,
+                10.0,
+                DistanceUnit::Kilometers,
+                false,
+                true,
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].2.is_some()); // coord should be present
+    }
+
+    #[test]
+    fn test_georadius_count_limit() {
+        let store = create_store();
+        let locations = vec![
+            (37.7749, -122.4194, b"SF1".to_vec()),
+            (37.7750, -122.4195, b"SF2".to_vec()),
+            (37.7751, -122.4196, b"SF3".to_vec()),
+        ];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+
+        let results = store
+            .georadius(
+                "cities",
+                37.7749,
+                -122.4194,
+                10.0,
+                DistanceUnit::Kilometers,
+                false,
+                false,
+                Some(2),
+                None,
+            )
+            .unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_georadiusbymember() {
+        let store = create_store();
+        let locations = vec![
+            (37.7749, -122.4194, b"San Francisco".to_vec()),
+            (37.7849, -122.4094, b"Near SF".to_vec()),
+        ];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+
+        let results = store
+            .georadiusbymember(
+                "cities",
+                b"San Francisco",
+                50.0,
+                DistanceUnit::Kilometers,
+                false,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_geosearch_from_member_by_radius() {
+        let store = create_store();
+        let locations = vec![
+            (37.7749, -122.4194, b"San Francisco".to_vec()),
+            (37.7849, -122.4094, b"Near SF".to_vec()),
+            (40.7128, -74.0060, b"New York".to_vec()),
+        ];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+
+        let results = store
+            .geosearch(
+                "cities",
+                Some(b"San Francisco"),
+                None,
+                Some((50.0, DistanceUnit::Kilometers)),
+                None,
+                false,
+                false,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(results.len(), 2); // SF and Near SF
+    }
+
+    #[test]
+    fn test_geosearch_from_lonlat_by_radius() {
+        let store = create_store();
+        let locations = vec![
+            (37.7749, -122.4194, b"San Francisco".to_vec()),
+            (37.7849, -122.4094, b"Near SF".to_vec()),
+        ];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+
+        let results = store
+            .geosearch(
+                "cities",
+                None,
+                Some((-122.4194, 37.7749)),
+                Some((50.0, DistanceUnit::Kilometers)),
+                None,
+                false,
+                false,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn test_geosearch_by_box() {
+        let store = create_store();
+        let locations = vec![
+            (37.7749, -122.4194, b"San Francisco".to_vec()),
+            (37.7849, -122.4094, b"Near SF".to_vec()),
+            (40.7128, -74.0060, b"New York".to_vec()),
+        ];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+
+        // Box of 100km x 100km around SF
+        let results = store
+            .geosearch(
+                "cities",
+                Some(b"San Francisco"),
+                None,
+                None,
+                Some((100000.0, 100000.0, DistanceUnit::Meters)),
+                false,
+                false,
+                false,
+                None,
+                None,
+            )
+            .unwrap();
+        assert!(results.len() >= 2); // Should include SF and Near SF
+    }
+
+    #[test]
+    fn test_geosearch_invalid_from() {
+        let store = create_store();
+        let result = store.geosearch(
+            "cities",
+            None,
+            None,
+            Some((50.0, DistanceUnit::Kilometers)),
+            None,
+            false,
+            false,
+            false,
+            None,
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_geosearch_invalid_by() {
+        let store = create_store();
+        let result = store.geosearch(
+            "cities",
+            Some(b"San Francisco"),
+            None,
+            None,
+            None,
+            false,
+            false,
+            false,
+            None,
+            None,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_stats() {
+        let store = create_store();
+        let locations = vec![(37.7749, -122.4194, b"San Francisco".to_vec())];
+        store
+            .geoadd("cities", locations, false, false, false)
+            .unwrap();
+        store
+            .geodist(
+                "cities",
+                b"San Francisco",
+                b"San Francisco",
+                DistanceUnit::Meters,
+            )
+            .unwrap();
+
+        let stats = store.stats();
+        assert_eq!(stats.geoadd_count, 1);
+        assert_eq!(stats.geodist_count, 1);
     }
 }

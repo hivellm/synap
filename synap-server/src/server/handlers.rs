@@ -1727,6 +1727,7 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         }
         "geospatial.geopos" => handle_geospatial_geopos_cmd(&state, &request).await,
         "geospatial.geohash" => handle_geospatial_geohash_cmd(&state, &request).await,
+        "geospatial.geosearch" => handle_geospatial_geosearch_cmd(&state, &request).await,
         "geospatial.stats" => handle_geospatial_stats_cmd(&state, &request).await,
         "queue.create" => handle_queue_create_cmd(&state, &request).await,
         "queue.delete" => handle_queue_delete_cmd(&state, &request).await,
@@ -8142,6 +8143,19 @@ pub struct GeospatialHashResponse {
     pub geohashes: Vec<Option<String>>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct GeospatialSearchRequest {
+    pub from_member: Option<String>,
+    pub from_lonlat: Option<(f64, f64)>,
+    pub by_radius: Option<(f64, String)>,
+    pub by_box: Option<(f64, f64, String)>,
+    pub with_dist: Option<bool>,
+    pub with_coord: Option<bool>,
+    pub with_hash: Option<bool>,
+    pub count: Option<usize>,
+    pub sort: Option<String>,
+}
+
 // ==================== Geospatial REST Handlers ====================
 
 /// POST /geospatial/:key/geoadd - Add geospatial locations
@@ -8373,6 +8387,69 @@ pub async fn geospatial_geohash(
     let geohashes = state.geospatial_store.geohash(&key, &members)?;
 
     Ok(Json(GeospatialHashResponse { key, geohashes }))
+}
+
+/// POST /geospatial/:key/geosearch - Advanced geospatial search
+pub async fn geospatial_geosearch(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<GeospatialSearchRequest>,
+) -> Result<Json<GeospatialRadiusResponse>, SynapError> {
+    debug!(
+        "REST GEOSEARCH key={} from_member={:?} from_lonlat={:?}",
+        key, req.from_member, req.from_lonlat
+    );
+
+    let from_member = req.from_member.as_ref().map(|s| s.as_bytes());
+    let from_lonlat = req.from_lonlat;
+
+    let by_radius = req.by_radius.map(|(r, u)| {
+        let unit = u
+            .parse::<crate::core::DistanceUnit>()
+            .unwrap_or(crate::core::DistanceUnit::Meters);
+        (r, unit)
+    });
+
+    let by_box = req.by_box.map(|(w, h, u)| {
+        let unit = u
+            .parse::<crate::core::DistanceUnit>()
+            .unwrap_or(crate::core::DistanceUnit::Meters);
+        (w, h, unit)
+    });
+
+    let results = state.geospatial_store.geosearch(
+        &key,
+        from_member,
+        from_lonlat,
+        by_radius,
+        by_box,
+        req.with_dist.unwrap_or(false),
+        req.with_coord.unwrap_or(false),
+        req.with_hash.unwrap_or(false),
+        req.count,
+        req.sort.as_deref(),
+    )?;
+
+    let response_results: Vec<GeospatialRadiusResult> = results
+        .into_iter()
+        .map(|(member_bytes, distance, coord)| {
+            let member_str = String::from_utf8_lossy(&member_bytes).to_string();
+            let coord_opt = coord.map(|c| GeospatialCoord {
+                lat: c.lat,
+                lon: c.lon,
+            });
+            GeospatialRadiusResult {
+                member: member_str,
+                distance,
+                coord: coord_opt,
+            }
+        })
+        .collect();
+
+    Ok(Json(GeospatialRadiusResponse {
+        key,
+        results: response_results,
+    }))
 }
 
 /// GET /geospatial/stats - Retrieve geospatial statistics
@@ -8723,6 +8800,130 @@ async fn handle_geospatial_geohash_cmd(
     Ok(serde_json::json!({
         "key": key,
         "geohashes": geohashes
+    }))
+}
+
+async fn handle_geospatial_geosearch_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let from_member = request
+        .payload
+        .get("from_member")
+        .and_then(|v| v.as_str())
+        .map(|s| s.as_bytes());
+    let from_lonlat = request.payload.get("from_lonlat").and_then(|v| {
+        if let Some(arr) = v.as_array() {
+            if arr.len() == 2 {
+                let lon = arr[0].as_f64()?;
+                let lat = arr[1].as_f64()?;
+                Some((lon, lat))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
+    let by_radius = request.payload.get("by_radius").and_then(|v| {
+        if let Some(arr) = v.as_array() {
+            if arr.len() == 2 {
+                let radius = arr[0].as_f64()?;
+                let unit_str = arr[1].as_str()?;
+                let unit = unit_str.parse::<crate::core::DistanceUnit>().ok()?;
+                Some((radius, unit))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
+    let by_box = request.payload.get("by_box").and_then(|v| {
+        if let Some(arr) = v.as_array() {
+            if arr.len() == 3 {
+                let width = arr[0].as_f64()?;
+                let height = arr[1].as_f64()?;
+                let unit_str = arr[2].as_str()?;
+                let unit = unit_str.parse::<crate::core::DistanceUnit>().ok()?;
+                Some((width, height, unit))
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+
+    let with_dist = request
+        .payload
+        .get("with_dist")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let with_coord = request
+        .payload
+        .get("with_coord")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let with_hash = request
+        .payload
+        .get("with_hash")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let count = request
+        .payload
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
+    let sort = request
+        .payload
+        .get("sort")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let results = state.geospatial_store.geosearch(
+        key,
+        from_member,
+        from_lonlat,
+        by_radius,
+        by_box,
+        with_dist,
+        with_coord,
+        with_hash,
+        count,
+        sort.as_deref(),
+    )?;
+
+    let json_results: Vec<serde_json::Value> = results
+        .into_iter()
+        .map(|(member_bytes, distance, coord)| {
+            let mut result = serde_json::json!({
+                "member": String::from_utf8_lossy(&member_bytes),
+            });
+            if let Some(dist) = distance {
+                result["distance"] = serde_json::json!(dist);
+            }
+            if let Some(c) = coord {
+                result["coord"] = serde_json::json!({
+                    "lat": c.lat,
+                    "lon": c.lon,
+                });
+            }
+            result
+        })
+        .collect();
+
+    Ok(serde_json::json!({
+        "key": key,
+        "results": json_results
     }))
 }
 

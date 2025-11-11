@@ -27,37 +27,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ✅ **GEORADIUSBYMEMBER** - Query members within radius of given member
 - ✅ **GEOPOS** - Get coordinates of one or more members
 - ✅ **GEOHASH** - Get geohash strings for members (11-character Redis-compatible format)
+- ✅ **GEOSEARCH** - Advanced geospatial search with FROMMEMBER/FROMLONLAT and BYRADIUS/BYBOX
 - ✅ **STATS** - Retrieve geospatial statistics
 
 #### API Integration
-- ✅ **REST API** - 7 endpoints:
+- ✅ **REST API** - 8 endpoints:
   - `POST /geospatial/:key/geoadd`
   - `GET /geospatial/:key/geodist/:member1/:member2`
   - `GET /geospatial/:key/georadius`
   - `GET /geospatial/:key/georadiusbymember/:member`
   - `POST /geospatial/:key/geopos`
   - `POST /geospatial/:key/geohash`
+  - `POST /geospatial/:key/geosearch`
   - `GET /geospatial/stats`
-- ✅ **StreamableHTTP** - 7 commands:
+- ✅ **StreamableHTTP** - 8 commands:
   - `geospatial.geoadd`
   - `geospatial.geodist`
   - `geospatial.georadius`
   - `geospatial.georadiusbymember`
   - `geospatial.geopos`
   - `geospatial.geohash`
+  - `geospatial.geosearch`
   - `geospatial.stats`
 
 #### Testing
-- ✅ **Integration Tests** - 15 comprehensive tests covering:
-  - GEOADD with multiple locations
-  - GEODIST distance calculations
-  - GEORADIUS queries (with distance/coordinates)
-  - GEORADIUSBYMEMBER queries
-  - GEOPOS coordinate retrieval
-  - GEOHASH string generation
+- ✅ **Unit Tests** - 23 comprehensive unit tests covering:
+  - GEOADD (basic, multiple, NX/XX options, invalid coordinates)
+  - GEODIST (same location, different locations, member not found)
+  - GEOPOS (single, multiple, not found)
+  - GEOHASH (single member)
+  - GEORADIUS (within radius, with distance, with coordinates, count limit)
+  - GEORADIUSBYMEMBER
+  - GEOSEARCH (FROMMEMBER/BYRADIUS, FROMLONLAT/BYRADIUS, BYBOX, count limit, sorting, invalid parameters)
   - Statistics tracking
+- ✅ **Integration Tests** - 17 comprehensive tests covering:
+  - GEOADD with multiple locations (REST + StreamableHTTP)
+  - GEODIST distance calculations (REST + StreamableHTTP)
+  - GEORADIUS queries (with distance/coordinates) (REST + StreamableHTTP)
+  - GEORADIUSBYMEMBER queries (REST + StreamableHTTP)
+  - GEOPOS coordinate retrieval (REST + StreamableHTTP)
+  - GEOHASH string generation (REST + StreamableHTTP)
+  - GEOSEARCH (FROMMEMBER/BYRADIUS, FROMLONLAT/BYBOX) (REST + StreamableHTTP)
+  - Statistics tracking (REST + StreamableHTTP)
   - Error handling (not found, invalid coordinates)
   - Both REST and StreamableHTTP protocols
+- ✅ **SDK S2S Tests** - Comprehensive tests in all SDKs:
+  - Python: 12 S2S tests covering all operations including GEOSEARCH
+  - TypeScript: 11 S2S tests including 5 GEOSEARCH tests
+  - Rust: 8 S2S tests including 3 GEOSEARCH tests
+  - PHP: 9 S2S tests including 3 GEOSEARCH tests
+  - C#: 9 S2S tests including 3 GEOSEARCH tests
 
 #### SDK Support
 - ✅ **TypeScript SDK** - GeospatialManager with full API + unit tests + S2S tests

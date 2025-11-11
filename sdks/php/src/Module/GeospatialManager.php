@@ -195,6 +195,74 @@ class GeospatialManager
     }
 
     /**
+     * Advanced geospatial search (GEOSEARCH)
+     *
+     * @param string $key Geospatial key
+     * @param string|null $fromMember Center member (mutually exclusive with fromLonLat)
+     * @param array{0: float, 1: float}|null $fromLonLat Center coordinates as [lon, lat] (mutually exclusive with fromMember)
+     * @param array{0: float, 1: string}|null $byRadius Search by radius as [radius, unit]
+     * @param array{0: float, 1: float, 2: string}|null $byBox Search by bounding box as [width, height, unit]
+     * @param bool $withDist Include distance in results
+     * @param bool $withCoord Include coordinates in results
+     * @param bool $withHash Include geohash in results
+     * @param int|null $count Maximum number of results
+     * @param 'ASC'|'DESC'|null $sort Sort order
+     * @return array<int, array{member: string, distance?: float, coord?: array{lat: float, lon: float}}>
+     */
+    public function geoSearch(
+        string $key,
+        ?string $fromMember = null,
+        ?array $fromLonLat = null,
+        ?array $byRadius = null,
+        ?array $byBox = null,
+        bool $withDist = false,
+        bool $withCoord = false,
+        bool $withHash = false,
+        ?int $count = null,
+        ?string $sort = null
+    ): array {
+        if ($fromMember === null && $fromLonLat === null) {
+            throw new \InvalidArgumentException("Either 'fromMember' or 'fromLonLat' must be provided");
+        }
+        if ($byRadius === null && $byBox === null) {
+            throw new \InvalidArgumentException("Either 'byRadius' or 'byBox' must be provided");
+        }
+
+        $payload = [
+            'with_dist' => $withDist,
+            'with_coord' => $withCoord,
+            'with_hash' => $withHash,
+        ];
+
+        if ($fromMember !== null) {
+            $payload['from_member'] = $fromMember;
+        }
+        if ($fromLonLat !== null) {
+            $payload['from_lonlat'] = $fromLonLat;
+        }
+        if ($byRadius !== null) {
+            $payload['by_radius'] = $byRadius;
+        }
+        if ($byBox !== null) {
+            $payload['by_box'] = $byBox;
+        }
+        if ($count !== null) {
+            $payload['count'] = $count;
+        }
+        if ($sort !== null) {
+            $payload['sort'] = $sort;
+        }
+
+        $response = $this->client->execute('geospatial.geosearch', $key, $payload);
+
+        $payload = $response['payload'] ?? $response;
+
+        /** @var list<array{member: string, distance?: float, coord?: array{lat: float, lon: float}}> $results */
+        $results = $payload['results'] ?? [];
+        return $results;
+    }
+
+    /**
      * Retrieve geospatial statistics
      *
      * @return array<string, int> Geospatial statistics

@@ -298,6 +298,69 @@ export class GeospatialManager {
   }
 
   /**
+   * Advanced geospatial search (GEOSEARCH)
+   * @param key Geospatial key
+   * @param options Search options (fromMember/fromLonLat, byRadius/byBox, withDist, withCoord, count, sort)
+   * @param commandOptions Optional command options
+   * @returns Array of matching members with optional distance and coordinates
+   */
+  async geosearch(
+    key: string,
+    options: {
+      fromMember?: string;
+      fromLonLat?: [number, number]; // [lon, lat]
+      byRadius?: [number, DistanceUnit];
+      byBox?: [number, number, DistanceUnit]; // [width, height, unit]
+      withDist?: boolean;
+      withCoord?: boolean;
+      withHash?: boolean;
+      count?: number;
+      sort?: 'ASC' | 'DESC';
+    },
+    commandOptions?: CommandOptions
+  ): Promise<GeoradiusResult[]> {
+    if (!options.fromMember && !options.fromLonLat) {
+      throw new TypeError("Either 'fromMember' or 'fromLonLat' must be provided");
+    }
+    if (!options.byRadius && !options.byBox) {
+      throw new TypeError("Either 'byRadius' or 'byBox' must be provided");
+    }
+
+    const payload: Record<string, unknown> = {
+      key,
+      with_dist: options.withDist ?? false,
+      with_coord: options.withCoord ?? false,
+      with_hash: options.withHash ?? false,
+    };
+
+    if (options.fromMember) {
+      payload.from_member = options.fromMember;
+    }
+    if (options.fromLonLat) {
+      payload.from_lonlat = options.fromLonLat;
+    }
+    if (options.byRadius) {
+      payload.by_radius = [options.byRadius[0], options.byRadius[1]];
+    }
+    if (options.byBox) {
+      payload.by_box = [options.byBox[0], options.byBox[1], options.byBox[2]];
+    }
+    if (options.count !== undefined) {
+      payload.count = options.count;
+    }
+    if (options.sort) {
+      payload.sort = options.sort;
+    }
+
+    const response = await this.client.sendCommand<GeoradiusResponse>(
+      'geospatial.geosearch',
+      this.buildPayload(commandOptions, payload)
+    );
+
+    return response.results;
+  }
+
+  /**
    * Retrieve geospatial statistics
    * @param options Optional command options
    * @returns Geospatial statistics

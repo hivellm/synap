@@ -187,6 +187,100 @@ describe('GeospatialManager S2S', () => {
     });
   });
 
+  describe('geosearch', () => {
+    it('should search by FROMMEMBER and BYRADIUS', async () => {
+      const key = `${testKey}:geosearch:member`;
+      await synap.geospatial.geoadd(key, [
+        { lat: 37.7749, lon: -122.4194, member: 'San Francisco' },
+        { lat: 37.8044, lon: -122.2711, member: 'Oakland' },
+        { lat: 40.7128, lon: -74.0060, member: 'New York' },
+      ]);
+
+      const results = await synap.geospatial.geosearch(key, {
+        fromMember: 'San Francisco',
+        byRadius: [50, 'km'],
+        withDist: true,
+      });
+
+      expect(results.length).toBeGreaterThanOrEqual(1);
+      expect(results.some((r) => r.member === 'San Francisco')).toBe(true);
+    });
+
+    it('should search by FROMLONLAT and BYRADIUS', async () => {
+      const key = `${testKey}:geosearch:lonlat`;
+      await synap.geospatial.geoadd(key, [
+        { lat: 37.7749, lon: -122.4194, member: 'San Francisco' },
+        { lat: 37.8044, lon: -122.2711, member: 'Oakland' },
+      ]);
+
+      const results = await synap.geospatial.geosearch(key, {
+        fromLonLat: [-122.4194, 37.7749],
+        byRadius: [50, 'km'],
+        withDist: true,
+        withCoord: true,
+      });
+
+      expect(results.length).toBeGreaterThanOrEqual(1);
+      if (results[0].coord) {
+        expect(results[0].coord.lat).toBeCloseTo(37.7749, 3);
+      }
+    });
+
+    it('should search by FROMMEMBER and BYBOX', async () => {
+      const key = `${testKey}:geosearch:box`;
+      await synap.geospatial.geoadd(key, [
+        { lat: 37.7749, lon: -122.4194, member: 'San Francisco' },
+        { lat: 37.8044, lon: -122.2711, member: 'Oakland' },
+        { lat: 40.7128, lon: -74.0060, member: 'New York' },
+      ]);
+
+      const results = await synap.geospatial.geosearch(key, {
+        fromMember: 'San Francisco',
+        byBox: [100000, 100000, 'm'], // 100km x 100km box
+        withDist: false,
+        withCoord: true,
+      });
+
+      expect(results.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('should respect count limit', async () => {
+      const key = `${testKey}:geosearch:count`;
+      await synap.geospatial.geoadd(key, [
+        { lat: 37.7749, lon: -122.4194, member: 'SF1' },
+        { lat: 37.7750, lon: -122.4195, member: 'SF2' },
+        { lat: 37.7751, lon: -122.4196, member: 'SF3' },
+      ]);
+
+      const results = await synap.geospatial.geosearch(key, {
+        fromLonLat: [-122.4194, 37.7749],
+        byRadius: [10, 'km'],
+        count: 2,
+      });
+
+      expect(results.length).toBeLessThanOrEqual(2);
+    });
+
+    it('should sort results ASC', async () => {
+      const key = `${testKey}:geosearch:sort`;
+      await synap.geospatial.geoadd(key, [
+        { lat: 37.7749, lon: -122.4194, member: 'SF' },
+        { lat: 37.8044, lon: -122.2711, member: 'Oakland' },
+      ]);
+
+      const results = await synap.geospatial.geosearch(key, {
+        fromLonLat: [-122.4194, 37.7749],
+        byRadius: [50, 'km'],
+        withDist: true,
+        sort: 'ASC',
+      });
+
+      if (results.length > 1 && results[0].distance && results[1].distance) {
+        expect(results[0].distance).toBeLessThanOrEqual(results[1].distance!);
+      }
+    });
+  });
+
   describe('stats', () => {
     it('should return geospatial statistics', async () => {
       const stats = await synap.geospatial.stats();

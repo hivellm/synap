@@ -288,6 +288,73 @@ class GeospatialManager:
         )
         return response.get("geohashes", [])
 
+    async def geosearch(
+        self,
+        key: str,
+        *,
+        from_member: str | None = None,
+        from_lonlat: tuple[float, float] | None = None,
+        by_radius: tuple[float, DistanceUnit] | None = None,
+        by_box: tuple[float, float, DistanceUnit] | None = None,
+        with_dist: bool = False,
+        with_coord: bool = False,
+        with_hash: bool = False,
+        count: int | None = None,
+        sort: Literal["ASC", "DESC"] | None = None,
+    ) -> list[GeoradiusResult]:
+        """Advanced geospatial search (GEOSEARCH).
+
+        Args:
+            key: Geospatial key
+            from_member: Center member (mutually exclusive with from_lonlat)
+            from_lonlat: Center coordinates as (lon, lat) tuple (mutually exclusive with from_member)
+            by_radius: Search by radius as (radius, unit) tuple
+            by_box: Search by bounding box as (width, height, unit) tuple
+            with_dist: Include distance in results
+            with_coord: Include coordinates in results
+            with_hash: Include geohash in results (not yet implemented)
+            count: Maximum number of results
+            sort: Sort order ("ASC" or "DESC")
+
+        Returns:
+            List of matching members with optional distance and coordinates
+
+        Example:
+            >>> results = await geospatial.geosearch(
+            ...     "cities",
+            ...     from_member="San Francisco",
+            ...     by_radius=(50, "km"),
+            ...     with_dist=True
+            ... )
+        """
+        if from_member is None and from_lonlat is None:
+            raise ValueError("Either 'from_member' or 'from_lonlat' must be provided")
+        if by_radius is None and by_box is None:
+            raise ValueError("Either 'by_radius' or 'by_box' must be provided")
+
+        payload: dict[str, any] = {
+            "key": key,
+            "with_dist": with_dist,
+            "with_coord": with_coord,
+            "with_hash": with_hash,
+        }
+
+        if from_member is not None:
+            payload["from_member"] = from_member
+        if from_lonlat is not None:
+            payload["from_lonlat"] = list(from_lonlat)
+        if by_radius is not None:
+            payload["by_radius"] = [by_radius[0], by_radius[1]]
+        if by_box is not None:
+            payload["by_box"] = [by_box[0], by_box[1], by_box[2]]
+        if count is not None:
+            payload["count"] = count
+        if sort is not None:
+            payload["sort"] = sort
+
+        response = await self._client.send_command("geospatial.geosearch", payload)
+        return response.get("results", [])
+
     async def stats(self) -> GeospatialStats:
         """Retrieve geospatial statistics.
 

@@ -305,6 +305,84 @@ impl GeospatialManager {
         Ok(coords)
     }
 
+    /// Advanced geospatial search (GEOSEARCH)
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - Geospatial key
+    /// * `from_member` - Center member (mutually exclusive with from_lonlat)
+    /// * `from_lonlat` - Center coordinates as (lon, lat) tuple (mutually exclusive with from_member)
+    /// * `by_radius` - Search by radius as (radius, unit) tuple
+    /// * `by_box` - Search by bounding box as (width, height, unit) tuple
+    /// * `with_dist` - Include distance in results
+    /// * `with_coord` - Include coordinates in results
+    /// * `with_hash` - Include geohash in results (not yet implemented)
+    /// * `count` - Maximum number of results
+    /// * `sort` - Sort order ("ASC" or "DESC")
+    ///
+    /// # Returns
+    ///
+    /// Vector of matching members with optional distance and coordinates
+    #[allow(clippy::too_many_arguments)]
+    pub async fn geosearch(
+        &self,
+        key: &str,
+        from_member: Option<&str>,
+        from_lonlat: Option<(f64, f64)>,
+        by_radius: Option<(f64, DistanceUnit)>,
+        by_box: Option<(f64, f64, DistanceUnit)>,
+        with_dist: bool,
+        with_coord: bool,
+        with_hash: bool,
+        count: Option<usize>,
+        sort: Option<&str>,
+    ) -> Result<Vec<GeoradiusResult>> {
+        if from_member.is_none() && from_lonlat.is_none() {
+            return Err(crate::error::SynapError::ServerError(
+                "Either 'from_member' or 'from_lonlat' must be provided".to_string(),
+            ));
+        }
+        if by_radius.is_none() && by_box.is_none() {
+            return Err(crate::error::SynapError::ServerError(
+                "Either 'by_radius' or 'by_box' must be provided".to_string(),
+            ));
+        }
+
+        let mut payload = json!({
+            "key": key,
+            "with_dist": with_dist,
+            "with_coord": with_coord,
+            "with_hash": with_hash,
+        });
+
+        if let Some(member) = from_member {
+            payload["from_member"] = json!(member);
+        }
+        if let Some((lon, lat)) = from_lonlat {
+            payload["from_lonlat"] = json!([lon, lat]);
+        }
+        if let Some((radius, unit)) = by_radius {
+            payload["by_radius"] = json!([radius, unit.as_str()]);
+        }
+        if let Some((width, height, unit)) = by_box {
+            payload["by_box"] = json!([width, height, unit.as_str()]);
+        }
+        if let Some(c) = count {
+            payload["count"] = json!(c);
+        }
+        if let Some(s) = sort {
+            payload["sort"] = json!(s);
+        }
+
+        let response = self
+            .client
+            .send_command("geospatial.geosearch", payload)
+            .await?;
+        let results: Vec<GeoradiusResult> =
+            serde_json::from_value(response["results"].clone()).unwrap_or_default();
+        Ok(results)
+    }
+
     /// Get geohash strings for members (GEOHASH)
     ///
     /// # Arguments

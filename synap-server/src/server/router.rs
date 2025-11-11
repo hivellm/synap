@@ -234,6 +234,10 @@ pub fn create_router(
             "/geospatial/{key}/geohash",
             post(handlers::geospatial_geohash),
         )
+        .route(
+            "/geospatial/{key}/geosearch",
+            post(handlers::geospatial_geosearch),
+        )
         .route("/geospatial/stats", get(handlers::geospatial_stats))
         // Persistence endpoints
         .route("/snapshot", post(handlers::trigger_snapshot))

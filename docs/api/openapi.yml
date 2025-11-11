@@ -1086,6 +1086,413 @@ paths:
                 $ref: '#/components/schemas/HyperLogLogStatsResponse'
 
   # ==========================================
+  # Geospatial Endpoints
+  # ==========================================
+  /geospatial/{key}/geoadd:
+    post:
+      tags: [Geospatial]
+      summary: Add geospatial locations
+      description: Add one or more geospatial items (latitude, longitude, member)
+      operationId: geospatialGeoadd
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: cities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [locations]
+              properties:
+                locations:
+                  type: array
+                  items:
+                    type: object
+                    required: [lat, lon, member]
+                    properties:
+                      lat:
+                        type: number
+                        format: double
+                        example: 37.7749
+                      lon:
+                        type: number
+                        format: double
+                        example: -122.4194
+                      member:
+                        type: string
+                        example: San Francisco
+                nx:
+                  type: boolean
+                  description: Only add new elements (don't update existing)
+                  default: false
+                xx:
+                  type: boolean
+                  description: Only update existing elements (don't add new)
+                  default: false
+                ch:
+                  type: boolean
+                  description: Return count of changed elements
+                  default: false
+      responses:
+        '200':
+          description: Locations added successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    example: cities
+                  added:
+                    type: integer
+                    example: 1
+
+  /geospatial/{key}/geodist/{member1}/{member2}:
+    get:
+      tags: [Geospatial]
+      summary: Calculate distance between two members
+      description: Get the distance between two geospatial members
+      operationId: geospatialGeodist
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: cities
+        - name: member1
+          in: path
+          required: true
+          schema:
+            type: string
+          example: San Francisco
+        - name: member2
+          in: path
+          required: true
+          schema:
+            type: string
+          example: New York
+        - name: unit
+          in: query
+          schema:
+            type: string
+            enum: [m, km, mi, ft]
+            default: m
+          description: Distance unit
+      responses:
+        '200':
+          description: Distance calculated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    example: cities
+                  distance:
+                    type: number
+                    format: double
+                    nullable: true
+                    example: 4139.0
+                  unit:
+                    type: string
+                    example: km
+
+  /geospatial/{key}/georadius:
+    get:
+      tags: [Geospatial]
+      summary: Query members within radius
+      description: Find members within a radius of a given coordinate
+      operationId: geospatialGeoradius
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: cities
+        - name: center_lat
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+          example: 37.7749
+        - name: center_lon
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+          example: -122.4194
+        - name: radius
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+          example: 50
+        - name: unit
+          in: query
+          schema:
+            type: string
+            enum: [m, km, mi, ft]
+            default: m
+        - name: withdist
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: withcoord
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: count
+          in: query
+          schema:
+            type: integer
+          example: 10
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [ASC, DESC]
+      responses:
+        '200':
+          description: Results retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    example: cities
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GeoradiusResult'
+
+  /geospatial/{key}/georadiusbymember/{member}:
+    get:
+      tags: [Geospatial]
+      summary: Query members within radius of member
+      description: Find members within a radius of a given member
+      operationId: geospatialGeoradiusByMember
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: cities
+        - name: member
+          in: path
+          required: true
+          schema:
+            type: string
+          example: San Francisco
+        - name: radius
+          in: query
+          required: true
+          schema:
+            type: number
+            format: double
+          example: 50
+        - name: unit
+          in: query
+          schema:
+            type: string
+            enum: [m, km, mi, ft]
+            default: m
+        - name: withdist
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: withcoord
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: count
+          in: query
+          schema:
+            type: integer
+          example: 10
+        - name: sort
+          in: query
+          schema:
+            type: string
+            enum: [ASC, DESC]
+      responses:
+        '200':
+          description: Results retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    example: cities
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GeoradiusResult'
+
+  /geospatial/{key}/geopos:
+    post:
+      tags: [Geospatial]
+      summary: Get coordinates of members
+      description: Retrieve coordinates for one or more geospatial members
+      operationId: geospatialGeopos
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: cities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [members]
+              properties:
+                members:
+                  type: array
+                  items:
+                    type: string
+                  example: [San Francisco, New York]
+      responses:
+        '200':
+          description: Coordinates retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    example: cities
+                  coordinates:
+                    type: array
+                    items:
+                      type: object
+                      nullable: true
+                      properties:
+                        lat:
+                          type: number
+                          format: double
+                        lon:
+                          type: number
+                          format: double
+
+  /geospatial/{key}/geohash:
+    post:
+      tags: [Geospatial]
+      summary: Get geohash strings
+      description: Retrieve geohash strings for one or more geospatial members
+      operationId: geospatialGeohash
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: cities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [members]
+              properties:
+                members:
+                  type: array
+                  items:
+                    type: string
+                  example: [San Francisco, New York]
+      responses:
+        '200':
+          description: Geohashes retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    example: cities
+                  geohashes:
+                    type: array
+                    items:
+                      type: string
+                      nullable: true
+                      example: 9q8yyk0j8w0
+
+  /geospatial/{key}/geosearch:
+    post:
+      tags: [Geospatial]
+      summary: Advanced geospatial search
+      description: Search geospatial data using FROMMEMBER/FROMLONLAT and BYRADIUS/BYBOX
+      operationId: geospatialGeosearch
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: cities
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GeospatialSearchRequest'
+      responses:
+        '200':
+          description: Search results retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    example: cities
+                  results:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/GeoradiusResult'
+
+  /geospatial/stats:
+    get:
+      tags: [Geospatial]
+      summary: Get geospatial statistics
+      description: Retrieve statistics about the geospatial store
+      operationId: geospatialStats
+      responses:
+        '200':
+          description: Statistics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeospatialStatsResponse'
+
+  # ==========================================
   # Queue Endpoints
   # ==========================================
   /queue/{name}:
@@ -2794,6 +3201,127 @@ components:
           format: int64
           description: Sum of estimated cardinalities across all HyperLogLog structures
           example: 500000
+
+    # Geospatial Schemas
+    GeoradiusResult:
+      type: object
+      properties:
+        member:
+          type: string
+          description: Member name
+          example: San Francisco
+        distance:
+          type: number
+          format: double
+          nullable: true
+          description: Distance from center (if withDist=true)
+          example: 0.5
+        coord:
+          type: object
+          nullable: true
+          description: Coordinates (if withCoord=true)
+          properties:
+            lat:
+              type: number
+              format: double
+              example: 37.7749
+            lon:
+              type: number
+              format: double
+              example: -122.4194
+
+    GeospatialSearchRequest:
+      type: object
+      properties:
+        from_member:
+          type: string
+          description: Center member (mutually exclusive with from_lonlat)
+          example: San Francisco
+        from_lonlat:
+          type: array
+          items:
+            type: number
+            format: double
+          minItems: 2
+          maxItems: 2
+          description: Center coordinates as [lon, lat] (mutually exclusive with from_member)
+          example: [-122.4194, 37.7749]
+        by_radius:
+          type: array
+          items:
+            type: number
+            format: double
+          minItems: 2
+          maxItems: 2
+          description: Search by radius as [radius, unit] where unit is 'm', 'km', 'mi', or 'ft' (mutually exclusive with by_box)
+          example: [50, km]
+        by_box:
+          type: array
+          items:
+            type: number
+            format: double
+          minItems: 3
+          maxItems: 3
+          description: Search by bounding box as [width, height, unit] where unit is 'm', 'km', 'mi', or 'ft' (mutually exclusive with by_radius)
+          example: [100000, 100000, m]
+        with_dist:
+          type: boolean
+          description: Include distance in results
+          default: false
+        with_coord:
+          type: boolean
+          description: Include coordinates in results
+          default: false
+        with_hash:
+          type: boolean
+          description: Include geohash in results
+          default: false
+        count:
+          type: integer
+          description: Maximum number of results
+          example: 10
+        sort:
+          type: string
+          enum: [ASC, DESC]
+          description: Sort order
+          example: ASC
+
+    GeospatialStatsResponse:
+      type: object
+      properties:
+        total_keys:
+          type: integer
+          description: Total number of geospatial keys
+          example: 100
+        total_locations:
+          type: integer
+          description: Total number of geospatial locations
+          example: 5000
+        geoadd_count:
+          type: integer
+          format: int64
+          description: Total number of GEOADD operations
+          example: 10000
+        geodist_count:
+          type: integer
+          format: int64
+          description: Total number of GEODIST operations
+          example: 5000
+        georadius_count:
+          type: integer
+          format: int64
+          description: Total number of GEORADIUS/GEOSEARCH operations
+          example: 2000
+        geopos_count:
+          type: integer
+          format: int64
+          description: Total number of GEOPOS operations
+          example: 3000
+        geohash_count:
+          type: integer
+          format: int64
+          description: Total number of GEOHASH operations
+          example: 1500
 
 security:
   - BasicAuth: []

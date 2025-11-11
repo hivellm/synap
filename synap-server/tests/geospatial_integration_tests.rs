@@ -589,6 +589,134 @@ async fn test_geospatial_geohash_streamable() {
 }
 
 #[tokio::test]
+async fn test_geospatial_geosearch_rest() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Add locations
+    client
+        .post(format!("{}/geospatial/cities/geoadd", base_url))
+        .json(&serde_json::json!({
+            "locations": [
+                {"lat": 37.7749, "lon": -122.4194, "member": "San Francisco"},
+                {"lat": 37.8044, "lon": -122.2711, "member": "Oakland"},
+                {"lat": 40.7128, "lon": -74.0060, "member": "New York"}
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // GEOSEARCH - FROMMEMBER + BYRADIUS
+    let response = client
+        .post(format!("{}/geospatial/cities/geosearch", base_url))
+        .json(&serde_json::json!({
+            "from_member": "San Francisco",
+            "by_radius": [50.0, "km"],
+            "with_dist": true,
+            "with_coord": true
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert!(body["key"].as_str().unwrap() == "cities");
+    let results = body["results"].as_array().unwrap();
+    assert!(!results.is_empty());
+
+    // GEOSEARCH - FROMLONLAT + BYBOX
+    let response = client
+        .post(format!("{}/geospatial/cities/geosearch", base_url))
+        .json(&serde_json::json!({
+            "from_lonlat": [-122.4194, 37.7749],
+            "by_box": [100000.0, 100000.0, "m"],
+            "with_coord": true,
+            "count": 2
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.unwrap();
+    let results = body["results"].as_array().unwrap();
+    assert!(results.len() <= 2);
+}
+
+#[tokio::test]
+async fn test_geospatial_geosearch_streamable() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Add locations
+    client
+        .post(format!("{}/api/v1/command", base_url))
+        .json(&serde_json::json!({
+            "command": "geospatial.geoadd",
+            "request_id": "test-1",
+            "payload": {
+                "key": "cities",
+                "locations": [
+                    {"lat": 37.7749, "lon": -122.4194, "member": "San Francisco"},
+                    {"lat": 37.8044, "lon": -122.2711, "member": "Oakland"}
+                ]
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // GEOSEARCH - FROMMEMBER + BYRADIUS
+    let response = client
+        .post(format!("{}/api/v1/command", base_url))
+        .json(&serde_json::json!({
+            "command": "geospatial.geosearch",
+            "request_id": "test-2",
+            "payload": {
+                "key": "cities",
+                "from_member": "San Francisco",
+                "by_radius": [50.0, "km"],
+                "with_dist": true,
+                "with_coord": true
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert!(body["success"].as_bool().unwrap());
+    let results = body["payload"]["results"].as_array().unwrap();
+    assert!(!results.is_empty());
+
+    // GEOSEARCH - FROMLONLAT + BYBOX
+    let response = client
+        .post(format!("{}/api/v1/command", base_url))
+        .json(&serde_json::json!({
+            "command": "geospatial.geosearch",
+            "request_id": "test-3",
+            "payload": {
+                "key": "cities",
+                "from_lonlat": [-122.4194, 37.7749],
+                "by_box": [100000.0, 100000.0, "m"],
+                "count": 2
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert!(body["success"].as_bool().unwrap());
+    let results = body["payload"]["results"].as_array().unwrap();
+    assert!(results.len() <= 2);
+}
+
+#[tokio::test]
 async fn test_geospatial_stats_streamable() {
     let base_url = spawn_test_server().await;
     let client = Client::new();

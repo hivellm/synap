@@ -306,6 +306,74 @@ public sealed class GeospatialManager
     }
 
     /// <summary>
+    /// Advanced geospatial search (GEOSEARCH).
+    /// </summary>
+    public async Task<List<GeoradiusResult>> GeoSearchAsync(
+        string key,
+        string? fromMember = null,
+        (double lon, double lat)? fromLonLat = null,
+        (double radius, DistanceUnit unit)? byRadius = null,
+        (double width, double height, DistanceUnit unit)? byBox = null,
+        bool withDist = false,
+        bool withCoord = false,
+        bool withHash = false,
+        int? count = null,
+        string? sort = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(key);
+
+        if (fromMember == null && fromLonLat == null)
+        {
+            throw new ArgumentException("Either 'fromMember' or 'fromLonLat' must be provided");
+        }
+        if (byRadius == null && byBox == null)
+        {
+            throw new ArgumentException("Either 'byRadius' or 'byBox' must be provided");
+        }
+
+        var data = new Dictionary<string, object?>
+        {
+            ["key"] = key,
+            ["with_dist"] = withDist,
+            ["with_coord"] = withCoord,
+            ["with_hash"] = withHash
+        };
+
+        if (fromMember != null)
+        {
+            data["from_member"] = fromMember;
+        }
+        if (fromLonLat.HasValue)
+        {
+            data["from_lonlat"] = new[] { fromLonLat.Value.lon, fromLonLat.Value.lat };
+        }
+        if (byRadius.HasValue)
+        {
+            data["by_radius"] = new[] { byRadius.Value.radius, DistanceUnitToString(byRadius.Value.unit) };
+        }
+        if (byBox.HasValue)
+        {
+            data["by_box"] = new[] { byBox.Value.width, byBox.Value.height, DistanceUnitToString(byBox.Value.unit) };
+        }
+        if (count.HasValue)
+        {
+            data["count"] = count.Value;
+        }
+        if (!string.IsNullOrEmpty(sort))
+        {
+            data["sort"] = sort;
+        }
+
+        using var response = await _client.ExecuteAsync("geospatial.geosearch", string.Empty, data, cancellationToken).ConfigureAwait(false);
+        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("results", out var results))
+        {
+            return JsonSerializer.Deserialize<List<GeoradiusResult>>(results.GetRawText()) ?? new List<GeoradiusResult>();
+        }
+        return new List<GeoradiusResult>();
+    }
+
+    /// <summary>
     /// Retrieve geospatial statistics.
     /// </summary>
     public async Task<GeospatialStats> StatsAsync(CancellationToken cancellationToken = default)
