@@ -4,5 +4,10 @@ parameters:
         - src
         - tests
     ignoreErrors:
-        # Add any necessary ignores here
+        # Cast warnings for response values (safe conversions)
+        - '#Cannot cast mixed to int#'
+        - message: '#Cannot cast mixed to int#'
+          path: src/Module/BitmapManager.php
+        - message: '#Cannot cast mixed to int#'
+          path: src/Module/HyperLogLogManager.php
 

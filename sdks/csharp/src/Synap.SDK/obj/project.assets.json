@@ -769,7 +769,7 @@
     "/home/andre/.nuget/packages/": {}
   },
   "project": {
-    "version": "0.2.0",
+    "version": "0.3.0",
     "restore": {
       "projectUniqueName": "/mnt/f/Node/hivellm/synap/sdks/csharp/src/Synap.SDK/Synap.SDK.csproj",
       "projectName": "HiveLLM.Synap.SDK",

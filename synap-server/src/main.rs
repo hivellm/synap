@@ -290,6 +290,11 @@ async fn main() -> Result<()> {
     let bitmap_store = Arc::new(BitmapStore::new());
     info!("Bitmap store initialized");
 
+    // Create Geospatial store (depends on sorted_set_store)
+    use synap_server::core::GeospatialStore;
+    let geospatial_store = Arc::new(GeospatialStore::new(sorted_set_store.clone()));
+    info!("Geospatial store initialized");
+
     // Create monitoring manager
     let monitoring = Arc::new(MonitoringManager::new(
         kv_store.clone(),
@@ -324,6 +329,7 @@ async fn main() -> Result<()> {
         sorted_set_store,
         hyperloglog_store,
         bitmap_store,
+        geospatial_store,
         queue_manager,
         stream_manager,
         partition_manager,

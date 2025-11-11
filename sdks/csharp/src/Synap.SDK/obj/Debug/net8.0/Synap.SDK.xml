@@ -63,6 +63,242 @@
             <param name="message">The error message.</param>
             <returns>A new <see cref="T:Synap.SDK.Exceptions.SynapException"/> instance.</returns>
         </member>
+        <member name="T:Synap.SDK.Modules.BitfieldOperation">
+            <summary>
+            Bitfield operation specification.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitfieldOperation.Operation">
+            <summary>
+            Operation type (GET, SET, INCRBY).
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitfieldOperation.Offset">
+            <summary>
+            Bit offset (0-based).
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitfieldOperation.Width">
+            <summary>
+            Bit width (1-64).
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitfieldOperation.IsSigned">
+            <summary>
+            Whether value is signed (default: false).
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitfieldOperation.Value">
+            <summary>
+            Value for SET operation.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitfieldOperation.Increment">
+            <summary>
+            Increment for INCRBY operation.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitfieldOperation.Overflow">
+            <summary>
+            Overflow behavior for INCRBY (default: WRAP).
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.Modules.BitmapManager">
+            <summary>
+            Bitmap operations (Redis-compatible).
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.Modules.BitmapManager.BitmapOperation">
+            <summary>
+            Bitmap operation types.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.BitmapManager.SetBitAsync(System.String,System.Int32,System.Byte,System.Threading.CancellationToken)">
+            <summary>
+            Set bit at offset to value (SETBIT).
+            </summary>
+            <param name="key">Bitmap key</param>
+            <param name="offset">Bit offset (0-based)</param>
+            <param name="value">Bit value (0 or 1)</param>
+            <param name="cancellationToken">Cancellation token</param>
+            <returns>Previous bit value (0 or 1)</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.BitmapManager.GetBitAsync(System.String,System.Int32,System.Threading.CancellationToken)">
+            <summary>
+            Get bit at offset (GETBIT).
+            </summary>
+            <param name="key">Bitmap key</param>
+            <param name="offset">Bit offset (0-based)</param>
+            <param name="cancellationToken">Cancellation token</param>
+            <returns>Bit value (0 or 1)</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.BitmapManager.BitCountAsync(System.String,System.Nullable{System.Int32},System.Nullable{System.Int32},System.Threading.CancellationToken)">
+            <summary>
+            Count set bits in bitmap (BITCOUNT).
+            </summary>
+            <param name="key">Bitmap key</param>
+            <param name="start">Optional start offset (inclusive)</param>
+            <param name="end">Optional end offset (inclusive)</param>
+            <param name="cancellationToken">Cancellation token</param>
+            <returns>Number of set bits</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.BitmapManager.BitPosAsync(System.String,System.Byte,System.Nullable{System.Int32},System.Nullable{System.Int32},System.Threading.CancellationToken)">
+            <summary>
+            Find first bit set to value (BITPOS).
+            </summary>
+            <param name="key">Bitmap key</param>
+            <param name="value">Bit value to search for (0 or 1)</param>
+            <param name="start">Optional start offset (inclusive)</param>
+            <param name="end">Optional end offset (inclusive)</param>
+            <param name="cancellationToken">Cancellation token</param>
+            <returns>Position of first matching bit, or null if not found</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.BitmapManager.BitOpAsync(Synap.SDK.Modules.BitmapManager.BitmapOperation,System.String,System.Collections.Generic.IReadOnlyList{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Perform bitwise operation on multiple bitmaps (BITOP).
+            </summary>
+            <param name="operation">Bitwise operation (AND, OR, XOR, NOT)</param>
+            <param name="destination">Destination key for result</param>
+            <param name="sourceKeys">Source bitmap keys (NOT requires exactly 1 source)</param>
+            <param name="cancellationToken">Cancellation token</param>
+            <returns>Length of resulting bitmap in bits</returns>
+        </member>
+        <member name="T:Synap.SDK.Modules.BitmapManager.BitfieldOperationType">
+            <summary>
+            Bitfield operation type.
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.Modules.BitmapManager.BitfieldOverflow">
+            <summary>
+            Bitfield overflow behavior.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.BitmapManager.BitFieldAsync(System.String,System.Collections.Generic.IReadOnlyList{Synap.SDK.Modules.BitfieldOperation},System.Threading.CancellationToken)">
+            <summary>
+            Execute bitfield operations (BITFIELD).
+            </summary>
+            <param name="key">Bitmap key</param>
+            <param name="operations">List of bitfield operations</param>
+            <param name="cancellationToken">Cancellation token</param>
+            <returns>List of result values (one per operation)</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.BitmapManager.StatsAsync(System.Threading.CancellationToken)">
+            <summary>
+            Retrieve bitmap statistics.
+            </summary>
+            <param name="cancellationToken">Cancellation token</param>
+            <returns>Bitmap statistics</returns>
+        </member>
+        <member name="T:Synap.SDK.Modules.BitmapStats">
+            <summary>
+            Bitmap statistics.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitmapStats.TotalBitmaps">
+            <summary>
+            Total number of bitmaps.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitmapStats.TotalBits">
+            <summary>
+            Total number of bits across all bitmaps.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitmapStats.SetBitCount">
+            <summary>
+            Number of SETBIT operations performed.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitmapStats.GetBitCount">
+            <summary>
+            Number of GETBIT operations performed.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitmapStats.BitCountCount">
+            <summary>
+            Number of BITCOUNT operations performed.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitmapStats.BitOpCount">
+            <summary>
+            Number of BITOP operations performed.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitmapStats.BitPosCount">
+            <summary>
+            Number of BITPOS operations performed.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.BitmapStats.BitFieldCount">
+            <summary>
+            Number of BITFIELD operations performed.
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.Modules.DistanceUnit">
+            <summary>
+            Distance unit types.
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.Modules.Location">
+            <summary>
+            Location with latitude, longitude, and member.
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.Modules.Coordinate">
+            <summary>
+            Geographic coordinate.
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.Modules.GeoradiusResult">
+            <summary>
+            Result from georadius query.
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.Modules.GeospatialStats">
+            <summary>
+            Geospatial statistics.
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.Modules.GeospatialManager">
+            <summary>
+            Geospatial operations (Redis-compatible).
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.GeospatialManager.GeoAddAsync(System.String,System.Collections.Generic.IEnumerable{Synap.SDK.Modules.Location},System.Boolean,System.Boolean,System.Boolean,System.Threading.CancellationToken)">
+            <summary>
+            Add geospatial locations (GEOADD).
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.GeospatialManager.GeoDistAsync(System.String,System.String,System.String,Synap.SDK.Modules.DistanceUnit,System.Threading.CancellationToken)">
+            <summary>
+            Calculate distance between two members (GEODIST).
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.GeospatialManager.GeoRadiusAsync(System.String,System.Double,System.Double,System.Double,Synap.SDK.Modules.DistanceUnit,System.Boolean,System.Boolean,System.Nullable{System.Int32},System.String,System.Threading.CancellationToken)">
+            <summary>
+            Query members within radius (GEORADIUS).
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.GeospatialManager.GeoRadiusByMemberAsync(System.String,System.String,System.Double,Synap.SDK.Modules.DistanceUnit,System.Boolean,System.Boolean,System.Nullable{System.Int32},System.String,System.Threading.CancellationToken)">
+            <summary>
+            Query members within radius of given member (GEORADIUSBYMEMBER).
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.GeospatialManager.GeoPosAsync(System.String,System.Collections.Generic.IEnumerable{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Get coordinates of members (GEOPOS).
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.GeospatialManager.GeoHashAsync(System.String,System.Collections.Generic.IEnumerable{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Get geohash strings for members (GEOHASH).
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.GeospatialManager.StatsAsync(System.Threading.CancellationToken)">
+            <summary>
+            Retrieve geospatial statistics.
+            </summary>
+        </member>
         <member name="T:Synap.SDK.Modules.HashManager">
             <summary>
             Hash data structure operations (Redis-compatible).
@@ -131,6 +367,74 @@
         <member name="M:Synap.SDK.Modules.HashManager.SetNXAsync(System.String,System.String,System.String,System.Threading.CancellationToken)">
             <summary>
             Set field only if it doesn't exist.
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.Modules.HyperLogLogManager">
+            <summary>
+            HyperLogLog operations (Redis-compatible).
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.HyperLogLogManager.PfAddAsync(System.String,System.Collections.Generic.IEnumerable{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Add elements to a HyperLogLog structure (PFADD).
+            </summary>
+            <param name="key">HyperLogLog key</param>
+            <param name="elements">Elements to add (strings or byte arrays)</param>
+            <param name="cancellationToken">Cancellation token</param>
+            <returns>Number of elements added (approximate)</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.HyperLogLogManager.PfCountAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Estimate cardinality of a HyperLogLog structure (PFCOUNT).
+            </summary>
+            <param name="key">HyperLogLog key</param>
+            <param name="cancellationToken">Cancellation token</param>
+            <returns>Estimated cardinality (approximate count)</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.HyperLogLogManager.PfMergeAsync(System.String,System.Collections.Generic.IReadOnlyList{System.String},System.Threading.CancellationToken)">
+            <summary>
+            Merge multiple HyperLogLog structures (PFMERGE).
+            </summary>
+            <param name="destination">Destination key for merged result</param>
+            <param name="sources">Source HyperLogLog keys to merge</param>
+            <param name="cancellationToken">Cancellation token</param>
+            <returns>Estimated cardinality of merged result</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.HyperLogLogManager.StatsAsync(System.Threading.CancellationToken)">
+            <summary>
+            Retrieve HyperLogLog statistics.
+            </summary>
+            <param name="cancellationToken">Cancellation token</param>
+            <returns>HyperLogLog statistics</returns>
+        </member>
+        <member name="T:Synap.SDK.Modules.HyperLogLogStats">
+            <summary>
+            HyperLogLog statistics.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.HyperLogLogStats.TotalHlls">
+            <summary>
+            Total number of HyperLogLog structures.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.HyperLogLogStats.TotalCardinality">
+            <summary>
+            Total estimated cardinality across all HyperLogLog structures.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.HyperLogLogStats.PfAddCount">
+            <summary>
+            Number of PFADD operations performed.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.HyperLogLogStats.PfCountCount">
+            <summary>
+            Number of PFCOUNT operations performed.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.Modules.HyperLogLogStats.PfMergeCount">
+            <summary>
+            Number of PFMERGE operations performed.
             </summary>
         </member>
         <member name="T:Synap.SDK.Modules.KVStore">
@@ -537,6 +841,21 @@
         <member name="P:Synap.SDK.SynapClient.PubSub">
             <summary>
             Gets the Pub/Sub operations.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapClient.Bitmap">
+            <summary>
+            Gets the Bitmap operations.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapClient.HyperLogLog">
+            <summary>
+            Gets the HyperLogLog operations.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapClient.Geospatial">
+            <summary>
+            Gets the Geospatial operations.
             </summary>
         </member>
         <member name="P:Synap.SDK.SynapClient.Config">

@@ -120,6 +120,215 @@ async fn test_bitmap_bitop_and() {
 
 #[tokio::test]
 #[ignore = "requires running Synap server"]
+async fn test_bitmap_bitfield_get_set() {
+    let client = common::setup_s2s_client();
+    let key = format!(
+        "test:bitmap:bitfield:{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    );
+
+    // SET operation: Set 8-bit unsigned value 42 at offset 0
+    let operations = vec![serde_json::json!({
+        "operation": "SET",
+        "offset": 0,
+        "width": 8,
+        "signed": false,
+        "value": 42
+    })];
+
+    let results = client.bitmap().bitfield(&key, &operations).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0], 0); // Old value was 0
+
+    // GET operation: Read back the value
+    let operations = vec![serde_json::json!({
+        "operation": "GET",
+        "offset": 0,
+        "width": 8,
+        "signed": false
+    })];
+
+    let results = client.bitmap().bitfield(&key, &operations).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0], 42);
+}
+
+#[tokio::test]
+#[ignore = "requires running Synap server"]
+async fn test_bitmap_bitfield_incrby_wrap() {
+    let client = common::setup_s2s_client();
+    let key = format!(
+        "test:bitmap:bitfield_wrap:{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    );
+
+    // Set initial value
+    let operations = vec![serde_json::json!({
+        "operation": "SET",
+        "offset": 0,
+        "width": 8,
+        "signed": false,
+        "value": 250
+    })];
+    client.bitmap().bitfield(&key, &operations).await.unwrap();
+
+    // INCRBY with wrap: 250 + 10 = 260 wraps to 4
+    let operations = vec![serde_json::json!({
+        "operation": "INCRBY",
+        "offset": 0,
+        "width": 8,
+        "signed": false,
+        "increment": 10,
+        "overflow": "WRAP"
+    })];
+
+    let results = client.bitmap().bitfield(&key, &operations).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0], 4); // 250 + 10 = 260 wraps to 4 (260 - 256)
+}
+
+#[tokio::test]
+#[ignore = "requires running Synap server"]
+async fn test_bitmap_bitfield_incrby_sat() {
+    let client = common::setup_s2s_client();
+    let key = format!(
+        "test:bitmap:bitfield_sat:{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    );
+
+    // Set 4-bit unsigned value to 14
+    let operations = vec![serde_json::json!({
+        "operation": "SET",
+        "offset": 0,
+        "width": 4,
+        "signed": false,
+        "value": 14
+    })];
+    client.bitmap().bitfield(&key, &operations).await.unwrap();
+
+    // INCRBY with saturate: 14 + 1 = 15 (max), then stays at 15
+    let operations = vec![serde_json::json!({
+        "operation": "INCRBY",
+        "offset": 0,
+        "width": 4,
+        "signed": false,
+        "increment": 1,
+        "overflow": "SAT"
+    })];
+
+    let results1 = client.bitmap().bitfield(&key, &operations).await.unwrap();
+    assert_eq!(results1[0], 15);
+
+    // Try to increment again (should saturate at 15)
+    let results2 = client.bitmap().bitfield(&key, &operations).await.unwrap();
+    assert_eq!(results2[0], 15);
+}
+
+#[tokio::test]
+#[ignore = "requires running Synap server"]
+async fn test_bitmap_bitfield_multiple_operations() {
+    let client = common::setup_s2s_client();
+    let key = format!(
+        "test:bitmap:bitfield_multi:{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    );
+
+    // Execute multiple operations in sequence
+    let operations = vec![
+        serde_json::json!({
+            "operation": "SET",
+            "offset": 0,
+            "width": 8,
+            "signed": false,
+            "value": 100
+        }),
+        serde_json::json!({
+            "operation": "SET",
+            "offset": 8,
+            "width": 8,
+            "signed": false,
+            "value": 200
+        }),
+        serde_json::json!({
+            "operation": "GET",
+            "offset": 0,
+            "width": 8,
+            "signed": false
+        }),
+        serde_json::json!({
+            "operation": "GET",
+            "offset": 8,
+            "width": 8,
+            "signed": false
+        }),
+        serde_json::json!({
+            "operation": "INCRBY",
+            "offset": 0,
+            "width": 8,
+            "signed": false,
+            "increment": 50,
+            "overflow": "WRAP"
+        }),
+    ];
+
+    let results = client.bitmap().bitfield(&key, &operations).await.unwrap();
+    assert_eq!(results.len(), 5);
+    assert_eq!(results[0], 0); // Old value at offset 0
+    assert_eq!(results[1], 0); // Old value at offset 8
+    assert_eq!(results[2], 100); // Read back offset 0
+    assert_eq!(results[3], 200); // Read back offset 8
+    assert_eq!(results[4], 150); // Incremented offset 0
+}
+
+#[tokio::test]
+#[ignore = "requires running Synap server"]
+async fn test_bitmap_bitfield_signed_values() {
+    let client = common::setup_s2s_client();
+    let key = format!(
+        "test:bitmap:bitfield_signed:{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+    );
+
+    // Set signed 8-bit negative value
+    let operations = vec![serde_json::json!({
+        "operation": "SET",
+        "offset": 0,
+        "width": 8,
+        "signed": true,
+        "value": -10
+    })];
+    client.bitmap().bitfield(&key, &operations).await.unwrap();
+
+    // Read back as signed
+    let operations = vec![serde_json::json!({
+        "operation": "GET",
+        "offset": 0,
+        "width": 8,
+        "signed": true
+    })];
+
+    let results = client.bitmap().bitfield(&key, &operations).await.unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0], -10);
+}
+
+#[tokio::test]
+#[ignore = "requires running Synap server"]
 async fn test_bitmap_stats() {
     let client = common::setup_s2s_client();
     let key = format!(

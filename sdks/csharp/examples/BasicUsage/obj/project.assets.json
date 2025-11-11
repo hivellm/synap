@@ -18,7 +18,7 @@
           "buildTransitive/net6.0/System.Text.Json.targets": {}
         }
       },
-      "HiveLLM.Synap.SDK/0.2.0": {
+      "HiveLLM.Synap.SDK/0.3.0": {
         "type": "project",
         "framework": ".NETCoreApp,Version=v8.0",
         "dependencies": {
@@ -107,7 +107,7 @@
         "useSharedDesignerContext.txt"
       ]
     },
-    "HiveLLM.Synap.SDK/0.2.0": {
+    "HiveLLM.Synap.SDK/0.3.0": {
       "type": "project",
       "path": "../../src/Synap.SDK/Synap.SDK.csproj",
       "msbuildProject": "../../src/Synap.SDK/Synap.SDK.csproj"
@@ -115,7 +115,7 @@
   },
   "projectFileDependencyGroups": {
     "net8.0": [
-      "HiveLLM.Synap.SDK >= 0.2.0"
+      "HiveLLM.Synap.SDK >= 0.3.0"
     ]
   },
   "packageFolders": {

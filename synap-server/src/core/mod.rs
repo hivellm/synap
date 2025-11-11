@@ -2,6 +2,7 @@ pub mod bitmap;
 pub mod cache;
 pub mod consumer_group;
 pub mod error;
+pub mod geospatial;
 pub mod hash;
 pub mod hyperloglog;
 pub mod key_manager;
@@ -16,13 +17,16 @@ pub mod stream;
 pub mod transaction;
 pub mod types;
 
-pub use bitmap::{BitmapOperation, BitmapStats, BitmapStore, BitmapValue};
+pub use bitmap::{
+    BitfieldOperation, BitfieldOverflow, BitmapOperation, BitmapStats, BitmapStore, BitmapValue,
+};
 pub use cache::{CacheLayer, CacheStats};
 pub use consumer_group::{
     AssignmentStrategy, ConsumerGroup, ConsumerGroupConfig, ConsumerGroupManager,
     ConsumerGroupStats, ConsumerMember, GroupState,
 };
 pub use error::SynapError;
+pub use geospatial::{Coordinate, DistanceUnit, GeospatialStats, GeospatialStore};
 pub use hash::{HashStats, HashStore, HashValue};
 pub use hyperloglog::{HyperLogLogStats, HyperLogLogStore, HyperLogLogValue};
 pub use key_manager::{KeyManager, KeyType};

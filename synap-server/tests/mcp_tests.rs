@@ -30,6 +30,9 @@ async fn test_mcp_kv_get() {
         set_store.clone(),
         sorted_set_store.clone(),
     ));
+    let geospatial_store = Arc::new(synap_server::core::GeospatialStore::new(
+        sorted_set_store.clone(),
+    ));
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
         hash_store: hash_store.clone(),
@@ -38,6 +41,7 @@ async fn test_mcp_kv_get() {
         sorted_set_store,
         hyperloglog_store: Arc::new(synap_server::core::HyperLogLogStore::new()),
         bitmap_store: Arc::new(synap_server::core::BitmapStore::new()),
+        geospatial_store,
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
@@ -87,6 +91,9 @@ async fn test_mcp_kv_set() {
         set_store.clone(),
         sorted_set_store.clone(),
     ));
+    let geospatial_store = Arc::new(synap_server::core::GeospatialStore::new(
+        sorted_set_store.clone(),
+    ));
     let state = Arc::new(AppState {
         kv_store,
         hash_store,
@@ -95,6 +102,7 @@ async fn test_mcp_kv_set() {
         sorted_set_store,
         hyperloglog_store: Arc::new(synap_server::core::HyperLogLogStore::new()),
         bitmap_store: Arc::new(synap_server::core::BitmapStore::new()),
+        geospatial_store,
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
@@ -149,6 +157,9 @@ async fn test_mcp_kv_delete() {
         set_store.clone(),
         sorted_set_store.clone(),
     ));
+    let geospatial_store = Arc::new(synap_server::core::GeospatialStore::new(
+        sorted_set_store.clone(),
+    ));
     let state = Arc::new(AppState {
         kv_store: kv_store.clone(),
         hash_store: hash_store.clone(),
@@ -157,6 +168,7 @@ async fn test_mcp_kv_delete() {
         sorted_set_store,
         hyperloglog_store: Arc::new(synap_server::core::HyperLogLogStore::new()),
         bitmap_store: Arc::new(synap_server::core::BitmapStore::new()),
+        geospatial_store,
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,
@@ -216,6 +228,9 @@ async fn test_mcp_queue_publish() {
         set_store.clone(),
         sorted_set_store.clone(),
     ));
+    let geospatial_store = Arc::new(synap_server::core::GeospatialStore::new(
+        sorted_set_store.clone(),
+    ));
     let state = Arc::new(AppState {
         kv_store,
         hash_store,
@@ -224,6 +239,7 @@ async fn test_mcp_queue_publish() {
         sorted_set_store,
         hyperloglog_store: Arc::new(synap_server::core::HyperLogLogStore::new()),
         bitmap_store: Arc::new(synap_server::core::BitmapStore::new()),
+        geospatial_store,
         queue_manager: Some(queue_manager.clone()),
         stream_manager: None,
         partition_manager: None,

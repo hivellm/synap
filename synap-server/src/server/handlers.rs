@@ -1,6 +1,6 @@
 use crate::core::{
-    HashStore, HyperLogLogStore, KVStore, KeyManager, Message, QueueManager, SortedSetStore,
-    SynapError, TransactionManager,
+    GeospatialStore, HashStore, HyperLogLogStore, KVStore, KeyManager, Message, QueueManager,
+    SortedSetStore, SynapError, TransactionManager,
 };
 use crate::monitoring::{
     InfoSection, KeyspaceInfo, MemoryInfo, MemoryUsage, ReplicationInfo, ServerInfo, StatsInfo,
@@ -33,6 +33,7 @@ pub struct AppState {
     pub sorted_set_store: Arc<SortedSetStore>,
     pub hyperloglog_store: Arc<HyperLogLogStore>,
     pub bitmap_store: Arc<crate::core::BitmapStore>,
+    pub geospatial_store: Arc<GeospatialStore>,
     pub queue_manager: Option<Arc<QueueManager>>,
     pub stream_manager: Option<Arc<crate::core::StreamManager>>,
     pub partition_manager: Option<Arc<crate::core::PartitionManager>>,
@@ -1716,7 +1717,17 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "bitmap.bitcount" => handle_bitmap_bitcount_cmd(&state, &request).await,
         "bitmap.bitpos" => handle_bitmap_bitpos_cmd(&state, &request).await,
         "bitmap.bitop" => handle_bitmap_bitop_cmd(&state, &request).await,
+        "bitmap.bitfield" => handle_bitmap_bitfield_cmd(&state, &request).await,
         "bitmap.stats" => handle_bitmap_stats_cmd(&state, &request).await,
+        "geospatial.geoadd" => handle_geospatial_geoadd_cmd(&state, &request).await,
+        "geospatial.geodist" => handle_geospatial_geodist_cmd(&state, &request).await,
+        "geospatial.georadius" => handle_geospatial_georadius_cmd(&state, &request).await,
+        "geospatial.georadiusbymember" => {
+            handle_geospatial_georadiusbymember_cmd(&state, &request).await
+        }
+        "geospatial.geopos" => handle_geospatial_geopos_cmd(&state, &request).await,
+        "geospatial.geohash" => handle_geospatial_geohash_cmd(&state, &request).await,
+        "geospatial.stats" => handle_geospatial_stats_cmd(&state, &request).await,
         "queue.create" => handle_queue_create_cmd(&state, &request).await,
         "queue.delete" => handle_queue_delete_cmd(&state, &request).await,
         "queue.publish" => handle_queue_publish_cmd(&state, &request).await,
@@ -7108,6 +7119,23 @@ pub struct BitmapOpResponse {
     pub length: usize,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct BitmapFieldOperation {
+    pub operation: String, // "GET", "SET", "INCRBY"
+    pub offset: usize,
+    pub width: usize,
+    pub signed: Option<bool>,
+    pub value: Option<i64>,       // For SET
+    pub increment: Option<i64>,   // For INCRBY
+    pub overflow: Option<String>, // "WRAP", "SAT", "FAIL"
+}
+
+#[derive(Debug, Serialize)]
+pub struct BitmapFieldResponse {
+    pub key: String,
+    pub results: Vec<i64>,
+}
+
 // ==================== Bitmap REST Handlers ====================
 
 /// POST /bitmap/:key/setbit - Set bit at offset to value (0 or 1)
@@ -7193,6 +7221,75 @@ pub async fn bitmap_bitop(
     Ok(Json(BitmapOpResponse {
         destination,
         length,
+    }))
+}
+
+/// POST /bitmap/:key/bitfield - Execute bitfield operations
+pub async fn bitmap_bitfield(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<Vec<BitmapFieldOperation>>,
+) -> Result<Json<BitmapFieldResponse>, SynapError> {
+    debug!("REST BITFIELD key={} operations={}", key, req.len());
+
+    use crate::core::{BitfieldOperation as CoreOp, BitfieldOverflow};
+
+    let mut operations = Vec::new();
+
+    for op in req {
+        let core_op = match op.operation.to_uppercase().as_str() {
+            "GET" => CoreOp::Get {
+                offset: op.offset,
+                width: op.width,
+                signed: op.signed.unwrap_or(false),
+            },
+            "SET" => {
+                let value = op.value.ok_or_else(|| {
+                    SynapError::InvalidRequest("SET operation requires 'value' field".to_string())
+                })?;
+                CoreOp::Set {
+                    offset: op.offset,
+                    width: op.width,
+                    signed: op.signed.unwrap_or(false),
+                    value,
+                }
+            }
+            "INCRBY" => {
+                let increment = op.increment.ok_or_else(|| {
+                    SynapError::InvalidRequest(
+                        "INCRBY operation requires 'increment' field".to_string(),
+                    )
+                })?;
+                let overflow = op
+                    .overflow
+                    .as_deref()
+                    .map(|s| s.parse())
+                    .transpose()?
+                    .unwrap_or(BitfieldOverflow::Wrap);
+                CoreOp::IncrBy {
+                    offset: op.offset,
+                    width: op.width,
+                    signed: op.signed.unwrap_or(false),
+                    increment,
+                    overflow,
+                }
+            }
+            _ => {
+                return Err(SynapError::InvalidRequest(format!(
+                    "Invalid operation: {}",
+                    op.operation
+                )));
+            }
+        };
+        operations.push(core_op);
+    }
+
+    let results = state.bitmap_store.bitfield(&key, &operations)?;
+    let values: Vec<i64> = results.iter().map(|r| r.value).collect();
+
+    Ok(Json(BitmapFieldResponse {
+        key,
+        results: values,
     }))
 }
 
@@ -7354,6 +7451,109 @@ async fn handle_bitmap_bitop_cmd(
         .bitop(operation, destination, &source_keys)?;
 
     Ok(serde_json::json!({ "destination": destination, "length": length }))
+}
+
+async fn handle_bitmap_bitfield_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let operations_json = request
+        .payload
+        .get("operations")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'operations' array".to_string()))?;
+
+    use crate::core::{BitfieldOperation as CoreOp, BitfieldOverflow};
+
+    let mut operations = Vec::new();
+
+    for op_json in operations_json {
+        let op_type = op_json
+            .get("operation")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| SynapError::InvalidRequest("Missing 'operation' field".to_string()))?;
+
+        let offset = op_json
+            .get("offset")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| SynapError::InvalidRequest("Missing 'offset' field".to_string()))?
+            as usize;
+
+        let width = op_json
+            .get("width")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| SynapError::InvalidRequest("Missing 'width' field".to_string()))?
+            as usize;
+
+        let signed = op_json
+            .get("signed")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let core_op = match op_type.to_uppercase().as_str() {
+            "GET" => CoreOp::Get {
+                offset,
+                width,
+                signed,
+            },
+            "SET" => {
+                let value = op_json
+                    .get("value")
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| {
+                        SynapError::InvalidRequest(
+                            "SET operation requires 'value' field".to_string(),
+                        )
+                    })?;
+                CoreOp::Set {
+                    offset,
+                    width,
+                    signed,
+                    value,
+                }
+            }
+            "INCRBY" => {
+                let increment = op_json
+                    .get("increment")
+                    .and_then(|v| v.as_i64())
+                    .ok_or_else(|| {
+                        SynapError::InvalidRequest(
+                            "INCRBY operation requires 'increment' field".to_string(),
+                        )
+                    })?;
+                let overflow_str = op_json
+                    .get("overflow")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("WRAP");
+                let overflow = overflow_str.parse().unwrap_or(BitfieldOverflow::Wrap);
+                CoreOp::IncrBy {
+                    offset,
+                    width,
+                    signed,
+                    increment,
+                    overflow,
+                }
+            }
+            _ => {
+                return Err(SynapError::InvalidRequest(format!(
+                    "Invalid operation: {}",
+                    op_type
+                )));
+            }
+        };
+        operations.push(core_op);
+    }
+
+    let results = state.bitmap_store.bitfield(key, &operations)?;
+    let values: Vec<i64> = results.iter().map(|r| r.value).collect();
+
+    Ok(serde_json::json!({ "key": key, "results": values }))
 }
 
 async fn handle_bitmap_stats_cmd(
@@ -7830,4 +8030,715 @@ pub async fn sortedset_zdiffstore(
     Ok(Json(
         json!({ "count": count, "destination": req.destination }),
     ))
+}
+
+// ==================== Geospatial Request/Response Types ====================
+
+#[derive(Debug, Deserialize)]
+pub struct GeospatialAddLocation {
+    pub lat: f64,
+    pub lon: f64,
+    pub member: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GeospatialAddRequest {
+    pub locations: Vec<GeospatialAddLocation>,
+    #[serde(default)]
+    pub nx: bool,
+    #[serde(default)]
+    pub xx: bool,
+    #[serde(default)]
+    pub ch: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GeospatialAddResponse {
+    pub key: String,
+    pub added: usize,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GeospatialDistRequest {
+    pub member1: String,
+    pub member2: String,
+    #[serde(default = "default_unit")]
+    pub unit: String,
+}
+
+fn default_unit() -> String {
+    "m".to_string()
+}
+
+#[derive(Debug, Serialize)]
+pub struct GeospatialDistResponse {
+    pub key: String,
+    pub distance: Option<f64>,
+    pub unit: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GeospatialRadiusRequest {
+    pub center_lat: f64,
+    pub center_lon: f64,
+    pub radius: f64,
+    #[serde(default = "default_unit")]
+    pub unit: String,
+    #[serde(default)]
+    pub with_dist: bool,
+    #[serde(default)]
+    pub with_coord: bool,
+    pub count: Option<usize>,
+    pub sort: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GeospatialRadiusResponse {
+    pub key: String,
+    pub results: Vec<GeospatialRadiusResult>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GeospatialRadiusResult {
+    pub member: String,
+    pub distance: Option<f64>,
+    pub coord: Option<GeospatialCoord>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GeospatialCoord {
+    pub lat: f64,
+    pub lon: f64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GeospatialRadiusByMemberRequest {
+    pub member: String,
+    pub radius: f64,
+    #[serde(default = "default_unit")]
+    pub unit: String,
+    #[serde(default)]
+    pub with_dist: bool,
+    #[serde(default)]
+    pub with_coord: bool,
+    pub count: Option<usize>,
+    pub sort: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct GeospatialPosRequest {
+    pub members: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GeospatialPosResponse {
+    pub key: String,
+    pub coordinates: Vec<Option<GeospatialCoord>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GeospatialHashResponse {
+    pub key: String,
+    pub geohashes: Vec<Option<String>>,
+}
+
+// ==================== Geospatial REST Handlers ====================
+
+/// POST /geospatial/:key/geoadd - Add geospatial locations
+pub async fn geospatial_geoadd(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<GeospatialAddRequest>,
+) -> Result<Json<GeospatialAddResponse>, SynapError> {
+    debug!(
+        "REST GEOADD key={} locations={} nx={} xx={} ch={}",
+        key,
+        req.locations.len(),
+        req.nx,
+        req.xx,
+        req.ch
+    );
+
+    let locations: Vec<(f64, f64, Vec<u8>)> = req
+        .locations
+        .into_iter()
+        .map(|loc| (loc.lat, loc.lon, loc.member.into_bytes()))
+        .collect();
+
+    let added = state
+        .geospatial_store
+        .geoadd(&key, locations, req.nx, req.xx, req.ch)?;
+
+    Ok(Json(GeospatialAddResponse { key, added }))
+}
+
+/// GET /geospatial/:key/geodist/:member1/:member2 - Calculate distance
+pub async fn geospatial_geodist(
+    State(state): State<AppState>,
+    Path((key, member1, member2)): Path<(String, String, String)>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<GeospatialDistResponse>, SynapError> {
+    let unit_str = params
+        .get("unit")
+        .cloned()
+        .unwrap_or_else(|| "m".to_string());
+    let unit = unit_str.parse::<crate::core::DistanceUnit>()?;
+
+    debug!(
+        "REST GEODIST key={} member1={} member2={} unit={:?}",
+        key, member1, member2, unit
+    );
+
+    let distance =
+        state
+            .geospatial_store
+            .geodist(&key, member1.as_bytes(), member2.as_bytes(), unit)?;
+
+    Ok(Json(GeospatialDistResponse {
+        key,
+        distance,
+        unit: unit_str,
+    }))
+}
+
+/// GET /geospatial/:key/georadius - Query within radius
+pub async fn geospatial_georadius(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<GeospatialRadiusResponse>, SynapError> {
+    let center_lat: f64 = params
+        .get("lat")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'lat' parameter".to_string()))?;
+    let center_lon: f64 = params
+        .get("lon")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'lon' parameter".to_string()))?;
+    let radius: f64 = params
+        .get("radius")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'radius' parameter".to_string()))?;
+    let unit_str = params
+        .get("unit")
+        .cloned()
+        .unwrap_or_else(|| "m".to_string());
+    let unit = unit_str.parse::<crate::core::DistanceUnit>()?;
+    let with_dist = params.get("withdist").map(|s| s == "true").unwrap_or(false);
+    let with_coord = params
+        .get("withcoord")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+    let count = params.get("count").and_then(|s| s.parse().ok());
+    let sort = params.get("sort").cloned();
+
+    debug!(
+        "REST GEORADIUS key={} lat={} lon={} radius={} unit={:?}",
+        key, center_lat, center_lon, radius, unit
+    );
+
+    let results = state.geospatial_store.georadius(
+        &key,
+        center_lat,
+        center_lon,
+        radius,
+        unit,
+        with_dist,
+        with_coord,
+        count,
+        sort.as_deref(),
+    )?;
+
+    let response_results: Vec<GeospatialRadiusResult> = results
+        .into_iter()
+        .map(|(member, distance, coord)| {
+            let member_str = String::from_utf8_lossy(&member).to_string();
+            let coord_opt = coord.map(|c| GeospatialCoord {
+                lat: c.lat,
+                lon: c.lon,
+            });
+            GeospatialRadiusResult {
+                member: member_str,
+                distance,
+                coord: coord_opt,
+            }
+        })
+        .collect();
+
+    Ok(Json(GeospatialRadiusResponse {
+        key,
+        results: response_results,
+    }))
+}
+
+/// GET /geospatial/:key/georadiusbymember/:member - Query within radius of member
+pub async fn geospatial_georadiusbymember(
+    State(state): State<AppState>,
+    Path((key, member)): Path<(String, String)>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<GeospatialRadiusResponse>, SynapError> {
+    let radius: f64 = params
+        .get("radius")
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'radius' parameter".to_string()))?;
+    let unit_str = params
+        .get("unit")
+        .cloned()
+        .unwrap_or_else(|| "m".to_string());
+    let unit = unit_str.parse::<crate::core::DistanceUnit>()?;
+    let with_dist = params.get("withdist").map(|s| s == "true").unwrap_or(false);
+    let with_coord = params
+        .get("withcoord")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+    let count = params.get("count").and_then(|s| s.parse().ok());
+    let sort = params.get("sort").cloned();
+
+    debug!(
+        "REST GEORADIUSBYMEMBER key={} member={} radius={} unit={:?}",
+        key, member, radius, unit
+    );
+
+    let results = state.geospatial_store.georadiusbymember(
+        &key,
+        member.as_bytes(),
+        radius,
+        unit,
+        with_dist,
+        with_coord,
+        count,
+        sort.as_deref(),
+    )?;
+
+    let response_results: Vec<GeospatialRadiusResult> = results
+        .into_iter()
+        .map(|(member_bytes, distance, coord)| {
+            let member_str = String::from_utf8_lossy(&member_bytes).to_string();
+            let coord_opt = coord.map(|c| GeospatialCoord {
+                lat: c.lat,
+                lon: c.lon,
+            });
+            GeospatialRadiusResult {
+                member: member_str,
+                distance,
+                coord: coord_opt,
+            }
+        })
+        .collect();
+
+    Ok(Json(GeospatialRadiusResponse {
+        key,
+        results: response_results,
+    }))
+}
+
+/// POST /geospatial/:key/geopos - Get coordinates of members
+pub async fn geospatial_geopos(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<GeospatialPosRequest>,
+) -> Result<Json<GeospatialPosResponse>, SynapError> {
+    debug!("REST GEOPOS key={} members={:?}", key, req.members);
+
+    let members: Vec<Vec<u8>> = req.members.into_iter().map(|m| m.into_bytes()).collect();
+
+    let coordinates = state.geospatial_store.geopos(&key, &members)?;
+
+    let response_coords: Vec<Option<GeospatialCoord>> = coordinates
+        .into_iter()
+        .map(|coord_opt| {
+            coord_opt.map(|c| GeospatialCoord {
+                lat: c.lat,
+                lon: c.lon,
+            })
+        })
+        .collect();
+
+    Ok(Json(GeospatialPosResponse {
+        key,
+        coordinates: response_coords,
+    }))
+}
+
+/// POST /geospatial/:key/geohash - Get geohash strings
+pub async fn geospatial_geohash(
+    State(state): State<AppState>,
+    Path(key): Path<String>,
+    Json(req): Json<GeospatialPosRequest>,
+) -> Result<Json<GeospatialHashResponse>, SynapError> {
+    debug!("REST GEOHASH key={} members={:?}", key, req.members);
+
+    let members: Vec<Vec<u8>> = req.members.into_iter().map(|m| m.into_bytes()).collect();
+
+    let geohashes = state.geospatial_store.geohash(&key, &members)?;
+
+    Ok(Json(GeospatialHashResponse { key, geohashes }))
+}
+
+/// GET /geospatial/stats - Retrieve geospatial statistics
+pub async fn geospatial_stats(
+    State(state): State<AppState>,
+) -> Result<Json<crate::core::GeospatialStats>, SynapError> {
+    debug!("REST GEOSPATIAL STATS");
+
+    let stats = state.geospatial_store.stats();
+
+    Ok(Json(stats))
+}
+
+// ==================== Geospatial StreamableHTTP Command Handlers ====================
+
+async fn handle_geospatial_geoadd_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let locations_array = request
+        .payload
+        .get("locations")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'locations' array".to_string()))?;
+
+    let mut locations = Vec::new();
+    for loc in locations_array {
+        let lat = loc
+            .get("lat")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| SynapError::InvalidRequest("Location missing 'lat'".to_string()))?;
+        let lon = loc
+            .get("lon")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| SynapError::InvalidRequest("Location missing 'lon'".to_string()))?;
+        let member = loc
+            .get("member")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| SynapError::InvalidRequest("Location missing 'member'".to_string()))?;
+
+        locations.push((lat, lon, member.as_bytes().to_vec()));
+    }
+
+    let nx = request
+        .payload
+        .get("nx")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let xx = request
+        .payload
+        .get("xx")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let ch = request
+        .payload
+        .get("ch")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let added = state.geospatial_store.geoadd(key, locations, nx, xx, ch)?;
+
+    Ok(serde_json::json!({ "key": key, "added": added }))
+}
+
+async fn handle_geospatial_geodist_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let member1 = request
+        .payload
+        .get("member1")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member1' field".to_string()))?;
+    let member2 = request
+        .payload
+        .get("member2")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member2' field".to_string()))?;
+
+    let unit_str = request
+        .payload
+        .get("unit")
+        .and_then(|v| v.as_str())
+        .unwrap_or("m");
+    let unit = unit_str.parse::<crate::core::DistanceUnit>()?;
+
+    let distance =
+        state
+            .geospatial_store
+            .geodist(key, member1.as_bytes(), member2.as_bytes(), unit)?;
+
+    Ok(serde_json::json!({
+        "key": key,
+        "member1": member1,
+        "member2": member2,
+        "distance": distance,
+        "unit": unit_str
+    }))
+}
+
+async fn handle_geospatial_georadius_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let center_lat = request
+        .payload
+        .get("center_lat")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'center_lat' field".to_string()))?;
+    let center_lon = request
+        .payload
+        .get("center_lon")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'center_lon' field".to_string()))?;
+    let radius = request
+        .payload
+        .get("radius")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'radius' field".to_string()))?;
+
+    let unit_str = request
+        .payload
+        .get("unit")
+        .and_then(|v| v.as_str())
+        .unwrap_or("m");
+    let unit = unit_str.parse::<crate::core::DistanceUnit>()?;
+
+    let with_dist = request
+        .payload
+        .get("with_dist")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let with_coord = request
+        .payload
+        .get("with_coord")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let count = request
+        .payload
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
+    let sort = request
+        .payload
+        .get("sort")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let results = state.geospatial_store.georadius(
+        key,
+        center_lat,
+        center_lon,
+        radius,
+        unit,
+        with_dist,
+        with_coord,
+        count,
+        sort.as_deref(),
+    )?;
+
+    let json_results: Vec<serde_json::Value> = results
+        .into_iter()
+        .map(|(member, distance, coord)| {
+            let mut obj = serde_json::json!({
+                "member": String::from_utf8_lossy(&member).to_string(),
+            });
+            if let Some(dist) = distance {
+                obj["distance"] = serde_json::json!(dist);
+            }
+            if let Some(coord_val) = coord {
+                obj["coord"] = serde_json::json!({
+                    "lat": coord_val.lat,
+                    "lon": coord_val.lon,
+                });
+            }
+            obj
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "key": key, "results": json_results }))
+}
+
+async fn handle_geospatial_georadiusbymember_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let member = request
+        .payload
+        .get("member")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
+
+    let radius = request
+        .payload
+        .get("radius")
+        .and_then(|v| v.as_f64())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'radius' field".to_string()))?;
+
+    let unit_str = request
+        .payload
+        .get("unit")
+        .and_then(|v| v.as_str())
+        .unwrap_or("m");
+    let unit = unit_str.parse::<crate::core::DistanceUnit>()?;
+
+    let with_dist = request
+        .payload
+        .get("with_dist")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let with_coord = request
+        .payload
+        .get("with_coord")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let count = request
+        .payload
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .map(|v| v as usize);
+    let sort = request
+        .payload
+        .get("sort")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    let results = state.geospatial_store.georadiusbymember(
+        key,
+        member.as_bytes(),
+        radius,
+        unit,
+        with_dist,
+        with_coord,
+        count,
+        sort.as_deref(),
+    )?;
+
+    let json_results: Vec<serde_json::Value> = results
+        .into_iter()
+        .map(|(member_bytes, distance, coord)| {
+            let mut obj = serde_json::json!({
+                "member": String::from_utf8_lossy(&member_bytes).to_string(),
+            });
+            if let Some(dist) = distance {
+                obj["distance"] = serde_json::json!(dist);
+            }
+            if let Some(coord_val) = coord {
+                obj["coord"] = serde_json::json!({
+                    "lat": coord_val.lat,
+                    "lon": coord_val.lon,
+                });
+            }
+            obj
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "key": key, "results": json_results }))
+}
+
+async fn handle_geospatial_geopos_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let members_array = request
+        .payload
+        .get("members")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'members' array".to_string()))?;
+
+    let members: Vec<Vec<u8>> = members_array
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.as_bytes().to_vec()))
+        .collect();
+
+    let coordinates = state.geospatial_store.geopos(key, &members)?;
+
+    let json_coords: Vec<Option<serde_json::Value>> = coordinates
+        .into_iter()
+        .map(|coord_opt| {
+            coord_opt.map(|c| {
+                serde_json::json!({
+                    "lat": c.lat,
+                    "lon": c.lon,
+                })
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({
+        "key": key,
+        "coordinates": json_coords
+    }))
+}
+
+async fn handle_geospatial_geohash_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let members_array = request
+        .payload
+        .get("members")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'members' array".to_string()))?;
+
+    let members: Vec<Vec<u8>> = members_array
+        .iter()
+        .filter_map(|v| v.as_str().map(|s| s.as_bytes().to_vec()))
+        .collect();
+
+    let geohashes = state.geospatial_store.geohash(key, &members)?;
+
+    Ok(serde_json::json!({
+        "key": key,
+        "geohashes": geohashes
+    }))
+}
+
+async fn handle_geospatial_stats_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let stats = state.geospatial_store.stats();
+
+    Ok(serde_json::json!({
+        "total_keys": stats.total_keys,
+        "total_locations": stats.total_locations,
+        "geoadd_count": stats.geoadd_count,
+        "geodist_count": stats.geodist_count,
+        "georadius_count": stats.georadius_count,
+        "geopos_count": stats.geopos_count,
+        "geohash_count": stats.geohash_count,
+    }))
 }

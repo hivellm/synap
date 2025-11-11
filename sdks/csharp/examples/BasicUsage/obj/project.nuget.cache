@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "FU22xv07+eykDOTkxCRzM2O3FqIDHpNdYKKlvKcNwXEwZ7yxelfco2cBW/GJehoK2xoMpbPXx6hnZ32Bdela7w==",
+  "dgSpecHash": "pbhj1HduNYp8huMu60tAmd7Xbvfs6rSlqCYr+wgKEMAUSA+QO89u+5UjWLpHaiezzNcQTbFsSBuwawQzJgPkTQ==",
   "success": true,
   "projectFilePath": "/mnt/f/Node/hivellm/synap/sdks/csharp/examples/BasicUsage/BasicUsage.csproj",
   "expectedPackageFiles": [

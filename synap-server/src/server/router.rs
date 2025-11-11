@@ -207,7 +207,34 @@ pub fn create_router(
         .route("/bitmap/{key}/bitcount", get(handlers::bitmap_bitcount))
         .route("/bitmap/{key}/bitpos", get(handlers::bitmap_bitpos))
         .route("/bitmap/{destination}/bitop", post(handlers::bitmap_bitop))
+        .route("/bitmap/{key}/bitfield", post(handlers::bitmap_bitfield))
         .route("/bitmap/stats", get(handlers::bitmap_stats))
+        // Geospatial endpoints
+        .route(
+            "/geospatial/{key}/geoadd",
+            post(handlers::geospatial_geoadd),
+        )
+        .route(
+            "/geospatial/{key}/geodist/{member1}/{member2}",
+            get(handlers::geospatial_geodist),
+        )
+        .route(
+            "/geospatial/{key}/georadius",
+            get(handlers::geospatial_georadius),
+        )
+        .route(
+            "/geospatial/{key}/georadiusbymember/{member}",
+            get(handlers::geospatial_georadiusbymember),
+        )
+        .route(
+            "/geospatial/{key}/geopos",
+            post(handlers::geospatial_geopos),
+        )
+        .route(
+            "/geospatial/{key}/geohash",
+            post(handlers::geospatial_geohash),
+        )
+        .route("/geospatial/stats", get(handlers::geospatial_stats))
         // Persistence endpoints
         .route("/snapshot", post(handlers::trigger_snapshot))
         // Event Stream endpoints

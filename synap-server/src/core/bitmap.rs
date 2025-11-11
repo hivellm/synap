@@ -218,6 +218,198 @@ impl BitmapValue {
     pub fn is_empty(&self) -> bool {
         self.data.is_empty() || self.data.iter().all(|&b| b == 0)
     }
+
+    /// BITFIELD - Get integer value from bit field
+    /// Reads a signed or unsigned integer of specified bit width at offset
+    pub fn bitfield_get(&self, offset: usize, width: usize, signed: bool) -> Result<i64> {
+        if width == 0 || width > 64 {
+            return Err(SynapError::InvalidValue(
+                "Bit width must be between 1 and 64".to_string(),
+            ));
+        }
+
+        let end_bit = offset + width - 1;
+        let end_byte = end_bit / 8;
+
+        if end_byte >= self.data.len() {
+            return Ok(0); // Return 0 for unset bits
+        }
+
+        // Read bits across byte boundaries
+        // Redis BITFIELD uses little-endian bit order (LSB first)
+        let mut value: u64 = 0;
+
+        for i in 0..width {
+            let bit_pos = offset + i;
+            let byte_idx = bit_pos / 8;
+            if byte_idx >= self.data.len() {
+                break; // Unset bits are 0
+            }
+            let bit_in_byte = bit_pos % 8; // LSB first (little-endian)
+            let bit_value = (self.data[byte_idx] >> bit_in_byte) & 1;
+            value |= (bit_value as u64) << i; // Set bit i
+        }
+
+        // Sign extend if signed and MSB is set
+        if signed && (value >> (width - 1)) & 1 == 1 {
+            // Sign extend: fill upper bits with 1s
+            let sign_mask = !((1u64 << width) - 1);
+            value |= sign_mask;
+        }
+
+        Ok(value as i64)
+    }
+
+    /// BITFIELD - Set integer value in bit field
+    /// Writes a signed or unsigned integer of specified bit width at offset
+    /// Returns the previous value
+    pub fn bitfield_set(
+        &mut self,
+        offset: usize,
+        width: usize,
+        signed: bool,
+        value: i64,
+    ) -> Result<i64> {
+        if width == 0 || width > 64 {
+            return Err(SynapError::InvalidValue(
+                "Bit width must be between 1 and 64".to_string(),
+            ));
+        }
+
+        // Get previous value
+        let old_value = self.bitfield_get(offset, width, signed)?;
+
+        // Ensure capacity
+        let end_bit = offset + width - 1;
+        let end_byte = end_bit / 8;
+        if end_byte >= self.data.len() {
+            self.data.resize(end_byte + 1, 0);
+        }
+
+        self.updated_at = Self::current_timestamp();
+
+        // Mask value to fit width
+        let mask = if width == 64 {
+            0xFFFFFFFFFFFFFFFFu64
+        } else {
+            (1u64 << width) - 1
+        };
+
+        let mut value_to_write = value as u64;
+        if signed {
+            // For signed values, mask and sign extend
+            value_to_write &= mask;
+            if (value_to_write >> (width - 1)) & 1 == 1 {
+                // Negative value, sign extend
+                let sign_mask = !mask;
+                value_to_write |= sign_mask;
+            }
+        } else {
+            // For unsigned, just mask
+            value_to_write &= mask;
+        }
+
+        // Write bits across byte boundaries
+        // Redis BITFIELD uses little-endian bit order (LSB first)
+        for i in 0..width {
+            let bit_pos = offset + i;
+            let byte_idx = bit_pos / 8;
+            let bit_in_byte = bit_pos % 8; // LSB first (little-endian)
+            let bit_value = ((value_to_write >> i) & 1) as u8; // Extract bit i (LSB is i=0)
+
+            if bit_value == 1 {
+                self.data[byte_idx] |= 1 << bit_in_byte;
+            } else {
+                self.data[byte_idx] &= !(1 << bit_in_byte);
+            }
+        }
+
+        Ok(old_value)
+    }
+
+    /// BITFIELD - Increment integer value in bit field
+    /// Increments a signed or unsigned integer of specified bit width at offset
+    /// Returns the new value after increment
+    pub fn bitfield_incrby(
+        &mut self,
+        offset: usize,
+        width: usize,
+        signed: bool,
+        increment: i64,
+        overflow: BitfieldOverflow,
+    ) -> Result<i64> {
+        // Get current value
+        let current = self.bitfield_get(offset, width, signed)?;
+
+        // Calculate new value
+        let new_value = match overflow {
+            BitfieldOverflow::Wrap => {
+                // Wrapping arithmetic
+                let max_value = if signed {
+                    (1i64 << (width - 1)) - 1
+                } else {
+                    (1i64 << width) - 1
+                };
+                let min_value = if signed { -(1i64 << (width - 1)) } else { 0 };
+
+                let result = current.wrapping_add(increment);
+                if signed {
+                    // Wrap signed value
+                    if result > max_value {
+                        min_value + (result - max_value - 1)
+                    } else if result < min_value {
+                        max_value - (min_value - result - 1)
+                    } else {
+                        result
+                    }
+                } else {
+                    // Wrap unsigned value
+                    if result > max_value {
+                        min_value + (result - max_value - 1)
+                    } else if result < 0 {
+                        max_value + result + 1
+                    } else {
+                        result
+                    }
+                }
+            }
+            BitfieldOverflow::Sat => {
+                // Saturating arithmetic
+                let max_value = if signed {
+                    (1i64 << (width - 1)) - 1
+                } else {
+                    (1i64 << width) - 1
+                };
+                let min_value = if signed { -(1i64 << (width - 1)) } else { 0 };
+
+                let result = current.saturating_add(increment);
+                result.max(min_value).min(max_value)
+            }
+            BitfieldOverflow::Fail => {
+                // Fail on overflow
+                let max_value = if signed {
+                    (1i64 << (width - 1)) - 1
+                } else {
+                    (1i64 << width) - 1
+                };
+                let min_value = if signed { -(1i64 << (width - 1)) } else { 0 };
+
+                let result = current + increment;
+                if result > max_value || result < min_value {
+                    return Err(SynapError::InvalidValue(format!(
+                        "Overflow: value {} would exceed range [{}, {}]",
+                        result, min_value, max_value
+                    )));
+                }
+                result
+            }
+        };
+
+        // Set new value
+        self.bitfield_set(offset, width, signed, new_value)?;
+
+        Ok(new_value)
+    }
 }
 
 impl Default for BitmapValue {
@@ -520,6 +712,77 @@ impl BitmapStore {
         result
     }
 
+    /// BITFIELD - Execute multiple bitfield operations
+    /// Executes a sequence of GET, SET, or INCRBY operations
+    pub fn bitfield(
+        &self,
+        key: &str,
+        operations: &[BitfieldOperation],
+    ) -> Result<Vec<BitfieldResult>> {
+        let shard = self.shard(key);
+        let mut map = shard.write();
+
+        // Remove expired value if present
+        if let Some(existing_bitmap) = map.get(key) {
+            if existing_bitmap.is_expired() {
+                map.remove(key);
+            }
+        }
+
+        let bitmap = map
+            .entry(key.to_string())
+            .or_insert_with(|| BitmapValue::new(None));
+
+        let mut results = Vec::new();
+
+        for op in operations {
+            let result = match op {
+                BitfieldOperation::Get {
+                    offset,
+                    width,
+                    signed,
+                } => {
+                    let value = bitmap.bitfield_get(*offset, *width, *signed)?;
+                    BitfieldResult {
+                        operation: BitfieldOp::Get,
+                        value,
+                    }
+                }
+                BitfieldOperation::Set {
+                    offset,
+                    width,
+                    signed,
+                    value,
+                } => {
+                    let old_value = bitmap.bitfield_set(*offset, *width, *signed, *value)?;
+                    BitfieldResult {
+                        operation: BitfieldOp::Set,
+                        value: old_value,
+                    }
+                }
+                BitfieldOperation::IncrBy {
+                    offset,
+                    width,
+                    signed,
+                    increment,
+                    overflow,
+                } => {
+                    let new_value =
+                        bitmap.bitfield_incrby(*offset, *width, *signed, *increment, *overflow)?;
+                    BitfieldResult {
+                        operation: BitfieldOp::IncrBy,
+                        value: new_value,
+                    }
+                }
+            };
+            results.push(result);
+        }
+
+        self.stats.write().bitfield_count += 1;
+
+        Ok(results)
+    }
+
     /// Get statistics
     pub fn stats(&self) -> BitmapStats {
         let mut stats = self.stats.read().clone();
@@ -552,6 +815,75 @@ pub enum BitmapOperation {
     Or,
     Xor,
     Not,
+}
+
+/// Bitfield overflow behavior
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BitfieldOverflow {
+    /// Wrap around on overflow (default)
+    #[default]
+    Wrap,
+    /// Saturate at min/max values
+    Sat,
+    /// Fail on overflow
+    Fail,
+}
+
+impl std::str::FromStr for BitfieldOverflow {
+    type Err = SynapError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        match s.to_uppercase().as_str() {
+            "WRAP" => Ok(BitfieldOverflow::Wrap),
+            "SAT" => Ok(BitfieldOverflow::Sat),
+            "FAIL" => Ok(BitfieldOverflow::Fail),
+            _ => Err(SynapError::InvalidRequest(format!(
+                "Invalid overflow behavior: {}",
+                s
+            ))),
+        }
+    }
+}
+
+/// Bitfield operation type
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BitfieldOp {
+    Get,
+    Set,
+    IncrBy,
+}
+
+/// Bitfield operation result
+#[derive(Debug, Clone)]
+pub struct BitfieldResult {
+    pub operation: BitfieldOp,
+    pub value: i64,
+}
+
+/// Bitfield operation specification
+#[derive(Debug, Clone)]
+pub enum BitfieldOperation {
+    /// GET operation: read value at offset
+    Get {
+        offset: usize,
+        width: usize,
+        signed: bool,
+    },
+    /// SET operation: write value at offset
+    Set {
+        offset: usize,
+        width: usize,
+        signed: bool,
+        value: i64,
+    },
+    /// INCRBY operation: increment value at offset
+    IncrBy {
+        offset: usize,
+        width: usize,
+        signed: bool,
+        increment: i64,
+        overflow: BitfieldOverflow,
+    },
 }
 
 impl std::str::FromStr for BitmapOperation {
@@ -682,5 +1014,505 @@ mod tests {
         assert_eq!(store.getbit("result", 1).unwrap(), 1);
         assert_eq!(store.getbit("result", 2).unwrap(), 1);
         assert_eq!(store.getbit("result", 3).unwrap(), 0);
+    }
+
+    #[test]
+    fn test_bitfield_get() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set bits manually to create value 42 (binary: 101010)
+        // Using 8 bits at offset 0
+        bitmap.setbit(0, 1).unwrap(); // bit 0 = 1
+        bitmap.setbit(2, 1).unwrap(); // bit 2 = 1
+        bitmap.setbit(4, 1).unwrap(); // bit 4 = 1
+        bitmap.setbit(6, 1).unwrap(); // bit 6 = 1
+
+        // Read as unsigned 8-bit value
+        let value = bitmap.bitfield_get(0, 8, false).unwrap();
+        assert_eq!(value, 0b10101010); // 170 in decimal
+
+        // Read as signed 8-bit value (should be negative if MSB is set)
+        let signed_value = bitmap.bitfield_get(0, 8, true).unwrap();
+        assert_eq!(signed_value, -86); // 0b10101010 as signed = -86
+    }
+
+    #[test]
+    fn test_bitfield_set() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set 8-bit unsigned value 42 at offset 0
+        // 42 in binary (little-endian): 01010100
+        let old_value = bitmap.bitfield_set(0, 8, false, 42).unwrap();
+        assert_eq!(old_value, 0); // Was empty
+
+        // Read back using bitfield_get (same encoding)
+        let value = bitmap.bitfield_get(0, 8, false).unwrap();
+        assert_eq!(value, 42);
+
+        // Test setting another value
+        let old_value2 = bitmap.bitfield_set(0, 8, false, 100).unwrap();
+        assert_eq!(old_value2, 42); // Previous value
+        let value2 = bitmap.bitfield_get(0, 8, false).unwrap();
+        assert_eq!(value2, 100);
+    }
+
+    #[test]
+    fn test_bitfield_incrby_wrap() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set 4-bit unsigned value 14 at offset 0
+        bitmap.bitfield_set(0, 4, false, 14).unwrap();
+
+        // Increment by 1 (should wrap to 0)
+        let new_value = bitmap
+            .bitfield_incrby(0, 4, false, 1, BitfieldOverflow::Wrap)
+            .unwrap();
+        assert_eq!(new_value, 15);
+
+        // Increment by 1 again (should wrap to 0)
+        let new_value = bitmap
+            .bitfield_incrby(0, 4, false, 1, BitfieldOverflow::Wrap)
+            .unwrap();
+        assert_eq!(new_value, 0);
+    }
+
+    #[test]
+    fn test_bitfield_incrby_sat() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set 4-bit unsigned value 14 at offset 0
+        bitmap.bitfield_set(0, 4, false, 14).unwrap();
+
+        // Increment by 1 (should saturate at 15)
+        let new_value = bitmap
+            .bitfield_incrby(0, 4, false, 1, BitfieldOverflow::Sat)
+            .unwrap();
+        assert_eq!(new_value, 15);
+
+        // Increment by 1 again (should stay at 15)
+        let new_value = bitmap
+            .bitfield_incrby(0, 4, false, 1, BitfieldOverflow::Sat)
+            .unwrap();
+        assert_eq!(new_value, 15);
+    }
+
+    #[test]
+    fn test_bitfield_incrby_fail() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set 4-bit unsigned value 15 at offset 0
+        bitmap.bitfield_set(0, 4, false, 15).unwrap();
+
+        // Increment by 1 (should fail)
+        let result = bitmap.bitfield_incrby(0, 4, false, 1, BitfieldOverflow::Fail);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bitfield_store_operations() {
+        let store = BitmapStore::new();
+
+        // Execute multiple operations
+        let operations = vec![
+            BitfieldOperation::Set {
+                offset: 0,
+                width: 8,
+                signed: false,
+                value: 100,
+            },
+            BitfieldOperation::Get {
+                offset: 0,
+                width: 8,
+                signed: false,
+            },
+            BitfieldOperation::IncrBy {
+                offset: 0,
+                width: 8,
+                signed: false,
+                increment: 50,
+                overflow: BitfieldOverflow::Wrap,
+            },
+        ];
+
+        let results = store.bitfield("test", &operations).unwrap();
+        assert_eq!(results.len(), 3);
+        assert_eq!(results[0].value, 0); // Old value was 0
+        assert_eq!(results[1].value, 100); // Read back 100
+        assert_eq!(results[2].value, 150); // Incremented to 150
+    }
+
+    #[test]
+    fn test_bitfield_signed_values() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set signed 8-bit value -10
+        bitmap.bitfield_set(0, 8, true, -10).unwrap();
+
+        // Read back as signed
+        let value = bitmap.bitfield_get(0, 8, true).unwrap();
+        assert_eq!(value, -10);
+
+        // Read as unsigned (should be 246)
+        let unsigned_value = bitmap.bitfield_get(0, 8, false).unwrap();
+        assert_eq!(unsigned_value, 246);
+    }
+
+    #[test]
+    fn test_bitfield_cross_byte_boundary() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set 16-bit value at offset 4 (crosses byte boundary)
+        bitmap.bitfield_set(4, 16, false, 0x1234).unwrap();
+
+        // Read back
+        let value = bitmap.bitfield_get(4, 16, false).unwrap();
+        assert_eq!(value, 0x1234);
+    }
+
+    #[test]
+    fn test_bitfield_different_widths() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Test 4-bit unsigned
+        bitmap.bitfield_set(0, 4, false, 15).unwrap();
+        assert_eq!(bitmap.bitfield_get(0, 4, false).unwrap(), 15);
+
+        // Test 12-bit unsigned
+        bitmap.bitfield_set(4, 12, false, 4095).unwrap();
+        assert_eq!(bitmap.bitfield_get(4, 12, false).unwrap(), 4095);
+
+        // Test 24-bit unsigned
+        bitmap.bitfield_set(16, 24, false, 16777215).unwrap();
+        assert_eq!(bitmap.bitfield_get(16, 24, false).unwrap(), 16777215);
+    }
+
+    #[test]
+    fn test_bitfield_signed_negative() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Test 8-bit signed negative value
+        bitmap.bitfield_set(0, 8, true, -10).unwrap();
+        assert_eq!(bitmap.bitfield_get(0, 8, true).unwrap(), -10);
+
+        // Test 16-bit signed negative value
+        bitmap.bitfield_set(8, 16, true, -1000).unwrap();
+        assert_eq!(bitmap.bitfield_get(8, 16, true).unwrap(), -1000);
+
+        // Test 4-bit signed negative value
+        bitmap.bitfield_set(24, 4, true, -8).unwrap();
+        assert_eq!(bitmap.bitfield_get(24, 4, true).unwrap(), -8);
+    }
+
+    #[test]
+    fn test_bitfield_incrby_negative_increment() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set initial value
+        bitmap.bitfield_set(0, 8, false, 100).unwrap();
+
+        // Decrement by 50
+        let new_value = bitmap
+            .bitfield_incrby(0, 8, false, -50, BitfieldOverflow::Wrap)
+            .unwrap();
+        assert_eq!(new_value, 50);
+
+        // Decrement by 100 (should wrap)
+        let new_value = bitmap
+            .bitfield_incrby(0, 8, false, -100, BitfieldOverflow::Wrap)
+            .unwrap();
+        assert_eq!(new_value, 206); // 50 - 100 wraps to 206 (256 - 50)
+    }
+
+    #[test]
+    fn test_bitfield_incrby_signed_wrap() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set signed 8-bit value to 127 (max positive)
+        bitmap.bitfield_set(0, 8, true, 127).unwrap();
+
+        // Increment by 1 (should wrap to -128)
+        let new_value = bitmap
+            .bitfield_incrby(0, 8, true, 1, BitfieldOverflow::Wrap)
+            .unwrap();
+        assert_eq!(new_value, -128);
+
+        // Increment by 1 again (should wrap to -127)
+        let new_value = bitmap
+            .bitfield_incrby(0, 8, true, 1, BitfieldOverflow::Wrap)
+            .unwrap();
+        assert_eq!(new_value, -127);
+    }
+
+    #[test]
+    fn test_bitfield_incrby_signed_sat() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set signed 8-bit value to 127 (max positive)
+        bitmap.bitfield_set(0, 8, true, 127).unwrap();
+
+        // Increment by 1 (should saturate at 127)
+        let new_value = bitmap
+            .bitfield_incrby(0, 8, true, 1, BitfieldOverflow::Sat)
+            .unwrap();
+        assert_eq!(new_value, 127);
+
+        // Set to -128 (min negative)
+        bitmap.bitfield_set(0, 8, true, -128).unwrap();
+
+        // Decrement by 1 (should saturate at -128)
+        let new_value = bitmap
+            .bitfield_incrby(0, 8, true, -1, BitfieldOverflow::Sat)
+            .unwrap();
+        assert_eq!(new_value, -128);
+    }
+
+    #[test]
+    fn test_bitfield_multiple_operations() {
+        let store = BitmapStore::new();
+
+        // Execute complex sequence of operations
+        let operations = vec![
+            // Set multiple fields
+            BitfieldOperation::Set {
+                offset: 0,
+                width: 8,
+                signed: false,
+                value: 100,
+            },
+            BitfieldOperation::Set {
+                offset: 8,
+                width: 8,
+                signed: false,
+                value: 200,
+            },
+            BitfieldOperation::Set {
+                offset: 16,
+                width: 8,
+                signed: false,
+                value: 50,
+            },
+            // Read them back
+            BitfieldOperation::Get {
+                offset: 0,
+                width: 8,
+                signed: false,
+            },
+            BitfieldOperation::Get {
+                offset: 8,
+                width: 8,
+                signed: false,
+            },
+            BitfieldOperation::Get {
+                offset: 16,
+                width: 8,
+                signed: false,
+            },
+            // Increment middle field
+            BitfieldOperation::IncrBy {
+                offset: 8,
+                width: 8,
+                signed: false,
+                increment: 50,
+                overflow: BitfieldOverflow::Wrap,
+            },
+        ];
+
+        let results = store.bitfield("multi", &operations).unwrap();
+        assert_eq!(results.len(), 7);
+        assert_eq!(results[0].value, 0); // Old value at offset 0
+        assert_eq!(results[1].value, 0); // Old value at offset 8
+        assert_eq!(results[2].value, 0); // Old value at offset 16
+        assert_eq!(results[3].value, 100); // Read back offset 0
+        assert_eq!(results[4].value, 200); // Read back offset 8
+        assert_eq!(results[5].value, 50); // Read back offset 16
+        assert_eq!(results[6].value, 250); // Incremented offset 8
+    }
+
+    #[test]
+    fn test_bitfield_overlapping_fields() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set 8-bit value at offset 0
+        bitmap.bitfield_set(0, 8, false, 0xAA).unwrap(); // 10101010
+
+        // Set 4-bit value at offset 4 (overlaps with first field)
+        bitmap.bitfield_set(4, 4, false, 0xF).unwrap(); // 1111
+
+        // Read back 8-bit value (should be modified)
+        let value = bitmap.bitfield_get(0, 8, false).unwrap();
+        assert_eq!(value, 0xFA); // 11111010
+    }
+
+    #[test]
+    fn test_bitfield_large_offset() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set value at large offset (beyond initial capacity)
+        bitmap.bitfield_set(1000, 8, false, 42).unwrap();
+
+        // Read back
+        let value = bitmap.bitfield_get(1000, 8, false).unwrap();
+        assert_eq!(value, 42);
+
+        // Verify earlier bits are still 0
+        let value_before = bitmap.bitfield_get(0, 8, false).unwrap();
+        assert_eq!(value_before, 0);
+    }
+
+    #[test]
+    fn test_bitfield_64bit_value() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set 64-bit unsigned value
+        bitmap
+            .bitfield_set(0, 64, false, 0x1234567890ABCDEF)
+            .unwrap();
+
+        // Read back
+        let value = bitmap.bitfield_get(0, 64, false).unwrap();
+        assert_eq!(value, 0x1234567890ABCDEF);
+    }
+
+    #[test]
+    fn test_bitfield_incrby_fail_unsigned() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set 4-bit unsigned value to max (15)
+        bitmap.bitfield_set(0, 4, false, 15).unwrap();
+
+        // Try to increment (should fail)
+        let result = bitmap.bitfield_incrby(0, 4, false, 1, BitfieldOverflow::Fail);
+        assert!(result.is_err());
+
+        // Try to increment by large value (should fail)
+        let result = bitmap.bitfield_incrby(0, 4, false, 100, BitfieldOverflow::Fail);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bitfield_incrby_fail_signed() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set 4-bit signed value to max (7)
+        bitmap.bitfield_set(0, 4, true, 7).unwrap();
+
+        // Try to increment (should fail)
+        let result = bitmap.bitfield_incrby(0, 4, true, 1, BitfieldOverflow::Fail);
+        assert!(result.is_err());
+
+        // Set to min (-8)
+        bitmap.bitfield_set(0, 4, true, -8).unwrap();
+
+        // Try to decrement (should fail)
+        let result = bitmap.bitfield_incrby(0, 4, true, -1, BitfieldOverflow::Fail);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bitfield_get_unset_bits() {
+        let bitmap = BitmapValue::new(None);
+
+        // Read from empty bitmap (should return 0)
+        let value = bitmap.bitfield_get(0, 8, false).unwrap();
+        assert_eq!(value, 0);
+
+        // Read from offset beyond bitmap size
+        let value = bitmap.bitfield_get(1000, 8, false).unwrap();
+        assert_eq!(value, 0);
+    }
+
+    #[test]
+    fn test_bitfield_partial_read() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set 8-bit value
+        bitmap.bitfield_set(0, 8, false, 0xFF).unwrap();
+
+        // Read only 4 bits (should get lower 4 bits)
+        let value = bitmap.bitfield_get(0, 4, false).unwrap();
+        assert_eq!(value, 0xF); // Lower 4 bits of 0xFF
+
+        // Read upper 4 bits
+        let value = bitmap.bitfield_get(4, 4, false).unwrap();
+        assert_eq!(value, 0xF); // Upper 4 bits of 0xFF
+    }
+
+    #[test]
+    fn test_bitfield_store_expiration() {
+        let store = BitmapStore::new();
+
+        // Create bitmap with operations
+        let operations = vec![BitfieldOperation::Set {
+            offset: 0,
+            width: 8,
+            signed: false,
+            value: 42,
+        }];
+
+        let results = store.bitfield("expire_test", &operations).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].value, 0);
+
+        // Read back
+        let read_ops = vec![BitfieldOperation::Get {
+            offset: 0,
+            width: 8,
+            signed: false,
+        }];
+        let results = store.bitfield("expire_test", &read_ops).unwrap();
+        assert_eq!(results[0].value, 42);
+    }
+
+    #[test]
+    fn test_bitfield_invalid_width() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Width 0 should fail
+        let result = bitmap.bitfield_set(0, 0, false, 42);
+        assert!(result.is_err());
+
+        // Width > 64 should fail
+        let result = bitmap.bitfield_set(0, 65, false, 42);
+        assert!(result.is_err());
+
+        // Width 0 for GET should fail
+        let result = bitmap.bitfield_get(0, 0, false);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_bitfield_signed_unsigned_interop() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Set as unsigned 8-bit value 200
+        bitmap.bitfield_set(0, 8, false, 200).unwrap();
+
+        // Read as signed (should be negative)
+        let signed_value = bitmap.bitfield_get(0, 8, true).unwrap();
+        assert_eq!(signed_value, -56); // 200 as signed 8-bit is -56
+
+        // Set as signed negative value
+        bitmap.bitfield_set(8, 8, true, -10).unwrap();
+
+        // Read as unsigned (should be 246)
+        let unsigned_value = bitmap.bitfield_get(8, 8, false).unwrap();
+        assert_eq!(unsigned_value, 246); // -10 as unsigned 8-bit is 246
+    }
+
+    #[test]
+    fn test_bitfield_32bit_values() {
+        let mut bitmap = BitmapValue::new(None);
+
+        // Test 32-bit unsigned
+        bitmap.bitfield_set(0, 32, false, 0xFFFFFFFF).unwrap();
+        assert_eq!(bitmap.bitfield_get(0, 32, false).unwrap(), 0xFFFFFFFF);
+
+        // Test 32-bit signed positive
+        bitmap.bitfield_set(32, 32, true, 2147483647).unwrap();
+        assert_eq!(bitmap.bitfield_get(32, 32, true).unwrap(), 2147483647);
+
+        // Test 32-bit signed negative
+        bitmap.bitfield_set(64, 32, true, -2147483648).unwrap();
+        assert_eq!(bitmap.bitfield_get(64, 32, true).unwrap(), -2147483648);
     }
 }

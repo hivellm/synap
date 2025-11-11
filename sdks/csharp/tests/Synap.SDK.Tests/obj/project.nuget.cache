@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "tsJCyfLPw8cSwWnF4RaF6wHrmdVHN0uBbO/urJdmZj1jHqN8lJCk8Oqs3n1a/RIiA2G4oZD7pQg7fyi7X3nQRA==",
+  "dgSpecHash": "Vp6gn18cZCYV2RVjRIZlu4Ldm7AaVAP3HKWcchLB86n6MUXxj+FlcU7LYdwoQoWSizwwJrsAbOTlbhXeCSyv9A==",
   "success": true,
   "projectFilePath": "/mnt/f/Node/hivellm/synap/sdks/csharp/tests/Synap.SDK.Tests/Synap.SDK.Tests.csproj",
   "expectedPackageFiles": [

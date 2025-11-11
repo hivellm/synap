@@ -3,7 +3,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use synap_server::core::{
-    BitmapStore, HashStore, HyperLogLogStore, ListStore, SetStore, SortedSetStore,
+    BitmapStore, GeospatialStore, HashStore, HyperLogLogStore, ListStore, SetStore, SortedSetStore,
 };
 use synap_server::monitoring::MonitoringManager;
 use synap_server::{AppState, KVStore, ScriptManager};
@@ -36,6 +36,7 @@ pub fn create_test_app_state_with_stores(
 
     let hyperloglog_store = Arc::new(HyperLogLogStore::new());
     let bitmap_store = Arc::new(BitmapStore::new());
+    let geospatial_store = Arc::new(GeospatialStore::new(sorted_set_store.clone()));
 
     AppState {
         kv_store,
@@ -45,6 +46,7 @@ pub fn create_test_app_state_with_stores(
         sorted_set_store,
         hyperloglog_store,
         bitmap_store,
+        geospatial_store,
         queue_manager: None,
         stream_manager: None,
         partition_manager: None,

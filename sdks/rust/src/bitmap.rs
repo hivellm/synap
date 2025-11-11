@@ -218,6 +218,73 @@ impl BitmapManager {
         Ok(response["length"].as_u64().unwrap_or(0) as usize)
     }
 
+    /// Execute bitfield operations (BITFIELD)
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - Bitmap key
+    /// * `operations` - Vector of bitfield operations
+    ///
+    /// # Returns
+    ///
+    /// Vector of result values (one per operation)
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// use synap_sdk::bitmap::BitmapManager;
+    /// use serde_json::json;
+    ///
+    /// # async fn example(bitmap: BitmapManager) -> Result<(), Box<dyn std::error::Error>> {
+    /// let operations = vec![
+    ///     json!({
+    ///         "operation": "SET",
+    ///         "offset": 0,
+    ///         "width": 8,
+    ///         "signed": false,
+    ///         "value": 42
+    ///     }),
+    ///     json!({
+    ///         "operation": "GET",
+    ///         "offset": 0,
+    ///         "width": 8,
+    ///         "signed": false
+    ///     }),
+    ///     json!({
+    ///         "operation": "INCRBY",
+    ///         "offset": 0,
+    ///         "width": 8,
+    ///         "signed": false,
+    ///         "increment": 10,
+    ///         "overflow": "WRAP"
+    ///     }),
+    /// ];
+    ///
+    /// let results = bitmap.bitfield("mybitmap", &operations).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn bitfield(&self, key: &str, operations: &[serde_json::Value]) -> Result<Vec<i64>> {
+        let payload = json!({
+            "key": key,
+            "operations": operations,
+        });
+
+        let response = self.client.send_command("bitmap.bitfield", payload).await?;
+        let results = response["results"]
+            .as_array()
+            .ok_or_else(|| {
+                crate::error::SynapError::ServerError(
+                    "Invalid response format for bitfield".to_string(),
+                )
+            })?
+            .iter()
+            .map(|v| v.as_i64().unwrap_or(0))
+            .collect();
+
+        Ok(results)
+    }
+
     /// Retrieve bitmap statistics
     pub async fn stats(&self) -> Result<BitmapStats> {
         let response = self.client.send_command("bitmap.stats", json!({})).await?;

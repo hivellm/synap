@@ -1,19 +1,20 @@
 # Tasks: Add HyperLogLog Support
 
-> **Status**: 📋 Pending  
+> **Status**: 🚧 In Progress (core ops shipped, unit/integration tests pending)  
 > **Target**: v0.8.0-alpha  
 > **Priority**: Medium (Phase 4)
 
 ## Core (3 commands, ~40 tasks, 2 weeks)
 
 ### Implementation
-- [ ] HyperLogLog storage (use `hyperloglog` crate)
-- [ ] PFADD, PFCOUNT, PFMERGE
-- [ ] 10+ unit tests
+- [x] HyperLogLog storage (custom implementation using 16,384 registers)
+- [x] PFADD, PFCOUNT, PFMERGE commands
+- [ ] 10+ unit tests (currently 3)
 
 ### API
-- [ ] 3 REST endpoints, 3 StreamableHTTP commands
+- [x] 3 REST endpoints, 3 StreamableHTTP commands
 
 ### Testing
-- [ ] 12+ unit tests, 8+ integration tests (accuracy validation)
+- [ ] 12+ unit tests (currently 3)
+- [ ] 8+ integration tests (currently 4)
 

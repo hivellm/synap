@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Synap API",
-    "description": "High-Performance In-Memory Key-Value Store & Message Broker\n\nSynap combines Redis, RabbitMQ, and Kafka features in a single platform:\n- **Key-Value Store**: Radix-tree based storage with TTL support\n- **Message Queues**: RabbitMQ-style queues with ACK/NACK\n- **Event Streams**: Kafka-style partitioned topics with consumer groups\n- **Pub/Sub**: Topic-based messaging with wildcard support\n\n**Authentication**: Supports Basic Auth, Bearer Token, and API Key\n",
-    "version": "0.3.0-rc",
+    "description": "High-Performance In-Memory Key-Value Store & Message Broker\n\nSynap combines Redis, RabbitMQ, and Kafka features in a single platform:\n- **Key-Value Store**: Radix-tree based storage with TTL support\n- **Hash Store**: Redis-compatible hash data structure for structured objects\n- **Message Queues**: RabbitMQ-style queues with ACK/NACK\n- **Event Streams**: Kafka-style partitioned topics with consumer groups\n- **Pub/Sub**: Topic-based messaging with wildcard support\n\n**Authentication**: Supports Basic Auth, Bearer Token, and API Key\n",
+    "version": "0.7.0-rc2",
     "contact": {
       "name": "Synap Team",
       "url": "https://github.com/hivellm/synap"
@@ -31,6 +31,42 @@
     {
       "name": "Key-Value",
       "description": "Redis-style key-value operations"
+    },
+    {
+      "name": "Hash",
+      "description": "Redis-style hash operations (field-value maps)"
+    },
+    {
+      "name": "Bitmap",
+      "description": "Redis-style bitmap operations"
+    },
+    {
+      "name": "List",
+      "description": "Redis-style list operations"
+    },
+    {
+      "name": "Set",
+      "description": "Redis-style set operations"
+    },
+    {
+      "name": "Sorted Set",
+      "description": "Redis-style sorted set operations"
+    },
+    {
+      "name": "HyperLogLog",
+      "description": "Redis-style HyperLogLog operations"
+    },
+    {
+      "name": "Geospatial",
+      "description": "Redis-style geospatial operations"
+    },
+    {
+      "name": "Transactions",
+      "description": "Redis-style transaction operations"
+    },
+    {
+      "name": "Scripting",
+      "description": "Lua scripting operations"
     },
     {
       "name": "Queue",
@@ -267,6 +303,1176 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/KVStats"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hash/{key}/set": {
+      "post": {
+        "tags": [
+          "Hash"
+        ],
+        "summary": "Set a hash field",
+        "description": "Set a field value in a hash",
+        "operationId": "hashSet",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:1000"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "field",
+                  "value"
+                ],
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "example": "name"
+                  },
+                  "value": {
+                    "description": "Value (can be string, number, or object)",
+                    "example": "Alice"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Field set successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HashSetResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hash/{key}/{field}": {
+      "get": {
+        "tags": [
+          "Hash"
+        ],
+        "summary": "Get a hash field value",
+        "description": "Retrieve the value of a field in a hash",
+        "operationId": "hashGet",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:1000"
+          },
+          {
+            "name": "field",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Field value retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "description": "Field value (string, number, or null if not found)",
+                  "example": "Alice"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Hash or field not found"
+          }
+        }
+      }
+    },
+    "/hash/{key}/getall": {
+      "get": {
+        "tags": [
+          "Hash"
+        ],
+        "summary": "Get all hash fields",
+        "description": "Retrieve all field-value pairs in a hash",
+        "operationId": "hashGetAll",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:1000"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "All fields retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "example": {
+                    "name": "Alice",
+                    "age": 30,
+                    "email": "alice@example.com"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hash/{key}/keys": {
+      "get": {
+        "tags": [
+          "Hash"
+        ],
+        "summary": "Get all field names",
+        "description": "Retrieve all field names in a hash",
+        "operationId": "hashKeys",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:1000"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Field names retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "example": [
+                    "name",
+                    "age",
+                    "email"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hash/{key}/vals": {
+      "get": {
+        "tags": [
+          "Hash"
+        ],
+        "summary": "Get all field values",
+        "description": "Retrieve all values in a hash",
+        "operationId": "hashVals",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:1000"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Values retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "description": "Field value"
+                  },
+                  "example": [
+                    "Alice",
+                    30,
+                    "alice@example.com"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hash/{key}/len": {
+      "get": {
+        "tags": [
+          "Hash"
+        ],
+        "summary": "Get hash field count",
+        "description": "Get the number of fields in a hash",
+        "operationId": "hashLen",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:1000"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Field count retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "length": {
+                      "type": "integer",
+                      "example": 3
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hash/{key}/mset": {
+      "post": {
+        "tags": [
+          "Hash"
+        ],
+        "summary": "Set multiple hash fields",
+        "description": "Set multiple field-value pairs in a hash",
+        "operationId": "hashMSet",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:1000"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fields"
+                ],
+                "properties": {
+                  "fields": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "example": {
+                      "name": "Alice",
+                      "age": 30,
+                      "email": "alice@example.com"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fields set successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hash/{key}/mget": {
+      "post": {
+        "tags": [
+          "Hash"
+        ],
+        "summary": "Get multiple hash fields",
+        "description": "Retrieve values for multiple fields in a hash",
+        "operationId": "hashMGet",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:1000"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fields"
+                ],
+                "properties": {
+                  "fields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "name",
+                      "age",
+                      "email"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Field values retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "description": "Field value (null if not found)"
+                  },
+                  "example": [
+                    "Alice",
+                    30,
+                    "alice@example.com"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hash/{key}/del": {
+      "post": {
+        "tags": [
+          "Hash"
+        ],
+        "summary": "Delete hash fields",
+        "description": "Delete one or more fields from a hash",
+        "operationId": "hashDel",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:1000"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "fields"
+                ],
+                "properties": {
+                  "fields": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "email",
+                      "age"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Fields deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HashDelResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hash/{key}/{field}/exists": {
+      "get": {
+        "tags": [
+          "Hash"
+        ],
+        "summary": "Check field existence",
+        "description": "Check if a field exists in a hash",
+        "operationId": "hashExists",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:1000"
+          },
+          {
+            "name": "field",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "name"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Existence check result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "exists": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hash/{key}/incrby": {
+      "post": {
+        "tags": [
+          "Hash"
+        ],
+        "summary": "Increment field by integer",
+        "description": "Atomically increment a hash field by an integer",
+        "operationId": "hashIncrBy",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "stats:user:1000"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "field",
+                  "increment"
+                ],
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "example": "login_count"
+                  },
+                  "increment": {
+                    "type": "integer",
+                    "format": "int64",
+                    "example": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Field incremented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "integer",
+                      "format": "int64",
+                      "example": 42
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hash/{key}/incrbyfloat": {
+      "post": {
+        "tags": [
+          "Hash"
+        ],
+        "summary": "Increment field by float",
+        "description": "Atomically increment a hash field by a floating point number",
+        "operationId": "hashIncrByFloat",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "stats:metrics"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "field",
+                  "increment"
+                ],
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "example": "average_response_time"
+                  },
+                  "increment": {
+                    "type": "number",
+                    "format": "double",
+                    "example": 0.25
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Field incremented",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "value": {
+                      "type": "number",
+                      "format": "double",
+                      "example": 123.75
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hash/{key}/setnx": {
+      "post": {
+        "tags": [
+          "Hash"
+        ],
+        "summary": "Set field if not exists",
+        "description": "Set a hash field only if it doesn't already exist",
+        "operationId": "hashSetNX",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:1000"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "field",
+                  "value"
+                ],
+                "properties": {
+                  "field": {
+                    "type": "string",
+                    "example": "created_at"
+                  },
+                  "value": {
+                    "description": "Value to set",
+                    "example": "2025-10-24T12:00:00Z"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Set operation result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "created": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/hash/stats": {
+      "get": {
+        "tags": [
+          "Hash"
+        ],
+        "summary": "Get hash statistics",
+        "description": "Retrieve statistics about the hash store",
+        "operationId": "hashStats",
+        "responses": {
+          "200": {
+            "description": "Statistics retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HashStatsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bitmap/{key}/setbit": {
+      "post": {
+        "tags": [
+          "Bitmap"
+        ],
+        "summary": "Set bit at offset",
+        "description": "Set a bit at a specific offset in a bitmap (0 or 1)",
+        "operationId": "bitmapSetBit",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:flags"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "offset",
+                  "value"
+                ],
+                "properties": {
+                  "offset": {
+                    "type": "integer",
+                    "format": "int64",
+                    "description": "Bit offset (0-based)",
+                    "example": 5
+                  },
+                  "value": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Bit value (0 or 1)",
+                    "example": 1
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bit set successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "example": "user:flags"
+                    },
+                    "old_value": {
+                      "type": "integer",
+                      "example": 0
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bitmap/{key}/getbit/{offset}": {
+      "get": {
+        "tags": [
+          "Bitmap"
+        ],
+        "summary": "Get bit at offset",
+        "description": "Retrieve the value of a bit at a specific offset",
+        "operationId": "bitmapGetBit",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:flags"
+          },
+          {
+            "name": "offset",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "example": 5
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bit value retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "example": "user:flags"
+                    },
+                    "offset": {
+                      "type": "integer",
+                      "example": 5
+                    },
+                    "value": {
+                      "type": "integer",
+                      "example": 1
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bitmap/{key}/bitcount": {
+      "get": {
+        "tags": [
+          "Bitmap"
+        ],
+        "summary": "Count set bits",
+        "description": "Count the number of bits set to 1 in a bitmap, optionally within a range",
+        "operationId": "bitmapBitCount",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:flags"
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Start byte offset (optional)",
+            "example": 0
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "End byte offset (optional)",
+            "example": 10
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bit count retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "example": "user:flags"
+                    },
+                    "count": {
+                      "type": "integer",
+                      "example": 42
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bitmap/{key}/bitpos": {
+      "get": {
+        "tags": [
+          "Bitmap"
+        ],
+        "summary": "Find first bit position",
+        "description": "Find the position of the first bit set to the specified value",
+        "operationId": "bitmapBitPos",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:flags"
+          },
+          {
+            "name": "value",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "description": "Bit value to search for (0 or 1)",
+            "example": 1
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Start byte offset (optional)",
+            "example": 0
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "End byte offset (optional)",
+            "example": 10
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Bit position found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "example": "user:flags"
+                    },
+                    "position": {
+                      "type": "integer",
+                      "nullable": true,
+                      "example": 7
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bitmap/{destination}/bitop": {
+      "post": {
+        "tags": [
+          "Bitmap"
+        ],
+        "summary": "Perform bitwise operation",
+        "description": "Perform bitwise operations (AND, OR, XOR, NOT) on multiple bitmaps",
+        "operationId": "bitmapBitOp",
+        "parameters": [
+          {
+            "name": "destination",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "result:flags"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "operation",
+                  "source_keys"
+                ],
+                "properties": {
+                  "operation": {
+                    "type": "string",
+                    "enum": [
+                      "AND",
+                      "OR",
+                      "XOR",
+                      "NOT"
+                    ],
+                    "example": "AND"
+                  },
+                  "source_keys": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "example": [
+                      "bitmap1",
+                      "bitmap2"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bitwise operation completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "destination": {
+                      "type": "string",
+                      "example": "result:flags"
+                    },
+                    "length": {
+                      "type": "integer",
+                      "example": 128
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bitmap/{key}/bitfield": {
+      "post": {
+        "tags": [
+          "Bitmap"
+        ],
+        "summary": "Execute bitfield operations",
+        "description": "Perform multiple bitfield operations (GET, SET, INCRBY) on a bitmap",
+        "operationId": "bitmapBitField",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "user:flags"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/BitfieldOperation"
+                },
+                "example": [
+                  {
+                    "operation": "SET",
+                    "offset": 0,
+                    "width": 8,
+                    "signed": false,
+                    "value": 42
+                  },
+                  {
+                    "operation": "GET",
+                    "offset": 0,
+                    "width": 8,
+                    "signed": false
+                  },
+                  {
+                    "operation": "INCRBY",
+                    "offset": 0,
+                    "width": 8,
+                    "signed": false,
+                    "increment": 10,
+                    "overflow": "WRAP"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bitfield operations completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "key": {
+                      "type": "string",
+                      "example": "user:flags"
+                    },
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "format": "int64"
+                      },
+                      "example": [
+                        0,
+                        42,
+                        52
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/bitmap/stats": {
+      "get": {
+        "tags": [
+          "Bitmap"
+        ],
+        "summary": "Get bitmap statistics",
+        "description": "Retrieve statistics about the bitmap store",
+        "operationId": "bitmapStats",
+        "responses": {
+          "200": {
+            "description": "Statistics retrieved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BitmapStatsResponse"
                 }
               }
             }
@@ -1855,6 +3061,131 @@
           }
         }
       },
+      "HashSetResponse": {
+        "type": "object",
+        "properties": {
+          "created": {
+            "type": "boolean",
+            "description": "True if field was created, false if updated",
+            "example": true
+          }
+        }
+      },
+      "HashDelResponse": {
+        "type": "object",
+        "properties": {
+          "deleted": {
+            "type": "integer",
+            "description": "Number of fields deleted",
+            "example": 2
+          }
+        }
+      },
+      "HashStatsResponse": {
+        "type": "object",
+        "properties": {
+          "total_hashes": {
+            "type": "integer",
+            "description": "Total number of hashes",
+            "example": 1000
+          },
+          "total_fields": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total number of fields across all hashes",
+            "example": 50000
+          },
+          "total_memory_bytes": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Total memory used by hash storage",
+            "example": 2097152
+          },
+          "operations": {
+            "type": "object",
+            "properties": {
+              "hset_count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Total HSET operations",
+                "example": 10000
+              },
+              "hget_count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Total HGET operations",
+                "example": 50000
+              },
+              "hdel_count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Total HDEL operations",
+                "example": 500
+              },
+              "hgetall_count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Total HGETALL operations",
+                "example": 5000
+              },
+              "hmset_count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Total HMSET operations",
+                "example": 2000
+              },
+              "hmget_count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Total HMGET operations",
+                "example": 8000
+              },
+              "hincrby_count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Total HINCRBY operations",
+                "example": 1500
+              },
+              "hincrbyfloat_count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Total HINCRBYFLOAT operations",
+                "example": 500
+              },
+              "hexists_count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Total HEXISTS operations",
+                "example": 15000
+              },
+              "hlen_count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Total HLEN operations",
+                "example": 3000
+              },
+              "hkeys_count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Total HKEYS operations",
+                "example": 1000
+              },
+              "hvals_count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Total HVALS operations",
+                "example": 1000
+              },
+              "hsetnx_count": {
+                "type": "integer",
+                "format": "int64",
+                "description": "Total HSETNX operations",
+                "example": 800
+              }
+            }
+          }
+        }
+      },
       "CreateQueueRequest": {
         "type": "object",
         "properties": {
@@ -2524,6 +3855,110 @@
             "type": "integer",
             "format": "int64",
             "example": 1729598400
+          }
+        }
+      },
+      "BitfieldOperation": {
+        "type": "object",
+        "required": [
+          "operation",
+          "offset",
+          "width"
+        ],
+        "properties": {
+          "operation": {
+            "type": "string",
+            "enum": [
+              "GET",
+              "SET",
+              "INCRBY"
+            ],
+            "description": "Operation type",
+            "example": "GET"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Bit offset (0-based)",
+            "example": 0
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 64,
+            "description": "Bit width (1-64)",
+            "example": 8
+          },
+          "signed": {
+            "type": "boolean",
+            "description": "Whether value is signed (default false)",
+            "example": false
+          },
+          "value": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Value for SET operation",
+            "example": 42
+          },
+          "increment": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Increment for INCRBY operation",
+            "example": 10
+          },
+          "overflow": {
+            "type": "string",
+            "enum": [
+              "WRAP",
+              "SAT",
+              "FAIL"
+            ],
+            "description": "Overflow behavior for INCRBY (default WRAP)",
+            "example": "WRAP"
+          }
+        }
+      },
+      "BitmapStatsResponse": {
+        "type": "object",
+        "properties": {
+          "total_bitmaps": {
+            "type": "integer",
+            "example": 1000
+          },
+          "total_bits": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1000000
+          },
+          "setbit_count": {
+            "type": "integer",
+            "format": "int64",
+            "example": 50000
+          },
+          "getbit_count": {
+            "type": "integer",
+            "format": "int64",
+            "example": 100000
+          },
+          "bitcount_count": {
+            "type": "integer",
+            "format": "int64",
+            "example": 20000
+          },
+          "bitpos_count": {
+            "type": "integer",
+            "format": "int64",
+            "example": 5000
+          },
+          "bitop_count": {
+            "type": "integer",
+            "format": "int64",
+            "example": 1000
+          },
+          "bitfield_count": {
+            "type": "integer",
+            "format": "int64",
+            "example": 5000
           }
         }
       }

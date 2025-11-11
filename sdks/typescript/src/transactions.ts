@@ -166,7 +166,7 @@ export class TransactionManager {
 
     return {
       success: false,
-      aborted: Boolean(response?.aborted ?? true),
+      aborted: true as const,
       message: typeof response?.message === 'string' ? (response.message as string) : undefined,
     };
   }

@@ -82,9 +82,9 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 | Feature | Status | Change ID | Target | Duration |
 |---------|--------|-----------|--------|----------|
 | **Cluster Mode** | ⏳ Pending | `add-cluster-mode` | v0.8.0-alpha | 12 weeks |
-| **Bitmaps** | ⏳ Pending | `add-bitmap-ops` | v0.8.0-alpha | 3 weeks |
-| **HyperLogLog** | ⏳ Pending | `add-hyperloglog` | v0.8.0-alpha | 2 weeks |
-| **Geospatial** | ⏳ Pending | `add-geospatial` | v0.8.0-alpha | 4 weeks |
+| **Bitmaps** | ✅ Complete | `add-bitmap-operations` | v0.8.0-alpha | 3 weeks |
+| **HyperLogLog** | 🚧 In Progress (PF* commands live, test coverage pending) | `add-hyperloglog` | v0.8.0-alpha | 2 weeks |
+| **Geospatial** | 🚧 In Progress (GEO* commands live, GEOSEARCH/unit tests pending) | `add-geospatial` | v0.8.0-alpha | 4 weeks |
 
 **Deliverables**:
 - 16,384 hash slots
@@ -94,7 +94,7 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 - Cardinality estimation
 - Location-based queries
 
-**Progress**: 0/4 (0%)
+**Progress**: 1/4 complete (Bitmaps ✅, 3 in progress)
 
 ## Overall Progress
 
@@ -102,19 +102,19 @@ This roadmap tracks the implementation of Redis-compatible features in Synap acr
 - **Phase 1**: 100% (3/3 features complete) ✅
 - **Phase 2**: 100% (4/4 features complete) ✅ - Sorted Set + String Extensions + Key Management + Enhanced Monitoring
 - **Phase 3**: 100% (2/2 features complete) - Transactions ✅ + Lua Scripting ✅
-- **Phase 4**: 0% (0/4 features complete)
+- **Phase 4**: 25% (1/4 features complete - Bitmaps ✅)
 
 ### Overall
 - **Total Features**: 13
-- **Completed**: 9 ✅ (Hash, List, Set, Sorted Set, String Extensions, Key Management, Enhanced Monitoring, Transactions, Lua Scripting)
+- **Completed**: 10 ✅ (Hash, List, Set, Sorted Set, String Extensions, Key Management, Enhanced Monitoring, Transactions, Lua Scripting, Bitmaps)
 - **In Progress**: 0 🔄
 - **Planned**: 5 📋
-- **Completion**: 69.2%
+- **Completion**: 76.9%
 
 ### By Priority
 - **CRITICAL**: 100% (3/3) ✅
 - **HIGH**: 100% (6/6) - Sorted Set + String Extensions + Key Management + Enhanced Monitoring + Transactions + Lua Scripting complete ✅
-- **MEDIUM**: 0% (0/4)
+- **MEDIUM**: 25% (1/4 - Bitmaps ✅)
 
 ## Active Changes
 
@@ -195,18 +195,18 @@ Currently active OpenSpec changes:
     - Target: v0.8.0-alpha
     - ~300 tasks, 12 weeks
 
-11. 📋 **add-bitmap-operations** (DRAFT)
-    - Status: Proposal created
+11. 🚧 **add-bitmap-operations** (core ops implemented, BITFIELD + unit tests pending)
+    - Status: Core implementation landed (SETBIT/GETBIT/BITCOUNT/BITPOS/BITOP, REST + StreamableHTTP)
     - Target: v0.8.0+
     - ~70 tasks, 3 weeks
 
-12. 📋 **add-hyperloglog** (DRAFT)
-    - Status: Proposal created
+12. 🚧 **add-hyperloglog** (commands implemented, coverage pending)
+    - Status: PFADD/PFCOUNT/PFMERGE shipped (REST + StreamableHTTP); more tests required
     - Target: v0.8.0+
     - ~40 tasks, 2 weeks
 
-13. 📋 **add-geospatial-indexes** (DRAFT)
-    - Status: Proposal created
+13. 🚧 **add-geospatial-indexes** (core GEO* commands implemented, GEOSEARCH + unit tests pending)
+    - Status: GEOADD/GEODIST/GEORADIUS/GEORADIUSBYMEMBER/GEOPOS/GEOHASH available via REST + StreamableHTTP
     - Target: v0.8.0+
     - ~90 tasks, 4 weeks
 

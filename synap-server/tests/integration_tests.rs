@@ -25,14 +25,19 @@ async fn spawn_test_server() -> String {
         Arc::new(synap_server::core::SetStore::new()),
         Arc::new(synap_server::core::SortedSetStore::new()),
     ));
+    let sorted_set_store = Arc::new(synap_server::core::SortedSetStore::new());
+    let geospatial_store = Arc::new(synap_server::core::GeospatialStore::new(
+        sorted_set_store.clone(),
+    ));
     let state = AppState {
         kv_store,
         hash_store,
         list_store: Arc::new(synap_server::core::ListStore::new()),
         set_store: Arc::new(synap_server::core::SetStore::new()),
-        sorted_set_store: Arc::new(synap_server::core::SortedSetStore::new()),
+        sorted_set_store,
         hyperloglog_store: Arc::new(synap_server::core::HyperLogLogStore::new()),
         bitmap_store: Arc::new(synap_server::core::BitmapStore::new()),
+        geospatial_store,
         queue_manager: None,
         stream_manager: None,
         pubsub_router: None,
