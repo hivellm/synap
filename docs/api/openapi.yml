@@ -947,6 +947,145 @@ paths:
                 $ref: '#/components/schemas/BitmapStatsResponse'
 
   # ==========================================
+  # HyperLogLog Endpoints
+  # ==========================================
+  /hyperloglog/{key}/pfadd:
+    post:
+      tags: [HyperLogLog]
+      summary: Add elements to HyperLogLog
+      description: Add one or more elements to a HyperLogLog structure for cardinality estimation
+      operationId: hyperloglogPfAdd
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: unique-visitors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [elements]
+              properties:
+                elements:
+                  type: array
+                  items:
+                    type: string
+                  description: Elements to add to the HyperLogLog
+                  example: [user:1, user:2, user:3]
+                ttl_secs:
+                  type: integer
+                  format: int64
+                  description: Optional TTL in seconds for the HyperLogLog
+                  example: 3600
+      responses:
+        '200':
+          description: Elements added successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    example: unique-visitors
+                  added:
+                    type: integer
+                    description: Number of elements estimated to be new (approximate)
+                    example: 2
+
+  /hyperloglog/{key}/pfcount:
+    get:
+      tags: [HyperLogLog]
+      summary: Estimate cardinality
+      description: Get the estimated cardinality (count of unique elements) of a HyperLogLog structure
+      operationId: hyperloglogPfCount
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+          example: unique-visitors
+      responses:
+        '200':
+          description: Cardinality estimate retrieved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  key:
+                    type: string
+                    example: unique-visitors
+                  count:
+                    type: integer
+                    format: int64
+                    description: Estimated cardinality (approximate count of unique elements)
+                    example: 1000
+
+  /hyperloglog/{destination}/pfmerge:
+    post:
+      tags: [HyperLogLog]
+      summary: Merge HyperLogLog structures
+      description: Merge multiple HyperLogLog structures into a destination structure
+      operationId: hyperloglogPfMerge
+      parameters:
+        - name: destination
+          in: path
+          required: true
+          schema:
+            type: string
+          example: total-visitors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sources]
+              properties:
+                sources:
+                  type: array
+                  items:
+                    type: string
+                  description: Source HyperLogLog keys to merge
+                  example: [visitors:day1, visitors:day2, visitors:day3]
+      responses:
+        '200':
+          description: HyperLogLog structures merged successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  destination:
+                    type: string
+                    example: total-visitors
+                  count:
+                    type: integer
+                    format: int64
+                    description: Estimated cardinality of merged result
+                    example: 5000
+
+  /hyperloglog/stats:
+    get:
+      tags: [HyperLogLog]
+      summary: Get HyperLogLog statistics
+      description: Retrieve statistics about the HyperLogLog store
+      operationId: hyperloglogStats
+      responses:
+        '200':
+          description: Statistics retrieved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HyperLogLogStatsResponse'
+
+  # ==========================================
   # Queue Endpoints
   # ==========================================
   /queue/{name}:

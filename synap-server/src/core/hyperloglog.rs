@@ -415,4 +415,243 @@ mod tests {
             Err(SynapError::KeyExpired) | Err(SynapError::NotFound)
         ));
     }
+
+    #[test]
+    fn pfadd_duplicates_return_lower_count() {
+        let store = HyperLogLogStore::new();
+
+        // First add
+        let added1 = store
+            .pfadd("dups", vec![b"user:1".to_vec(), b"user:2".to_vec()], None)
+            .unwrap();
+        assert!(added1 >= 1);
+
+        // Add same elements again
+        let added2 = store
+            .pfadd("dups", vec![b"user:1".to_vec(), b"user:2".to_vec()], None)
+            .unwrap();
+        // Should add fewer (or zero) elements since they're duplicates
+        assert!(added2 <= added1);
+
+        // Count should remain similar
+        let count = store.pfcount("dups").unwrap();
+        assert!(count >= 2);
+    }
+
+    #[test]
+    fn pfcount_nonexistent_key_returns_error() {
+        let store = HyperLogLogStore::new();
+
+        let result = store.pfcount("nonexistent");
+        assert!(matches!(result, Err(SynapError::NotFound)));
+    }
+
+    #[test]
+    fn pfadd_empty_elements() {
+        let store = HyperLogLogStore::new();
+
+        let added = store.pfadd("empty", vec![], None).unwrap();
+        assert_eq!(added, 0);
+
+        // Empty HLL should have count 0 or very small
+        let count = store.pfcount("empty").unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn pfadd_large_set() {
+        let store = HyperLogLogStore::new();
+
+        let mut elements = Vec::new();
+        for i in 0..1000 {
+            elements.push(format!("user:{}", i).into_bytes());
+        }
+
+        let added = store.pfadd("large", elements, None).unwrap();
+        assert!(added >= 100);
+
+        let count = store.pfcount("large").unwrap();
+        // Should be approximately 1000, but with some error tolerance
+        assert!((800..=1200).contains(&count));
+    }
+
+    #[test]
+    fn pfmerge_with_empty_source() {
+        let store = HyperLogLogStore::new();
+
+        // Create source with data
+        store
+            .pfadd("source", vec![b"alpha".to_vec(), b"beta".to_vec()], None)
+            .unwrap();
+
+        // Merge with non-existent source (should be treated as empty)
+        let merged = store
+            .pfmerge("dest", vec!["source".into(), "nonexistent".into()])
+            .unwrap();
+
+        assert!(merged >= 2);
+    }
+
+    #[test]
+    fn pfmerge_multiple_sources() {
+        let store = HyperLogLogStore::new();
+
+        store
+            .pfadd("src1", vec![b"a".to_vec(), b"b".to_vec()], None)
+            .unwrap();
+        store
+            .pfadd("src2", vec![b"c".to_vec(), b"d".to_vec()], None)
+            .unwrap();
+        store
+            .pfadd("src3", vec![b"e".to_vec(), b"f".to_vec()], None)
+            .unwrap();
+
+        let merged = store
+            .pfmerge("dest", vec!["src1".into(), "src2".into(), "src3".into()])
+            .unwrap();
+
+        assert!(merged >= 5);
+    }
+
+    #[test]
+    fn pfmerge_self_reference_ignored() {
+        let store = HyperLogLogStore::new();
+
+        store
+            .pfadd("self", vec![b"alpha".to_vec(), b"beta".to_vec()], None)
+            .unwrap();
+
+        // Merge with self (should be ignored)
+        let merged = store.pfmerge("self", vec!["self".into()]).unwrap();
+
+        // Should still have original count
+        assert!(merged >= 2);
+    }
+
+    #[test]
+    fn pfmerge_creates_destination_if_missing() {
+        let store = HyperLogLogStore::new();
+
+        store.pfadd("source", vec![b"data".to_vec()], None).unwrap();
+
+        // Merge to non-existent destination
+        let merged = store.pfmerge("new_dest", vec!["source".into()]).unwrap();
+
+        assert!(merged >= 1);
+
+        // Destination should now exist
+        let count = store.pfcount("new_dest").unwrap();
+        assert!(count >= 1);
+    }
+
+    #[test]
+    fn stats_track_operations() {
+        let store = HyperLogLogStore::new();
+
+        store.pfadd("key1", vec![b"a".to_vec()], None).unwrap();
+        store.pfadd("key2", vec![b"b".to_vec()], None).unwrap();
+        store.pfcount("key1").unwrap();
+        store
+            .pfmerge("merged", vec!["key1".into(), "key2".into()])
+            .unwrap();
+
+        let stats = store.stats();
+
+        assert_eq!(stats.total_hlls, 3); // key1, key2, merged
+        assert_eq!(stats.pfadd_count, 2);
+        assert_eq!(stats.pfcount_count, 1);
+        assert_eq!(stats.pfmerge_count, 1);
+        assert!(stats.total_cardinality > 0);
+    }
+
+    #[test]
+    fn pfadd_updates_existing_ttl() {
+        let store = HyperLogLogStore::new();
+
+        // Create with TTL
+        store
+            .pfadd("ttl_key", vec![b"data".to_vec()], Some(60))
+            .unwrap();
+
+        // Update with new TTL
+        store
+            .pfadd("ttl_key", vec![b"more_data".to_vec()], Some(120))
+            .unwrap();
+
+        // Should still be accessible
+        assert!(store.pfcount("ttl_key").is_ok());
+    }
+
+    #[test]
+    fn pfadd_incremental_updates_cardinality() {
+        let store = HyperLogLogStore::new();
+
+        let mut count1 = 0;
+        for i in 0..10 {
+            store
+                .pfadd(
+                    "incremental",
+                    vec![format!("item:{}", i).into_bytes()],
+                    None,
+                )
+                .unwrap();
+            count1 = store.pfcount("incremental").unwrap();
+        }
+
+        assert!((8..=12).contains(&count1)); // Approximate, with error tolerance
+
+        // Add more items
+        for i in 10..50 {
+            store
+                .pfadd(
+                    "incremental",
+                    vec![format!("item:{}", i).into_bytes()],
+                    None,
+                )
+                .unwrap();
+        }
+
+        let count2 = store.pfcount("incremental").unwrap();
+        assert!(count2 > count1);
+        assert!((40..=60).contains(&count2)); // Approximate
+    }
+
+    #[test]
+    fn pfmerge_preserves_destination_data() {
+        let store = HyperLogLogStore::new();
+
+        // Create destination with data
+        store
+            .pfadd("dest", vec![b"dest_data".to_vec()], None)
+            .unwrap();
+
+        // Create source
+        store
+            .pfadd("source", vec![b"source_data".to_vec()], None)
+            .unwrap();
+
+        // Merge source into destination
+        let merged = store.pfmerge("dest", vec!["source".into()]).unwrap();
+
+        // Should have both elements
+        assert!(merged >= 2);
+    }
+
+    #[test]
+    fn reset_stats_clears_counters() {
+        let store = HyperLogLogStore::new();
+
+        store.pfadd("key", vec![b"data".to_vec()], None).unwrap();
+        store.pfcount("key").unwrap();
+
+        let stats_before = store.stats();
+        assert!(stats_before.pfadd_count > 0);
+
+        store.reset_stats();
+
+        let stats_after = store.stats();
+        assert_eq!(stats_after.pfadd_count, 0);
+        assert_eq!(stats_after.pfcount_count, 0);
+        assert_eq!(stats_after.pfmerge_count, 0);
+    }
 }
