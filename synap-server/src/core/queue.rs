@@ -343,6 +343,21 @@ impl QueueManager {
         priority: Option<u8>,
         max_retries: Option<u32>,
     ) -> Result<MessageId> {
+        let message = self
+            .publish_with_message(queue_name, payload, priority, max_retries)
+            .await?;
+        Ok(message.id)
+    }
+
+    /// Publish message to queue and return the full message
+    /// This is useful for persistence logging
+    pub async fn publish_with_message(
+        &self,
+        queue_name: &str,
+        payload: Vec<u8>,
+        priority: Option<u8>,
+        max_retries: Option<u32>,
+    ) -> Result<QueueMessage> {
         debug!("Publishing to queue: {}", queue_name);
 
         let mut queues = self.queues.write();
@@ -355,7 +370,12 @@ impl QueueManager {
         let max_retries = max_retries.unwrap_or(queue.config.default_max_retries);
 
         let message = QueueMessage::new(payload, priority, max_retries);
-        queue.publish(message)
+        let message_id = queue.publish(message.clone())?;
+
+        // Verify message ID matches (should always be true)
+        debug_assert_eq!(message.id, message_id);
+
+        Ok(message)
     }
 
     /// Consume message from queue

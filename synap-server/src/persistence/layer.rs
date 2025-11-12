@@ -349,6 +349,28 @@ impl PersistenceLayer {
         Ok(())
     }
 
+    /// Log a Queue NACK operation
+    pub async fn log_queue_nack(
+        &self,
+        queue: String,
+        message_id: String,
+        requeue: bool,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::QueueNack {
+            queue,
+            message_id,
+            requeue,
+        };
+
+        self.wal.append(operation).await?;
+
+        Ok(())
+    }
+
     /// Log a Stream PUBLISH operation
     pub async fn log_stream_publish(
         &self,
