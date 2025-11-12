@@ -4,7 +4,7 @@
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.85%2B)-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/tests-456%2F456%20(100%25)-brightgreen.svg)](#testing--quality)
 [![Coverage](https://img.shields.io/badge/coverage-99.30%25-brightgreen.svg)](docs/TESTING.md)
-[![Version](https://img.shields.io/badge/version-0.7.0--rc1-blue.svg)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](#project-status)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
 
@@ -37,6 +37,14 @@ Synap provides multiple core capabilities in a single, cohesive system:
 - **🗜️ Smart Compression**: LZ4/Zstd compression with minimal CPU overhead
 - **🔥 Hot Data Cache**: Decompressed cache for frequently accessed data
 
+### 🔐 Security & Authentication (✅ PRODUCTION READY - Jan 2025)
+- **🔒 Authentication System** - Root user, user management, API keys
+- **🛡️ Fine-grained Permissions** - Resource-based permissions (RabbitMQ-style)
+- **📝 Audit Logging** - Track all authentication events
+- **🔑 Password Validation** - Configurable password requirements
+- **🌐 IP Filtering** - Restrict API keys to specific IPs
+- **✅ Basic Auth & Bearer Token** - Support for both authentication methods
+
 ### 💪 Durability (✅ COMPLETE - Oct 2025)
 - **💾 Full Persistence**: WAL + Snapshots for KV, Queue, and Stream
 - **🔄 OptimizedWAL**: Redis-style batching (10K ops/batch, 100µs window)
@@ -57,12 +65,20 @@ Synap provides multiple core capabilities in a single, cohesive system:
 - **🔁 Event Replay**: Stream history and replay capabilities
 - **🔀 Manual Failover**: Promote replica to master capability
 
+### 🔐 Security & Authentication (✅ PRODUCTION READY - Jan 2025)
+- **🔒 Authentication System** - Root user, user management, API keys
+- **🛡️ Fine-grained Permissions** - Resource-based permissions (RabbitMQ-style)
+- **📝 Audit Logging** - Track all authentication events
+- **🔑 Password Validation** - Configurable password requirements
+- **🌐 IP Filtering** - Restrict API keys to specific IPs
+- **✅ Basic Auth & Bearer Token** - Support for both authentication methods
+
 ### 👨‍💻 Developer Experience
 - **🤖 AI Integration**: MCP support for Cursor, Claude Desktop, and AI assistants
 - **🌊 StreamableHTTP Protocol**: Simple HTTP-based streaming protocol
 - **🔌 WebSocket Support**: Persistent connections for real-time updates
-- **📚 Multi-language SDKs**: TypeScript, Python, and Rust clients
-- **📖 Rich Examples**: Chat, event broadcasting, task queues, and more
+- **📚 Multi-language SDKs**: TypeScript, Python, Rust, PHP, and C# clients with authentication support
+- **📖 Rich Examples**: Chat, event broadcasting, task queues, authentication examples, and more
 
 ### 🔗 Protocol Support
 - **🤖 MCP (Model Context Protocol)**: ✅ **PRODUCTION READY** - 13 essential tools at `/mcp` endpoint (optimized for Cursor)
@@ -139,7 +155,25 @@ cd synap
 docker build -t synap:latest .
 docker run -d -p 15500:15500 synap:latest
 
+# Run with authentication enabled
+docker run -d --name synap-server \
+  -p 15500:15500 -p 15501:15501 \
+  -v synap-data:/data \
+  -e SYNAP_AUTH_ENABLED=true \
+  -e SYNAP_AUTH_REQUIRE_AUTH=true \
+  -e SYNAP_AUTH_ROOT_USERNAME=admin \
+  -e SYNAP_AUTH_ROOT_PASSWORD=SecurePassword123! \
+  -e SYNAP_AUTH_ROOT_ENABLED=true \
+  synap:latest
+
 # Or use docker-compose for replication setup
+docker-compose up -d
+
+# With authentication (set environment variables before running)
+export SYNAP_AUTH_ENABLED=true
+export SYNAP_AUTH_REQUIRE_AUTH=true
+export SYNAP_AUTH_ROOT_USERNAME=admin
+export SYNAP_AUTH_ROOT_PASSWORD=SecurePassword123!
 docker-compose up -d
 ```
 
@@ -185,7 +219,68 @@ curl -X POST http://localhost:15500/stream/publish \
 # Pub/Sub
 curl -X POST http://localhost:15500/pubsub/publish \
   -d '{"topic": "notifications.email", "message": "New order"}'
+
+# With Authentication (if enabled)
+curl -X POST http://localhost:15500/kv/set \
+  -H "Authorization: Basic $(echo -n 'admin:password' | base64)" \
+  -H "Content-Type: application/json" \
+  -d '{"key": "user:1", "value": "John Doe"}'
+
+# Or with API Key
+curl -X POST http://localhost:15500/kv/set \
+  -H "Authorization: Bearer sk_your_api_key_here" \
+  -H "Content-Type: application/json" \
+  -d '{"key": "user:1", "value": "John Doe"}'
 ```
+
+### 🔒 Authentication & Security (✅ Production Ready)
+
+Authentication is **disabled by default** for development. Enable it for production:
+
+**Features:**
+- ✅ **Root User Management** - Configurable root user with full permissions
+- ✅ **User Management** - Create, delete, enable/disable users
+- ✅ **API Key Management** - Generate, revoke, and manage API keys with expiration
+- ✅ **Fine-grained Permissions** - Resource-based permissions (RabbitMQ-style)
+- ✅ **Basic Auth & Bearer Token** - Support for both authentication methods
+- ✅ **Audit Logging** - Track all authentication events (login, API key usage, permission denials)
+- ✅ **Password Validation** - Configurable password requirements (length, complexity)
+- ✅ **IP Filtering** - Restrict API keys to specific IP addresses
+
+**Via Config File** (`config.yml`):
+```yaml
+auth:
+  enabled: true
+  require_auth: true
+  root:
+    username: "root"
+    password: "your_secure_password"
+    enabled: true
+```
+
+**Via Docker Environment Variables**:
+```bash
+docker run -d -p 15500:15500 \
+  -e SYNAP_AUTH_ENABLED=true \
+  -e SYNAP_AUTH_REQUIRE_AUTH=true \
+  -e SYNAP_AUTH_ROOT_USERNAME=root \
+  -e SYNAP_AUTH_ROOT_PASSWORD=your_secure_password \
+  synap:latest
+```
+
+**Using Authentication**:
+```bash
+# Basic Auth
+curl -u root:password http://localhost:15500/kv/get/user:1
+
+# Bearer Token (API Key)
+curl -H "Authorization: Bearer sk_XXXXX..." http://localhost:15500/kv/get/user:1
+
+# Query Parameter
+curl "http://localhost:15500/kv/get/user:1?api_key=sk_XXXXX..."
+```
+
+See [Authentication Guide](docs/AUTHENTICATION.md) for complete details.
 
 ### 🔄 Replication Setup
 

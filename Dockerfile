@@ -12,6 +12,61 @@
 # - Non-root user for security
 # - Health checks enabled
 # - Volume mounts for persistence
+#
+# Docker Commands:
+#   Build image:
+#     docker build -t synap:0.8.0 -t synap:latest .
+#     docker build -t hivellm/synap:0.8.0 -t hivellm/synap:latest .
+#
+#   Run container:
+#     docker run -d --name synap-server-0.8.0 \
+#       -p 15500:15500 -p 15501:15501 \
+#       -v synap-data:/data \
+#       synap:0.8.0
+#
+#   Run with authentication enabled:
+#     docker run -d --name synap-server \
+#       -p 15500:15500 -p 15501:15501 \
+#       -v synap-data:/data \
+#       -e SYNAP_AUTH_ENABLED=true \
+#       -e SYNAP_AUTH_REQUIRE_AUTH=true \
+#       -e SYNAP_AUTH_ROOT_USERNAME=root \
+#       -e SYNAP_AUTH_ROOT_PASSWORD=your_secure_password \
+#       -e SYNAP_AUTH_ROOT_ENABLED=true \
+#       synap:latest
+#
+#   Run with authentication and audit logging:
+#     docker run -d --name synap-server \
+#       -p 15500:15500 -p 15501:15501 \
+#       -v synap-data:/data \
+#       -e SYNAP_AUTH_ENABLED=true \
+#       -e SYNAP_AUTH_REQUIRE_AUTH=true \
+#       -e SYNAP_AUTH_ROOT_USERNAME=admin \
+#       -e SYNAP_AUTH_ROOT_PASSWORD=SecurePassword123! \
+#       -e SYNAP_AUTH_ROOT_ENABLED=true \
+#       synap:latest
+#
+#   Run with custom config:
+#     docker run -d --name synap-server \
+#       -p 15500:15500 -p 15501:15501 \
+#       -v synap-data:/data \
+#       -v /path/to/config.yml:/app/config.yml:ro \
+#       synap:latest
+#
+#   View logs:
+#     docker logs -f synap-server-0.8.0
+#
+#   Check status:
+#     docker ps --filter name=synap-server-0.8.0
+#
+#   Stop container:
+#     docker stop synap-server-0.8.0
+#
+#   Remove container:
+#     docker rm synap-server-0.8.0
+#
+#   Remove image:
+#     docker rmi synap:0.8.0
 # ============================================================================
 
 # ============================================================================
@@ -26,6 +81,10 @@ RUN apk add --no-cache \
     openssl-dev \
     openssl-libs-static
 
+# Install nightly toolchain for Rust Edition 2024
+RUN rustup toolchain install nightly && \
+    rustup default nightly
+
 # Set working directory
 WORKDIR /usr/src/synap
 
@@ -39,6 +98,11 @@ COPY sdks/rust/Cargo.toml ./sdks/rust/
 COPY synap-server/src ./synap-server/src
 COPY synap-cli/src ./synap-cli/src
 COPY sdks/rust/src ./sdks/rust/src
+
+# Remove benchmark declarations from Cargo.toml for Docker build
+# (benchmarks are not needed for production image)
+RUN sed -i '/^# Configure benchmarks to use Criterion/,/^$/d' synap-server/Cargo.toml && \
+    sed -i '/^\[\[bench\]\]/,/^$/d' synap-server/Cargo.toml
 
 # Build release binary with optimizations
 # - Static linking for portability
@@ -57,7 +121,8 @@ FROM alpine:3.19
 # Install runtime dependencies (minimal)
 RUN apk add --no-cache \
     ca-certificates \
-    tzdata
+    tzdata \
+    wget
 
 # Create non-root user
 RUN addgroup -g 1000 synap && \

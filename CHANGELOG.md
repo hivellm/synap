@@ -7,6 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed - Docker Image Updates (January 2025) ✅
+
+**Docker Build Improvements**
+
+- ✅ **Rust Edition 2024 Support** - Updated Dockerfile to use Rust nightly toolchain for Edition 2024 compatibility
+- ✅ **Health Check Fix** - Added `wget` to runtime dependencies for proper health check functionality
+- ✅ **Toolchain Installation** - Automatic nightly toolchain installation in builder stage
+- ✅ **Updated Base Image** - Using `rust:1.85-alpine` with nightly toolchain overlay
+
+### Changed - Password Hashing Algorithm (January 2025) ✅
+
+**Password Hashing Changed from bcrypt to SHA512**
+
+- ✅ **SHA512 Implementation** - Changed password hashing from bcrypt to SHA512
+- ✅ **Removed bcrypt dependency** - Replaced with `sha2` crate
+- ✅ **Updated tests** - Modified security tests to verify SHA512 hash format (128 hex characters)
+- ✅ **Backward compatibility** - Existing bcrypt hashes will need to be re-hashed on next password change
+
+### Added - Audit Logging & Password Validation (January 2025) ✅
+
+**Security Enhancements**
+
+- ✅ **Audit Logging** - Implemented comprehensive audit logging system (`auth/audit.rs`):
+  - Tracks all authentication events (login success/failure, API key usage, permission denials)
+  - Stores audit entries with metadata (username, IP, resource, action, timestamp)
+  - Filtering and querying capabilities (by event type, username, time range)
+  - Configurable max entries (default: 1000)
+  - Integration with tracing for log output
+  - Tests: 10+ comprehensive tests in `auth_audit_tests.rs`
+
+- ✅ **Password Validation** - Implemented password requirements system (`auth/password_validation.rs`):
+  - Minimum length requirement (default: 8, strict: 12)
+  - Optional complexity requirements (uppercase, lowercase, numbers, special chars)
+  - Common password rejection (configurable)
+  - Three presets: Default (min 8), Relaxed (min 6), Strict (min 12 + all complexity)
+  - Integrated into User creation and password change operations
+  - Tests: 8+ comprehensive tests in `auth_password_validation_tests.rs`
+
+- ✅ **Docker Updates** - Updated Docker configuration for authentication:
+  - Updated `Dockerfile` with authentication environment variables documentation
+  - Updated `docker-compose.yml` with authentication support for all nodes
+  - Added authentication examples in README.md
+  - Environment variables: `SYNAP_AUTH_ENABLED`, `SYNAP_AUTH_REQUIRE_AUTH`, `SYNAP_AUTH_ROOT_USERNAME`, `SYNAP_AUTH_ROOT_PASSWORD`, `SYNAP_AUTH_ROOT_ENABLED`
+
+### Added - SDK Authentication Tests (January 2025) ✅
+
+**Comprehensive Authentication Tests for All SDKs**
+
+- ✅ **TypeScript SDK Tests** - Created `authentication.s2s.test.ts` with Basic Auth and API Key tests
+- ✅ **Python SDK Tests** - Created `test_authentication.py` with pytest-based authentication tests
+- ✅ **Rust SDK Tests** - Created `authentication_test.rs` with tokio-based async authentication tests
+- ✅ **PHP SDK Tests** - Created `AuthenticationTest.php` with PHPUnit-based authentication tests
+- ✅ **C# SDK Tests** - Created `AuthenticationTests.cs` with xUnit-based authentication tests
+- ✅ **Test Coverage** - All SDKs now have tests for:
+  - Basic Auth success and failure scenarios
+  - API Key authentication success and failure scenarios
+  - Configuration validation (mutual exclusivity of auth methods)
+  - Builder pattern for auth configuration
+  - S2S (Server-to-Server) integration tests
+
+### Added - Migration Guide & Security Best Practices (January 2025) ✅
+
+**Documentation Enhancements**
+
+- ✅ **Migration Guide** - Created comprehensive guide (`docs/guides/MIGRATION_AUTH.md`) for migrating from non-auth to auth-enabled deployments
+- ✅ **Security Best Practices** - Expanded security section in `docs/AUTHENTICATION.md` with 8 detailed categories:
+  - Production Deployment guidelines
+  - API Key Management best practices
+  - Password Security recommendations
+  - Network Security measures
+  - Permission Management principles
+  - Monitoring & Auditing strategies
+  - Development vs Production differences
+  - Incident Response procedures
+
+### Added - SDK Authentication Support & MCP Authentication (January 2025) ✅
+
+**SDK Authentication & MCP Authentication Implementation - Complete**
+
+#### SDK Authentication Support
+- ✅ **Python SDK** - Added Basic Auth support (`username`/`password`) in addition to existing `auth_token`
+- ✅ **Rust SDK** - Added Basic Auth support (`with_basic_auth()`) in addition to existing `auth_token`
+- ✅ **PHP SDK** - Added complete Basic Auth and API Key support (`withBasicAuth()`, `withAuthToken()`)
+- ✅ **C# SDK** - Added complete Basic Auth and API Key support (`WithBasicAuth()`, `WithAuthToken()`)
+- ✅ **TypeScript SDK** - Verified complete Basic Auth and API Key support (already implemented)
+- ✅ **SDK Examples** - Created authentication examples for all SDKs:
+  - `sdks/python/examples/authentication.py`
+  - `sdks/typescript/examples/authentication.ts`
+  - `sdks/rust/examples/authentication.rs`
+  - `sdks/php/examples/authentication.php`
+  - `sdks/csharp/examples/AuthenticationExample.cs`
+
+#### MCP Authentication & Authorization
+- ✅ **MCP Authentication Middleware** - Applied authentication middleware to MCP router
+- ✅ **API Key Validation** - MCP requests support Bearer Token authentication
+- ✅ **Basic Auth Support** - MCP requests support Basic Auth authentication
+- ✅ **User Context Propagation** - Thread-local storage for AuthContext during MCP request processing
+- ✅ **Permission Checks** - Implemented permission verification in all MCP handlers:
+  - KV operations (get, set, delete) - checks `kv:*` permissions
+  - Hash operations (set, get) - checks `hash:*` permissions
+  - List operations (push, pop, range) - checks `list:*` permissions
+  - Set operations (add, members) - checks `set:*` permissions
+  - Queue operations (publish) - checks `queue:*` permissions
+- ✅ **MCP Integration Tests** - Created comprehensive test suite (`mcp_auth_integration_tests.rs`):
+  - Basic Auth success test
+  - API Key auth success test
+  - No auth when disabled test
+  - Require auth rejects anonymous test
+  - Permission check read-only test
+  - Permission check write allowed test
+  - Admin bypass permissions test
+
+#### Technical Implementation
+- ✅ **Thread-Local Storage** - Created `mcp_context.rs` module for thread-safe AuthContext storage
+- ✅ **Permission Helper** - Created `check_mcp_permission()` function for consistent permission checking
+- ✅ **Error Handling** - Proper error responses for insufficient permissions in MCP operations
+
 ## [0.7.0-rc2] - 2025-01-31
 
 ### Added - Geospatial Indexes (January 2025) ✅
