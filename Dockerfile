@@ -90,8 +90,7 @@ RUN apk add --no-cache \
     pkgconfig \
     openssl-dev \
     openssl-libs-static \
-    gcc \
-    musl-tools
+    gcc
 
 # Install nightly toolchain for Rust Edition 2024
 RUN rustup toolchain install nightly && \
@@ -133,7 +132,7 @@ RUN case ${TARGETARCH} in \
     cargo build --release --bins \
     --target ${TARGET_TRIPLE} && \
     strip /usr/src/synap/target/${TARGET_TRIPLE}/release/synap-server && \
-    cp /usr/src/synap/target/${TARGET_TRIPLE}/release/synap-server /usr/src/synap/synap-server
+    cp /usr/src/synap/target/${TARGET_TRIPLE}/release/synap-server /usr/src/synap/synap-server-binary
 
 # ============================================================================
 # Stage 2: Runtime
@@ -159,7 +158,7 @@ WORKDIR /app
 
 # Copy binary from builder (multi-arch support)
 # Binary is copied to a fixed location in builder stage
-COPY --from=builder --chown=synap:synap /usr/src/synap/synap-server /usr/local/bin/synap-server
+COPY --from=builder --chown=synap:synap /usr/src/synap/synap-server-binary /usr/local/bin/synap-server
 RUN chmod +x /usr/local/bin/synap-server
 
 # Copy default configuration
