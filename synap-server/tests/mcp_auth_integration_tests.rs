@@ -79,12 +79,12 @@ async fn spawn_test_server_with_mcp_auth(
 
     // Initialize root user
     user_manager
-        .initialize_root_user("root", "root123", true)
+        .initialize_root_user("root", "root12345", true)
         .unwrap();
 
     // Create test user with read-only permissions
     user_manager
-        .create_user("readonly", "read123", false)
+        .create_user("readonly", "read12345", false)
         .unwrap();
     user_manager.add_user_role("readonly", "readonly").unwrap();
 
@@ -172,7 +172,7 @@ async fn test_mcp_basic_auth_success() {
     let client = Client::new();
 
     // Set a value first using Basic Auth
-    let credentials = general_purpose::STANDARD.encode("root:root123");
+    let credentials = general_purpose::STANDARD.encode("root:root12345");
     let auth_header = format!("Basic {}", credentials);
 
     // First set a value (would need REST API or direct MCP call)
