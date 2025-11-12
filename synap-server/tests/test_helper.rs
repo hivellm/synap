@@ -67,7 +67,7 @@ pub fn create_test_auth_managers() -> (Arc<UserManager>, Arc<ApiKeyManager>) {
 }
 
 /// Create a router for testing with default configuration
-pub fn create_test_router(state: AppState) -> synap_server::server::router::Router {
+pub fn create_test_router(state: AppState) -> axum::Router {
     let (user_manager, api_key_manager) = create_test_auth_managers();
     create_router(
         state,

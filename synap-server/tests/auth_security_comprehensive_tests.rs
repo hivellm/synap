@@ -12,6 +12,7 @@
 //! - Privilege escalation attempts
 
 use std::net::IpAddr;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use synap_server::auth::{Action, ApiKeyManager, Permission, UserManager};
 
@@ -663,7 +664,7 @@ fn test_concurrent_password_change() {
     }
 
     for handle in handles {
-        let _ = handle.join().unwrap();
+        let _: Result<(), _> = handle.join();
     }
 
     // Should be able to authenticate with one of the passwords
@@ -700,7 +701,7 @@ fn test_concurrent_api_key_revocation() {
     }
 
     for handle in handles {
-        let _ = handle.join().unwrap();
+        let _: Result<(), _> = handle.join();
     }
 
     // Key should be revoked
