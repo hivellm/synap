@@ -250,8 +250,14 @@ class SynapClient
             'Accept' => 'application/json',
         ];
 
+        // Add authentication headers
         if ($this->config->getAuthToken() !== null) {
             $headers['Authorization'] = 'Bearer ' . $this->config->getAuthToken();
+        } elseif ($this->config->getUsername() !== null && $this->config->getPassword() !== null) {
+            $credentials = base64_encode(
+                $this->config->getUsername() . ':' . $this->config->getPassword()
+            );
+            $headers['Authorization'] = 'Basic ' . $credentials;
         }
 
         return $headers;

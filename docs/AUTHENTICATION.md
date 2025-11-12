@@ -4,7 +4,7 @@
 
 Synap implements a comprehensive **rule-based authentication and authorization system** with support for:
 
-✅ **User Management** with bcrypt password hashing  
+✅ **User Management** with SHA512 password hashing  
 ✅ **Role-Based Access Control (RBAC)**  
 ✅ **API Keys** with expiration and IP filtering  
 ✅ **Access Control Lists (ACL)** for fine-grained permissions  
@@ -34,7 +34,7 @@ user_manager.create_user("user1", "password123", false)?;
 
 #### Password Management
 
-- **bcrypt** hashing (DEFAULT_COST = 12)
+- **SHA512** hashing (hexadecimal output, 128 characters)
 - Secure password verification
 - Password change capability
 
@@ -266,31 +266,83 @@ acl:
 ### 1. **Production Deployment**
 
 ✅ **ALWAYS enable authentication** when binding to `0.0.0.0`  
-✅ **Change default admin password** immediately  
-✅ **Use strong passwords** (min 12 characters)  
-✅ **Enable ACLs** for fine-grained control  
+✅ **Change default root password** immediately after first login  
+✅ **Use strong passwords** (minimum 12 characters, mix of letters, numbers, symbols)  
+✅ **Enable `require_auth: true`** for production environments  
+✅ **Disable root user** after creating admin users (optional, via `root.enabled: false`)  
+✅ **Use environment variables** for sensitive credentials (never commit to git)  
 
 ### 2. **API Key Management**
 
-✅ **Set expiration** (recommended: 90 days)  
-✅ **Use IP filtering** when possible  
-✅ **Rotate keys** regularly  
-✅ **Revoke unused keys** immediately  
-✅ **Monitor usage** via `usage_count` and `last_used_at`  
+✅ **Set expiration** (recommended: 30-90 days, shorter for high-security environments)  
+✅ **Use IP filtering** when possible (restrict keys to specific source IPs)  
+✅ **Rotate keys regularly** (create new keys before old ones expire)  
+✅ **Revoke unused keys** immediately (don't leave orphaned keys)  
+✅ **Monitor usage** via `usage_count` and `last_used_at` (detect suspicious activity)  
+✅ **Use descriptive names** for keys (e.g., "production-worker-queue-2025-01")  
+✅ **Store keys securely** (use secrets managers, never log or commit keys)  
+✅ **One key per service** (don't share keys between services)  
 
 ### 3. **Password Security**
 
-✅ **bcrypt hashing** with DEFAULT_COST (12)  
-✅ **Never store plain-text** passwords  
-✅ **Implement password rotation** policies  
-✅ **Disable compromised accounts** immediately  
+✅ **SHA512 hashing** (hexadecimal, 128 characters)  
+✅ **Never store plain-text** passwords (always hash before storage)  
+✅ **Implement password rotation** policies (force change every 90 days)  
+✅ **Disable compromised accounts** immediately (set `enabled: false`)  
+✅ **Use strong passwords** (minimum 12 characters, avoid common words)  
+✅ **Don't reuse passwords** across different services  
+✅ **Consider password complexity** (enforce via application logic if needed)  
 
 ### 4. **Network Security**
 
-✅ **Use TLS/SSL** for production (external proxy)  
-✅ **Firewall rules** to limit access  
-✅ **IP whitelisting** for sensitive keys  
-✅ **Monitor failed auth** attempts  
+✅ **Use TLS/SSL** for production (set up reverse proxy with HTTPS)  
+✅ **Firewall rules** to limit access (only allow necessary IPs/ports)  
+✅ **IP whitelisting** for sensitive keys (restrict API keys to known IPs)  
+✅ **Monitor failed auth** attempts (set up alerts for brute force attacks)  
+✅ **Use VPN** for administrative access (don't expose admin endpoints publicly)  
+✅ **Rate limiting** on auth endpoints (prevent brute force attacks)  
+
+### 5. **Permission Management**
+
+✅ **Principle of least privilege** (grant minimum permissions needed)  
+✅ **Use wildcards carefully** (prefer specific resources over `*`)  
+✅ **Review permissions regularly** (audit who has access to what)  
+✅ **Use roles** for common permission sets (don't duplicate permissions)  
+✅ **Test permissions** before deploying (verify access works as expected)  
+✅ **Document permission rationale** (why each permission was granted)  
+
+### 6. **Monitoring & Auditing**
+
+✅ **Log all authentication events** (successful and failed attempts)  
+✅ **Monitor API key usage** (detect unusual patterns)  
+✅ **Set up alerts** for multiple failed auth attempts  
+✅ **Review logs regularly** (weekly/monthly security audits)  
+✅ **Track permission changes** (who granted/revoked what permissions)  
+✅ **Monitor for privilege escalation** attempts  
+
+### 7. **Development vs Production**
+
+**Development**:
+- `auth.enabled: false` or `require_auth: false` (for local testing)
+- Use simple passwords (but still change defaults)
+- Allow anonymous access for testing
+
+**Production**:
+- `auth.enabled: true` and `require_auth: true` (mandatory)
+- Strong passwords (12+ characters, complex)
+- No anonymous access
+- IP filtering enabled
+- API key expiration set
+- Monitoring enabled
+
+### 8. **Incident Response**
+
+✅ **Have a plan** for compromised credentials  
+✅ **Revoke compromised keys** immediately  
+✅ **Disable compromised users** immediately  
+✅ **Rotate all credentials** after security incident  
+✅ **Review access logs** to identify scope of compromise  
+✅ **Document incidents** for post-mortem analysis  
 
 ---
 

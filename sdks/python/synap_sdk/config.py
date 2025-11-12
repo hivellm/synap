@@ -11,12 +11,16 @@ class SynapConfig:
     Args:
         base_url: The base URL of the Synap server
         timeout: Request timeout in seconds (default: 30)
-        auth_token: Optional authentication token
+        auth_token: Optional API key token (Bearer token)
+        username: Optional username for Basic Auth
+        password: Optional password for Basic Auth
         max_retries: Maximum number of retries for failed requests (default: 3)
 
     Example:
-        >>> config = SynapConfig("http://localhost:15500")
-        >>> config = config.with_timeout(60).with_auth_token("my-token")
+        >>> # API Key authentication
+        >>> config = SynapConfig("http://localhost:15500", auth_token="my-api-key")
+        >>> # Basic Auth authentication
+        >>> config = SynapConfig("http://localhost:15500", username="user", password="pass")
     """
 
     def __init__(
@@ -25,15 +29,22 @@ class SynapConfig:
         *,
         timeout: int = 30,
         auth_token: str | None = None,
+        username: str | None = None,
+        password: str | None = None,
         max_retries: int = 3,
     ) -> None:
         """Initialize a new SynapConfig."""
         if not base_url or not base_url.strip():
             raise SynapException("Base URL cannot be empty")
 
+        if auth_token and (username or password):
+            raise SynapException("Cannot use both auth_token and Basic Auth (username/password)")
+
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._auth_token = auth_token
+        self._username = username
+        self._password = password
         self._max_retries = max_retries
 
     @property
@@ -48,8 +59,18 @@ class SynapConfig:
 
     @property
     def auth_token(self) -> str | None:
-        """Get the authentication token."""
+        """Get the authentication token (API key)."""
         return self._auth_token
+
+    @property
+    def username(self) -> str | None:
+        """Get the username for Basic Auth."""
+        return self._username
+
+    @property
+    def password(self) -> str | None:
+        """Get the password for Basic Auth."""
+        return self._password
 
     @property
     def max_retries(self) -> int:
@@ -85,10 +106,10 @@ class SynapConfig:
         )
 
     def with_auth_token(self, token: str) -> SynapConfig:
-        """Create a copy with an authentication token.
+        """Create a copy with an authentication token (API key).
 
         Args:
-            token: The authentication token
+            token: The authentication token (API key)
 
         Returns:
             A new SynapConfig instance with the updated token
@@ -97,6 +118,24 @@ class SynapConfig:
             self._base_url,
             timeout=self._timeout,
             auth_token=token,
+            max_retries=self._max_retries,
+        )
+
+    def with_basic_auth(self, username: str, password: str) -> SynapConfig:
+        """Create a copy with Basic Auth credentials.
+
+        Args:
+            username: The username for Basic Auth
+            password: The password for Basic Auth
+
+        Returns:
+            A new SynapConfig instance with Basic Auth credentials
+        """
+        return SynapConfig(
+            self._base_url,
+            timeout=self._timeout,
+            username=username,
+            password=password,
             max_retries=self._max_retries,
         )
 

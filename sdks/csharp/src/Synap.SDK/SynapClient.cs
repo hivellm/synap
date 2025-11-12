@@ -60,10 +60,19 @@ public sealed class SynapClient : IDisposable
 
         _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
 
+        // Add authentication headers
         if (!string.IsNullOrWhiteSpace(config.AuthToken))
         {
             _httpClient.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", config.AuthToken);
+        }
+        else if (!string.IsNullOrWhiteSpace(config.Username) && !string.IsNullOrWhiteSpace(config.Password))
+        {
+            var credentials = Convert.ToBase64String(
+                System.Text.Encoding.UTF8.GetBytes($"{config.Username}:{config.Password}")
+            );
+            _httpClient.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
         }
     }
 

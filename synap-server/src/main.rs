@@ -3,6 +3,7 @@ use clap::Parser;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use synap_server::auth::{ApiKeyManager, UserManager};
 use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
 use synap_server::monitoring::MonitoringManager;
 use synap_server::persistence::{PersistenceLayer, recover};
@@ -65,6 +66,28 @@ async fn main() -> Result<()> {
     }
     if let Some(port) = args.port {
         config.server.port = port;
+    }
+
+    // Override auth config from environment variables (Docker support)
+    if let Ok(enabled) = std::env::var("SYNAP_AUTH_ENABLED") {
+        config.auth.enabled = enabled.parse().unwrap_or(false);
+    }
+    if let Ok(require_auth) = std::env::var("SYNAP_AUTH_REQUIRE_AUTH") {
+        config.auth.require_auth = require_auth.parse().unwrap_or(false);
+    }
+    if let Ok(root_username) = std::env::var("SYNAP_AUTH_ROOT_USERNAME") {
+        config.auth.root.username = root_username;
+    }
+    if let Ok(root_password) = std::env::var("SYNAP_AUTH_ROOT_PASSWORD") {
+        config.auth.root.password = root_password;
+    }
+    if let Ok(root_enabled) = std::env::var("SYNAP_AUTH_ROOT_ENABLED") {
+        config.auth.root.enabled = root_enabled.parse().unwrap_or(true);
+    }
+    if let Ok(default_ttl) = std::env::var("SYNAP_AUTH_DEFAULT_KEY_TTL") {
+        if let Ok(ttl) = default_ttl.parse::<u64>() {
+            config.auth.default_key_ttl = ttl;
+        }
     }
 
     // Configure replication from CLI args
@@ -320,6 +343,38 @@ async fn main() -> Result<()> {
     let script_manager = Arc::new(ScriptManager::new(Duration::from_secs(5)));
     info!("Script manager initialized (default timeout: 5s)");
 
+    // Initialize authentication managers
+    let user_manager = Arc::new(UserManager::new());
+    let api_key_manager = Arc::new(ApiKeyManager::new());
+
+    // Initialize root user if authentication is enabled
+    if config.auth.enabled {
+        info!("Authentication enabled, initializing root user");
+        user_manager
+            .initialize_root_user(
+                &config.auth.root.username,
+                &config.auth.root.password,
+                config.auth.root.enabled,
+            )
+            .unwrap_or_else(|e| {
+                warn!("Failed to initialize root user: {}", e);
+            });
+
+        if config.auth.root.enabled {
+            info!(
+                "Root user initialized: {} (enabled)",
+                config.auth.root.username
+            );
+        } else {
+            warn!(
+                "Root user initialized: {} (DISABLED - for security after initial setup)",
+                config.auth.root.username
+            );
+        }
+    } else {
+        info!("Authentication disabled (development mode)");
+    }
+
     // Create application state with persistence and streams
     let app_state = AppState {
         kv_store,
@@ -344,8 +399,16 @@ async fn main() -> Result<()> {
     // Initialize Prometheus metrics
     init_metrics();
 
-    // Create router with rate limiting
-    let app = create_router(app_state, config.rate_limit.clone(), config.mcp.clone());
+    // Create router with rate limiting and authentication
+    let app = create_router(
+        app_state,
+        config.rate_limit.clone(),
+        config.mcp.clone(),
+        user_manager.clone(),
+        api_key_manager.clone(),
+        config.auth.enabled,
+        config.auth.require_auth,
+    );
 
     if config.rate_limit.enabled {
         info!(

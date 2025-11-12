@@ -1,12 +1,22 @@
 pub mod acl;
 pub mod api_key;
+pub mod audit;
+pub mod extractor;
+pub mod mcp_context;
 pub mod middleware;
+pub mod password_validation;
+pub mod permission_checker;
 pub mod permissions;
 pub mod user;
 
 pub use acl::{Acl, AclRule, ResourceType};
 pub use api_key::{ApiKey, ApiKeyManager};
+pub use audit::{AuditLogEntry, AuditLogManager, AuthEventType};
+pub use extractor::{AuthContextExtractor, require_admin, require_auth, require_permission};
+pub use mcp_context::{clear_auth_context, get_auth_context, set_auth_context, with_auth_context};
 pub use middleware::AuthMiddleware;
+pub use password_validation::{PasswordRequirements, validate_password, validate_password_strict};
+pub use permission_checker::*;
 pub use permissions::{Action, Permission, Role};
 pub use user::{User, UserManager};
 

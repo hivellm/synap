@@ -30,7 +30,7 @@ serde_yaml = "0.9"
 clap = { version = "4.5", features = ["derive"] }
 lz4.workspace = true
 zstd.workspace = true
-bcrypt.workspace = true
+sha2 = "0.10"
 chrono.workspace = true
 base64.workspace = true
 rand.workspace = true
@@ -60,6 +60,8 @@ tempfile = "3.15"
 # Enable S2S (Server-to-Server) tests that require a running Synap server
 # These tests are excluded from CI/CD by default
 s2s-tests = []
+# Enable benchmarks (excluded from Docker builds)
+bench = []
 
 [dev-dependencies]
 criterion = { version = "0.7", features = ["async_tokio"] }

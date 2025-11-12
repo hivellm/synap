@@ -21,8 +21,12 @@ pub struct SynapConfig {
     pub timeout: Duration,
     /// Maximum retry attempts
     pub max_retries: u32,
-    /// Optional authentication token
+    /// Optional API key token (Bearer token)
     pub auth_token: Option<String>,
+    /// Optional username for Basic Auth
+    pub username: Option<String>,
+    /// Optional password for Basic Auth
+    pub password: Option<String>,
 }
 
 impl SynapConfig {
@@ -33,6 +37,8 @@ impl SynapConfig {
             timeout: Duration::from_secs(30),
             max_retries: 3,
             auth_token: None,
+            username: None,
+            password: None,
         }
     }
 
@@ -42,9 +48,23 @@ impl SynapConfig {
         self
     }
 
-    /// Set the authentication token
+    /// Set the authentication token (API key)
     pub fn with_auth_token(mut self, token: impl Into<String>) -> Self {
         self.auth_token = Some(token.into());
+        self.username = None;
+        self.password = None;
+        self
+    }
+
+    /// Set Basic Auth credentials
+    pub fn with_basic_auth(
+        mut self,
+        username: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Self {
+        self.username = Some(username.into());
+        self.password = Some(password.into());
+        self.auth_token = None;
         self
     }
 
@@ -71,11 +91,22 @@ impl SynapClient {
 
         let mut http_client_builder = Client::builder().timeout(config.timeout);
 
+        // Add authentication headers
         if let Some(ref token) = config.auth_token {
             let mut headers = reqwest::header::HeaderMap::new();
             headers.insert(
                 reqwest::header::AUTHORIZATION,
                 format!("Bearer {}", token).parse().unwrap(),
+            );
+            http_client_builder = http_client_builder.default_headers(headers);
+        } else if let (Some(username), Some(password)) = (&config.username, &config.password) {
+            use base64::Engine;
+            let credentials = base64::engine::general_purpose::STANDARD
+                .encode(format!("{}:{}", username, password));
+            let mut headers = reqwest::header::HeaderMap::new();
+            headers.insert(
+                reqwest::header::AUTHORIZATION,
+                format!("Basic {}", credentials).parse().unwrap(),
             );
             http_client_builder = http_client_builder.default_headers(headers);
         }

@@ -264,11 +264,19 @@ impl TransactionManager {
     pub fn watch(&self, client_id: &str, keys: Vec<String>) -> Result<()> {
         debug!("WATCH client_id={}, keys={:?}", client_id, keys);
 
+        if keys.is_empty() {
+            return Err(SynapError::InvalidRequest(
+                "Keys list cannot be empty".to_string(),
+            ));
+        }
+
         let mut transactions = self.transactions.write();
 
+        // WATCH can be called before MULTI (Redis-compatible behavior)
+        // If no transaction exists, create one implicitly
         let transaction = transactions
-            .get_mut(client_id)
-            .ok_or_else(|| SynapError::InvalidRequest("No transaction in progress".to_string()))?;
+            .entry(client_id.to_string())
+            .or_insert_with(|| Transaction::new(client_id.to_string()));
 
         // Record current versions for watched keys
         let key_versions = self.key_versions.read();
@@ -303,11 +311,12 @@ impl TransactionManager {
 
         let mut transactions = self.transactions.write();
 
-        let transaction = transactions
-            .get_mut(client_id)
-            .ok_or_else(|| SynapError::InvalidRequest("No transaction in progress".to_string()))?;
-
-        transaction.unwatch();
+        // UNWATCH can be called even if no transaction exists (Redis-compatible behavior)
+        // If transaction exists, unwatch its keys
+        if let Some(transaction) = transactions.get_mut(client_id) {
+            transaction.unwatch();
+        }
+        // If no transaction exists, it's a no-op (Redis-compatible)
         Ok(())
     }
 

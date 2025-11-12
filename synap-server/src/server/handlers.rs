@@ -1,3 +1,4 @@
+use crate::auth::{Action, AuthContextExtractor, require_permission};
 use crate::core::{
     GeospatialStore, HashStore, HyperLogLogStore, KVStore, KeyManager, Message, QueueManager,
     SortedSetStore, SynapError, TransactionManager,
@@ -219,9 +220,13 @@ pub struct StreamConsumeResponse {
 /// SET endpoint - store a key-value pair
 pub async fn kv_set(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Json(req): Json<SetRequest>,
 ) -> Result<Json<SetResponse>, SynapError> {
     debug!("REST SET key={}", req.key);
+
+    // Check permission
+    require_permission(&ctx, &format!("kv:{}", req.key), Action::Write)?;
 
     let value_bytes = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::SerializationError(e.to_string()))?;
@@ -252,11 +257,15 @@ pub async fn kv_set(
 /// GET endpoint - retrieve a value by key
 pub async fn kv_get(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Result<Json<GetResponse>, SynapError> {
     let return_type = params.get("type").map(|s| s.as_str()).unwrap_or("string");
     debug!("REST GET key={}, type={}", key, return_type);
+
+    // Check permission
+    require_permission(&ctx, &format!("kv:{}", key), Action::Read)?;
 
     let value_bytes = state.kv_store.get(&key).await?;
 
@@ -282,9 +291,13 @@ pub async fn kv_get(
 /// DELETE endpoint - delete a key
 pub async fn kv_delete(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<DeleteResponse>, SynapError> {
     debug!("REST DELETE key={}", key);
+
+    // Check permission
+    require_permission(&ctx, &format!("kv:{}", key), Action::Delete)?;
 
     let deleted = state.kv_store.delete(&key).await?;
 
@@ -328,7 +341,12 @@ pub async fn trigger_snapshot(
 }
 
 /// STATS endpoint - get store statistics
-pub async fn kv_stats(State(state): State<AppState>) -> Result<Json<StatsResponse>, SynapError> {
+pub async fn kv_stats(
+    State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+) -> Result<Json<StatsResponse>, SynapError> {
+    // Check permission (read access to any KV key)
+    require_permission(&ctx, "kv:*", Action::Read)?;
     debug!("REST STATS");
 
     let stats = state.kv_store.stats().await;
@@ -706,14 +724,16 @@ pub async fn key_copy(
     );
 
     let manager = create_key_manager(&state);
-    let success = manager
-        .copy(&source, &req.destination, req.replace.unwrap_or(false))
-        .await?;
+    let replace = req.replace.unwrap_or(false);
+    let success = manager.copy(&source, &req.destination, replace).await?;
 
     if !success {
-        return Err(SynapError::InvalidRequest(
-            "Destination key already exists and replace=false".to_string(),
-        ));
+        // Destination exists and replace=false - return 409 Conflict instead of error
+        return Ok(Json(CopyResponse {
+            success: false,
+            source,
+            destination: req.destination,
+        }));
     }
 
     Ok(Json(CopyResponse {
@@ -740,8 +760,11 @@ pub async fn key_randomkey(
 /// INFO endpoint - get server information
 pub async fn info(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    // Check admin permission for server info
+    require_permission(&ctx, "admin:*", Action::Admin)?;
     let section = params.get("section").map(|s| s.as_str()).unwrap_or("all");
     let section = InfoSection::from_str(section);
 
@@ -898,6 +921,12 @@ pub async fn transaction_watch(
 ) -> Result<Json<MultiResponse>, SynapError> {
     let client_id = "rest_client";
 
+    if req.keys.is_empty() {
+        return Err(SynapError::InvalidRequest(
+            "Keys list cannot be empty".to_string(),
+        ));
+    }
+
     debug!("REST WATCH client_id={}, keys={:?}", client_id, req.keys);
     state.transaction_manager.watch(client_id, req.keys)?;
 
@@ -1008,10 +1037,14 @@ pub struct HashOperationStats {
 /// POST /hash/:key/set - Set a field in hash
 pub async fn hash_set(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<HashSetRequest>,
 ) -> Result<Json<HashSetResponse>, SynapError> {
     debug!("REST HSET key={} field={}", key, req.field);
+
+    // Check permission
+    require_permission(&ctx, &format!("hash:{}", key), Action::Write)?;
 
     let value = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize value: {}", e)))?;
@@ -1028,9 +1061,13 @@ pub async fn hash_set(
 /// GET /hash/:key/:field - Get a field from hash
 pub async fn hash_get(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((key, field)): Path<(String, String)>,
 ) -> Result<Json<HashGetResponse>, SynapError> {
     debug!("REST HGET key={} field={}", key, field);
+
+    // Check permission
+    require_permission(&ctx, &format!("hash:{}", key), Action::Read)?;
 
     match state.hash_store.hget(&key, &field)? {
         Some(value) => {
@@ -1047,9 +1084,13 @@ pub async fn hash_get(
 /// GET /hash/:key/getall - Get all fields from hash
 pub async fn hash_getall(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<HashMap<String, serde_json::Value>>, SynapError> {
     debug!("REST HGETALL key={}", key);
+
+    // Check permission
+    require_permission(&ctx, &format!("hash:{}", key), Action::Read)?;
 
     let all = state.hash_store.hgetall(&key)?;
 
@@ -1157,10 +1198,14 @@ pub async fn hash_mget(
 /// DELETE /hash/:key - Delete fields from hash
 pub async fn hash_del(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<HashDelRequest>,
 ) -> Result<Json<HashDelResponse>, SynapError> {
     debug!("REST HDEL key={} fields={:?}", key, req.fields);
+
+    // Check permission
+    require_permission(&ctx, &format!("hash:{}", key), Action::Delete)?;
 
     let deleted = state.hash_store.hdel(&key, &req.fields)?;
 
@@ -1234,8 +1279,12 @@ pub async fn hash_setnx(
 /// GET /hash/stats - Get hash statistics
 pub async fn hash_stats(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<HashStatsResponse>, SynapError> {
     debug!("REST HASH STATS");
+
+    // Check permission (read access to any hash)
+    require_permission(&ctx, "hash:*", Action::Read)?;
 
     let stats = state.hash_store.stats();
 
@@ -1255,9 +1304,13 @@ pub async fn hash_stats(
 /// Create stream room
 pub async fn stream_create_room(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(room_name): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST CREATE STREAM ROOM: {}", room_name);
+
+    // Check permission
+    require_permission(&ctx, &format!("stream:{}", room_name), Action::Configure)?;
 
     let stream_manager = state
         .stream_manager
@@ -1278,10 +1331,14 @@ pub async fn stream_create_room(
 /// Publish event to stream room
 pub async fn stream_publish(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(room_name): Path<String>,
     Json(req): Json<StreamPublishRequest>,
 ) -> Result<Json<StreamPublishResponse>, SynapError> {
     debug!("REST STREAM PUBLISH to room: {}", room_name);
+
+    // Check permission
+    require_permission(&ctx, &format!("stream:{}", room_name), Action::Write)?;
 
     let stream_manager = state
         .stream_manager
@@ -1305,6 +1362,7 @@ pub async fn stream_publish(
 /// Consume events from stream room
 pub async fn stream_consume(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((room_name, subscriber_id)): Path<(String, String)>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Result<Json<StreamConsumeResponse>, SynapError> {
@@ -1312,6 +1370,9 @@ pub async fn stream_consume(
         "REST STREAM CONSUME from room: {}, subscriber: {}",
         room_name, subscriber_id
     );
+
+    // Check permission
+    require_permission(&ctx, &format!("stream:{}", room_name), Action::Read)?;
 
     let stream_manager = state
         .stream_manager
@@ -1344,9 +1405,13 @@ pub async fn stream_consume(
 /// Get stream room statistics
 pub async fn stream_room_stats(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(room_name): Path<String>,
 ) -> Result<Json<crate::core::RoomStats>, SynapError> {
     debug!("REST STREAM STATS for room: {}", room_name);
+
+    // Check permission
+    require_permission(&ctx, &format!("stream:{}", room_name), Action::Read)?;
 
     let stream_manager = state
         .stream_manager
@@ -1364,8 +1429,12 @@ pub async fn stream_room_stats(
 /// List all stream rooms
 pub async fn stream_list_rooms(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST STREAM LIST ROOMS");
+
+    // Check permission (read access to any stream)
+    require_permission(&ctx, "stream:*", Action::Read)?;
 
     let stream_manager = state
         .stream_manager
@@ -1383,9 +1452,13 @@ pub async fn stream_list_rooms(
 /// Delete stream room
 pub async fn stream_delete_room(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(room_name): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST DELETE STREAM ROOM: {}", room_name);
+
+    // Check permission
+    require_permission(&ctx, &format!("stream:{}", room_name), Action::Delete)?;
 
     let stream_manager = state
         .stream_manager
@@ -1408,10 +1481,14 @@ pub async fn stream_delete_room(
 /// Create queue endpoint
 pub async fn queue_create(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(queue_name): Path<String>,
     Json(req): Json<CreateQueueRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST CREATE QUEUE: {}", queue_name);
+
+    // Check permission
+    require_permission(&ctx, &format!("queue:{}", queue_name), Action::Configure)?;
 
     let queue_manager = state
         .queue_manager
@@ -1440,10 +1517,14 @@ pub async fn queue_create(
 /// Publish message endpoint
 pub async fn queue_publish(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(queue_name): Path<String>,
     Json(req): Json<PublishRequest>,
 ) -> Result<Json<PublishResponse>, SynapError> {
     debug!("REST PUBLISH to queue: {}", queue_name);
+
+    // Check permission
+    require_permission(&ctx, &format!("queue:{}", queue_name), Action::Write)?;
 
     let queue_manager = state
         .queue_manager
@@ -1464,9 +1545,13 @@ pub async fn queue_publish(
 /// Consume message endpoint
 pub async fn queue_consume(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((queue_name, consumer_id)): Path<(String, String)>,
 ) -> Result<Json<ConsumeResponse>, SynapError> {
     debug!("REST CONSUME from queue: {} by {}", queue_name, consumer_id);
+
+    // Check permission
+    require_permission(&ctx, &format!("queue:{}", queue_name), Action::Read)?;
 
     let queue_manager = state
         .queue_manager
@@ -1541,9 +1626,13 @@ pub async fn queue_nack(
 /// Queue stats endpoint
 pub async fn queue_stats(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(queue_name): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST QUEUE STATS: {}", queue_name);
+
+    // Check permission
+    require_permission(&ctx, &format!("queue:{}", queue_name), Action::Read)?;
 
     let queue_manager = state
         .queue_manager
@@ -1560,8 +1649,12 @@ pub async fn queue_stats(
 /// List queues endpoint
 pub async fn queue_list(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST LIST QUEUES");
+
+    // Check permission (read access to any queue)
+    require_permission(&ctx, "queue:*", Action::Read)?;
 
     let queue_manager = state
         .queue_manager
@@ -1576,9 +1669,13 @@ pub async fn queue_list(
 /// Purge queue endpoint
 pub async fn queue_purge(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(queue_name): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST PURGE QUEUE: {}", queue_name);
+
+    // Check permission
+    require_permission(&ctx, &format!("queue:{}", queue_name), Action::Delete)?;
 
     let queue_manager = state
         .queue_manager
@@ -1596,9 +1693,13 @@ pub async fn queue_purge(
 /// Delete queue endpoint
 pub async fn queue_delete(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(queue_name): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST DELETE QUEUE: {}", queue_name);
+
+    // Check permission
+    require_permission(&ctx, &format!("queue:{}", queue_name), Action::Delete)?;
 
     let queue_manager = state
         .queue_manager
@@ -5734,9 +5835,19 @@ pub struct UnsubscribeRequest {
 /// POST /pubsub/subscribe - Subscribe to topics
 pub async fn pubsub_subscribe(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Json(req): Json<SubscribeRequest>,
 ) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
     debug!("POST /pubsub/subscribe - topics: {:?}", req.topics);
+
+    // Check permission for each topic
+    for topic in &req.topics {
+        if require_permission(&ctx, &format!("pubsub:{}", topic), Action::Read).is_err() {
+            return Err(Json(serde_json::json!({
+                "error": format!("Insufficient permissions for topic: {}", topic)
+            })));
+        }
+    }
 
     let pubsub_router = state.pubsub_router.as_ref().ok_or_else(|| {
         Json(serde_json::json!({
@@ -5762,10 +5873,18 @@ pub async fn pubsub_subscribe(
 /// POST /pubsub/:topic/publish - Publish message to topic
 pub async fn pubsub_publish(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(topic): Path<String>,
     Json(req): Json<PublishMessageRequest>,
 ) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
     debug!("POST /pubsub/{}/publish", topic);
+
+    // Check permission
+    if require_permission(&ctx, &format!("pubsub:{}", topic), Action::Write).is_err() {
+        return Err(Json(serde_json::json!({
+            "error": format!("Insufficient permissions for topic: {}", topic)
+        })));
+    }
 
     let pubsub_router = state.pubsub_router.as_ref().ok_or_else(|| {
         Json(serde_json::json!({
@@ -5820,8 +5939,16 @@ pub async fn pubsub_unsubscribe(
 /// GET /pubsub/stats - Get Pub/Sub statistics
 pub async fn pubsub_stats(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
     debug!("GET /pubsub/stats");
+
+    // Check permission (read access to any pubsub topic)
+    if require_permission(&ctx, "pubsub:*", Action::Read).is_err() {
+        return Err(Json(serde_json::json!({
+            "error": "Insufficient permissions"
+        })));
+    }
 
     let pubsub_router = state.pubsub_router.as_ref().ok_or_else(|| {
         Json(serde_json::json!({
@@ -5836,8 +5963,16 @@ pub async fn pubsub_stats(
 /// GET /pubsub/topics - List all topics
 pub async fn pubsub_list_topics(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
     debug!("GET /pubsub/topics");
+
+    // Check permission (read access to any pubsub topic)
+    if require_permission(&ctx, "pubsub:*", Action::Read).is_err() {
+        return Err(Json(serde_json::json!({
+            "error": "Insufficient permissions"
+        })));
+    }
 
     let pubsub_router = state.pubsub_router.as_ref().ok_or_else(|| {
         Json(serde_json::json!({
@@ -5855,9 +5990,17 @@ pub async fn pubsub_list_topics(
 /// GET /pubsub/:topic/info - Get topic information
 pub async fn pubsub_topic_info(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(topic): Path<String>,
 ) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
     debug!("GET /pubsub/{}/info", topic);
+
+    // Check permission
+    if require_permission(&ctx, &format!("pubsub:{}", topic), Action::Read).is_err() {
+        return Err(Json(serde_json::json!({
+            "error": format!("Insufficient permissions for topic: {}", topic)
+        })));
+    }
 
     let pubsub_router = state.pubsub_router.as_ref().ok_or_else(|| {
         Json(serde_json::json!({
@@ -6981,10 +7124,14 @@ pub struct SetOperationStats {
 /// POST /set/:key/add - Add member(s) to set
 pub async fn set_add(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<SetAddRequest>,
 ) -> Result<Json<SetAddResponse>, SynapError> {
     debug!("REST SADD key={} count={}", key, req.members.len());
+
+    // Check permission
+    require_permission(&ctx, &format!("set:{}", key), Action::Write)?;
 
     let members: Result<Vec<Vec<u8>>, _> = req
         .members
@@ -7000,10 +7147,14 @@ pub async fn set_add(
 /// POST /set/:key/rem - Remove member(s) from set
 pub async fn set_rem(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<SetRemRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST SREM key={} count={}", key, req.members.len());
+
+    // Check permission
+    require_permission(&ctx, &format!("set:{}", key), Action::Delete)?;
 
     let members: Result<Vec<Vec<u8>>, _> = req
         .members
@@ -7035,9 +7186,13 @@ pub async fn set_ismember(
 /// GET /set/:key/members - Get all members
 pub async fn set_members(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST SMEMBERS key={}", key);
+
+    // Check permission
+    require_permission(&ctx, &format!("set:{}", key), Action::Read)?;
 
     let members = state.set_store.smembers(&key)?;
 
@@ -7221,7 +7376,10 @@ pub async fn set_diff(
 /// GET /set/stats - Get set statistics
 pub async fn set_stats(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<SetStatsResponse>, SynapError> {
+    // Check permission (read access to any set)
+    require_permission(&ctx, "set:*", Action::Read)?;
     debug!("REST SET STATS");
 
     let stats = state.set_store.stats();
@@ -7354,10 +7512,14 @@ pub struct HyperLogLogMergeResponse {
 /// POST /list/:key/lpush - Push element(s) to left (front)
 pub async fn list_lpush(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ListPushRequest>,
 ) -> Result<Json<ListPushResponse>, SynapError> {
     debug!("REST LPUSH key={} count={}", key, req.values.len());
+
+    // Check permission
+    require_permission(&ctx, &format!("list:{}", key), Action::Write)?;
 
     let values: Result<Vec<Vec<u8>>, _> = req
         .values
@@ -7481,9 +7643,12 @@ pub async fn list_rpop(
 /// GET /list/:key/range?start=:start&stop=:stop - Get range of elements
 pub async fn list_range(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<ListRangeResponse>, SynapError> {
+    // Check permission
+    require_permission(&ctx, &format!("list:{}", key), Action::Read)?;
     let start: i64 = params
         .get("start")
         .and_then(|s| s.parse::<i64>().ok())
@@ -7639,7 +7804,10 @@ pub async fn list_rpoplpush(
 /// GET /list/stats - Get list statistics
 pub async fn list_stats(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<ListStatsResponse>, SynapError> {
+    // Check permission (read access to any list)
+    require_permission(&ctx, "list:*", Action::Read)?;
     debug!("REST LIST STATS");
 
     let stats = state.list_store.stats();
@@ -8292,6 +8460,7 @@ pub struct ZInterstoreRequest {
 /// POST /sortedset/:key/zadd - Add member with score
 pub async fn sortedset_zadd(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ZAddRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
@@ -8299,6 +8468,9 @@ pub async fn sortedset_zadd(
         "REST ZADD key={} member={:?} score={}",
         key, req.member, req.score
     );
+
+    // Check permission
+    require_permission(&ctx, &format!("sortedset:{}", key), Action::Write)?;
 
     let member = serde_json::to_vec(&req.member)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize member: {}", e)))?;
@@ -8320,10 +8492,14 @@ pub async fn sortedset_zadd(
 /// POST /sortedset/:key/zrem - Remove members
 pub async fn sortedset_zrem(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ZRemRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST ZREM key={} members={:?}", key, req.members);
+
+    // Check permission
+    require_permission(&ctx, &format!("sortedset:{}", key), Action::Delete)?;
 
     let members: Result<Vec<Vec<u8>>, _> = req.members.iter().map(serde_json::to_vec).collect();
 
@@ -8384,9 +8560,12 @@ pub async fn sortedset_zincrby(
 /// GET /sortedset/:key/zrange - Get range by rank
 pub async fn sortedset_zrange(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    // Check permission
+    require_permission(&ctx, &format!("sortedset:{}", key), Action::Read)?;
     let start: i64 = params
         .get("start")
         .and_then(|s| s.parse().ok())
@@ -8515,8 +8694,12 @@ pub async fn sortedset_zunionstore(
 /// GET /sortedset/stats - Get sorted set statistics
 pub async fn sortedset_stats(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST SORTEDSET STATS");
+
+    // Check permission (read access to any sortedset)
+    require_permission(&ctx, "sortedset:*", Action::Read)?;
 
     let stats = state.sorted_set_store.stats();
 

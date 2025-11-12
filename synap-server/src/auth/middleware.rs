@@ -105,7 +105,7 @@ impl AuthMiddleware {
         // Check for API key in header
         let api_key = if let Some(auth_header) = req.headers().get(header::AUTHORIZATION) {
             if let Ok(auth_str) = auth_header.to_str() {
-                auth_str.strip_prefix("Bearer ").map(|key| key.to_string())
+                auth_str.strip_prefix("Bearer ").map(|key| key.trim().to_string())
             } else {
                 None
             }
@@ -124,6 +124,19 @@ impl AuthMiddleware {
         };
 
         if let Some(key) = api_key {
+            // Empty key is treated as no key provided
+            if key.is_empty() {
+                return Ok(None);
+            }
+
+            // Check if key exists in index first
+            if !auth.api_key_manager.key_exists(&key) {
+                // Key provided but not found - return error (401 Unauthorized)
+                // This ensures that invalid/non-existent keys return 401, not fallback to Basic Auth
+                return Err(());
+            }
+
+            // Key exists, verify it
             match auth.api_key_manager.verify(&key, client_ip) {
                 Ok(api_key_obj) => {
                     debug!("Authenticated via API key: {}", api_key_obj.name);
@@ -137,9 +150,8 @@ impl AuthMiddleware {
                     }));
                 }
                 Err(_) => {
-                    // API key provided but invalid/not found - return None to allow other auth methods
-                    // This allows tests to verify extraction without requiring valid keys
-                    return Ok(None);
+                    // Key exists but is invalid (expired, disabled, IP not allowed) - return error
+                    return Err(());
                 }
             }
         }

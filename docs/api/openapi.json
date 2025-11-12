@@ -2,8 +2,8 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Synap API",
-    "description": "High-Performance In-Memory Key-Value Store & Message Broker\n\nSynap combines Redis, RabbitMQ, and Kafka features in a single platform:\n- **Key-Value Store**: Radix-tree based storage with TTL support\n- **Hash Store**: Redis-compatible hash data structure for structured objects\n- **Message Queues**: RabbitMQ-style queues with ACK/NACK\n- **Event Streams**: Kafka-style partitioned topics with consumer groups\n- **Pub/Sub**: Topic-based messaging with wildcard support\n\n**Authentication**: Supports Basic Auth, Bearer Token, and API Key\n",
-    "version": "0.7.0-rc2",
+    "description": "High-Performance In-Memory Key-Value Store & Message Broker\n\nSynap combines Redis, RabbitMQ, and Kafka features in a single platform:\n- **Key-Value Store**: Radix-tree based storage with TTL support\n- **Hash Store**: Redis-compatible hash data structure for structured objects\n- **Message Queues**: RabbitMQ-style queues with ACK/NACK\n- **Event Streams**: Kafka-style partitioned topics with consumer groups\n- **Pub/Sub**: Topic-based messaging with wildcard support\n\n**Authentication & Security** (\u2705 Production Ready):\n- **Basic Auth**: HTTP Basic Authentication (username:password)\n- **Bearer Token**: API Key authentication via Authorization header\n- **API Key**: Query parameter authentication for GET requests\n- **User Management**: Create, delete, enable/disable users\n- **API Key Management**: Generate, revoke, and manage API keys with expiration\n- **Fine-grained Permissions**: Resource-based permissions (RabbitMQ-style)\n- **Audit Logging**: Track all authentication events\n- **Password Validation**: Configurable password requirements\n",
+    "version": "0.9.0",
     "contact": {
       "name": "Synap Team",
       "url": "https://github.com/hivellm/synap"
@@ -91,6 +91,10 @@
     {
       "name": "Persistence",
       "description": "Snapshot and persistence management"
+    },
+    {
+      "name": "Authentication",
+      "description": "Authentication, user management, and API key management"
     }
   ],
   "paths": {
@@ -3821,6 +3825,788 @@
                 }
               }
             }
+          }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Login with username/password",
+        "description": "Authenticate using username and password (returns user info, use Basic Auth for API calls)",
+        "operationId": "authLogin",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "username",
+                  "password"
+                ],
+                "properties": {
+                  "username": {
+                    "type": "string",
+                    "example": "admin"
+                  },
+                  "password": {
+                    "type": "string",
+                    "format": "password",
+                    "example": "SecurePassword123!"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Login response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "user": {
+                      "$ref": "#/components/schemas/UserInfo"
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "Login successful"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/me": {
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Get current user info",
+        "description": "Get information about the currently authenticated user",
+        "operationId": "authMe",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/auth/keys": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Create API key",
+        "description": "Generate a new API key with optional expiration and permissions",
+        "operationId": "authCreateKey",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateKeyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "API key created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateKeyResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden (insufficient permissions)"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "List API keys",
+        "description": "List all API keys for the authenticated user",
+        "operationId": "authListKeys",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of API keys",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "keys": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ApiKeyInfo"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
+      }
+    },
+    "/auth/keys/{id}": {
+      "delete": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Revoke API key",
+        "description": "Revoke (delete) an API key by ID",
+        "operationId": "authRevokeKey",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "key_abc123xyz"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "API key revoked successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "message": {
+                      "type": "string",
+                      "example": "API key revoked"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "API key not found"
+          }
+        }
+      }
+    },
+    "/auth/users": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Create user (Admin only)",
+        "description": "Create a new user account (requires admin permissions)",
+        "operationId": "authCreateUser",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUserRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User created successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    },
+                    "username": {
+                      "type": "string",
+                      "example": "newuser"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden (admin required)"
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "List users (Admin only)",
+        "description": "Get a list of all users (requires admin permissions)",
+        "operationId": "authListUsers",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of users",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UserInfo"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden (admin required)"
+          }
+        }
+      }
+    },
+    "/auth/users/{username}": {
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Get user details",
+        "description": "Get detailed information about a specific user",
+        "operationId": "authGetUser",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "admin"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User information",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserInfo"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "404": {
+            "description": "User not found"
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Delete user (Admin only)",
+        "description": "Delete a user account (cannot delete root user)",
+        "operationId": "authDeleteUser",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "olduser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden (admin required)"
+          },
+          "400": {
+            "description": "Cannot delete root user"
+          }
+        }
+      }
+    },
+    "/auth/users/{username}/password": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Change user password",
+        "description": "Change password for a user (users can change their own password, admins can change any password)",
+        "operationId": "authChangePassword",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "admin"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "new_password"
+                ],
+                "properties": {
+                  "new_password": {
+                    "type": "string",
+                    "format": "password",
+                    "example": "NewSecurePassword123!"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Password changed successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "400": {
+            "description": "Invalid password (doesn't meet requirements)"
+          }
+        }
+      }
+    },
+    "/auth/users/{username}/enable": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Enable user (Admin only)",
+        "description": "Enable a disabled user account",
+        "operationId": "authEnableUser",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "disableduser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User enabled successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden (admin required)"
+          }
+        }
+      }
+    },
+    "/auth/users/{username}/disable": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Disable user (Admin only)",
+        "description": "Disable a user account (prevents login)",
+        "operationId": "authDisableUser",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "problematicuser"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "User disabled successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden (admin required)"
+          }
+        }
+      }
+    },
+    "/auth/users/{username}/roles": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Grant role to user (Admin only)",
+        "description": "Assign a role to a user",
+        "operationId": "authGrantRole",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "newuser"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "role"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "example": "readonly"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Role granted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden (admin required)"
+          }
+        }
+      }
+    },
+    "/auth/users/{username}/roles/{role}": {
+      "delete": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Revoke role from user (Admin only)",
+        "description": "Remove a role from a user",
+        "operationId": "authRevokeRole",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "newuser"
+          },
+          {
+            "name": "role",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "readonly"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Role revoked successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "success": {
+                      "type": "boolean",
+                      "example": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden (admin required)"
+          }
+        }
+      }
+    },
+    "/auth/roles": {
+      "get": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "List roles",
+        "description": "Get a list of all available roles",
+        "operationId": "authListRoles",
+        "security": [
+          {
+            "BasicAuth": []
+          },
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List of roles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/RoleInfo"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
           }
         }
       }

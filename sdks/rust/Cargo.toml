@@ -21,6 +21,7 @@ tracing = "0.1"
 async-trait = "0.1"
 url = "2.5"
 uuid = { version = "1.11", features = ["v4"] }
+base64 = "0.22"
 
 # RxJS-style reactive programming
 futures = "0.3"

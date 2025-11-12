@@ -19,9 +19,19 @@ public sealed class SynapConfig
     public int Timeout { get; private set; } = 30;
 
     /// <summary>
-    /// Gets the authentication token for requests.
+    /// Gets the authentication token (API key) for requests.
     /// </summary>
     public string? AuthToken { get; private set; }
+
+    /// <summary>
+    /// Gets the username for Basic Auth.
+    /// </summary>
+    public string? Username { get; private set; }
+
+    /// <summary>
+    /// Gets the password for Basic Auth.
+    /// </summary>
+    public string? Password { get; private set; }
 
     /// <summary>
     /// Gets the maximum number of retries for failed requests.
@@ -65,14 +75,31 @@ public sealed class SynapConfig
     }
 
     /// <summary>
-    /// Creates a copy of this configuration with the specified authentication token.
+    /// Creates a copy of this configuration with the specified authentication token (API key).
     /// </summary>
-    /// <param name="token">The authentication token.</param>
+    /// <param name="token">The authentication token (API key).</param>
     /// <returns>A new <see cref="SynapConfig"/> instance with the updated token.</returns>
     public SynapConfig WithAuthToken(string token)
     {
         var clone = (SynapConfig)MemberwiseClone();
         clone.AuthToken = token;
+        clone.Username = null;
+        clone.Password = null;
+        return clone;
+    }
+
+    /// <summary>
+    /// Creates a copy of this configuration with Basic Auth credentials.
+    /// </summary>
+    /// <param name="username">The username for Basic Auth.</param>
+    /// <param name="password">The password for Basic Auth.</param>
+    /// <returns>A new <see cref="SynapConfig"/> instance with Basic Auth credentials.</returns>
+    public SynapConfig WithBasicAuth(string username, string password)
+    {
+        var clone = (SynapConfig)MemberwiseClone();
+        clone.Username = username;
+        clone.Password = password;
+        clone.AuthToken = null;
         return clone;
     }
 

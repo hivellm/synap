@@ -169,21 +169,167 @@ cargo test --test mcp_tests -- --nocapture
 
 ## 🔒 Authentication
 
-MCP tools respect Synap's authentication system:
+MCP requests support **full authentication** via HTTP headers, with permission checks for all operations.
 
-```rust
-// With API key in state
-let state = AppState {
-    // ... setup with auth enabled
-};
+### Authentication Methods
 
-// Tools will use configured authentication
-let result = handle_mcp_tool(request, state).await?;
+#### 1. Basic Auth (Username/Password)
+
+```bash
+# Via curl
+curl -u username:password \
+  -X POST http://localhost:15500/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "tools/call",
+    "params": {
+      "name": "synap_kv_get",
+      "arguments": {"key": "test"}
+    }
+  }'
+```
+
+#### 2. Bearer Token (API Key)
+
+```bash
+# Via curl
+curl -X POST http://localhost:15500/mcp \
+  -H "Authorization: Bearer sk_XXXXX..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "tools/call",
+    "params": {
+      "name": "synap_kv_get",
+      "arguments": {"key": "test"}
+    }
+  }'
+```
+
+### Permission Checks
+
+All MCP operations verify permissions before execution:
+
+- **KV Operations**: Requires `kv:*` permissions
+  - `synap_kv_get` - Requires `Read` permission
+  - `synap_kv_set` - Requires `Write` permission
+  - `synap_kv_delete` - Requires `Delete` permission
+
+- **Queue Operations**: Requires `queue:*` permissions
+  - `synap_queue_publish` - Requires `Write` permission
+
+- **Hash Operations**: Requires `hash:*` permissions
+  - `synap_hash_get` - Requires `Read` permission
+  - `synap_hash_set` - Requires `Write` permission
+
+- **List Operations**: Requires `list:*` permissions
+  - `synap_list_push` - Requires `Write` permission
+  - `synap_list_pop` - Requires `Write` permission
+  - `synap_list_range` - Requires `Read` permission
+
+- **Set Operations**: Requires `set:*` permissions
+  - `synap_set_add` - Requires `Write` permission
+  - `synap_set_members` - Requires `Read` permission
+
+- **Admin Users**: Bypass all permission checks (full access)
+
+### Error Responses
+
+When authentication or authorization fails:
+
+```json
+{
+  "error": {
+    "code": -32603,
+    "message": "Insufficient permissions for resource: kv:test_key, action: write"
+  }
+}
+```
+
+**HTTP Status Codes**:
+- `401 Unauthorized` - Missing or invalid credentials
+- `403 Forbidden` - Valid credentials but insufficient permissions (handled in tool response)
+
+### Configuration
+
+Enable authentication in `config.yml`:
+
+```yaml
+auth:
+  enabled: true
+  require_auth: true  # Require auth for MCP requests
+  root:
+    username: "root"
+    password: "root"
+    enabled: true
 ```
 
 **Environment Variables**:
-- `SYNAP_API_KEY` - API key for authentication
-- `SYNAP_URL` - Server URL (default: http://localhost:15500)
+- `SYNAP_AUTH_ENABLED=true` - Enable authentication
+- `SYNAP_AUTH_REQUIRE_AUTH=true` - Require auth for all requests
+- `SYNAP_AUTH_ROOT_USERNAME=root` - Root username
+- `SYNAP_AUTH_ROOT_PASSWORD=root` - Root password
+
+### Example: Authenticated MCP Request
+
+```bash
+# 1. Create API key (via REST API)
+curl -u root:root \
+  -X POST http://localhost:15500/auth/keys \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "mcp-readonly-key",
+    "permissions": [
+      {"resource": "kv:*", "actions": ["read"]}
+    ]
+  }'
+
+# Response: {"id": "...", "key": "sk_XXXXX..."}
+
+# 2. Use API key for MCP request
+curl -X POST http://localhost:15500/mcp \
+  -H "Authorization: Bearer sk_XXXXX..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "tools/call",
+    "params": {
+      "name": "synap_kv_get",
+      "arguments": {"key": "test"}
+    }
+  }'
+
+# 3. Write operation will fail (read-only key)
+curl -X POST http://localhost:15500/mcp \
+  -H "Authorization: Bearer sk_XXXXX..." \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "tools/call",
+    "params": {
+      "name": "synap_kv_set",
+      "arguments": {"key": "test", "value": "data"}
+    }
+  }'
+
+# Response: Error - Insufficient permissions
+```
+
+### Anonymous Access
+
+When `auth.require_auth=false`, MCP requests can be made without authentication:
+
+```bash
+# No auth header required
+curl -X POST http://localhost:15500/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "method": "tools/call",
+    "params": {
+      "name": "synap_kv_get",
+      "arguments": {"key": "test"}
+    }
+  }'
+```
+
+**Note**: Anonymous access is only available when authentication is disabled or `require_auth=false`. In production, always enable `require_auth=true`.
 
 ## 📊 Tool Annotations
 

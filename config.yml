@@ -108,7 +108,7 @@ queue:
 # AUTHENTICATION & SECURITY
 # ============================================================================
 
-authentication:
+auth:
   # Enable/disable authentication
   # Default: false (disabled for development)
   # IMPORTANT: Authentication is REQUIRED when binding to 0.0.0.0
@@ -119,21 +119,16 @@ authentication:
   # Default: false
   require_auth: false
   
-  # Default admin user (created on first startup if no users exist)
+  # Root user configuration (created on first startup)
   # CHANGE THESE IN PRODUCTION!
-  default_admin:
-    username: "admin"
-    password: "changeme"
+  root:
+    username: "root"
+    password: "root"  # MUST be changed in production!
+    enabled: true     # Can be disabled after initial setup for security
   
-  # Session/Token settings
-  # API keys can have expiration time (in days)
-  # Set to 0 for no expiration
-  api_key_default_expiration_days: 90
-  
-  # IP whitelisting for API keys
-  # Empty list = all IPs allowed
-  # Example: ["192.168.1.0/24", "10.0.0.1"]
-  api_key_allowed_ips: []
+  # Default TTL for temporary API keys (in seconds)
+  # Default: 3600 (1 hour)
+  default_key_ttl: 3600
 
 # Access Control Lists (ACL)
 # Define who can access what resources

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+import base64
 import uuid
 
 import httpx
@@ -49,8 +50,15 @@ class SynapClient:
             self._http_client = http_client
         else:
             headers = {"Accept": "application/json"}
+            
+            # Add authentication headers
             if config.auth_token:
                 headers["Authorization"] = f"Bearer {config.auth_token}"
+            elif config.username and config.password:
+                credentials = base64.b64encode(
+                    f"{config.username}:{config.password}".encode()
+                ).decode()
+                headers["Authorization"] = f"Basic {credentials}"
 
             self._http_client = httpx.AsyncClient(
                 base_url=config.base_url,

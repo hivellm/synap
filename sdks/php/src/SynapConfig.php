@@ -14,6 +14,8 @@ class SynapConfig
     private string $baseUrl;
     private int $timeout = 30;
     private ?string $authToken = null;
+    private ?string $username = null;
+    private ?string $password = null;
     private int $maxRetries = 3;
 
     public function __construct(string $baseUrl)
@@ -42,6 +44,18 @@ class SynapConfig
     {
         $clone = clone $this;
         $clone->authToken = $token;
+        $clone->username = null;
+        $clone->password = null;
+
+        return $clone;
+    }
+
+    public function withBasicAuth(string $username, string $password): self
+    {
+        $clone = clone $this;
+        $clone->username = $username;
+        $clone->password = $password;
+        $clone->authToken = null;
 
         return $clone;
     }
@@ -67,6 +81,16 @@ class SynapConfig
     public function getAuthToken(): ?string
     {
         return $this->authToken;
+    }
+
+    public function getUsername(): ?string
+    {
+        return $this->username;
+    }
+
+    public function getPassword(): ?string
+    {
+        return $this->password;
     }
 
     public function getMaxRetries(): int

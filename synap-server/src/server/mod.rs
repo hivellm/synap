@@ -1,3 +1,4 @@
+pub mod auth_handlers;
 pub mod handlers;
 pub mod mcp_handlers;
 pub mod mcp_server;

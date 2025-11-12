@@ -9,6 +9,22 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use tracing::{debug, info};
 
+/// API Key metadata (without the secret key)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ApiKeyMetadata {
+    pub id: String,
+    pub name: String,
+    pub username: Option<String>,
+    pub permissions: Vec<Permission>,
+    pub allowed_ips: Vec<IpAddr>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub enabled: bool,
+    pub created_at: DateTime<Utc>,
+    pub last_used_at: Option<DateTime<Utc>>,
+    pub usage_count: u64,
+    pub metadata: HashMap<String, String>,
+}
+
 /// API Key for authentication
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiKey {
@@ -52,6 +68,35 @@ impl ApiKey {
         let id = uuid::Uuid::new_v4().to_string();
 
         let expires_at = expires_in_days.map(|days| Utc::now() + Duration::days(days));
+
+        Self {
+            id,
+            key,
+            name: name.into(),
+            username,
+            permissions,
+            allowed_ips,
+            expires_at,
+            enabled: true,
+            created_at: Utc::now(),
+            last_used_at: None,
+            usage_count: 0,
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// Generate a temporary API key with TTL in seconds
+    pub fn generate_with_ttl(
+        name: impl Into<String>,
+        username: Option<String>,
+        permissions: Vec<Permission>,
+        allowed_ips: Vec<IpAddr>,
+        ttl_seconds: u64,
+    ) -> Self {
+        let key = Self::generate_key();
+        let id = uuid::Uuid::new_v4().to_string();
+
+        let expires_at = Some(Utc::now() + Duration::seconds(ttl_seconds as i64));
 
         Self {
             id,
@@ -162,6 +207,33 @@ impl ApiKeyManager {
         Ok(api_key)
     }
 
+    /// Create a temporary API key with TTL in seconds
+    pub fn create_temporary(
+        &self,
+        name: impl Into<String>,
+        username: Option<String>,
+        permissions: Vec<Permission>,
+        allowed_ips: Vec<IpAddr>,
+        ttl_seconds: u64,
+    ) -> AuthResult<ApiKey> {
+        let api_key =
+            ApiKey::generate_with_ttl(name, username, permissions, allowed_ips, ttl_seconds);
+
+        debug!(
+            "Creating temporary API key: {} (ID: {}, TTL: {}s)",
+            api_key.name, api_key.id, ttl_seconds
+        );
+
+        let mut keys = self.keys.write();
+        let mut index = self.key_index.write();
+
+        // Store key
+        index.insert(api_key.key.clone(), api_key.id.clone());
+        keys.insert(api_key.id.clone(), api_key.clone());
+
+        Ok(api_key)
+    }
+
     /// Verify API key and return the key object
     pub fn verify(&self, key: &str, client_ip: IpAddr) -> AuthResult<ApiKey> {
         debug!("Verifying API key from IP: {}", client_ip);
@@ -200,6 +272,11 @@ impl ApiKeyManager {
         Ok(api_key.clone())
     }
 
+    /// Check if an API key exists (by key string)
+    pub fn key_exists(&self, key: &str) -> bool {
+        self.key_index.read().contains_key(key)
+    }
+
     /// Get API key by ID
     pub fn get(&self, id: &str) -> Option<ApiKey> {
         self.keys.read().get(id).cloned()
@@ -208,6 +285,55 @@ impl ApiKeyManager {
     /// List all API keys (excluding the secret key)
     pub fn list(&self) -> Vec<ApiKey> {
         self.keys.read().values().cloned().collect()
+    }
+
+    /// List API keys for a specific user
+    pub fn list_by_user(&self, username: &str) -> Vec<ApiKey> {
+        self.keys
+            .read()
+            .values()
+            .filter(|k| k.username.as_ref().map_or(false, |u| u == username))
+            .cloned()
+            .collect()
+    }
+
+    /// List expired API keys
+    pub fn list_expired(&self) -> Vec<ApiKey> {
+        let now = Utc::now();
+        self.keys
+            .read()
+            .values()
+            .filter(|k| k.expires_at.map_or(false, |expires_at| now > expires_at))
+            .cloned()
+            .collect()
+    }
+
+    /// List active (non-expired, enabled) API keys
+    pub fn list_active(&self) -> Vec<ApiKey> {
+        let now = Utc::now();
+        self.keys
+            .read()
+            .values()
+            .filter(|k| k.enabled && k.expires_at.map_or(true, |expires_at| now <= expires_at))
+            .cloned()
+            .collect()
+    }
+
+    /// Get API key metadata (without exposing the secret key)
+    pub fn get_metadata(&self, id: &str) -> Option<ApiKeyMetadata> {
+        self.keys.read().get(id).map(|k| ApiKeyMetadata {
+            id: k.id.clone(),
+            name: k.name.clone(),
+            username: k.username.clone(),
+            permissions: k.permissions.clone(),
+            allowed_ips: k.allowed_ips.clone(),
+            expires_at: k.expires_at,
+            enabled: k.enabled,
+            created_at: k.created_at,
+            last_used_at: k.last_used_at,
+            usage_count: k.usage_count,
+            metadata: k.metadata.clone(),
+        })
     }
 
     /// Revoke (delete) API key
@@ -388,5 +514,215 @@ mod tests {
         let key_state = manager.get(&key.id).unwrap();
         assert_eq!(key_state.usage_count, 5);
         assert!(key_state.last_used_at.is_some());
+    }
+
+    // Temporary key tests
+    #[test]
+    fn test_create_temporary_key() {
+        let manager = ApiKeyManager::new();
+        let key = manager
+            .create_temporary("temp-key", Some("user1".to_string()), vec![], vec![], 3600)
+            .unwrap();
+
+        assert_eq!(key.name, "temp-key");
+        assert!(key.key.starts_with("sk_"));
+        assert!(key.expires_at.is_some());
+        assert!(key.is_valid());
+
+        // Check expiration is approximately 3600 seconds from now
+        if let Some(expires_at) = key.expires_at {
+            let now = Utc::now();
+            let diff = (expires_at - now).num_seconds();
+            assert!(diff >= 3590 && diff <= 3610); // Allow 10s tolerance
+        }
+    }
+
+    #[test]
+    fn test_temporary_key_expires() {
+        let manager = ApiKeyManager::new();
+        // Create key with very short TTL (1 second)
+        let key = manager
+            .create_temporary("temp", None, vec![], vec![], 1)
+            .unwrap();
+
+        assert!(key.is_valid());
+
+        // Wait for expiration
+        std::thread::sleep(std::time::Duration::from_secs(2));
+
+        // Key should be expired now
+        let expired_key = manager.get(&key.id).unwrap();
+        assert!(!expired_key.is_valid());
+    }
+
+    #[test]
+    fn test_list_by_user() {
+        let manager = ApiKeyManager::new();
+        manager
+            .create("key1", Some("user1".to_string()), vec![], vec![], None)
+            .unwrap();
+        manager
+            .create("key2", Some("user1".to_string()), vec![], vec![], None)
+            .unwrap();
+        manager
+            .create("key3", Some("user2".to_string()), vec![], vec![], None)
+            .unwrap();
+
+        let user1_keys = manager.list_by_user("user1");
+        assert_eq!(user1_keys.len(), 2);
+
+        let user2_keys = manager.list_by_user("user2");
+        assert_eq!(user2_keys.len(), 1);
+
+        let user3_keys = manager.list_by_user("user3");
+        assert_eq!(user3_keys.len(), 0);
+    }
+
+    #[test]
+    fn test_list_expired() {
+        let manager = ApiKeyManager::new();
+        // Create expired key
+        let mut expired_key = ApiKey::generate("expired", None, vec![], vec![], None);
+        expired_key.expires_at = Some(Utc::now() - Duration::days(1));
+        let expired_id = expired_key.id.clone();
+        manager.keys.write().insert(expired_id.clone(), expired_key);
+
+        // Create active key
+        manager
+            .create("active", None, vec![], vec![], None)
+            .unwrap();
+
+        let expired = manager.list_expired();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].id, expired_id);
+    }
+
+    #[test]
+    fn test_list_active() {
+        let manager = ApiKeyManager::new();
+        // Create active key
+        let active1 = manager
+            .create("active1", None, vec![], vec![], None)
+            .unwrap();
+
+        // Create expired key
+        let mut expired = ApiKey::generate("expired", None, vec![], vec![], None);
+        expired.expires_at = Some(Utc::now() - Duration::days(1));
+        let expired_id = expired.id.clone();
+        manager.keys.write().insert(expired_id, expired);
+
+        // Create disabled key
+        let disabled = manager
+            .create("disabled", None, vec![], vec![], None)
+            .unwrap();
+        manager.set_enabled(&disabled.id, false).unwrap();
+
+        let active = manager.list_active();
+        assert_eq!(active.len(), 1);
+        assert_eq!(active[0].id, active1.id);
+    }
+
+    #[test]
+    fn test_get_metadata() {
+        let manager = ApiKeyManager::new();
+        let key = manager
+            .create(
+                "test-key",
+                Some("user1".to_string()),
+                vec![Permission::new("queue:*", super::super::Action::Read)],
+                vec![],
+                Some(30),
+            )
+            .unwrap();
+
+        let metadata = manager.get_metadata(&key.id).unwrap();
+        assert_eq!(metadata.id, key.id);
+        assert_eq!(metadata.name, "test-key");
+        assert_eq!(metadata.username, Some("user1".to_string()));
+        assert_eq!(metadata.permissions.len(), 1);
+        assert!(metadata.expires_at.is_some());
+        assert!(metadata.enabled);
+        assert_eq!(metadata.usage_count, 0);
+    }
+
+    #[test]
+    fn test_metadata_does_not_expose_secret() {
+        let manager = ApiKeyManager::new();
+        let key = manager.create("test", None, vec![], vec![], None).unwrap();
+
+        let metadata = manager.get_metadata(&key.id).unwrap();
+        // Metadata struct doesn't have 'key' field, so secret is not exposed
+        assert_eq!(metadata.id, key.id);
+    }
+
+    #[test]
+    fn test_revoke_temporary_key() {
+        let manager = ApiKeyManager::new();
+        let key = manager
+            .create_temporary("temp", None, vec![], vec![], 3600)
+            .unwrap();
+
+        assert!(manager.get(&key.id).is_some());
+
+        // Revoke
+        let revoked = manager.revoke(&key.id).unwrap();
+        assert!(revoked);
+
+        // No longer exists
+        assert!(manager.get(&key.id).is_none());
+    }
+
+    #[test]
+    fn test_temporary_key_with_zero_ttl() {
+        let manager = ApiKeyManager::new();
+        let key = manager
+            .create_temporary("instant-expire", None, vec![], vec![], 0)
+            .unwrap();
+
+        // Should be expired immediately
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let key_state = manager.get(&key.id).unwrap();
+        assert!(!key_state.is_valid());
+    }
+
+    #[test]
+    fn test_list_all_keys() {
+        let manager = ApiKeyManager::new();
+        manager.create("key1", None, vec![], vec![], None).unwrap();
+        manager.create("key2", None, vec![], vec![], None).unwrap();
+        manager.create("key3", None, vec![], vec![], None).unwrap();
+
+        let all_keys = manager.list();
+        assert_eq!(all_keys.len(), 3);
+    }
+
+    #[test]
+    fn test_cleanup_expired_keys() {
+        let manager = ApiKeyManager::new();
+        // Create expired key
+        let mut expired = ApiKey::generate("expired", None, vec![], vec![], None);
+        expired.expires_at = Some(Utc::now() - Duration::days(1));
+        let expired_id = expired.id.clone();
+        let expired_key_str = expired.key.clone();
+        manager.keys.write().insert(expired_id.clone(), expired);
+        manager
+            .key_index
+            .write()
+            .insert(expired_key_str, expired_id.clone());
+
+        // Create active key
+        let active = manager
+            .create("active", None, vec![], vec![], None)
+            .unwrap();
+
+        // Cleanup
+        let cleaned = manager.cleanup_expired();
+        assert_eq!(cleaned, 1);
+
+        // Expired key should be gone
+        assert!(manager.get(&expired_id).is_none());
+
+        // Active key should still exist
+        assert!(manager.get(&active.id).is_some());
     }
 }

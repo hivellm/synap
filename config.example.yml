@@ -87,3 +87,37 @@ mcp:
 # Note: All functionality is available via REST API and StreamableHTTP
 # regardless of MCP tool configuration
 
+# ============================================================================
+# AUTHENTICATION & SECURITY
+# ============================================================================
+
+auth:
+  # Enable/disable authentication
+  # Default: false (disabled for development)
+  # IMPORTANT: Authentication is REQUIRED when binding to 0.0.0.0
+  enabled: false
+  
+  # Require authentication for all endpoints
+  # If false, anonymous access is allowed (with limited permissions)
+  # Default: false
+  require_auth: false
+  
+  # Root user configuration (created on first startup)
+  # CHANGE THESE IN PRODUCTION!
+  root:
+    username: "root"
+    password: "root"  # MUST be changed in production!
+    enabled: true     # Can be disabled after initial setup for security
+  
+  # Default TTL for temporary API keys (in seconds)
+  # Default: 3600 (1 hour)
+  default_key_ttl: 3600
+
+# Environment Variables (Docker):
+#   SYNAP_AUTH_ENABLED=true
+#   SYNAP_AUTH_REQUIRE_AUTH=true
+#   SYNAP_AUTH_ROOT_USERNAME=root
+#   SYNAP_AUTH_ROOT_PASSWORD=your_secure_password
+#   SYNAP_AUTH_ROOT_ENABLED=true
+#   SYNAP_AUTH_DEFAULT_KEY_TTL=3600
+

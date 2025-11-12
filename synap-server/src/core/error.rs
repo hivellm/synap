@@ -65,6 +65,12 @@ pub enum SynapError {
 
     #[error("Operation timed out")]
     Timeout,
+
+    #[error("Unauthorized: {0}")]
+    Unauthorized(String),
+
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
 }
 
 impl SynapError {
@@ -91,6 +97,8 @@ impl SynapError {
             Self::IndexOutOfRange => StatusCode::BAD_REQUEST,
             Self::KeyExpired => StatusCode::GONE,
             Self::Timeout => StatusCode::REQUEST_TIMEOUT,
+            Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            Self::Forbidden(_) => StatusCode::FORBIDDEN,
         }
     }
 }
@@ -186,5 +194,23 @@ mod tests {
         let _ = SynapError::QueueFull("q".to_string());
         let _ = SynapError::MessageNotFound("msg".to_string());
         let _ = SynapError::ConsumerNotFound("consumer".to_string());
+        let _ = SynapError::Unauthorized("test".to_string());
+        let _ = SynapError::Forbidden("test".to_string());
+    }
+
+    #[test]
+    fn test_unauthorized_error_status() {
+        assert_eq!(
+            SynapError::Unauthorized("test".to_string()).status_code(),
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    #[test]
+    fn test_forbidden_error_status() {
+        assert_eq!(
+            SynapError::Forbidden("test".to_string()).status_code(),
+            StatusCode::FORBIDDEN
+        );
     }
 }

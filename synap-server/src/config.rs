@@ -21,6 +21,8 @@ pub struct ServerConfig {
     pub replication: ReplicationConfig,
     #[serde(default)]
     pub mcp: McpConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -115,6 +117,70 @@ fn default_true() -> bool {
     true
 }
 
+/// Authentication configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AuthConfig {
+    /// Enable/disable authentication
+    #[serde(default)]
+    pub enabled: bool,
+    /// Require authentication for all endpoints
+    #[serde(default)]
+    pub require_auth: bool,
+    /// Root user configuration
+    #[serde(default)]
+    pub root: RootUserConfig,
+    /// Default TTL for temporary API keys (in seconds)
+    #[serde(default = "default_key_ttl")]
+    pub default_key_ttl: u64,
+}
+
+/// Root user configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RootUserConfig {
+    /// Root username (default: "root")
+    #[serde(default = "default_root_username")]
+    pub username: String,
+    /// Root password (default: "root", must be changed in production)
+    #[serde(default = "default_root_password")]
+    pub password: String,
+    /// Enable/disable root user (can disable after initial setup)
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+fn default_key_ttl() -> u64 {
+    3600 // 1 hour
+}
+
+fn default_root_username() -> String {
+    "root".to_string()
+}
+
+fn default_root_password() -> String {
+    "root".to_string()
+}
+
+impl Default for RootUserConfig {
+    fn default() -> Self {
+        Self {
+            username: "root".to_string(),
+            password: "root".to_string(),
+            enabled: true,
+        }
+    }
+}
+
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            require_auth: false,
+            root: RootUserConfig::default(),
+            default_key_ttl: 3600,
+        }
+    }
+}
+
 impl Default for McpConfig {
     fn default() -> Self {
         Self {
@@ -172,6 +238,7 @@ impl Default for ServerConfig {
             persistence: PersistenceConfig::default(),
             replication: ReplicationConfig::default(),
             mcp: McpConfig::default(),
+            auth: AuthConfig::default(),
         }
     }
 }

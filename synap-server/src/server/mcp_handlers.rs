@@ -3,7 +3,30 @@ use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
 
+use crate::auth::{Action, get_auth_context};
 use crate::server::AppState;
+
+/// Check if the current MCP request has permission for the given resource and action
+fn check_mcp_permission(resource: &str, action: Action) -> Result<(), ErrorData> {
+    if let Some(auth_context) = get_auth_context() {
+        if auth_context.has_permission(resource, action) {
+            Ok(())
+        } else {
+            Err(ErrorData::invalid_request(
+                format!(
+                    "Insufficient permissions for resource: {}, action: {}",
+                    resource,
+                    action.as_str()
+                ),
+                None,
+            ))
+        }
+    } else {
+        // No auth context - allow if auth is disabled (anonymous access)
+        // If auth is required, middleware should have rejected the request
+        Ok(())
+    }
+}
 
 pub async fn handle_mcp_tool(
     request: CallToolRequestParam,
@@ -61,6 +84,9 @@ async fn handle_kv_get(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
 
+    // Check permission for kv:key read operation
+    check_mcp_permission(&format!("kv:{}", key), Action::Read)?;
+
     let return_type = args
         .get("type")
         .and_then(|v| v.as_str())
@@ -102,6 +128,9 @@ async fn handle_kv_set(
         .get("key")
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    // Check permission for kv:key write operation
+    check_mcp_permission(&format!("kv:{}", key), Action::Write)?;
 
     let value_str = args
         .get("value")
@@ -146,6 +175,9 @@ async fn handle_kv_delete(
         .get("key")
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    // Check permission for kv:key delete operation
+    check_mcp_permission(&format!("kv:{}", key), Action::Delete)?;
 
     let deleted = state
         .kv_store
@@ -397,6 +429,9 @@ async fn handle_hash_set(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing field", None))?;
 
+    // Check permission for hash:key write operation
+    check_mcp_permission(&format!("hash:{}", key), Action::Write)?;
+
     let value = args
         .get("value")
         .ok_or_else(|| ErrorData::invalid_params("Missing value", None))?;
@@ -432,6 +467,9 @@ async fn handle_hash_get(
         .get("field")
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing field", None))?;
+
+    // Check permission for hash:key read operation
+    check_mcp_permission(&format!("hash:{}", key), Action::Read)?;
 
     let value_bytes = state
         .hash_store
@@ -499,6 +537,9 @@ async fn handle_list_push(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
 
+    // Check permission for list:key write operation
+    check_mcp_permission(&format!("list:{}", key), Action::Write)?;
+
     let values_array = args
         .get("values")
         .and_then(|v| v.as_array())
@@ -545,6 +586,9 @@ async fn handle_list_pop(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
 
+    // Check permission for list:key write operation
+    check_mcp_permission(&format!("list:{}", key), Action::Write)?;
+
     let direction = args
         .get("direction")
         .and_then(|v| v.as_str())
@@ -590,6 +634,9 @@ async fn handle_list_range(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
 
+    // Check permission for list:key read operation
+    check_mcp_permission(&format!("list:{}", key), Action::Read)?;
+
     let start = args.get("start").and_then(|v| v.as_i64()).unwrap_or(0);
 
     let stop = args.get("stop").and_then(|v| v.as_i64()).unwrap_or(-1);
@@ -627,11 +674,15 @@ async fn handle_queue_publish(
         .as_ref()
         .ok_or_else(|| ErrorData::invalid_params("Missing arguments", None))?;
 
-    let queue = args
+    let queue_name = args
         .get("queue")
         .and_then(|v| v.as_str())
-        .ok_or_else(|| ErrorData::invalid_params("Missing queue", None))?;
+        .ok_or_else(|| ErrorData::invalid_params("Missing queue name", None))?;
 
+    // Check permission for queue:name write operation
+    check_mcp_permission(&format!("queue:{}", queue_name), Action::Write)?;
+
+    let queue = queue_name;
     let message = args
         .get("message")
         .and_then(|v| v.as_str())
@@ -666,6 +717,9 @@ async fn handle_set_add(
         .get("key")
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
+
+    // Check permission for set:key write operation
+    check_mcp_permission(&format!("set:{}", key), Action::Write)?;
 
     let members = args
         .get("members")
