@@ -10,8 +10,8 @@ fn create_test_managers() -> (Arc<KVStore>, Arc<UserManager>, Arc<ApiKeyManager>
     let api_key_manager = Arc::new(ApiKeyManager::new());
 
     // Create test users
-    user_manager.create_user("admin", "admin123", true).unwrap();
-    user_manager.create_user("user1", "pass123", false).unwrap();
+    user_manager.create_user("admin", "admin12345", true).unwrap();
+    user_manager.create_user("user1", "pass12345", false).unwrap();
     user_manager.add_user_role("user1", "readonly").unwrap();
 
     // Create test API key
@@ -40,8 +40,8 @@ fn test_user_manager_integration() {
     assert!(user_manager.get_user("user1").is_some());
 
     // Test authentication
-    assert!(user_manager.authenticate("admin", "admin123").is_ok());
-    assert!(user_manager.authenticate("user1", "pass123").is_ok());
+    assert!(user_manager.authenticate("admin", "admin12345").is_ok());
+    assert!(user_manager.authenticate("user1", "pass12345").is_ok());
 }
 
 #[test]
@@ -59,11 +59,11 @@ fn test_auth_components_ready_for_integration() {
     let user_manager = UserManager::new();
     let api_key_manager = ApiKeyManager::new();
 
-    user_manager.create_user("test", "pass", false).unwrap();
+    user_manager.create_user("test", "pass12345", false).unwrap();
     let key = api_key_manager
         .create("key", None, vec![], vec![], None)
         .unwrap();
 
-    assert!(user_manager.authenticate("test", "pass").is_ok());
+    assert!(user_manager.authenticate("test", "pass12345").is_ok());
     assert!(key.key.starts_with("sk_"));
 }
