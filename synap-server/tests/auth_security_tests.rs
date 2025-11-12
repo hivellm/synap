@@ -45,48 +45,48 @@ fn test_authentication_fails_nonexistent_user() {
 #[test]
 fn test_disabled_user_cannot_authenticate() {
     let manager = UserManager::new();
-    manager.create_user("user1", "password", false).unwrap();
+    manager.create_user("user1", "password12345", false).unwrap();
 
     // Can authenticate when enabled
-    assert!(manager.authenticate("user1", "password").is_ok());
+    assert!(manager.authenticate("user1", "password12345").is_ok());
 
     // Disable user
     manager.set_user_enabled("user1", false).unwrap();
 
     // Cannot authenticate when disabled
-    let result = manager.authenticate("user1", "password");
+    let result = manager.authenticate("user1", "password12345");
     assert!(result.is_err());
 }
 
 #[test]
 fn test_password_change() {
     let manager = UserManager::new();
-    manager.create_user("user1", "oldpass", false).unwrap();
+    manager.create_user("user1", "oldpass123", false).unwrap();
 
     // Can authenticate with old password
-    assert!(manager.authenticate("user1", "oldpass").is_ok());
+    assert!(manager.authenticate("user1", "oldpass123").is_ok());
 
     // Change password
-    manager.change_password("user1", "newpass").unwrap();
+    manager.change_password("user1", "newpass123").unwrap();
 
     // Cannot authenticate with old password
-    assert!(manager.authenticate("user1", "oldpass").is_err());
+    assert!(manager.authenticate("user1", "oldpass123").is_err());
 
     // Can authenticate with new password
-    assert!(manager.authenticate("user1", "newpass").is_ok());
+    assert!(manager.authenticate("user1", "newpass123").is_ok());
 }
 
 #[test]
 fn test_last_login_tracking() {
     let manager = UserManager::new();
-    manager.create_user("user1", "pass", false).unwrap();
+    manager.create_user("user1", "pass12345", false).unwrap();
 
     // Initially no last login
     let user = manager.get_user("user1").unwrap();
     assert!(user.last_login.is_none());
 
     // After authentication, last login is set
-    manager.authenticate("user1", "pass").unwrap();
+    manager.authenticate("user1", "pass12345").unwrap();
     let user = manager.get_user("user1").unwrap();
     assert!(user.last_login.is_some());
 }
@@ -94,10 +94,10 @@ fn test_last_login_tracking() {
 #[test]
 fn test_duplicate_user_creation_fails() {
     let manager = UserManager::new();
-    manager.create_user("user1", "pass1", false).unwrap();
+    manager.create_user("user1", "pass12345", false).unwrap();
 
     // Try to create duplicate
-    let result = manager.create_user("user1", "pass2", false);
+    let result = manager.create_user("user1", "pass23456", false);
     assert!(result.is_err());
 }
 
@@ -106,10 +106,10 @@ fn test_admin_user_flag() {
     let manager = UserManager::new();
 
     // Create admin
-    manager.create_user("admin", "adminpass", true).unwrap();
+    manager.create_user("admin", "adminpass123", true).unwrap();
 
     // Create regular user
-    manager.create_user("regular", "userpass", false).unwrap();
+    manager.create_user("regular", "userpass123", false).unwrap();
 
     let admin = manager.get_user("admin").unwrap();
     assert!(admin.is_admin);
@@ -123,7 +123,7 @@ fn test_admin_user_flag() {
 #[test]
 fn test_role_assignment() {
     let manager = UserManager::new();
-    manager.create_user("user1", "pass", false).unwrap();
+    manager.create_user("user1", "pass12345", false).unwrap();
 
     // Add role
     manager.add_user_role("user1", "readonly").unwrap();
@@ -141,7 +141,7 @@ fn test_role_assignment() {
 #[test]
 fn test_add_nonexistent_role_fails() {
     let manager = UserManager::new();
-    manager.create_user("user1", "pass", false).unwrap();
+    manager.create_user("user1", "pass12345", false).unwrap();
 
     let result = manager.add_user_role("user1", "nonexistent_role");
     assert!(result.is_err());
@@ -169,7 +169,7 @@ fn test_custom_role_creation() {
 #[test]
 fn test_admin_user_has_all_permissions() {
     let manager = UserManager::new();
-    manager.create_user("admin", "pass", true).unwrap();
+    manager.create_user("admin", "pass12345", true).unwrap();
     manager.add_user_role("admin", "admin").unwrap();
 
     let permissions = manager.get_user_permissions("admin");
@@ -569,9 +569,9 @@ fn test_acl_specific_rule_overrides_wildcard() {
 fn test_empty_password_rejected() {
     let manager = UserManager::new();
 
-    // Empty password should still hash (SHA512 handles it)
+    // Empty password should be rejected (minimum 8 characters)
     let result = manager.create_user("user1", "", false);
-    assert!(result.is_ok());
+    assert!(result.is_err());
 
     // But authentication should fail with wrong password
     let result = manager.authenticate("user1", "anypass");
@@ -584,9 +584,9 @@ fn test_special_characters_in_username() {
 
     // Special characters should be allowed
     manager
-        .create_user("user@example.com", "pass", false)
+        .create_user("user@example.com", "pass12345", false)
         .unwrap();
-    manager.create_user("user-123_test", "pass", false).unwrap();
+    manager.create_user("user-123_test", "pass12345", false).unwrap();
 
     assert!(manager.get_user("user@example.com").is_some());
     assert!(manager.get_user("user-123_test").is_some());
@@ -596,14 +596,14 @@ fn test_special_characters_in_username() {
 fn test_case_sensitive_usernames() {
     let manager = UserManager::new();
 
-    manager.create_user("User", "pass1", false).unwrap();
-    manager.create_user("user", "pass2", false).unwrap();
+    manager.create_user("User", "pass12345", false).unwrap();
+    manager.create_user("user", "pass23456", false).unwrap();
 
     // Should be different users
-    assert!(manager.authenticate("User", "pass1").is_ok());
-    assert!(manager.authenticate("user", "pass2").is_ok());
-    assert!(manager.authenticate("User", "pass2").is_err());
-    assert!(manager.authenticate("user", "pass1").is_err());
+    assert!(manager.authenticate("User", "pass12345").is_ok());
+    assert!(manager.authenticate("user", "pass23456").is_ok());
+    assert!(manager.authenticate("User", "pass23456").is_err());
+    assert!(manager.authenticate("user", "pass12345").is_err());
 }
 
 #[test]
@@ -612,7 +612,7 @@ fn test_concurrent_authentication() {
     use std::thread;
 
     let manager = Arc::new(UserManager::new());
-    manager.create_user("user1", "password", false).unwrap();
+    manager.create_user("user1", "password12345", false).unwrap();
 
     let mut handles = vec![];
 
@@ -620,7 +620,7 @@ fn test_concurrent_authentication() {
     for _ in 0..10 {
         let manager_clone = Arc::clone(&manager);
         let handle = thread::spawn(move || {
-            manager_clone.authenticate("user1", "password").unwrap();
+            manager_clone.authenticate("user1", "password12345").unwrap();
         });
         handles.push(handle);
     }
@@ -694,7 +694,7 @@ fn test_admin_bypasses_all_checks() {
 #[test]
 fn test_user_deletion() {
     let manager = UserManager::new();
-    manager.create_user("temp_user", "pass", false).unwrap();
+    manager.create_user("temp_user", "pass12345", false).unwrap();
 
     assert!(manager.get_user("temp_user").is_some());
 
