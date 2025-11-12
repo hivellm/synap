@@ -664,7 +664,7 @@ fn test_concurrent_password_change() {
     }
 
     for handle in handles {
-        let _: Result<(), _> = handle.join();
+        handle.join().unwrap();
     }
 
     // Should be able to authenticate with one of the passwords
@@ -701,7 +701,7 @@ fn test_concurrent_api_key_revocation() {
     }
 
     for handle in handles {
-        let _: Result<(), _> = handle.join();
+        handle.join().unwrap();
     }
 
     // Key should be revoked
