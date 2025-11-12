@@ -1,19 +1,33 @@
 //! S2S (Server-to-Server) integration tests for Key Management operations
 //! These tests require a running Synap server
 
+#[cfg(feature = "s2s-tests")]
+#[cfg_attr(not(feature = "s2s-tests"), allow(unused_imports))]
 use reqwest::Client;
+#[cfg(feature = "s2s-tests")]
+#[cfg_attr(not(feature = "s2s-tests"), allow(unused_imports))]
 use serde_json::json;
+#[cfg(feature = "s2s-tests")]
 use std::sync::Arc;
+#[cfg(feature = "s2s-tests")]
 use std::time::Duration;
+#[cfg(feature = "s2s-tests")]
 use synap_server::auth::{ApiKeyManager, UserManager};
+#[cfg(feature = "s2s-tests")]
 use synap_server::core::{
     HashStore, HyperLogLogStore, KVStore, ListStore, SetStore, SortedSetStore, TransactionManager,
 };
+#[cfg(feature = "s2s-tests")]
 use synap_server::monitoring::MonitoringManager;
+#[cfg(feature = "s2s-tests")]
 use synap_server::server::router::create_router;
+#[cfg(feature = "s2s-tests")]
 use synap_server::{AppState, KVConfig, ScriptManager};
+#[cfg(feature = "s2s-tests")]
 use tokio::net::TcpListener;
 
+#[cfg(feature = "s2s-tests")]
+#[cfg_attr(not(feature = "s2s-tests"), allow(dead_code))]
 async fn spawn_test_server() -> String {
     let kv_store = Arc::new(KVStore::new(KVConfig::default()));
     let hash_store = Arc::new(HashStore::new());
@@ -93,6 +107,8 @@ async fn spawn_test_server() -> String {
     url
 }
 
+#[cfg(feature = "s2s-tests")]
+#[cfg_attr(not(feature = "s2s-tests"), allow(dead_code))]
 async fn send_command(
     client: &Client,
     base_url: &str,

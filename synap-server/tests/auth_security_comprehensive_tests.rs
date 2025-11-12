@@ -92,11 +92,7 @@ fn test_password_verification_timing() {
 
     // Times should be similar (SHA512 hashing takes similar time)
     // Allow some variance but should be close
-    let diff = if correct_time > incorrect_time {
-        correct_time - incorrect_time
-    } else {
-        incorrect_time - correct_time
-    };
+    let diff = correct_time.abs_diff(incorrect_time);
 
     // Difference should be small (SHA512 hashing takes similar time regardless)
     assert!(diff < Duration::from_millis(100));
@@ -691,6 +687,7 @@ fn test_concurrent_password_change() {
         handles.push(handle);
     }
 
+    #[allow(unused_must_use)]
     for handle in handles {
         handle.join().unwrap();
     }
@@ -728,6 +725,7 @@ fn test_concurrent_api_key_revocation() {
         handles.push(handle);
     }
 
+    #[allow(unused_must_use)]
     for handle in handles {
         handle.join().unwrap();
     }

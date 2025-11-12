@@ -67,6 +67,7 @@ pub fn create_test_auth_managers() -> (Arc<UserManager>, Arc<ApiKeyManager>) {
 }
 
 /// Create a router for testing with default configuration
+#[allow(dead_code)]
 pub fn create_test_router(state: AppState) -> axum::Router {
     let (user_manager, api_key_manager) = create_test_auth_managers();
     create_router(

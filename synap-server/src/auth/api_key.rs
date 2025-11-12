@@ -533,7 +533,7 @@ mod tests {
         if let Some(expires_at) = key.expires_at {
             let now = Utc::now();
             let diff = (expires_at - now).num_seconds();
-            assert!(diff >= 3590 && diff <= 3610); // Allow 10s tolerance
+            assert!((3590..=3610).contains(&diff)); // Allow 10s tolerance
         }
     }
 

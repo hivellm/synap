@@ -380,7 +380,7 @@ mod tests {
     #[test]
     fn test_permission_multiple_patterns() {
         // Test that multiple permissions can match the same resource
-        let perms = vec![
+          let perms = [
             Permission::new("queue:*", Action::Read),
             Permission::new("queue:orders", Action::Write),
         ];

@@ -151,7 +151,7 @@ async fn make_mcp_request(
     arguments: serde_json::Value,
     auth_header: Option<&str>,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    let mut request = client.post(&format!("{}/mcp", base_url)).json(&json!({
+    let mut request = client.post(format!("{}/mcp", base_url)).json(&json!({
         "method": "tools/call",
         "params": {
             "name": tool_name,
