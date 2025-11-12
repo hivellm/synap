@@ -151,6 +151,11 @@ impl Permission {
 
     /// Check if resource matches the pattern
     fn matches_pattern(&self, resource: &str) -> bool {
+        // Empty pattern should not match anything (security)
+        if self.resource_pattern.is_empty() {
+            return false;
+        }
+        
         // Exact match
         if self.resource_pattern == resource {
             return true;
