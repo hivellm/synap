@@ -224,7 +224,9 @@ fn test_basic_auth_empty_username() {
 fn test_basic_auth_empty_password() {
     let user_manager = UserManager::new();
     // Note: Empty password is not allowed anymore (min 8 chars), so we test with a valid password
-    user_manager.create_user("testuser", "emptypass123", false).unwrap();
+    user_manager
+        .create_user("testuser", "emptypass123", false)
+        .unwrap();
     let api_key_manager = ApiKeyManager::new();
     let auth = AuthMiddleware::new(user_manager, api_key_manager, false);
 
@@ -477,7 +479,7 @@ fn test_authorization_header_without_prefix() {
 fn test_multiple_authorization_headers() {
     let user_manager = UserManager::new();
     let api_key_manager = ApiKeyManager::new();
-    
+
     // Create a key for testing before creating auth
     let key = api_key_manager
         .create(
@@ -488,7 +490,7 @@ fn test_multiple_authorization_headers() {
             None,
         )
         .unwrap();
-    
+
     let auth = AuthMiddleware::new(user_manager, api_key_manager, false);
 
     // Multiple Authorization headers (should use first one)
@@ -558,7 +560,7 @@ fn test_unicode_in_headers() {
         "Bearer sk_test_unicode_123".to_string(),
     )]);
     let client_ip = IpAddr::from([127, 0, 0, 1]);
-    
+
     // Key doesn't exist - should return error
     let result = AuthMiddleware::authenticate_api_key(&auth, &req, client_ip);
     assert!(result.is_err());
@@ -652,7 +654,9 @@ fn test_concurrent_middleware_authentication() {
     use std::thread;
 
     let user_manager = Arc::new(UserManager::new());
-    user_manager.create_user("user1", "pass12345", false).unwrap();
+    user_manager
+        .create_user("user1", "pass12345", false)
+        .unwrap();
 
     let api_key_manager = Arc::new(ApiKeyManager::new());
     let key = api_key_manager

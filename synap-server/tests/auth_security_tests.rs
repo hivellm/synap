@@ -45,7 +45,9 @@ fn test_authentication_fails_nonexistent_user() {
 #[test]
 fn test_disabled_user_cannot_authenticate() {
     let manager = UserManager::new();
-    manager.create_user("user1", "password12345", false).unwrap();
+    manager
+        .create_user("user1", "password12345", false)
+        .unwrap();
 
     // Can authenticate when enabled
     assert!(manager.authenticate("user1", "password12345").is_ok());
@@ -109,7 +111,9 @@ fn test_admin_user_flag() {
     manager.create_user("admin", "adminpass123", true).unwrap();
 
     // Create regular user
-    manager.create_user("regular", "userpass123", false).unwrap();
+    manager
+        .create_user("regular", "userpass123", false)
+        .unwrap();
 
     let admin = manager.get_user("admin").unwrap();
     assert!(admin.is_admin);
@@ -586,7 +590,9 @@ fn test_special_characters_in_username() {
     manager
         .create_user("user@example.com", "pass12345", false)
         .unwrap();
-    manager.create_user("user-123_test", "pass12345", false).unwrap();
+    manager
+        .create_user("user-123_test", "pass12345", false)
+        .unwrap();
 
     assert!(manager.get_user("user@example.com").is_some());
     assert!(manager.get_user("user-123_test").is_some());
@@ -612,7 +618,9 @@ fn test_concurrent_authentication() {
     use std::thread;
 
     let manager = Arc::new(UserManager::new());
-    manager.create_user("user1", "password12345", false).unwrap();
+    manager
+        .create_user("user1", "password12345", false)
+        .unwrap();
 
     let mut handles = vec![];
 
@@ -620,7 +628,9 @@ fn test_concurrent_authentication() {
     for _ in 0..10 {
         let manager_clone = Arc::clone(&manager);
         let handle = thread::spawn(move || {
-            manager_clone.authenticate("user1", "password12345").unwrap();
+            manager_clone
+                .authenticate("user1", "password12345")
+                .unwrap();
         });
         handles.push(handle);
     }
@@ -694,7 +704,9 @@ fn test_admin_bypasses_all_checks() {
 #[test]
 fn test_user_deletion() {
     let manager = UserManager::new();
-    manager.create_user("temp_user", "pass12345", false).unwrap();
+    manager
+        .create_user("temp_user", "pass12345", false)
+        .unwrap();
 
     assert!(manager.get_user("temp_user").is_some());
 

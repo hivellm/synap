@@ -106,7 +106,9 @@ impl AuthMiddleware {
         // Check for API key in header
         let api_key = if let Some(auth_header) = req.headers().get(header::AUTHORIZATION) {
             if let Ok(auth_str) = auth_header.to_str() {
-                auth_str.strip_prefix("Bearer ").map(|key| key.trim().to_string())
+                auth_str
+                    .strip_prefix("Bearer ")
+                    .map(|key| key.trim().to_string())
             } else {
                 None
             }

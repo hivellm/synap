@@ -696,7 +696,9 @@ mod tests {
         let manager = UserManager::new();
         assert_eq!(manager.get_root_username(), None);
 
-        manager.initialize_root_user("root", "pass12345", true).unwrap();
+        manager
+            .initialize_root_user("root", "pass12345", true)
+            .unwrap();
         assert_eq!(manager.get_root_username(), Some("root".to_string()));
     }
 
@@ -706,7 +708,9 @@ mod tests {
         assert!(!manager.is_root_user("root"));
         assert!(!manager.is_root_user("admin"));
 
-        manager.initialize_root_user("root", "pass12345", true).unwrap();
+        manager
+            .initialize_root_user("root", "pass12345", true)
+            .unwrap();
         assert!(manager.is_root_user("root"));
         assert!(!manager.is_root_user("admin"));
     }

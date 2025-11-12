@@ -448,7 +448,9 @@ async fn test_change_password() {
     assert_eq!(user.username, "passuser");
 
     // Change password
-    user_manager.change_password("passuser", "newpass123").unwrap();
+    user_manager
+        .change_password("passuser", "newpass123")
+        .unwrap();
 
     // Old password should fail
     assert!(user_manager.authenticate("passuser", "oldpass123").is_err());
@@ -468,13 +470,21 @@ async fn test_disable_user() {
         .unwrap();
 
     // Should be able to authenticate
-    assert!(user_manager.authenticate("disableuser", "pass12345").is_ok());
+    assert!(
+        user_manager
+            .authenticate("disableuser", "pass12345")
+            .is_ok()
+    );
 
     // Disable user
     user_manager.set_user_enabled("disableuser", false).unwrap();
 
     // Should not be able to authenticate
-    assert!(user_manager.authenticate("disableuser", "pass12345").is_err());
+    assert!(
+        user_manager
+            .authenticate("disableuser", "pass12345")
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -488,7 +498,11 @@ async fn test_enable_user() {
     user_manager.set_user_enabled("enableuser", false).unwrap();
 
     // Should not be able to authenticate
-    assert!(user_manager.authenticate("enableuser", "pass12345").is_err());
+    assert!(
+        user_manager
+            .authenticate("enableuser", "pass12345")
+            .is_err()
+    );
 
     // Enable user
     user_manager.set_user_enabled("enableuser", true).unwrap();

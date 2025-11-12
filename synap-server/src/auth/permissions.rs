@@ -155,7 +155,7 @@ impl Permission {
         if self.resource_pattern.is_empty() {
             return false;
         }
-        
+
         // Exact match
         if self.resource_pattern == resource {
             return true;

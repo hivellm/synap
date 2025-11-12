@@ -61,7 +61,9 @@ fn test_password_hash_not_reversible() {
 #[test]
 fn test_sha512_hash_format() {
     let manager = UserManager::new();
-    manager.create_user("user1", "password12345", false).unwrap();
+    manager
+        .create_user("user1", "password12345", false)
+        .unwrap();
 
     let user = manager.get_user("user1").unwrap();
     let hash = &user.password_hash;
@@ -495,7 +497,13 @@ fn test_brute_force_different_users() {
     manager.create_user("user3", "pass34567", false).unwrap();
 
     // Try to brute force multiple users
-    let passwords = vec!["pass12345", "pass23456", "pass34567", "wrong123", "wrong234"];
+    let passwords = vec![
+        "pass12345",
+        "pass23456",
+        "pass34567",
+        "wrong123",
+        "wrong234",
+    ];
 
     for user in &["user1", "user2", "user3"] {
         for pass in &passwords {
@@ -507,9 +515,19 @@ fn test_brute_force_different_users() {
                 _ => "",
             };
             if *pass == expected_pass {
-                assert!(result.is_ok(), "User {} should authenticate with password {}", user, expected_pass);
+                assert!(
+                    result.is_ok(),
+                    "User {} should authenticate with password {}",
+                    user,
+                    expected_pass
+                );
             } else {
-                assert!(result.is_err(), "User {} should NOT authenticate with password {}", user, pass);
+                assert!(
+                    result.is_err(),
+                    "User {} should NOT authenticate with password {}",
+                    user,
+                    pass
+                );
             }
         }
     }

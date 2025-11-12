@@ -154,7 +154,6 @@ impl AuditLogManager {
         }
     }
 
-
     /// Enable or disable audit logging
     pub fn set_enabled(&mut self, enabled: bool) {
         self.enabled = enabled;
