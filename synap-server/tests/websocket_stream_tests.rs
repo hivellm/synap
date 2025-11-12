@@ -1,15 +1,27 @@
+//! WebSocket Stream Tests
+//! These tests require a running Synap server
+
+#[cfg(feature = "s2s-tests")]
 use futures_util::{SinkExt, StreamExt};
+#[cfg(feature = "s2s-tests")]
 use serde_json::json;
+#[cfg(feature = "s2s-tests")]
 use std::sync::Arc;
+#[cfg(feature = "s2s-tests")]
 use synap_server::auth::{ApiKeyManager, UserManager};
+#[cfg(feature = "s2s-tests")]
 use synap_server::{
     AppState, KVStore, ScriptManager, ServerConfig, StreamConfig, StreamManager, create_router,
 };
+#[cfg(feature = "s2s-tests")]
 use tokio::net::TcpListener;
+#[cfg(feature = "s2s-tests")]
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-/// Spawn a test server and return its base URL
-async fn spawn_test_server() -> String {
+/// Spawn a test server and return its base URL and shutdown handle
+#[cfg(feature = "s2s-tests")]
+#[cfg_attr(not(feature = "s2s-tests"), allow(dead_code))]
+async fn spawn_test_server() -> (String, tokio::sync::oneshot::Sender<()>) {
     let config = ServerConfig::default();
     let kv_config = config.to_kv_config();
 
@@ -79,11 +91,18 @@ async fn spawn_test_server() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
+    // Create shutdown signal
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let shutdown_signal = async {
+        shutdown_rx.await.ok();
+    };
+
     tokio::spawn(async move {
         axum::serve(
             listener,
             app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
+        .with_graceful_shutdown(shutdown_signal)
         .await
         .unwrap();
     });
@@ -91,12 +110,13 @@ async fn spawn_test_server() -> String {
     // Wait for server to start
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    format!("http://{}", addr)
+    (format!("http://{}", addr), shutdown_tx)
 }
 
+#[cfg(feature = "s2s-tests")]
 #[tokio::test]
 async fn test_stream_websocket_connection() {
-    let base_url = spawn_test_server().await;
+    let (base_url, shutdown) = spawn_test_server().await;
     let ws_url = base_url.replace("http://", "ws://");
     let client = reqwest::Client::new();
 
@@ -126,11 +146,13 @@ async fn test_stream_websocket_connection() {
     }
 
     write.close().await.unwrap();
+    let _ = shutdown.send(());
 }
 
+#[cfg(feature = "s2s-tests")]
 #[tokio::test]
 async fn test_stream_websocket_real_time_push() {
-    let base_url = spawn_test_server().await;
+    let (base_url, shutdown) = spawn_test_server().await;
     let ws_url = base_url.replace("http://", "ws://");
     let client = reqwest::Client::new();
 
@@ -179,11 +201,13 @@ async fn test_stream_websocket_real_time_push() {
     .expect("Timeout waiting for event");
 
     write.close().await.unwrap();
+    let _ = shutdown.send(());
 }
 
+#[cfg(feature = "s2s-tests")]
 #[tokio::test]
 async fn test_stream_websocket_multiple_events() {
-    let base_url = spawn_test_server().await;
+    let (base_url, shutdown) = spawn_test_server().await;
     let ws_url = base_url.replace("http://", "ws://");
     let client = reqwest::Client::new();
 
@@ -236,11 +260,13 @@ async fn test_stream_websocket_multiple_events() {
 
     assert_eq!(received, 3);
     write.close().await.unwrap();
+    let _ = shutdown.send(());
 }
 
+#[cfg(feature = "s2s-tests")]
 #[tokio::test]
 async fn test_stream_websocket_from_offset() {
-    let base_url = spawn_test_server().await;
+    let (base_url, shutdown) = spawn_test_server().await;
     let ws_url = base_url.replace("http://", "ws://");
     let client = reqwest::Client::new();
 
@@ -300,4 +326,5 @@ async fn test_stream_websocket_from_offset() {
         "Should start from offset 5 or later"
     );
     write.close().await.unwrap();
+    let _ = shutdown.send(());
 }

@@ -1,13 +1,25 @@
+//! WebSocket PubSub Tests
+//! These tests require a running Synap server
+
+#[cfg(feature = "s2s-tests")]
 use futures_util::{SinkExt, StreamExt};
+#[cfg(feature = "s2s-tests")]
 use serde_json::json;
+#[cfg(feature = "s2s-tests")]
 use std::sync::Arc;
+#[cfg(feature = "s2s-tests")]
 use synap_server::auth::{ApiKeyManager, UserManager};
+#[cfg(feature = "s2s-tests")]
 use synap_server::{AppState, KVStore, PubSubRouter, ScriptManager, ServerConfig, create_router};
+#[cfg(feature = "s2s-tests")]
 use tokio::net::TcpListener;
+#[cfg(feature = "s2s-tests")]
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-/// Spawn a test server and return its base URL
-async fn spawn_test_server() -> String {
+/// Spawn a test server and return its base URL and shutdown handle
+#[cfg(feature = "s2s-tests")]
+#[cfg_attr(not(feature = "s2s-tests"), allow(dead_code))]
+async fn spawn_test_server() -> (String, tokio::sync::oneshot::Sender<()>) {
     let config = ServerConfig::default();
     let kv_config = config.to_kv_config();
 
@@ -75,11 +87,18 @@ async fn spawn_test_server() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
 
+    // Create shutdown signal
+    let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let shutdown_signal = async {
+        shutdown_rx.await.ok();
+    };
+
     tokio::spawn(async move {
         axum::serve(
             listener,
             app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
         )
+        .with_graceful_shutdown(shutdown_signal)
         .await
         .unwrap();
     });
@@ -87,12 +106,13 @@ async fn spawn_test_server() -> String {
     // Wait for server to start
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    format!("http://{}", addr)
+    (format!("http://{}", addr), shutdown_tx)
 }
 
+#[cfg(feature = "s2s-tests")]
 #[tokio::test]
 async fn test_pubsub_websocket_connection() {
-    let base_url = spawn_test_server().await;
+    let (base_url, shutdown) = spawn_test_server().await;
     let ws_url = base_url.replace("http://", "ws://");
 
     // Connect via WebSocket
@@ -114,11 +134,13 @@ async fn test_pubsub_websocket_connection() {
     }
 
     write.close().await.unwrap();
+    let _ = shutdown.send(());
 }
 
+#[cfg(feature = "s2s-tests")]
 #[tokio::test]
 async fn test_pubsub_websocket_instant_delivery() {
-    let base_url = spawn_test_server().await;
+    let (base_url, shutdown) = spawn_test_server().await;
     let ws_url = base_url.replace("http://", "ws://");
 
     // Connect subscriber via WebSocket
@@ -163,11 +185,13 @@ async fn test_pubsub_websocket_instant_delivery() {
     .expect("Timeout - message should arrive instantly");
 
     write.close().await.unwrap();
+    let _ = shutdown.send(());
 }
 
+#[cfg(feature = "s2s-tests")]
 #[tokio::test]
 async fn test_pubsub_websocket_wildcard_single_level() {
-    let base_url = spawn_test_server().await;
+    let (base_url, shutdown) = spawn_test_server().await;
     let ws_url = base_url.replace("http://", "ws://");
 
     // Subscribe with wildcard
@@ -238,11 +262,13 @@ async fn test_pubsub_websocket_wildcard_single_level() {
     );
 
     write.close().await.unwrap();
+    let _ = shutdown.send(());
 }
 
+#[cfg(feature = "s2s-tests")]
 #[tokio::test]
 async fn test_pubsub_websocket_multiple_topics() {
-    let base_url = spawn_test_server().await;
+    let (base_url, shutdown) = spawn_test_server().await;
     let ws_url = base_url.replace("http://", "ws://");
 
     // Subscribe to multiple topics at once
@@ -296,11 +322,13 @@ async fn test_pubsub_websocket_multiple_topics() {
 
     assert_eq!(received, 2);
     write.close().await.unwrap();
+    let _ = shutdown.send(());
 }
 
+#[cfg(feature = "s2s-tests")]
 #[tokio::test]
 async fn test_pubsub_websocket_multiple_subscribers() {
-    let base_url = spawn_test_server().await;
+    let (base_url, shutdown) = spawn_test_server().await;
     let ws_url = base_url.replace("http://", "ws://");
 
     // Connect 3 subscribers to same topic
@@ -347,4 +375,5 @@ async fn test_pubsub_websocket_multiple_subscribers() {
 
         write.close().await.unwrap();
     }
+    let _ = shutdown.send(());
 }
