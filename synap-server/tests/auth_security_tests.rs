@@ -569,7 +569,7 @@ fn test_acl_specific_rule_overrides_wildcard() {
 fn test_empty_password_rejected() {
     let manager = UserManager::new();
 
-    // Empty password should still hash (bcrypt handles it)
+    // Empty password should still hash (SHA512 handles it)
     let result = manager.create_user("user1", "", false);
     assert!(result.is_ok());
 

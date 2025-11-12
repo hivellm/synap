@@ -1,5 +1,7 @@
+use super::auth_handlers;
 use super::handlers::{self, AppState};
 use super::mcp_server::SynapMcpService;
+use crate::auth::{ApiKeyManager, AuthMiddleware, UserManager};
 use axum::{
     Router,
     routing::{delete, get, post},
@@ -10,12 +12,17 @@ use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
 };
+use tracing::debug;
 
 /// Create the Axum router with all endpoints
 pub fn create_router(
     state: AppState,
     rate_limit_config: crate::config::RateLimitConfig,
     mcp_config: crate::config::McpConfig,
+    user_manager: Arc<UserManager>,
+    api_key_manager: Arc<ApiKeyManager>,
+    auth_enabled: bool,
+    require_auth: bool,
 ) -> Router {
     // CORS configuration
     let cors = CorsLayer::new()
@@ -23,18 +30,83 @@ pub fn create_router(
         .allow_methods(Any)
         .allow_headers(Any);
 
+    // Create auth state for auth handlers
+    let auth_state = auth_handlers::AuthState {
+        user_manager: user_manager.clone(),
+        api_key_manager: api_key_manager.clone(),
+    };
+
+    // Create authentication middleware
+    let auth_middleware = if auth_enabled {
+        Some(AuthMiddleware::new(
+            (*user_manager).clone(),
+            (*api_key_manager).clone(),
+            require_auth,
+        ))
+    } else {
+        None
+    };
+
     // Create MCP router (stateless)
     let state_arc = Arc::new(state.clone());
-    let mcp_router = create_mcp_router(state_arc.clone(), mcp_config.clone());
+    let mcp_router = create_mcp_router(
+        state_arc.clone(),
+        mcp_config.clone(),
+        user_manager.clone(),
+        api_key_manager.clone(),
+        auth_enabled,
+        require_auth,
+    );
 
     // Create UMICP router
     let umicp_router = create_umicp_router(state_arc.clone(), mcp_config.clone());
 
+    // Create auth router (no auth required for auth endpoints themselves)
+    let auth_router = Router::new()
+        // Authentication endpoints
+        .route("/auth/login", post(auth_handlers::auth_login))
+        .route("/auth/me", get(auth_handlers::auth_me))
+        // API key management
+        .route("/auth/keys", post(auth_handlers::auth_create_key))
+        .route("/auth/keys", get(auth_handlers::auth_list_keys))
+        .route("/auth/keys/{id}", delete(auth_handlers::auth_revoke_key))
+        // User management (admin only)
+        .route("/auth/users", post(auth_handlers::auth_create_user))
+        .route("/auth/users", get(auth_handlers::auth_list_users))
+        .route("/auth/users/{username}", get(auth_handlers::auth_get_user))
+        .route(
+            "/auth/users/{username}",
+            delete(auth_handlers::auth_delete_user),
+        )
+        .route(
+            "/auth/users/{username}/password",
+            post(auth_handlers::auth_change_password),
+        )
+        .route(
+            "/auth/users/{username}/enable",
+            post(auth_handlers::auth_enable_user),
+        )
+        .route(
+            "/auth/users/{username}/disable",
+            post(auth_handlers::auth_disable_user),
+        )
+        .route(
+            "/auth/users/{username}/roles",
+            post(auth_handlers::auth_grant_role),
+        )
+        .route(
+            "/auth/users/{username}/roles/{role}",
+            delete(auth_handlers::auth_revoke_role),
+        )
+        // Role management
+        .route("/auth/roles", get(auth_handlers::auth_list_roles))
+        .with_state(auth_state);
+
     // Create main API router with state
     let api_router = Router::new()
-        // Health check
+        // Health check (always public)
         .route("/health", get(handlers::health_check))
-        // Prometheus metrics
+        // Prometheus metrics (always public)
         .route("/metrics", get(super::metrics_handler::metrics_handler))
         // KV endpoints
         .route("/kv/ws", get(handlers::kv_websocket)) // WebSocket for WATCH (future)
@@ -332,10 +404,84 @@ pub fn create_router(
         // Add state
         .with_state(state);
 
-    // Merge all routers: MCP + UMICP + API
-    let router = mcp_router
+    // Merge all routers: Auth + MCP + UMICP + API
+    let mut router = mcp_router
         .merge(umicp_router) // UMICP protocol endpoints (/umicp, /umicp/discover)
-        .merge(api_router) // Main API endpoints
+        .merge(auth_router) // Authentication endpoints
+        .merge(api_router); // Main API endpoints
+
+    // Apply authentication middleware (always apply, but behavior depends on auth_enabled)
+    if let Some(auth) = auth_middleware {
+        let auth_clone = auth.clone();
+        router = router.layer(axum::middleware::from_fn(
+            move |mut req: axum::extract::Request, next: axum::middleware::Next| {
+                let auth = auth_clone.clone();
+                async move {
+                    let client_ip = AuthMiddleware::get_client_ip(&req);
+                    debug!("Processing authentication for IP: {}", client_ip);
+
+                    // Try API Key authentication first (from header or query param)
+                    match AuthMiddleware::authenticate_api_key(&auth, &req, client_ip) {
+                        Ok(Some(auth_context)) => {
+                            req.extensions_mut().insert(auth_context);
+                            return Ok(next.run(req).await);
+                        }
+                        Err(_) => {
+                            // API key provided but invalid - return 401
+                            debug!("Invalid API key provided");
+                            return Err(axum::http::StatusCode::UNAUTHORIZED);
+                        }
+                        Ok(None) => {
+                            // No API key provided, continue to Basic Auth
+                        }
+                    }
+
+                    // Try Basic Auth
+                    match AuthMiddleware::authenticate_basic(&auth, &req, client_ip) {
+                        Ok(Some(auth_context)) => {
+                            req.extensions_mut().insert(auth_context);
+                            return Ok(next.run(req).await);
+                        }
+                        Err(_) => {
+                            // Basic Auth credentials provided but invalid - return 401
+                            debug!("Invalid Basic Auth credentials");
+                            return Err(axum::http::StatusCode::UNAUTHORIZED);
+                        }
+                        Ok(None) => {
+                            // No Basic Auth provided, continue
+                        }
+                    }
+
+                    // No authentication provided
+                    if auth.require_auth {
+                        debug!("Authentication required but not provided");
+                        return Err(axum::http::StatusCode::UNAUTHORIZED);
+                    }
+
+                    // Allow anonymous access
+                    req.extensions_mut()
+                        .insert(crate::auth::AuthContext::anonymous(client_ip));
+                    Ok(next.run(req).await)
+                }
+            },
+        ));
+    } else {
+        // Auth disabled - insert anonymous context with all permissions (admin-like)
+        router = router.layer(axum::middleware::from_fn(
+            move |mut req: axum::extract::Request, next: axum::middleware::Next| {
+                async move {
+                    let client_ip = AuthMiddleware::get_client_ip(&req);
+                    // Create anonymous context with admin privileges when auth is disabled
+                    let mut anonymous_ctx = crate::auth::AuthContext::anonymous(client_ip);
+                    anonymous_ctx.is_admin = true; // Grant all permissions when auth is disabled
+                    req.extensions_mut().insert(anonymous_ctx);
+                    next.run(req).await
+                }
+            },
+        ));
+    }
+
+    router = router
         .layer(CompressionLayer::new()) // Gzip compression for responses
         .layer(TraceLayer::new_for_http())
         .layer(cors);
@@ -358,11 +504,29 @@ pub fn create_router(
     router
 }
 
-/// Create MCP router with StreamableHTTP service
-fn create_mcp_router(state: Arc<AppState>, mcp_config: crate::config::McpConfig) -> Router {
+/// Create MCP router with StreamableHTTP service and authentication
+fn create_mcp_router(
+    state: Arc<AppState>,
+    mcp_config: crate::config::McpConfig,
+    user_manager: Arc<UserManager>,
+    api_key_manager: Arc<ApiKeyManager>,
+    auth_enabled: bool,
+    require_auth: bool,
+) -> Router {
     use hyper_util::service::TowerToHyperService;
     use rmcp::transport::streamable_http_server::StreamableHttpService;
     use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
+
+    // Create authentication middleware for MCP
+    let auth_middleware = if auth_enabled {
+        Some(AuthMiddleware::new(
+            (*user_manager).clone(),
+            (*api_key_manager).clone(),
+            require_auth,
+        ))
+    } else {
+        None
+    };
 
     // Create StreamableHTTP service
     let streamable_service = StreamableHttpService::new(
@@ -380,20 +544,99 @@ fn create_mcp_router(state: Arc<AppState>, mcp_config: crate::config::McpConfig)
     let hyper_service = TowerToHyperService::new(streamable_service);
 
     // Create router with the MCP endpoint
-    Router::new().route(
+    let mut router = Router::new().route(
         "/mcp",
         axum::routing::any(move |req: axum::extract::Request| {
             use hyper::service::Service;
             let service = hyper_service.clone();
             async move {
+                // Extract AuthContext from request extensions before passing to hyper service
+                let auth_context = req.extensions().get::<crate::auth::AuthContext>().cloned();
+
+                // Set auth context in thread-local storage for MCP handlers
+                if let Some(ctx) = auth_context {
+                    crate::auth::set_auth_context(ctx);
+                }
+
                 // Forward request to hyper service
-                match service.call(req).await {
+                let result = match service.call(req).await {
                     Ok(response) => Ok(response),
                     Err(_) => Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
-                }
+                };
+
+                // Clear auth context after request processing
+                crate::auth::clear_auth_context();
+
+                result
             }
         }),
-    )
+    );
+
+    // Apply authentication middleware if enabled
+    if let Some(auth) = auth_middleware {
+        let auth_clone = auth.clone();
+        router = router.layer(axum::middleware::from_fn(
+            move |mut req: axum::extract::Request, next: axum::middleware::Next| {
+                let auth = auth_clone.clone();
+                async move {
+                    let client_ip = AuthMiddleware::get_client_ip(&req);
+                    debug!("MCP: Processing authentication for IP: {}", client_ip);
+
+                    // Try API Key authentication first
+                    match AuthMiddleware::authenticate_api_key(&auth, &req, client_ip) {
+                        Ok(Some(auth_context)) => {
+                            req.extensions_mut().insert(auth_context);
+                            return Ok(next.run(req).await);
+                        }
+                        Err(_) => {
+                            debug!("MCP: Invalid API key provided");
+                            return Err(axum::http::StatusCode::UNAUTHORIZED);
+                        }
+                        Ok(None) => {}
+                    }
+
+                    // Try Basic Auth
+                    match AuthMiddleware::authenticate_basic(&auth, &req, client_ip) {
+                        Ok(Some(auth_context)) => {
+                            req.extensions_mut().insert(auth_context);
+                            return Ok(next.run(req).await);
+                        }
+                        Err(_) => {
+                            debug!("MCP: Invalid Basic Auth credentials");
+                            return Err(axum::http::StatusCode::UNAUTHORIZED);
+                        }
+                        Ok(None) => {}
+                    }
+
+                    // No authentication provided
+                    if auth.require_auth {
+                        debug!("MCP: Authentication required but not provided");
+                        return Err(axum::http::StatusCode::UNAUTHORIZED);
+                    }
+
+                    // Allow anonymous access
+                    req.extensions_mut()
+                        .insert(crate::auth::AuthContext::anonymous(client_ip));
+                    Ok(next.run(req).await)
+                }
+            },
+        ));
+    } else {
+        // Auth disabled - insert anonymous context
+        router = router.layer(axum::middleware::from_fn(
+            move |mut req: axum::extract::Request, next: axum::middleware::Next| {
+                async move {
+                    let client_ip = AuthMiddleware::get_client_ip(&req);
+                    let mut anonymous_ctx = crate::auth::AuthContext::anonymous(client_ip);
+                    anonymous_ctx.is_admin = true; // Grant all permissions when auth is disabled
+                    req.extensions_mut().insert(anonymous_ctx);
+                    next.run(req).await
+                }
+            },
+        ));
+    }
+
+    router
 }
 
 /// Create UMICP router with discovery and message endpoints

@@ -1,10 +1,12 @@
 //! Test helper utilities for creating AppState instances
 
 use std::sync::Arc;
+use synap_server::auth::{ApiKeyManager, UserManager};
 use synap_server::core::{
     GeospatialStore, HashStore, HyperLogLogStore, ListStore, SetStore, SortedSetStore,
 };
 use synap_server::monitoring::MonitoringManager;
+use synap_server::server::router::create_router;
 use synap_server::{AppState, KVConfig, KVStore, ScriptManager};
 
 /// Create a default AppState for testing
@@ -55,4 +57,29 @@ pub fn create_test_app_state() -> AppState {
         transaction_manager,
         script_manager,
     }
+}
+
+/// Create default UserManager and ApiKeyManager for tests
+pub fn create_test_auth_managers() -> (Arc<UserManager>, Arc<ApiKeyManager>) {
+    let user_manager = Arc::new(UserManager::new());
+    let api_key_manager = Arc::new(ApiKeyManager::new());
+    (user_manager, api_key_manager)
+}
+
+/// Create a router for testing with default configuration
+pub fn create_test_router(state: AppState) -> synap_server::server::router::Router {
+    let (user_manager, api_key_manager) = create_test_auth_managers();
+    create_router(
+        state,
+        synap_server::config::RateLimitConfig {
+            enabled: false,
+            requests_per_second: 100,
+            burst_size: 10,
+        },
+        synap_server::config::McpConfig::default(),
+        user_manager,
+        api_key_manager,
+        false, // auth_enabled
+        false, // require_auth
+    )
 }

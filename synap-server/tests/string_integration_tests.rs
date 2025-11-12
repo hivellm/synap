@@ -2,6 +2,7 @@ use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
+use synap_server::auth::{ApiKeyManager, UserManager};
 use synap_server::{AppState, KVConfig, KVStore, ScriptManager, create_router};
 use tokio::net::TcpListener;
 
@@ -53,6 +54,8 @@ async fn spawn_test_server() -> String {
         script_manager,
     };
 
+    let user_manager = Arc::new(UserManager::new());
+    let api_key_manager = Arc::new(ApiKeyManager::new());
     let app = create_router(
         state,
         synap_server::config::RateLimitConfig {
@@ -61,6 +64,10 @@ async fn spawn_test_server() -> String {
             burst_size: 10,
         },
         synap_server::config::McpConfig::default(),
+        user_manager,
+        api_key_manager,
+        false,
+        false,
     );
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();

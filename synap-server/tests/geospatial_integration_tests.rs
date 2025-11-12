@@ -4,6 +4,7 @@ use axum::http::StatusCode;
 use reqwest::Client;
 use std::sync::Arc;
 use std::time::Duration;
+use synap_server::auth::{ApiKeyManager, UserManager};
 use synap_server::config::{McpConfig, RateLimitConfig, ServerConfig};
 use synap_server::core::{
     GeospatialStore, HashStore, HyperLogLogStore, ListStore, SetStore, SortedSetStore,
@@ -63,6 +64,8 @@ async fn spawn_test_server() -> String {
         script_manager,
     };
 
+    let user_manager = Arc::new(UserManager::new());
+    let api_key_manager = Arc::new(ApiKeyManager::new());
     let app = create_router(
         state,
         RateLimitConfig {
@@ -71,6 +74,10 @@ async fn spawn_test_server() -> String {
             burst_size: 10,
         },
         McpConfig::default(),
+        user_manager,
+        api_key_manager,
+        false,
+        false,
     );
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
