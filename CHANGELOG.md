@@ -110,7 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Builder pattern for auth configuration
   - S2S (Server-to-Server) integration tests
 
-### Added - Migration Guide & Security Best Practices (November 20) ✅
+### Added - Migration Guide & Security Best Practices (November 2025) ✅
 
 **Documentation Enhancements**
 
@@ -125,7 +125,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Development vs Production differences
   - Incident Response procedures
 
-### Added - SDK Authentication Support & MCP Authentication (November 2024)
+### Added - SDK Authentication Support & MCP Authentication (November 2025)
 
 **SDK Authentication & MCP Authentication Implementation - Complete**
 
