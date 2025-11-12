@@ -11,7 +11,7 @@ use std::collections::HashMap;
 /// Pub/Sub is **reactive by default** - use `subscribe()` and `subscribe_topic()`.
 #[derive(Clone)]
 pub struct PubSubManager {
-    client: SynapClient,
+    pub(crate) client: SynapClient,
 }
 
 impl PubSubManager {

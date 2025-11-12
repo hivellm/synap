@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Pending Tasks Implementation (January 2025) ✅
+
+**Completed 7/7 Tasks from Implementation Plan**
+
+- ✅ **Task 1: RENAME Operation WAL Logging** - Added `KVRename` variant to WAL operations, integrated logging into REST and StreamableHTTP handlers
+- ✅ **Task 2: Queue Persistence Integration** - Integrated `log_queue_publish`, `log_queue_ack`, and `log_queue_nack` into queue handlers with end-to-end tests
+- ✅ **Task 3: WebSocket Client Tracking** - Added `ClientListManager` to `AppState`, integrated client registration/deregistration into WebSocket handlers (Queue, Stream, PubSub)
+- ✅ **Task 4: TTL Support in Replication Sync** - Modified snapshot creation to include TTL information for KVSet operations, added test for TTL preservation
+- ✅ **Task 5: Replication Lag Calculation** - Implemented lag calculation based on heartbeat timestamps and operation timestamps with fallback logic
+- ✅ **Task 6: Replication Byte Tracking** - Added `total_bytes` counter to `MasterNode`, tracks serialized operation size multiplied by replica count
+- ✅ **Task 7: Reactive Subscription for PubSub (Rust SDK)** - Created `pubsub_reactive.rs` module with `observe()` and `observe_topic()` methods using WebSocket, added example
+
+**Files Changed**:
+- `synap-server/src/persistence/types.rs` - Added `KVRename` operation
+- `synap-server/src/persistence/layer.rs` - Added `log_kv_rename` method
+- `synap-server/src/server/handlers.rs` - Integrated WAL logging, client tracking
+- `synap-server/src/replication/sync.rs` - Added TTL support in snapshots
+- `synap-server/src/replication/master.rs` - Added lag calculation and byte tracking
+- `synap-server/src/monitoring/client_list.rs` - Client tracking implementation
+- `sdks/rust/src/pubsub_reactive.rs` - New reactive PubSub module
+- `sdks/rust/src/pubsub.rs` - Made `client` field `pub(crate)`
+- `sdks/rust/Cargo.toml` - Added `tokio-tungstenite` dependency
+- `sdks/rust/examples/reactive_pubsub.rs` - New example
+- `sdks/rust/README.md` - Updated with reactive PubSub documentation
+- `docs/TEST_COVERAGE_SUMMARY.md` - New test coverage documentation
+
+**Test Coverage**: All 7 tasks have test coverage (100%)
+
 ### Changed - Docker Image Updates (January 2025) ✅
 
 **Docker Build Improvements**

@@ -252,7 +252,7 @@ let delivered_count = client.pubsub().publish(
     None        // headers
 ).await?;
 
-// ✨ Subscribe to topics (with wildcards)
+// ✨ Subscribe to topics (with wildcards) - REST API
 let sub_id = client.pubsub().subscribe_topics(
     "user-123",  // subscriber ID
     vec![
@@ -261,11 +261,28 @@ let sub_id = client.pubsub().subscribe_topics(
     ]
 ).await?;
 
-// TODO: Reactive subscription (coming soon)
-// let (mut messages, handle) = client.pubsub()
-//     .observe("user-123", vec!["events.*"]);
+// ✨ Reactive: Observe messages via WebSocket (recommended)
+use futures::StreamExt;
+let (mut messages, handle) = client.pubsub()
+    .observe("user-123", vec![
+        "events.user.*".to_string(),      // single-level wildcard
+        "notifications.#".to_string(),    // multi-level wildcard
+    ]);
 
-// Unsubscribe
+tokio::spawn(async move {
+    while let Some(message) = messages.next().await {
+        println!("Received on {}: {:?}", message.topic, message.data);
+    }
+});
+
+// Stop observing
+handle.unsubscribe();
+
+// Or observe a single topic
+let (mut events, handle2) = client.pubsub()
+    .observe_topic("user-123", "events.user.*");
+
+// Unsubscribe (REST API)
 client.pubsub().unsubscribe("user-123", vec![
     "events.user.*".to_string(),
     "notifications.#".to_string(),
@@ -338,6 +355,7 @@ See the [`examples/`](examples/) directory for more examples:
 - [`stream.rs`](examples/stream.rs) - Event stream (traditional)
 - [`reactive_stream.rs`](examples/reactive_stream.rs) - Reactive event consumption 🔥
 - [`pubsub.rs`](examples/pubsub.rs) - Pub/Sub messaging
+- [`reactive_pubsub.rs`](examples/reactive_pubsub.rs) - Reactive Pub/Sub subscriptions 🔥
 - [`rxjs_style.rs`](examples/rxjs_style.rs) - RxJS-style patterns ⭐ NEW
 
 Run an example:
@@ -347,6 +365,7 @@ cargo run --example basic
 cargo run --example queue
 cargo run --example reactive_queue    # Recommended for queues
 cargo run --example reactive_stream   # Recommended for streams
+cargo run --example reactive_pubsub   # Recommended for Pub/Sub 🔥
 cargo run --example rxjs_style        # RxJS-style API
 cargo run --example pubsub
 ```

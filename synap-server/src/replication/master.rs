@@ -10,6 +10,7 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
@@ -37,6 +38,9 @@ pub struct MasterNode {
 
     /// Channel to send operations to replication task
     replication_tx: mpsc::UnboundedSender<ReplicationMessage>,
+
+    /// Total bytes replicated (accumulated)
+    total_bytes: Arc<AtomicU64>,
 }
 
 struct ReplicaConnection {
@@ -49,7 +53,10 @@ struct ReplicaConnection {
 }
 
 enum ReplicationMessage {
-    Operation(Operation),
+    Operation {
+        operation: Operation,
+        offset: u64,
+    },
     #[allow(dead_code)]
     Heartbeat,
 }
@@ -99,10 +106,13 @@ impl MasterNode {
         // Spawn replication task (process operations)
         let replicas_clone = Arc::clone(&replicas);
         let log_clone = Arc::clone(&replication_log);
+        let total_bytes = Arc::new(AtomicU64::new(0));
+        let total_bytes_clone = Arc::clone(&total_bytes);
         tokio::spawn(Self::replication_task(
             replication_rx,
             replicas_clone,
             log_clone,
+            total_bytes_clone,
         ));
 
         Ok(Self {
@@ -111,6 +121,7 @@ impl MasterNode {
             stream_manager,
             replicas,
             replication_tx,
+            total_bytes,
         })
     }
 
@@ -367,11 +378,15 @@ impl MasterNode {
         loop {
             interval.tick().await;
 
-            let reps = replicas.read();
-            for (_, replica) in reps.iter() {
+            let current_time = Self::current_timestamp();
+            let mut reps = replicas.write();
+            for (_, replica) in reps.iter_mut() {
+                // Update last_heartbeat timestamp when sending heartbeat
+                replica.last_heartbeat = current_time;
+
                 let heartbeat = ReplicationCommand::Heartbeat {
                     master_offset: 0, // Will be filled by replication task
-                    timestamp: Self::current_timestamp(),
+                    timestamp: current_time,
                 };
 
                 let _ = replica.sender.send(heartbeat);
@@ -383,25 +398,44 @@ impl MasterNode {
     async fn replication_task(
         mut rx: mpsc::UnboundedReceiver<ReplicationMessage>,
         replicas: Arc<RwLock<HashMap<String, ReplicaConnection>>>,
-        replication_log: Arc<ReplicationLog>,
+        _replication_log: Arc<ReplicationLog>,
+        total_bytes: Arc<AtomicU64>,
     ) {
         while let Some(msg) = rx.recv().await {
             match msg {
-                ReplicationMessage::Operation(operation) => {
-                    // Append to replication log
-                    let offset = replication_log.append(operation.clone());
+                ReplicationMessage::Operation {
+                    operation,
+                    offset: _offset,
+                } => {
+                    // Operation already added to log by replicate() method
+                    // Calculate size of serialized operation for byte tracking
+                    let operation_size = match bincode::serde::encode_to_vec(
+                        &ReplicationOperation {
+                            offset: _offset,
+                            timestamp: Self::current_timestamp(),
+                            operation: operation.clone(),
+                        },
+                        bincode::config::legacy(),
+                    ) {
+                        Ok(data) => data.len() as u64,
+                        Err(_) => 0, // Skip tracking if serialization fails
+                    };
 
                     // Send to all replicas
                     let reps = replicas.read();
+                    let replica_count = reps.len() as u64;
                     for (_, replica) in reps.iter() {
                         let cmd = ReplicationCommand::Operation(ReplicationOperation {
-                            offset,
+                            offset: _offset,
                             timestamp: Self::current_timestamp(),
                             operation: operation.clone(),
                         });
 
                         let _ = replica.sender.send(cmd);
                     }
+
+                    // Track total bytes: operation_size * number of replicas
+                    total_bytes.fetch_add(operation_size * replica_count, Ordering::Relaxed);
                 }
                 ReplicationMessage::Heartbeat => {
                     // Handled by heartbeat_task
@@ -414,26 +448,38 @@ impl MasterNode {
     pub fn replicate(&self, operation: Operation) -> u64 {
         let offset = self.replication_log.append(operation.clone());
 
-        // Send to replication task
+        // Send to replication task with offset
         let _ = self
             .replication_tx
-            .send(ReplicationMessage::Operation(operation));
+            .send(ReplicationMessage::Operation { operation, offset });
 
         offset
     }
 
     /// Get list of connected replicas
     pub fn list_replicas(&self) -> Vec<ReplicaInfo> {
+        let current_time = Self::current_timestamp();
         let reps = self.replicas.read();
         reps.values()
-            .map(|r| ReplicaInfo {
-                id: r.id.clone(),
-                address: r.address,
-                role: super::types::NodeRole::Replica,
-                offset: r.offset,
-                connected_at: r.connected_at,
-                last_sync: r.last_heartbeat,
-                lag_ms: 0, // TODO: Calculate from heartbeat
+            .map(|r| {
+                // Calculate lag in milliseconds: (current_time - last_heartbeat) * 1000
+                // last_heartbeat is updated when we send heartbeats, so this measures
+                // how long since we last communicated with the replica
+                let lag_ms = if r.last_heartbeat > 0 {
+                    (current_time.saturating_sub(r.last_heartbeat)) * 1000
+                } else {
+                    0
+                };
+
+                ReplicaInfo {
+                    id: r.id.clone(),
+                    address: r.address,
+                    role: super::types::NodeRole::Replica,
+                    offset: r.offset,
+                    connected_at: r.connected_at,
+                    last_sync: r.last_heartbeat,
+                    lag_ms,
+                }
             })
             .collect()
     }
@@ -441,6 +487,7 @@ impl MasterNode {
     /// Get replication statistics
     pub fn stats(&self) -> ReplicationStats {
         let current_offset = self.replication_log.current_offset();
+        let current_time = Self::current_timestamp();
         let reps = self.replicas.read();
 
         // Calculate min replica offset
@@ -450,13 +497,69 @@ impl MasterNode {
             .min()
             .unwrap_or(current_offset);
 
+        // Calculate lag in milliseconds
+        // Strategy 1: Use operation timestamps (most accurate)
+        // Strategy 2: Fallback to heartbeat timestamps
+        let lag_ms = if min_replica_offset < current_offset && min_replica_offset > 0 {
+            // Get the timestamp of the last operation the slowest replica received
+            // min_replica_offset is the next offset needed, so last received is min_replica_offset - 1
+            let last_received_offset = min_replica_offset - 1;
+
+            if let Ok(ops) = self.replication_log.get_from_offset(last_received_offset) {
+                // Find the operation at the last received offset
+                if let Some(last_op) = ops.iter().find(|op| op.offset == last_received_offset) {
+                    // Calculate lag: time since last operation was sent
+                    (current_time.saturating_sub(last_op.timestamp)) * 1000
+                } else {
+                    // Fallback to heartbeat-based calculation
+                    reps.values()
+                        .map(|r| {
+                            if r.last_heartbeat > 0 {
+                                (current_time.saturating_sub(r.last_heartbeat)) * 1000
+                            } else {
+                                0
+                            }
+                        })
+                        .max()
+                        .unwrap_or(0)
+                }
+            } else {
+                // Fallback to heartbeat-based calculation
+                reps.values()
+                    .map(|r| {
+                        if r.last_heartbeat > 0 {
+                            (current_time.saturating_sub(r.last_heartbeat)) * 1000
+                        } else {
+                            0
+                        }
+                    })
+                    .max()
+                    .unwrap_or(0)
+            }
+        } else if !reps.is_empty() {
+            // Replicas are up to date, but calculate heartbeat lag for monitoring
+            reps.values()
+                .map(|r| {
+                    if r.last_heartbeat > 0 {
+                        (current_time.saturating_sub(r.last_heartbeat)) * 1000
+                    } else {
+                        0
+                    }
+                })
+                .max()
+                .unwrap_or(0)
+        } else {
+            // No replicas connected
+            0
+        };
+
         ReplicationStats {
             master_offset: current_offset,
             replica_offset: min_replica_offset,
             lag_operations: current_offset.saturating_sub(min_replica_offset),
-            lag_ms: 0, // TODO: Calculate from timestamps
+            lag_ms,
             total_replicated: current_offset,
-            total_bytes: 0, // TODO: Track bytes
+            total_bytes: self.total_bytes.load(Ordering::Relaxed),
             last_heartbeat: Self::current_timestamp(),
             connected: !reps.is_empty(),
         }
@@ -508,8 +611,11 @@ mod tests {
         let offset = master.replicate(op);
         assert_eq!(offset, 0);
 
-        // Check stats
+        // Test lag calculation
         let stats = master.stats();
+        // With no replicas, lag should be 0
+        assert_eq!(stats.lag_ms, 0);
+        assert_eq!(stats.lag_operations, 0);
         assert_eq!(stats.master_offset, 1);
     }
 }

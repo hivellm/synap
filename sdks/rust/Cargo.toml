@@ -28,6 +28,7 @@ futures = "0.3"
 futures-util = "0.3"
 async-stream = "0.3"
 pin-project = "1.1"
+tokio-tungstenite = { version = "0.24", features = ["native-tls"] }
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -65,3 +66,7 @@ path = "examples/reactive_stream.rs"
 [[example]]
 name = "rxjs_style"
 path = "examples/rxjs_style.rs"
+
+[[example]]
+name = "reactive_pubsub"
+path = "examples/reactive_pubsub.rs"

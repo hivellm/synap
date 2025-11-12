@@ -5,7 +5,7 @@ use std::time::Duration;
 use synap_server::core::{
     BitmapStore, GeospatialStore, HashStore, HyperLogLogStore, ListStore, SetStore, SortedSetStore,
 };
-use synap_server::monitoring::MonitoringManager;
+use synap_server::monitoring::{ClientListManager, MonitoringManager};
 use synap_server::{AppState, KVStore, ScriptManager};
 
 /// Create a default AppState for testing
@@ -33,6 +33,7 @@ pub fn create_test_app_state_with_stores(
     ));
 
     let script_manager = Arc::new(ScriptManager::new(Duration::from_secs(5)));
+    let client_list_manager = Arc::new(ClientListManager::new());
 
     let hyperloglog_store = Arc::new(HyperLogLogStore::new());
     let bitmap_store = Arc::new(BitmapStore::new());
@@ -56,5 +57,6 @@ pub fn create_test_app_state_with_stores(
         monitoring,
         transaction_manager,
         script_manager,
+        client_list_manager,
     }
 }

@@ -19,6 +19,7 @@ use axum::{
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
 use tokio::sync::mpsc;
@@ -44,6 +45,7 @@ pub struct AppState {
     pub monitoring: Arc<crate::monitoring::MonitoringManager>,
     pub transaction_manager: Arc<TransactionManager>,
     pub script_manager: Arc<ScriptManager>,
+    pub client_list_manager: Arc<crate::monitoring::ClientListManager>,
 }
 
 // Request/Response types for REST API
@@ -858,12 +860,38 @@ pub async fn memory_usage(
 
 /// CLIENT LIST endpoint - get active connections
 pub async fn client_list(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
-    // TODO: Implement client tracking when WebSocket tracking is added
+    let clients = state.client_list_manager.list().await;
+    let count = clients.len();
+
+    let clients_json: Vec<serde_json::Value> = clients
+        .into_iter()
+        .map(|c| {
+            serde_json::json!({
+                "id": c.id,
+                "addr": c.addr,
+                "age": c.age,
+                "idle": c.idle,
+                "flags": c.flags,
+                "db": c.db,
+                "sub": c.sub,
+                "psub": c.psub,
+                "multi": c.multi,
+                "qbuf": c.qbuf,
+                "qbuf_free": c.qbuf_free,
+                "obl": c.obl,
+                "oll": c.oll,
+                "omem": c.omem,
+                "events": c.events,
+                "cmd": c.cmd
+            })
+        })
+        .collect();
+
     Ok(Json(serde_json::json!({
-        "clients": [],
-        "count": 0
+        "clients": clients_json,
+        "count": count
     })))
 }
 
@@ -5448,6 +5476,7 @@ pub async fn kv_websocket(
 pub async fn queue_websocket(
     State(state): State<AppState>,
     Path((queue_name, consumer_id)): Path<(String, String)>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> AxumResponse {
     let queue_manager = match state.queue_manager.as_ref() {
@@ -5461,12 +5490,26 @@ pub async fn queue_websocket(
         }
     };
 
+    let client_list_manager = state.client_list_manager.clone();
+    let client_addr = addr.to_string();
+    let client_id = format!("queue-{}-{}", queue_name, consumer_id);
+
     info!(
-        "Queue WebSocket connection: queue={}, consumer={}",
-        queue_name, consumer_id
+        "Queue WebSocket connection: queue={}, consumer={}, addr={}",
+        queue_name, consumer_id, client_addr
     );
 
-    ws.on_upgrade(move |socket| handle_queue_socket(socket, queue_manager, queue_name, consumer_id))
+    ws.on_upgrade(move |socket| {
+        handle_queue_socket(
+            socket,
+            queue_manager,
+            queue_name,
+            consumer_id,
+            client_list_manager,
+            client_id,
+            client_addr,
+        )
+    })
 }
 
 /// Handle Queue WebSocket connection
@@ -5475,7 +5518,15 @@ async fn handle_queue_socket(
     queue_manager: Arc<crate::core::QueueManager>,
     queue_name: String,
     consumer_id: String,
+    client_list_manager: Arc<crate::monitoring::ClientListManager>,
+    client_id: String,
+    client_addr: String,
 ) {
+    let connected_at = std::time::SystemTime::now();
+    let client_info =
+        crate::monitoring::ClientInfo::new(client_id.clone(), client_addr, connected_at);
+    client_list_manager.add(client_info).await;
+
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
     // Send welcome message
@@ -5491,6 +5542,7 @@ async fn handle_queue_socket(
         .is_err()
     {
         warn!("Failed to send welcome to consumer: {}", consumer_id);
+        client_list_manager.remove(&client_id).await;
         return;
     }
 
@@ -5578,6 +5630,8 @@ async fn handle_queue_socket(
         }
     }
 
+    // Cleanup: remove client from tracking
+    client_list_manager.remove(&client_id).await;
     info!("Queue consumer {} disconnected", consumer_id);
 }
 
@@ -5591,6 +5645,7 @@ pub async fn stream_websocket(
     State(state): State<AppState>,
     Path((room_name, subscriber_id)): Path<(String, String)>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> AxumResponse {
     let stream_manager = match state.stream_manager.as_ref() {
@@ -5614,6 +5669,10 @@ pub async fn stream_websocket(
         room_name, subscriber_id, from_offset
     );
 
+    let client_list_manager = state.client_list_manager.clone();
+    let client_addr = addr.to_string();
+    let client_id = format!("stream-{}-{}", room_name, subscriber_id);
+
     ws.on_upgrade(move |socket| {
         handle_stream_socket(
             socket,
@@ -5621,18 +5680,30 @@ pub async fn stream_websocket(
             room_name,
             subscriber_id,
             from_offset,
+            client_list_manager,
+            client_id,
+            client_addr,
         )
     })
 }
 
 /// Handle Event Stream WebSocket connection
+#[allow(clippy::too_many_arguments)]
 async fn handle_stream_socket(
     socket: WebSocket,
     stream_manager: Arc<crate::core::StreamManager>,
     room_name: String,
     subscriber_id: String,
     mut current_offset: u64,
+    client_list_manager: Arc<crate::monitoring::ClientListManager>,
+    client_id: String,
+    client_addr: String,
 ) {
+    let connected_at = std::time::SystemTime::now();
+    let client_info =
+        crate::monitoring::ClientInfo::new(client_id.clone(), client_addr, connected_at);
+    client_list_manager.add(client_info).await;
+
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
     // Send welcome message
@@ -5677,6 +5748,7 @@ async fn handle_stream_socket(
 
                                 if ws_sender.send(axum::extract::ws::Message::Text(event_json.to_string().into())).await.is_err() {
                                     warn!("Failed to send event to subscriber: {}", subscriber_id);
+                                    client_list_manager.remove(&client_id).await;
                                     return;
                                 }
                             }
@@ -5721,6 +5793,8 @@ async fn handle_stream_socket(
         }
     }
 
+    // Cleanup: remove client from tracking
+    client_list_manager.remove(&client_id).await;
     info!(
         "Stream subscriber {} disconnected from room {}",
         subscriber_id, room_name
@@ -5737,6 +5811,7 @@ pub async fn pubsub_websocket(
     State(state): State<AppState>,
     ws: WebSocketUpgrade,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
 ) -> AxumResponse {
     let pubsub_router = match state.pubsub_router.as_ref() {
         Some(router) => router.clone(),
@@ -5767,7 +5842,18 @@ pub async fn pubsub_websocket(
 
     info!("WebSocket connection requested for topics: {:?}", topics);
 
-    ws.on_upgrade(move |socket| handle_pubsub_socket(socket, pubsub_router, topics))
+    let client_list_manager = state.client_list_manager.clone();
+    let client_addr = addr.to_string();
+
+    ws.on_upgrade(move |socket| {
+        handle_pubsub_socket(
+            socket,
+            pubsub_router,
+            topics,
+            client_list_manager,
+            client_addr,
+        )
+    })
 }
 
 /// Handle individual WebSocket connection for Pub/Sub
@@ -5775,6 +5861,8 @@ async fn handle_pubsub_socket(
     socket: WebSocket,
     pubsub_router: Arc<crate::core::PubSubRouter>,
     topics: Vec<String>,
+    client_list_manager: Arc<crate::monitoring::ClientListManager>,
+    client_addr: String,
 ) {
     let (mut ws_sender, mut ws_receiver) = socket.split();
 
@@ -5797,10 +5885,18 @@ async fn handle_pubsub_socket(
     };
 
     let subscriber_id = subscribe_result.subscriber_id.clone();
+    let client_id = format!("pubsub-{}", subscriber_id);
+    let connected_at = std::time::SystemTime::now();
+
     info!(
         "Subscriber {} connected to topics: {:?}",
         subscriber_id, topics
     );
+
+    // Track client connection
+    let client_info =
+        crate::monitoring::ClientInfo::new(client_id.clone(), client_addr, connected_at);
+    client_list_manager.add(client_info).await;
 
     // Create channel for receiving messages
     let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
@@ -5887,6 +5983,7 @@ async fn handle_pubsub_socket(
     }
 
     // Cleanup
+    client_list_manager.remove(&client_id).await;
     pubsub_router.unregister_connection(&subscriber_id);
     let _ = pubsub_router.unsubscribe(&subscriber_id, None);
     info!("Subscriber {} disconnected and cleaned up", subscriber_id);
@@ -6381,13 +6478,39 @@ async fn handle_memory_usage_cmd(
 }
 
 async fn handle_client_list_cmd(
-    _state: AppState,
+    state: AppState,
     _request: &Request,
 ) -> Result<serde_json::Value, SynapError> {
-    // TODO: Implement client tracking when WebSocket tracking is added
+    let clients = state.client_list_manager.list().await;
+    let count = clients.len();
+
+    let clients_json: Vec<serde_json::Value> = clients
+        .into_iter()
+        .map(|c| {
+            serde_json::json!({
+                "id": c.id,
+                "addr": c.addr,
+                "age": c.age,
+                "idle": c.idle,
+                "flags": c.flags,
+                "db": c.db,
+                "sub": c.sub,
+                "psub": c.psub,
+                "multi": c.multi,
+                "qbuf": c.qbuf,
+                "qbuf_free": c.qbuf_free,
+                "obl": c.obl,
+                "oll": c.oll,
+                "omem": c.omem,
+                "events": c.events,
+                "cmd": c.cmd
+            })
+        })
+        .collect();
+
     Ok(serde_json::json!({
-        "clients": [],
-        "count": 0
+        "clients": clients_json,
+        "count": count
     }))
 }
 

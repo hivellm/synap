@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use synap_server::auth::{ApiKeyManager, UserManager};
 use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
-use synap_server::monitoring::MonitoringManager;
+use synap_server::monitoring::{ClientListManager, MonitoringManager};
 use synap_server::persistence::{PersistenceLayer, recover};
 use synap_server::replication::NodeRole;
 use synap_server::{
@@ -328,6 +328,10 @@ async fn main() -> Result<()> {
     ));
     info!("Monitoring manager initialized");
 
+    // Create client list manager
+    let client_list_manager = Arc::new(ClientListManager::new());
+    info!("Client list manager initialized");
+
     // Create transaction manager
     use synap_server::core::TransactionManager;
     let transaction_manager = Arc::new(TransactionManager::new(
@@ -394,6 +398,7 @@ async fn main() -> Result<()> {
         monitoring,
         transaction_manager,
         script_manager,
+        client_list_manager,
     };
 
     // Initialize Prometheus metrics

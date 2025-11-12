@@ -40,6 +40,7 @@ pub mod hyperloglog;
 pub mod kv;
 pub mod list;
 pub mod pubsub;
+mod pubsub_reactive;
 pub mod queue;
 mod queue_reactive;
 pub mod reactive;

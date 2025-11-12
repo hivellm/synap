@@ -42,10 +42,12 @@ pub async fn create_snapshot_with_streams(
     let mut operations = Vec::new();
     for key in keys {
         if let Ok(Some(value)) = kv_store.get(&key).await {
+            // Get TTL for the key (returns remaining seconds)
+            let ttl = kv_store.ttl(&key).await.ok().flatten();
             operations.push(Operation::KVSet {
                 key: key.clone(),
                 value,
-                ttl: None, // TODO: Include TTL
+                ttl,
             });
         }
     }
@@ -224,5 +226,52 @@ mod tests {
 
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Checksum mismatch"));
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_preserves_ttl() {
+        let kv1 = KVStore::new(KVConfig::default());
+
+        // Set keys with different TTLs
+        kv1.set("key_no_ttl", b"value1".to_vec(), None)
+            .await
+            .unwrap();
+        kv1.set("key_with_ttl", b"value2".to_vec(), Some(3600))
+            .await
+            .unwrap();
+
+        // Create snapshot
+        let snapshot = create_snapshot(&kv1, 0).await.unwrap();
+        assert!(!snapshot.is_empty());
+
+        // Apply to new KV store
+        let kv2 = KVStore::new(KVConfig::default());
+        let _offset = apply_snapshot(&kv2, &snapshot).await.unwrap();
+
+        // Verify values
+        assert_eq!(
+            kv2.get("key_no_ttl").await.unwrap(),
+            Some(b"value1".to_vec())
+        );
+        assert_eq!(
+            kv2.get("key_with_ttl").await.unwrap(),
+            Some(b"value2".to_vec())
+        );
+
+        // Verify TTLs
+        // Key without TTL should return None or error
+        let ttl1 = kv2.ttl("key_no_ttl").await;
+        assert!(ttl1.is_err() || ttl1.unwrap().is_none());
+
+        // Key with TTL should have remaining TTL (should be close to 3600 seconds)
+        let ttl2 = kv2.ttl("key_with_ttl").await.unwrap();
+        assert!(ttl2.is_some());
+        // TTL should be close to 3600 (allow some small difference due to processing time)
+        let remaining = ttl2.unwrap();
+        assert!(
+            remaining > 3500 && remaining <= 3600,
+            "TTL should be preserved, got: {}",
+            remaining
+        );
     }
 }

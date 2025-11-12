@@ -3,6 +3,7 @@ use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 use synap_server::auth::{ApiKeyManager, UserManager};
+use synap_server::monitoring::ClientListManager;
 use synap_server::{AppState, KVConfig, KVStore, ScriptManager, create_router};
 use tokio::net::TcpListener;
 
@@ -30,7 +31,7 @@ async fn spawn_test_server() -> String {
     ));
 
     let script_manager = Arc::new(ScriptManager::default());
-
+    let client_list_manager = Arc::new(ClientListManager::new());
     let geospatial_store = Arc::new(synap_server::core::GeospatialStore::new(
         sorted_set_store.clone(),
     ));
@@ -52,6 +53,7 @@ async fn spawn_test_server() -> String {
         monitoring,
         transaction_manager,
         script_manager,
+        client_list_manager,
     };
 
     let user_manager = Arc::new(UserManager::new());

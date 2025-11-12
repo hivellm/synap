@@ -10,7 +10,7 @@ use synap_server::core::{
     GeospatialStore, HashStore, HyperLogLogStore, ListStore, SetStore, SortedSetStore,
     TransactionManager,
 };
-use synap_server::monitoring::MonitoringManager;
+use synap_server::monitoring::{ClientListManager, MonitoringManager};
 use synap_server::server::router::create_router;
 use synap_server::{AppState, KVStore, ScriptManager};
 use tokio::net::TcpListener;
@@ -40,6 +40,7 @@ async fn spawn_test_server() -> String {
     ));
 
     let script_manager = Arc::new(ScriptManager::default());
+    let client_list_manager = Arc::new(ClientListManager::new());
     let hyperloglog_store = Arc::new(HyperLogLogStore::new());
     let bitmap_store = Arc::new(synap_server::core::BitmapStore::new());
     let geospatial_store = Arc::new(GeospatialStore::new(sorted_set_store.clone()));
@@ -62,6 +63,7 @@ async fn spawn_test_server() -> String {
         monitoring,
         transaction_manager,
         script_manager,
+        client_list_manager,
     };
 
     let user_manager = Arc::new(UserManager::new());

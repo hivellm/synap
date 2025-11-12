@@ -51,6 +51,7 @@ async fn test_mcp_kv_get() {
         monitoring,
         transaction_manager,
         script_manager: Arc::new(ScriptManager::default()),
+        client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
     });
 
     // Set a value first (use clone before moving to state)
@@ -112,6 +113,7 @@ async fn test_mcp_kv_set() {
         monitoring,
         transaction_manager,
         script_manager: Arc::new(ScriptManager::default()),
+        client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
     });
 
     let request = CallToolRequestParam {
@@ -178,6 +180,7 @@ async fn test_mcp_kv_delete() {
         monitoring,
         transaction_manager,
         script_manager: Arc::new(ScriptManager::default()),
+        client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
     });
 
     // Set then delete (use clone before moving to state)
@@ -249,6 +252,7 @@ async fn test_mcp_queue_publish() {
         monitoring,
         transaction_manager,
         script_manager: Arc::new(ScriptManager::default()),
+        client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
     });
 
     // Create queue

@@ -54,6 +54,7 @@ async fn spawn_test_server() -> String {
         monitoring,
         transaction_manager,
         script_manager: Arc::new(ScriptManager::default()),
+        client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
     };
     let user_manager = Arc::new(UserManager::new());
     let api_key_manager = Arc::new(ApiKeyManager::new());

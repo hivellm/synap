@@ -18,7 +18,7 @@ use synap_server::core::{
     HashStore, HyperLogLogStore, KVStore, ListStore, SetStore, SortedSetStore, TransactionManager,
 };
 #[cfg(feature = "s2s-tests")]
-use synap_server::monitoring::MonitoringManager;
+use synap_server::monitoring::{ClientListManager, MonitoringManager};
 #[cfg(feature = "s2s-tests")]
 use synap_server::server::router::create_router;
 #[cfg(feature = "s2s-tests")]
@@ -52,6 +52,7 @@ async fn spawn_test_server() -> String {
     ));
 
     let script_manager = Arc::new(ScriptManager::default());
+    let client_list_manager = Arc::new(ClientListManager::new());
     let hyperloglog_store = Arc::new(HyperLogLogStore::new());
     let bitmap_store = Arc::new(synap_server::core::BitmapStore::new());
     let geospatial_store = Arc::new(synap_server::core::GeospatialStore::new(
@@ -76,6 +77,7 @@ async fn spawn_test_server() -> String {
         monitoring,
         transaction_manager,
         script_manager,
+        client_list_manager,
     };
 
     let user_manager = Arc::new(UserManager::new());
