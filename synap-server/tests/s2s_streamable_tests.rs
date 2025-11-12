@@ -647,9 +647,14 @@ async fn test_streamable_ttl_workflow() {
 
     // GET immediately
     let res = send_command(&client, &base_url, "kv.get", json!({"key": "ttl_test"})).await;
-    // Payload returns value directly
-    let value_str = res["payload"].as_str().unwrap();
-    assert!(!value_str.is_empty(), "Expected value to be found");
+    // Payload returns value directly as JSON string, or null if not found
+    assert_eq!(res["success"], true);
+    if let Some(value_str) = res["payload"].as_str() {
+        assert!(!value_str.is_empty(), "Expected value to be found");
+    } else {
+        // Value may have expired already, which is unexpected but we should handle it
+        panic!("Value should exist immediately after setting, but payload is null");
+    }
 
     // Wait for expiration
     tokio::time::sleep(Duration::from_secs(2)).await;
