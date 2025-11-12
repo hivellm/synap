@@ -2,9 +2,9 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.85%2B)-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-456%2F456%20(100%25)-brightgreen.svg)](#testing--quality)
+[![Tests](https://img.shields.io/badge/tests-456%2B%20(100%25)-brightgreen.svg)](#testing--quality)
 [![Coverage](https://img.shields.io/badge/coverage-99.30%25-brightgreen.svg)](docs/TESTING.md)
-[![Version](https://img.shields.io/badge/version-0.9.0-blue.svg)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.7.0--rc2-blue.svg)](#project-status)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
 
@@ -19,12 +19,15 @@ Synap provides multiple core capabilities in a single, cohesive system:
 3. **📋 List Data Structure** - Ordered sequences with LPUSH, RPOP, LRANGE (Redis-compatible) ✅ **v0.6.0**
 4. **🔷 Set Data Structure** - Unordered unique collections with SADD, SREM, SINTER, SUNION (Redis-compatible) ✅ **v0.6.0**
 5. **📊 Sorted Set Data Structure** - Scored members with ranking (ZADD, ZRANGE, ZRANK, ZINTER/ZUNION) ✅ **v0.7.0**
-6. **🔢 HyperLogLog** - Probabilistic cardinality estimation with ~0.81% error (~12KB memory) ✅ **v0.7.0-rc1** (REST + StreamableHTTP + TTL)
-7. **📜 Lua Scripting** - Server-side scripting with EVAL/EVALSHA and redis.call() bridge ✅ **v0.7.0**
-8. **🔄 Transactions** - MULTI/EXEC/WATCH/DISCARD with optimistic locking ✅ **v0.7.0**
-9. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
-10. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
-11. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
+6. **🔢 HyperLogLog** - Probabilistic cardinality estimation with ~0.81% error (~12KB memory) ✅ **v0.7.0-rc1**
+7. **🗺️ Geospatial Indexes** - Redis-compatible GEO commands (GEOADD, GEORADIUS, GEOSEARCH) ✅ **v0.7.0-rc2**
+8. **🔢 Bitmap Operations** - Redis-compatible bit manipulation (SETBIT, GETBIT, BITCOUNT, BITOP) ✅ **v0.7.0-rc2**
+9. **📝 String Extensions** - APPEND, GETRANGE, SETRANGE, GETSET, MSETNX ✅ **v0.7.0-rc1**
+10. **📜 Lua Scripting** - Server-side scripting with EVAL/EVALSHA and redis.call() bridge ✅ **v0.7.0**
+11. **🔄 Transactions** - MULTI/EXEC/WATCH/DISCARD with optimistic locking ✅ **v0.7.0**
+12. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
+13. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
+14. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
 
 ## ✨ Key Features
 
@@ -40,10 +43,11 @@ Synap provides multiple core capabilities in a single, cohesive system:
 ### 🔐 Security & Authentication (✅ PRODUCTION READY - Jan 2025)
 - **🔒 Authentication System** - Root user, user management, API keys
 - **🛡️ Fine-grained Permissions** - Resource-based permissions (RabbitMQ-style)
-- **📝 Audit Logging** - Track all authentication events
-- **🔑 Password Validation** - Configurable password requirements
-- **🌐 IP Filtering** - Restrict API keys to specific IPs
+- **📝 Audit Logging** - Track all authentication events (login, API key usage, permission denials)
+- **🔑 Password Validation** - Configurable password requirements (SHA512 hashing)
+- **🌐 IP Filtering** - Restrict API keys to specific IP addresses
 - **✅ Basic Auth & Bearer Token** - Support for both authentication methods
+- **🔐 MCP Authentication** - Full authentication support for MCP protocol
 
 ### 💪 Durability (✅ COMPLETE - Oct 2025)
 - **💾 Full Persistence**: WAL + Snapshots for KV, Queue, and Stream
@@ -65,24 +69,23 @@ Synap provides multiple core capabilities in a single, cohesive system:
 - **🔁 Event Replay**: Stream history and replay capabilities
 - **🔀 Manual Failover**: Promote replica to master capability
 
-### 🔐 Security & Authentication (✅ PRODUCTION READY - Jan 2025)
-- **🔒 Authentication System** - Root user, user management, API keys
-- **🛡️ Fine-grained Permissions** - Resource-based permissions (RabbitMQ-style)
-- **📝 Audit Logging** - Track all authentication events
-- **🔑 Password Validation** - Configurable password requirements
-- **🌐 IP Filtering** - Restrict API keys to specific IPs
-- **✅ Basic Auth & Bearer Token** - Support for both authentication methods
+### 📊 Monitoring & Observability
+- **📈 INFO Command** - Redis-style server introspection (server, memory, stats, replication, keyspace)
+- **🐌 SLOWLOG** - Slow query logging with configurable threshold (default 10ms)
+- **💾 MEMORY USAGE** - Per-key memory tracking across all data types
+- **👥 CLIENT LIST** - Active connection tracking and management
+- **📊 Prometheus Metrics** - 17 metric types for comprehensive monitoring
 
 ### 👨‍💻 Developer Experience
 - **🤖 AI Integration**: MCP support for Cursor, Claude Desktop, and AI assistants
 - **🌊 StreamableHTTP Protocol**: Simple HTTP-based streaming protocol
 - **🔌 WebSocket Support**: Persistent connections for real-time updates
-- **📚 Multi-language SDKs**: TypeScript, Python, Rust, PHP, and C# clients with authentication support
+- **📚 Multi-language SDKs**: TypeScript, Python, Rust (with reactive PubSub), PHP, and C# clients with full authentication support
 - **📖 Rich Examples**: Chat, event broadcasting, task queues, authentication examples, and more
 
 ### 🔗 Protocol Support
-- **🤖 MCP (Model Context Protocol)**: ✅ **PRODUCTION READY** - 13 essential tools at `/mcp` endpoint (optimized for Cursor)
-- **🌐 UMICP (Universal Matrix Inter-Communication Protocol)**: ✅ **PRODUCTION READY** - 13 operations via MCP bridge
+- **🤖 MCP (Model Context Protocol)**: ✅ **PRODUCTION READY** - Configurable tools (KV, Hash, List, Set, Queue, Sorted Set) at `/mcp` endpoint with authentication support
+- **🌐 UMICP (Universal Matrix Inter-Communication Protocol)**: ✅ **PRODUCTION READY** - 13 operations via MCP bridge with TLS support
 - **📡 REST API**: Standard HTTP endpoints for all operations
 - **🔌 WebSocket API**: Real-time bidirectional communication
 
@@ -537,7 +540,7 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 | Pub/Sub Publish | < 0.5ms | 🔵 Planned |
 | Replication Lag | < 10ms | 🔵 Planned |
 
-**Test Coverage**: 359/359 tests passing (100%)
+**Test Coverage**: 456+ tests passing (99.30% coverage)
 
 **Scripts**: `./scripts/test-performance.ps1` (full suite), `./scripts/quick-test.ps1` (fast validation)
 
@@ -549,6 +552,13 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 | **Hashes** | ✅ (v0.6.0) | ✅ | ❌ | ❌ |
 | **Lists** | ✅ (v0.6.0) | ✅ | ❌ | ❌ |
 | **Sets** | ✅ (v0.6.0) | ✅ | ❌ | ❌ |
+| **Sorted Sets** | ✅ (v0.7.0) | ✅ | ❌ | ❌ |
+| **Geospatial** | ✅ (v0.7.0-rc2) | ✅ | ❌ | ❌ |
+| **Bitmaps** | ✅ (v0.7.0-rc2) | ✅ | ❌ | ❌ |
+| **HyperLogLog** | ✅ (v0.7.0-rc1) | ✅ | ❌ | ❌ |
+| **Lua Scripting** | ✅ (v0.7.0) | ✅ | ❌ | ❌ |
+| **Transactions** | ✅ (v0.7.0) | ✅ | ❌ | ❌ |
+| **String Extensions** | ✅ (v0.7.0-rc1) | ✅ | ❌ | ❌ |
 | Queues (ACK) | ✅ | ❌ | ✅ | ❌ |
 | Priority Queues | ✅ (0-9) | ❌ | ✅ | ❌ |
 | Dead Letter Queue | ✅ | ❌ | ✅ | ❌ |
@@ -567,8 +577,10 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 | Native Compression | ✅ (LZ4/Zstd) | ❌ | ❌ | ✅ (Snappy) |
 | Hot Data Cache | 🔄 (L1/L2) | ✅ (Single) | ❌ | ❌ |
 | StreamableHTTP | ✅ | ❌ | ❌ | ❌ |
-| MCP Support | ✅ (8 tools) | ❌ | ❌ | ❌ |
-| UMICP Support | ✅ (5 tools) | ❌ | ❌ | ❌ |
+| MCP Support | ✅ (Configurable, Auth) | ❌ | ❌ | ❌ |
+| UMICP Support | ✅ (13 ops, TLS) | ❌ | ❌ | ❌ |
+| Enhanced Monitoring | ✅ (INFO, SLOWLOG, MEMORY) | ✅ (INFO) | ❌ | ❌ |
+| Password Hashing | ✅ (SHA512) | ✅ (SHA256) | ✅ (bcrypt) | ✅ (SASL) |
 | AI Integration | ✅ (MCP+UMICP) | ❌ | ❌ | ❌ |
 | Matrix Operations | ✅ (via UMICP) | ❌ | ❌ | ❌ |
 | Single Binary | ✅ | ✅ | ❌ | ❌ |
@@ -586,10 +598,10 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 
 ## 📊 Project Status
 
-**Status**: ✅ Phase 1-3 Complete | ✅ Redis Phase 1 Complete (Hash, List, Set)  
-**Version**: 0.7.0-rc1 (Redis-compatible data structures + Lua Scripting + Transactions + HyperLogLog)  
+**Status**: ✅ Phase 1-3 Complete | ✅ Redis Phase 1-2 Complete (Hash, List, Set, Sorted Set, Geospatial, Bitmap, String Extensions)  
+**Version**: 0.7.0-rc2 (Redis-compatible data structures + Lua Scripting + Transactions + HyperLogLog + Geospatial + Bitmap)  
 **Edition**: Rust 2024 (nightly 1.85+)  
-**Last Updated**: October 31, 2025
+**Last Updated**: January 31, 2025
 
 ### ✅ Implementation Complete
 
@@ -616,7 +628,7 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - ✅ Performance: 7,500+ msg/s with 50 concurrent consumers
 
 **🔒 Authentication & Authorization** ✅ COMPLETE
-- ✅ **User management** (bcrypt password hashing)
+- ✅ **User management** (SHA512 password hashing)
 - ✅ **Role-Based Access Control** (admin, readonly, custom roles)
 - ✅ **API Keys** (expiration, IP filtering, usage tracking)
 - ✅ **ACL system** (resource-based permissions)
@@ -689,14 +701,18 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - Stress test: 5000 ops in ~4-5 seconds
 
 #### 🧪 Testing & Quality
-- ✅ **410 tests passing** (increased test coverage to 99.30%)
+- ✅ **456+ tests passing** (99.30% test coverage)
   - 128 library tests (KV, Queue, Streams, Partitioning, Consumer Groups, Persistence, Auth, Compression)
   - 67 replication tests (25 unit + 16 extended + 10 integration TCP + 16 KV ops)
   - 21 integration tests (performance, hybrid storage, persistence e2e)
-  - 7 Kafka-style integration tests (partition, consumer groups, retention) ✅ NEW
+  - 7 Kafka-style integration tests (partition, consumer groups, retention)
+  - 40+ geospatial tests (23 unit + 17 integration)
+  - 12 bitmap integration tests
+  - 30 Lua scripting tests
+  - 11 transaction tests
   - 58 authentication tests
   - Protocol tests across REST, StreamableHTTP, WebSocket
-- ✅ **9 comprehensive benchmark suites**
+- ✅ **11 comprehensive benchmark suites**
   - `kv_bench`: Memory, sharding, TTL, concurrency
   - `queue_bench`: Arc sharing, priority, pending messages
   - `persistence_bench`: AsyncWAL, snapshots, recovery
@@ -706,8 +722,11 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
   - `compression_bench`: LZ4/Zstd performance
   - `kv_persistence_bench`: With disk I/O (3 fsync modes)
   - `queue_persistence_bench`: RabbitMQ-style durability
+  - `geospatial_bench`: GEO operations performance ✅ NEW
+  - `bitmap_bench`: Bit manipulation performance ✅ NEW
 - ✅ **99.30% test coverage**
 - ✅ Clean `cargo fmt` and `cargo clippy`
+- ✅ WebSocket tests with graceful shutdown (s2s-tests feature)
 
 ### 🚀 Quick Start
 
@@ -717,7 +736,7 @@ git clone https://github.com/hivellm/synap.git
 cd synap
 cargo build --release
 
-# Run tests (359 passing)
+# Run tests (456+ passing)
 cargo test
 
 # Run server
@@ -784,9 +803,10 @@ See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) for complete authentication
 **✅ Phase 2 (Q4 2025)**: Event Streams, Pub/Sub, Persistence - **COMPLETE**  
 **✅ Phase 3 (Q1 2026)**: Master-Slave Replication with TCP - **COMPLETE**  
 **✅ Redis Phase 1 (Oct 2025)**: Hash, List, Set Data Structures + 5 SDKs - **COMPLETE** 🎉  
-**✅ MCP Integration**: Model Context Protocol with Configurable Tools - **COMPLETE**  
-**✅ UMICP Integration**: Universal Matrix Inter-Communication Protocol - **COMPLETE**  
-**🔄 Redis Phase 2**: Sorted Sets (80%), String Extensions, Key Management  
+**✅ Redis Phase 2 (Jan 2025)**: Sorted Sets, String Extensions, Geospatial, Bitmap - **COMPLETE** 🎉  
+**✅ MCP Integration**: Model Context Protocol with Authentication & Configurable Tools - **COMPLETE**  
+**✅ UMICP Integration**: Universal Matrix Inter-Communication Protocol with TLS - **COMPLETE**  
+**✅ Enhanced Monitoring**: INFO, SLOWLOG, MEMORY USAGE, CLIENT LIST - **COMPLETE**  
 **⏳ Phase 4 (Q2 2026)**: Clustering, Sharding, GUI Dashboard, Distribution packages
 
 See [docs/ROADMAP.md](docs/ROADMAP.md) for details.
