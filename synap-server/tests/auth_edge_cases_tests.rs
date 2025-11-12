@@ -67,7 +67,7 @@ async fn spawn_test_server_with_auth(
 
     if auth_enabled {
         user_manager
-            .initialize_root_user("root", "root123", true)
+            .initialize_root_user("root", "root12345", true)
             .unwrap();
 
         // Create a test API key with full permissions
@@ -400,11 +400,11 @@ async fn test_create_duplicate_user() {
 
     // Create a user
     user_manager
-        .create_user("duplicate", "pass123", false)
+        .create_user("duplicate", "pass12345", false)
         .unwrap();
 
     // Try to create duplicate (should fail)
-    let result = user_manager.create_user("duplicate", "pass456", false);
+    let result = user_manager.create_user("duplicate", "pass45678", false);
     assert!(result.is_err());
 }
 
@@ -414,7 +414,7 @@ async fn test_delete_user() {
 
     // Create a user
     user_manager
-        .create_user("todelete", "pass123", false)
+        .create_user("todelete", "pass12345", false)
         .unwrap();
 
     // Delete user
@@ -440,21 +440,21 @@ async fn test_change_password() {
 
     // Create a user
     user_manager
-        .create_user("passuser", "oldpass", false)
+        .create_user("passuser", "oldpass123", false)
         .unwrap();
 
     // Verify old password works
-    let user = user_manager.authenticate("passuser", "oldpass").unwrap();
+    let user = user_manager.authenticate("passuser", "oldpass123").unwrap();
     assert_eq!(user.username, "passuser");
 
     // Change password
-    user_manager.change_password("passuser", "newpass").unwrap();
+    user_manager.change_password("passuser", "newpass123").unwrap();
 
     // Old password should fail
-    assert!(user_manager.authenticate("passuser", "oldpass").is_err());
+    assert!(user_manager.authenticate("passuser", "oldpass123").is_err());
 
     // New password should work
-    let user = user_manager.authenticate("passuser", "newpass").unwrap();
+    let user = user_manager.authenticate("passuser", "newpass123").unwrap();
     assert_eq!(user.username, "passuser");
 }
 
@@ -464,17 +464,17 @@ async fn test_disable_user() {
 
     // Create a user
     user_manager
-        .create_user("disableuser", "pass123", false)
+        .create_user("disableuser", "pass12345", false)
         .unwrap();
 
     // Should be able to authenticate
-    assert!(user_manager.authenticate("disableuser", "pass123").is_ok());
+    assert!(user_manager.authenticate("disableuser", "pass12345").is_ok());
 
     // Disable user
     user_manager.set_user_enabled("disableuser", false).unwrap();
 
     // Should not be able to authenticate
-    assert!(user_manager.authenticate("disableuser", "pass123").is_err());
+    assert!(user_manager.authenticate("disableuser", "pass12345").is_err());
 }
 
 #[tokio::test]
@@ -483,18 +483,18 @@ async fn test_enable_user() {
 
     // Create and disable a user
     user_manager
-        .create_user("enableuser", "pass123", false)
+        .create_user("enableuser", "pass12345", false)
         .unwrap();
     user_manager.set_user_enabled("enableuser", false).unwrap();
 
     // Should not be able to authenticate
-    assert!(user_manager.authenticate("enableuser", "pass123").is_err());
+    assert!(user_manager.authenticate("enableuser", "pass12345").is_err());
 
     // Enable user
     user_manager.set_user_enabled("enableuser", true).unwrap();
 
     // Should be able to authenticate
-    assert!(user_manager.authenticate("enableuser", "pass123").is_ok());
+    assert!(user_manager.authenticate("enableuser", "pass12345").is_ok());
 }
 
 // ==================== Permission Edge Cases Tests ====================
@@ -794,7 +794,7 @@ async fn test_concurrent_user_authentication() {
 
     // Create a user
     user_manager
-        .create_user("concurrentuser", "pass123", false)
+        .create_user("concurrentuser", "pass12345", false)
         .unwrap();
 
     // Authenticate concurrently
@@ -802,7 +802,7 @@ async fn test_concurrent_user_authentication() {
     for _ in 0..10 {
         let user_manager = user_manager.clone();
         let handle =
-            tokio::spawn(async move { user_manager.authenticate("concurrentuser", "pass123") });
+            tokio::spawn(async move { user_manager.authenticate("concurrentuser", "pass12345") });
         handles.push(handle);
     }
 
@@ -907,7 +907,7 @@ async fn test_user_roles() {
 
     // Create a user
     user_manager
-        .create_user("roleuser", "pass123", false)
+        .create_user("roleuser", "pass12345", false)
         .unwrap();
 
     // Add role to user
@@ -938,7 +938,7 @@ async fn test_user_roles_permissions() {
 
     // Create a user
     user_manager
-        .create_user("rolepermuser", "pass123", false)
+        .create_user("rolepermuser", "pass12345", false)
         .unwrap();
 
     // Add role to user
@@ -958,10 +958,10 @@ async fn test_list_users() {
 
     // Create multiple users
     user_manager
-        .create_user("listuser1", "pass123", false)
+        .create_user("listuser1", "pass12345", false)
         .unwrap();
     user_manager
-        .create_user("listuser2", "pass123", false)
+        .create_user("listuser2", "pass12345", false)
         .unwrap();
 
     // List users
