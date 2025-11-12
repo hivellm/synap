@@ -73,6 +73,9 @@ pub enum Operation {
     /// KV Store DELETE operation
     KVDel { keys: Vec<String> },
 
+    /// KV Store RENAME operation
+    KVRename { source: String, destination: String },
+
     /// Queue PUBLISH operation
     QueuePublish {
         queue: String,

@@ -141,6 +141,24 @@ pub async fn recover(
                 }
                 replayed += 1;
             }
+            Operation::KVRename {
+                source,
+                destination,
+            } => {
+                // Get value and TTL from source key
+                let value = kv_store.get(&source).await?;
+                if let Some(data) = value {
+                    // Get TTL from source key
+                    let ttl = kv_store.ttl(&source).await?;
+
+                    // Set destination with same value and TTL
+                    kv_store.set(&destination, data, ttl).await?;
+
+                    // Delete source
+                    kv_store.delete(&source).await?;
+                }
+                replayed += 1;
+            }
             Operation::QueuePublish { queue, message } => {
                 if let Some(ref qm) = queue_manager {
                     // Ensure queue exists

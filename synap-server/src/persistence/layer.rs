@@ -70,6 +70,29 @@ impl PersistenceLayer {
         Ok(())
     }
 
+    /// Log a KV RENAME operation
+    pub async fn log_kv_rename(
+        &self,
+        source: String,
+        destination: String,
+    ) -> super::types::Result<()> {
+        if !self.config.enabled || !self.config.wal.enabled {
+            return Ok(());
+        }
+
+        let operation = Operation::KVRename {
+            source,
+            destination,
+        };
+
+        self.wal.append(operation).await?;
+
+        let mut ops = self.operations_since_snapshot.write();
+        *ops += 1;
+
+        Ok(())
+    }
+
     /// Log a Hash SET operation
     pub async fn log_hash_set(
         &self,

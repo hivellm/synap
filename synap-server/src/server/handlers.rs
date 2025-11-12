@@ -673,9 +673,14 @@ pub async fn key_rename(
     manager.rename(&source, &req.destination).await?;
 
     // Log to WAL if persistence is enabled
-    if state.persistence.is_some() {
-        // RENAME is logged as a copy + delete sequence
-        // TODO: Add specific RENAME operation to WAL
+    if let Some(ref persistence) = state.persistence {
+        if let Err(e) = persistence
+            .log_kv_rename(source.clone(), req.destination.clone())
+            .await
+        {
+            error!("Failed to log RENAME to WAL: {}", e);
+            // Don't fail the request, just log the error
+        }
     }
 
     Ok(Json(RenameResponse {
@@ -2600,8 +2605,16 @@ async fn handle_key_rename_cmd(
     let manager = create_key_manager(state);
     manager.rename(source, destination).await?;
 
-    // TODO: Log RENAME to WAL when persistence is enabled
-    // RENAME operation would be logged as a copy + delete sequence
+    // Log to WAL if persistence is enabled
+    if let Some(ref persistence) = state.persistence {
+        if let Err(e) = persistence
+            .log_kv_rename(source.to_string(), destination.to_string())
+            .await
+        {
+            error!("Failed to log RENAME to WAL: {}", e);
+            // Don't fail the request, just log the error
+        }
+    }
 
     Ok(serde_json::json!({
         "success": true,
