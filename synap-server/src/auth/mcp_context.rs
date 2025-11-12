@@ -7,7 +7,7 @@ use std::cell::RefCell;
 
 thread_local! {
     /// Thread-local storage for AuthContext during MCP request processing
-    static MCP_AUTH_CONTEXT: RefCell<Option<AuthContext>> = RefCell::new(None);
+    static MCP_AUTH_CONTEXT: RefCell<Option<AuthContext>> = const { RefCell::new(None) };
 }
 
 /// Set the authentication context for the current thread

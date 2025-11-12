@@ -292,7 +292,7 @@ impl ApiKeyManager {
         self.keys
             .read()
             .values()
-            .filter(|k| k.username.as_ref().map_or(false, |u| u == username))
+            .filter(|k| k.username.as_ref().is_some_and(|u| u == username))
             .cloned()
             .collect()
     }
@@ -303,7 +303,7 @@ impl ApiKeyManager {
         self.keys
             .read()
             .values()
-            .filter(|k| k.expires_at.map_or(false, |expires_at| now > expires_at))
+            .filter(|k| k.expires_at.is_some_and(|expires_at| now > expires_at))
             .cloned()
             .collect()
     }
@@ -314,7 +314,7 @@ impl ApiKeyManager {
         self.keys
             .read()
             .values()
-            .filter(|k| k.enabled && k.expires_at.map_or(true, |expires_at| now <= expires_at))
+            .filter(|k| k.enabled && k.expires_at.is_none_or(|expires_at| now <= expires_at))
             .cloned()
             .collect()
     }

@@ -97,6 +97,7 @@ impl AuthMiddleware {
     /// Authenticate via API key
     /// Returns Ok(Some(AuthContext)) on success, Ok(None) if no API key provided,
     /// Err(()) if API key provided but invalid
+    #[allow(clippy::result_unit_err)]
     pub fn authenticate_api_key(
         auth: &AuthMiddleware,
         req: &Request,
@@ -162,6 +163,7 @@ impl AuthMiddleware {
     /// Authenticate via Basic Auth
     /// Returns Ok(Some(AuthContext)) on success, Ok(None) if no Basic Auth header,
     /// Err(()) if Basic Auth header present but invalid
+    #[allow(clippy::result_unit_err)]
     pub fn authenticate_basic(
         auth: &AuthMiddleware,
         req: &Request,

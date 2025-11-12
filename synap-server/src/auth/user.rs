@@ -190,7 +190,7 @@ impl UserManager {
         self.root_username
             .read()
             .as_ref()
-            .map_or(false, |root| root == username)
+            .is_some_and(|root| root == username)
     }
 
     /// Get root username

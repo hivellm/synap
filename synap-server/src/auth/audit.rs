@@ -154,10 +154,6 @@ impl AuditLogManager {
         }
     }
 
-    /// Create with default configuration (1000 entries)
-    pub fn default() -> Self {
-        Self::new(1000)
-    }
 
     /// Enable or disable audit logging
     pub fn set_enabled(&mut self, enabled: bool) {
@@ -286,10 +282,15 @@ impl AuditLogManager {
     pub async fn len(&self) -> usize {
         self.entries.read().await.len()
     }
+
+    /// Check if audit log is empty
+    pub async fn is_empty(&self) -> bool {
+        self.entries.read().await.is_empty()
+    }
 }
 
 impl Default for AuditLogManager {
     fn default() -> Self {
-        Self::default()
+        Self::new(1000)
     }
 }
