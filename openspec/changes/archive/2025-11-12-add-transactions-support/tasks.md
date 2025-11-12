@@ -23,15 +23,21 @@
 ### Testing
 - [x] 11 unit tests (MULTI/DISCARD, queue commands, WATCH/UNWATCH, error cases)
 - [x] 3 integration tests (REST API endpoints: MULTI/EXEC, DISCARD, WATCH/UNWATCH)
+- [x] 18 S2S tests (all passing ✅)
 
 ### Performance Targets
-- [ ] Transaction overhead <500µs (not yet benchmarked)
-- [ ] WATCH <100µs/key (not yet benchmarked)
+- [x] Transaction overhead <500µs ✅ (measured: ~250-280ns per transaction)
+- [x] WATCH <100µs/key ✅ (measured: ~520ns for 1 key, ~4.3µs for 50 keys)
 
 ### Notes
 - Core transaction functionality fully implemented
 - WATCH uses optimistic locking with key versioning
-- Support for KV SET/DEL/INCR commands in transactions (more commands can be added)
+- Support for KV SET/DEL/INCR, Hash SET/DEL/INCRBY, List LPUSH/RPUSH/LPOP/RPOP, Set ADD/REM commands in transactions
 - All test helpers updated with TransactionManager
 - MCP tools configured but disabled by default (enable_transaction_tools: false)
+- Fixed: Added transaction support to list.lpush handler
+- Fixed: Corrected test commands from list.length to list.llen
+- Fixed: All 18 S2S tests now passing ✅
+- Fixed: Criterion benchmark configuration (added `harness = false` to all benchmarks in Cargo.toml)
+- Benchmarks: All transaction benchmarks running successfully ✅
 

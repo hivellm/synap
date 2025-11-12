@@ -142,3 +142,105 @@ pub struct ClientList {
     pub clients: Vec<ClientInfo>,
     pub count: usize,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_client_list_new() {
+        let manager = ClientListManager::new();
+        assert_eq!(manager.len().await, 0);
+        assert!(manager.is_empty().await);
+    }
+
+    #[tokio::test]
+    async fn test_client_list_add() {
+        let manager = ClientListManager::new();
+        let client = ClientInfo::new(
+            "client1".to_string(),
+            "127.0.0.1:12345".to_string(),
+            SystemTime::now(),
+        );
+
+        manager.add(client).await;
+        assert_eq!(manager.len().await, 1);
+        assert!(!manager.is_empty().await);
+    }
+
+    #[tokio::test]
+    async fn test_client_list_remove() {
+        let manager = ClientListManager::new();
+        let client1 = ClientInfo::new(
+            "client1".to_string(),
+            "127.0.0.1:12345".to_string(),
+            SystemTime::now(),
+        );
+        let client2 = ClientInfo::new(
+            "client2".to_string(),
+            "127.0.0.1:12346".to_string(),
+            SystemTime::now(),
+        );
+
+        manager.add(client1).await;
+        manager.add(client2).await;
+        assert_eq!(manager.len().await, 2);
+
+        manager.remove("client1").await;
+        assert_eq!(manager.len().await, 1);
+
+        let clients = manager.list().await;
+        assert_eq!(clients[0].id, "client2");
+    }
+
+    #[tokio::test]
+    async fn test_client_list_list() {
+        let manager = ClientListManager::new();
+
+        for i in 0..3 {
+            let client = ClientInfo::new(
+                format!("client{}", i),
+                format!("127.0.0.1:1234{}", i),
+                SystemTime::now(),
+            );
+            manager.add(client).await;
+        }
+
+        let clients = manager.list().await;
+        assert_eq!(clients.len(), 3);
+        assert_eq!(clients[0].id, "client0");
+        assert_eq!(clients[1].id, "client1");
+        assert_eq!(clients[2].id, "client2");
+    }
+
+    #[tokio::test]
+    async fn test_client_info_new() {
+        let connected_at = SystemTime::now();
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+
+        let client = ClientInfo::new(
+            "test_id".to_string(),
+            "127.0.0.1:12345".to_string(),
+            connected_at,
+        );
+
+        assert_eq!(client.id, "test_id");
+        assert_eq!(client.addr, "127.0.0.1:12345");
+        assert_eq!(client.flags, "N");
+        assert_eq!(client.db, 0);
+    }
+
+    #[test]
+    fn test_client_info_to_redis_format() {
+        let client = ClientInfo::new(
+            "123".to_string(),
+            "127.0.0.1:12345".to_string(),
+            SystemTime::now(),
+        );
+
+        let formatted = client.to_redis_format();
+        assert!(formatted.contains("id=123"));
+        assert!(formatted.contains("addr=127.0.0.1:12345"));
+        assert!(formatted.contains("flags=N"));
+    }
+}

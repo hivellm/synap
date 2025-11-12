@@ -32,7 +32,45 @@ pub enum TransactionCommand {
         key: String,
         delta: i64,
     },
-    // Add other commands as needed
+    /// Hash commands
+    HashSet {
+        key: String,
+        field: String,
+        value: Vec<u8>,
+    },
+    HashDel {
+        key: String,
+        fields: Vec<String>,
+    },
+    HashIncrBy {
+        key: String,
+        field: String,
+        delta: i64,
+    },
+    /// List commands
+    ListLPush {
+        key: String,
+        values: Vec<Vec<u8>>,
+    },
+    ListRPush {
+        key: String,
+        values: Vec<Vec<u8>>,
+    },
+    ListLPop {
+        key: String,
+    },
+    ListRPop {
+        key: String,
+    },
+    /// Set commands
+    SetAdd {
+        key: String,
+        members: Vec<Vec<u8>>,
+    },
+    SetRem {
+        key: String,
+        members: Vec<Vec<u8>>,
+    },
 }
 
 /// Watched key version info (stored at WATCH time)
@@ -121,6 +159,17 @@ impl Transaction {
                     }
                 }
                 TransactionCommand::KVIncr { key, .. } => {
+                    keys.insert(key.clone());
+                }
+                TransactionCommand::HashSet { key, .. }
+                | TransactionCommand::HashDel { key, .. }
+                | TransactionCommand::HashIncrBy { key, .. }
+                | TransactionCommand::ListLPush { key, .. }
+                | TransactionCommand::ListRPush { key, .. }
+                | TransactionCommand::ListLPop { key, .. }
+                | TransactionCommand::ListRPop { key, .. }
+                | TransactionCommand::SetAdd { key, .. }
+                | TransactionCommand::SetRem { key, .. } => {
                     keys.insert(key.clone());
                 }
             }
@@ -371,6 +420,52 @@ impl TransactionManager {
                     };
                     serde_json::json!({"value": value})
                 }
+                TransactionCommand::HashSet { key, field, value } => {
+                    self.hash_store.hset(key, field, value.clone())?;
+                    serde_json::json!({"ok": true})
+                }
+                TransactionCommand::HashDel { key, fields } => {
+                    let deleted = self.hash_store.hdel(key, fields)?;
+                    serde_json::json!({"deleted": deleted})
+                }
+                TransactionCommand::HashIncrBy { key, field, delta } => {
+                    let value = self.hash_store.hincrby(key, field, *delta)?;
+                    serde_json::json!({"value": value})
+                }
+                TransactionCommand::ListLPush { key, values } => {
+                    let length = self.list_store.lpush(key, values.clone(), false)?;
+                    serde_json::json!({"length": length})
+                }
+                TransactionCommand::ListRPush { key, values } => {
+                    let length = self.list_store.rpush(key, values.clone(), false)?;
+                    serde_json::json!({"length": length})
+                }
+                TransactionCommand::ListLPop { key } => {
+                    let values = self.list_store.lpop(key, Some(1))?;
+                    serde_json::json!(
+                        values
+                            .into_iter()
+                            .next()
+                            .map(|v| String::from_utf8_lossy(&v).to_string())
+                    )
+                }
+                TransactionCommand::ListRPop { key } => {
+                    let values = self.list_store.rpop(key, Some(1))?;
+                    serde_json::json!(
+                        values
+                            .into_iter()
+                            .next()
+                            .map(|v| String::from_utf8_lossy(&v).to_string())
+                    )
+                }
+                TransactionCommand::SetAdd { key, members } => {
+                    let added = self.set_store.sadd(key, members.clone())?;
+                    serde_json::json!({"added": added})
+                }
+                TransactionCommand::SetRem { key, members } => {
+                    let removed = self.set_store.srem(key, members.clone())?;
+                    serde_json::json!({"removed": removed})
+                }
             };
 
             results.push(result);
@@ -383,6 +478,38 @@ impl TransactionManager {
     pub fn get_transaction(&self, client_id: &str) -> Option<Transaction> {
         let transactions = self.transactions.read();
         transactions.get(client_id).cloned()
+    }
+
+    /// Queue a command in a transaction if one exists for the client_id
+    /// Returns true if command was queued, false if no transaction exists
+    pub fn queue_command_if_transaction(
+        &self,
+        client_id: &str,
+        command: TransactionCommand,
+    ) -> Result<bool> {
+        let mut transactions = self.transactions.write();
+        if let Some(transaction) = transactions.get_mut(client_id) {
+            transaction.queue_command(command);
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Update key version when a key is modified outside a transaction
+    /// This is needed for WATCH to detect changes
+    pub fn update_key_version(&self, key: &str) {
+        let mut key_versions = self.key_versions.write();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let version = key_versions.entry(key.to_string()).or_insert(KeyVersion {
+            version: 0,
+            modified_at: 0,
+        });
+        version.version += 1;
+        version.modified_at = now;
     }
 }
 

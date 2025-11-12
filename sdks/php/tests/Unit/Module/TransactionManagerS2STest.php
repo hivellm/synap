@@ -34,11 +34,21 @@ final class TransactionManagerS2STest extends TestCase
         $result = $this->transaction->multi($clientId);
         $this->assertTrue($result['success']);
 
-        // Execute empty transaction (commands queuing requires handler modification)
+        // Queue commands using execute with client_id (automatic queuing)
+        $this->client->execute('kv.set', 'tx:key1', ['value' => 'value1', 'client_id' => $clientId]);
+        $this->client->execute('kv.set', 'tx:key2', ['value' => 'value2', 'client_id' => $clientId]);
+
+        // Execute transaction
         $execResult = $this->transaction->exec($clientId);
         $this->assertTrue($execResult['success']);
         $this->assertArrayHasKey('results', $execResult);
-        $this->assertIsArray($execResult['results']);
+        $this->assertCount(2, $execResult['results']);
+
+        // Verify values were set
+        $value1 = $this->client->kv()->get('tx:key1');
+        $value2 = $this->client->kv()->get('tx:key2');
+        $this->assertEquals('value1', $value1);
+        $this->assertEquals('value2', $value2);
     }
 
     public function testDiscard(): void
@@ -48,9 +58,16 @@ final class TransactionManagerS2STest extends TestCase
         // Start transaction
         $this->transaction->multi($clientId);
 
+        // Queue a command (will be discarded)
+        $this->client->execute('kv.set', 'tx:discard:key', ['value' => 'value', 'client_id' => $clientId]);
+
         // Discard transaction
         $result = $this->transaction->discard($clientId);
         $this->assertTrue($result['success']);
+
+        // Verify value was NOT set
+        $value = $this->client->kv()->get('tx:discard:key');
+        $this->assertNull($value);
     }
 
     public function testWatchUnwatch(): void

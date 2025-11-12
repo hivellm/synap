@@ -31,11 +31,21 @@ class TestTransactionS2S:
             result = await client.transaction.multi(client_id=client_id)
             assert result["success"] is True
             
-            # Execute empty transaction (commands queuing requires handler modification)
+            # Queue commands using send_command with client_id (automatic queuing)
+            await client.send_command("kv.set", {"key": "tx:key1", "value": "value1", "client_id": client_id})
+            await client.send_command("kv.set", {"key": "tx:key2", "value": "value2", "client_id": client_id})
+            
+            # Execute transaction
             exec_result = await client.transaction.exec(client_id=client_id)
             assert exec_result["success"] is True
             assert "results" in exec_result
-            assert isinstance(exec_result["results"], list)
+            assert len(exec_result["results"]) == 2
+            
+            # Verify values were set
+            value1 = await client.kv.get("tx:key1")
+            value2 = await client.kv.get("tx:key2")
+            assert value1 == "value1"
+            assert value2 == "value2"
 
     @pytest.mark.asyncio
     async def test_discard(self, client):
@@ -46,9 +56,16 @@ class TestTransactionS2S:
             # Start transaction
             await client.transaction.multi(client_id=client_id)
             
+            # Queue a command (will be discarded)
+            await client.send_command("kv.set", {"key": "tx:discard:key", "value": "value", "client_id": client_id})
+            
             # Discard transaction
             result = await client.transaction.discard(client_id=client_id)
             assert result["success"] is True
+            
+            # Verify value was NOT set
+            value = await client.kv.get("tx:discard:key")
+            assert value is None
 
     @pytest.mark.asyncio
     async def test_watch_unwatch(self, client):

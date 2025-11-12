@@ -1738,6 +1738,19 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "queue.list" => handle_queue_list_cmd(&state, &request).await,
         "queue.stats" => handle_queue_stats_cmd(&state, &request).await,
         "queue.purge" => handle_queue_purge_cmd(&state, &request).await,
+        // Set commands
+        "set.add" => handle_set_add_cmd(&state, &request).await,
+        "set.rem" => handle_set_rem_cmd(&state, &request).await,
+        "set.ismember" => handle_set_ismember_cmd(&state, &request).await,
+        "set.members" => handle_set_members_cmd(&state, &request).await,
+        "set.size" => handle_set_size_cmd(&state, &request).await,
+        "set.pop" => handle_set_pop_cmd(&state, &request).await,
+        "set.randmember" => handle_set_randmember_cmd(&state, &request).await,
+        "set.move" => handle_set_move_cmd(&state, &request).await,
+        "set.inter" => handle_set_inter_cmd(&state, &request).await,
+        "set.union" => handle_set_union_cmd(&state, &request).await,
+        "set.diff" => handle_set_diff_cmd(&state, &request).await,
+        "set.stats" => handle_set_stats_cmd(&state, &request).await,
         // Sorted Set commands
         "sortedset.zadd" => handle_sortedset_zadd_cmd(&state, &request).await,
         "sortedset.zrem" => handle_sortedset_zrem_cmd(&state, &request).await,
@@ -1821,7 +1834,34 @@ async fn handle_kv_set_cmd(
     let value_bytes =
         serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
+    // Check if there's an active transaction for this client_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if !client_id.is_empty() {
+        let was_queued = state.transaction_manager.queue_command_if_transaction(
+            client_id,
+            crate::core::transaction::TransactionCommand::KVSet {
+                key: key.to_string(),
+                value: value_bytes.clone(),
+                ttl,
+            },
+        )?;
+
+        if was_queued {
+            // Command queued in transaction, return success immediately
+            return Ok(serde_json::json!({ "success": true, "queued": true }));
+        }
+    }
+
+    // No active transaction, execute immediately
     state.kv_store.set(key, value_bytes.clone(), ttl).await?;
+
+    // Update key version for WATCH (optimistic locking)
+    state.transaction_manager.update_key_version(key);
 
     // Log to WAL
     if let Some(ref persistence) = state.persistence {
@@ -1877,7 +1917,34 @@ async fn handle_kv_del_cmd(
         .and_then(|v| v.as_str())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
 
+    // Check if there's an active transaction for this client_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if !client_id.is_empty() {
+        let was_queued = state.transaction_manager.queue_command_if_transaction(
+            client_id,
+            crate::core::transaction::TransactionCommand::KVDel {
+                keys: vec![key.to_string()],
+            },
+        )?;
+
+        if was_queued {
+            // Command queued in transaction, return success immediately
+            return Ok(serde_json::json!({ "success": true, "queued": true }));
+        }
+    }
+
+    // No active transaction, execute immediately
     let deleted = state.kv_store.delete(key).await?;
+
+    // Update key version for WATCH (optimistic locking) if deleted
+    if deleted {
+        state.transaction_manager.update_key_version(key);
+    }
 
     // Log to WAL if deleted
     if deleted {
@@ -1920,7 +1987,33 @@ async fn handle_kv_incr_cmd(
         .and_then(|v| v.as_i64())
         .unwrap_or(1);
 
+    // Check if there's an active transaction for this client_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if !client_id.is_empty() {
+        let was_queued = state.transaction_manager.queue_command_if_transaction(
+            client_id,
+            crate::core::transaction::TransactionCommand::KVIncr {
+                key: key.to_string(),
+                delta: amount,
+            },
+        )?;
+
+        if was_queued {
+            // Command queued in transaction, return success immediately
+            return Ok(serde_json::json!({ "success": true, "queued": true }));
+        }
+    }
+
+    // No active transaction, execute immediately
     let value = state.kv_store.incr(key, amount).await?;
+
+    // Update key version for WATCH (optimistic locking)
+    state.transaction_manager.update_key_version(key);
 
     // Log final value to WAL (INCR is a SET operation)
     if let Some(ref persistence) = state.persistence {
@@ -1948,7 +2041,33 @@ async fn handle_kv_decr_cmd(
         .and_then(|v| v.as_i64())
         .unwrap_or(1);
 
+    // Check if there's an active transaction for this client_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if !client_id.is_empty() {
+        let was_queued = state.transaction_manager.queue_command_if_transaction(
+            client_id,
+            crate::core::transaction::TransactionCommand::KVIncr {
+                key: key.to_string(),
+                delta: -amount, // DECR is INCR with negative delta
+            },
+        )?;
+
+        if was_queued {
+            // Command queued in transaction, return success immediately
+            return Ok(serde_json::json!({ "success": true, "queued": true }));
+        }
+    }
+
+    // No active transaction, execute immediately
     let value = state.kv_store.decr(key, amount).await?;
+
+    // Update key version for WATCH (optimistic locking)
+    state.transaction_manager.update_key_version(key);
 
     // Log final value to WAL (DECR is a SET operation)
     if let Some(ref persistence) = state.persistence {
@@ -2547,7 +2666,34 @@ async fn handle_hash_set_cmd(
     let value_bytes =
         serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
+    // Check if there's an active transaction for this client_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if !client_id.is_empty() {
+        let was_queued = state.transaction_manager.queue_command_if_transaction(
+            client_id,
+            crate::core::transaction::TransactionCommand::HashSet {
+                key: key.to_string(),
+                field: field.to_string(),
+                value: value_bytes.clone(),
+            },
+        )?;
+
+        if was_queued {
+            // Command queued in transaction, return success immediately
+            return Ok(serde_json::json!({ "success": true, "queued": true }));
+        }
+    }
+
+    // No active transaction, execute immediately
     let created = state.hash_store.hset(key, field, value_bytes)?;
+
+    // Update key version for WATCH (optimistic locking)
+    state.transaction_manager.update_key_version(key);
 
     Ok(serde_json::json!({ "created": created, "key": key, "field": field }))
 }
@@ -2624,7 +2770,35 @@ async fn handle_hash_del_cmd(
         .filter_map(|v| v.as_str().map(|s| s.to_string()))
         .collect();
 
+    // Check if there's an active transaction for this client_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if !client_id.is_empty() {
+        let was_queued = state.transaction_manager.queue_command_if_transaction(
+            client_id,
+            crate::core::transaction::TransactionCommand::HashDel {
+                key: key.to_string(),
+                fields: fields.clone(),
+            },
+        )?;
+
+        if was_queued {
+            // Command queued in transaction, return success immediately
+            return Ok(serde_json::json!({ "success": true, "queued": true }));
+        }
+    }
+
+    // No active transaction, execute immediately
     let deleted = state.hash_store.hdel(key, &fields)?;
+
+    // Update key version for WATCH (optimistic locking) if deleted
+    if deleted > 0 {
+        state.transaction_manager.update_key_version(key);
+    }
 
     Ok(serde_json::json!({ "deleted": deleted }))
 }
@@ -2792,7 +2966,34 @@ async fn handle_hash_incrby_cmd(
         .and_then(|v| v.as_i64())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'increment' field".to_string()))?;
 
+    // Check if there's an active transaction for this client_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if !client_id.is_empty() {
+        let was_queued = state.transaction_manager.queue_command_if_transaction(
+            client_id,
+            crate::core::transaction::TransactionCommand::HashIncrBy {
+                key: key.to_string(),
+                field: field.to_string(),
+                delta: increment,
+            },
+        )?;
+
+        if was_queued {
+            // Command queued in transaction, return success immediately
+            return Ok(serde_json::json!({ "success": true, "queued": true }));
+        }
+    }
+
+    // No active transaction, execute immediately
     let new_value = state.hash_store.hincrby(key, field, increment)?;
+
+    // Update key version for WATCH (optimistic locking)
+    state.transaction_manager.update_key_version(key);
 
     Ok(serde_json::json!({ "value": new_value }))
 }
@@ -2891,7 +3092,33 @@ async fn handle_list_lpush_cmd(
         .map(|v| serde_json::to_vec(v).map_err(|e| SynapError::SerializationError(e.to_string())))
         .collect::<Result<Vec<_>, _>>()?;
 
+    // Check if there's an active transaction for this client_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if !client_id.is_empty() {
+        let was_queued = state.transaction_manager.queue_command_if_transaction(
+            client_id,
+            crate::core::transaction::TransactionCommand::ListLPush {
+                key: key.to_string(),
+                values: values.clone(),
+            },
+        )?;
+
+        if was_queued {
+            // Command queued in transaction, return success immediately
+            return Ok(serde_json::json!({ "success": true, "queued": true }));
+        }
+    }
+
+    // No active transaction, execute immediately
     let length = state.list_store.lpush(key, values, false)?;
+
+    // Update key version for WATCH (optimistic locking)
+    state.transaction_manager.update_key_version(key);
 
     Ok(serde_json::json!({ "length": length, "key": key }))
 }
@@ -2939,7 +3166,33 @@ async fn handle_list_rpush_cmd(
         .map(|v| serde_json::to_vec(v).map_err(|e| SynapError::SerializationError(e.to_string())))
         .collect::<Result<Vec<_>, _>>()?;
 
+    // Check if there's an active transaction for this client_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if !client_id.is_empty() {
+        let was_queued = state.transaction_manager.queue_command_if_transaction(
+            client_id,
+            crate::core::transaction::TransactionCommand::ListRPush {
+                key: key.to_string(),
+                values: values.clone(),
+            },
+        )?;
+
+        if was_queued {
+            // Command queued in transaction, return success immediately
+            return Ok(serde_json::json!({ "success": true, "queued": true }));
+        }
+    }
+
+    // No active transaction, execute immediately
     let length = state.list_store.rpush(key, values, false)?;
+
+    // Update key version for WATCH (optimistic locking)
+    state.transaction_manager.update_key_version(key);
 
     Ok(serde_json::json!({ "length": length, "key": key }))
 }
@@ -2984,7 +3237,35 @@ async fn handle_list_lpop_cmd(
         .and_then(|v| v.as_u64())
         .map(|c| c as usize);
 
+    // Check if there's an active transaction for this client_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if !client_id.is_empty() && count == Some(1) {
+        // Only support single pop in transactions for now
+        let was_queued = state.transaction_manager.queue_command_if_transaction(
+            client_id,
+            crate::core::transaction::TransactionCommand::ListLPop {
+                key: key.to_string(),
+            },
+        )?;
+
+        if was_queued {
+            // Command queued in transaction, return success immediately
+            return Ok(serde_json::json!({ "success": true, "queued": true }));
+        }
+    }
+
+    // No active transaction, execute immediately
     let values = state.list_store.lpop(key, count)?;
+
+    // Update key version for WATCH (optimistic locking) if values were popped
+    if !values.is_empty() {
+        state.transaction_manager.update_key_version(key);
+    }
 
     let json_values: Vec<serde_json::Value> = values
         .into_iter()
@@ -3014,7 +3295,35 @@ async fn handle_list_rpop_cmd(
         .and_then(|v| v.as_u64())
         .map(|c| c as usize);
 
+    // Check if there's an active transaction for this client_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if !client_id.is_empty() && count == Some(1) {
+        // Only support single pop in transactions for now
+        let was_queued = state.transaction_manager.queue_command_if_transaction(
+            client_id,
+            crate::core::transaction::TransactionCommand::ListRPop {
+                key: key.to_string(),
+            },
+        )?;
+
+        if was_queued {
+            // Command queued in transaction, return success immediately
+            return Ok(serde_json::json!({ "success": true, "queued": true }));
+        }
+    }
+
+    // No active transaction, execute immediately
     let values = state.list_store.rpop(key, count)?;
+
+    // Update key version for WATCH (optimistic locking) if values were popped
+    if !values.is_empty() {
+        state.transaction_manager.update_key_version(key);
+    }
 
     let json_values: Vec<serde_json::Value> = values
         .into_iter()
@@ -3074,9 +3383,11 @@ async fn handle_list_llen_cmd(
         .and_then(|v| v.as_str())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
 
-    let length = state.list_store.llen(key)?;
-
-    Ok(serde_json::json!({ "length": length, "key": key }))
+    match state.list_store.llen(key) {
+        Ok(length) => Ok(serde_json::json!({ "length": length, "key": key })),
+        Err(SynapError::NotFound) => Ok(serde_json::json!({ "length": 0, "key": key })),
+        Err(e) => Err(e),
+    }
 }
 
 async fn handle_list_lindex_cmd(
@@ -3272,6 +3583,378 @@ async fn handle_list_rpoplpush_cmd(
         .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&value).to_string()));
 
     Ok(serde_json::json!({ "value": json_value, "source": source, "destination": destination }))
+}
+
+// ==================== Set Command Handlers ====================
+
+async fn handle_set_add_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let members: Vec<Vec<u8>> = request
+        .payload
+        .get("members")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'members' array".to_string()))?
+        .iter()
+        .map(|v| serde_json::to_vec(v).map_err(|e| SynapError::SerializationError(e.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // Check if there's an active transaction for this client_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if !client_id.is_empty() {
+        let was_queued = state.transaction_manager.queue_command_if_transaction(
+            client_id,
+            crate::core::transaction::TransactionCommand::SetAdd {
+                key: key.to_string(),
+                members: members.clone(),
+            },
+        )?;
+
+        if was_queued {
+            // Command queued in transaction, return success immediately
+            return Ok(serde_json::json!({ "success": true, "queued": true }));
+        }
+    }
+
+    // No active transaction, execute immediately
+    let added = state.set_store.sadd(key, members)?;
+
+    // Update key version for WATCH (optimistic locking)
+    state.transaction_manager.update_key_version(key);
+
+    Ok(serde_json::json!({ "added": added }))
+}
+
+async fn handle_set_rem_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let members: Vec<Vec<u8>> = request
+        .payload
+        .get("members")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'members' array".to_string()))?
+        .iter()
+        .map(|v| serde_json::to_vec(v).map_err(|e| SynapError::SerializationError(e.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    // Check if there's an active transaction for this client_id
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    if !client_id.is_empty() {
+        let was_queued = state.transaction_manager.queue_command_if_transaction(
+            client_id,
+            crate::core::transaction::TransactionCommand::SetRem {
+                key: key.to_string(),
+                members: members.clone(),
+            },
+        )?;
+
+        if was_queued {
+            // Command queued in transaction, return success immediately
+            return Ok(serde_json::json!({ "success": true, "queued": true }));
+        }
+    }
+
+    // No active transaction, execute immediately
+    let removed = state.set_store.srem(key, members)?;
+
+    // Update key version for WATCH (optimistic locking) if removed
+    if removed > 0 {
+        state.transaction_manager.update_key_version(key);
+    }
+
+    Ok(serde_json::json!({ "removed": removed }))
+}
+
+async fn handle_set_ismember_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let member = request
+        .payload
+        .get("member")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
+
+    let member_bytes =
+        serde_json::to_vec(member).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let is_member = state.set_store.sismember(key, member_bytes)?;
+
+    Ok(serde_json::json!({ "is_member": is_member }))
+}
+
+async fn handle_set_members_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let members = state.set_store.smembers(key)?;
+
+    let json_members: Vec<serde_json::Value> = members
+        .into_iter()
+        .map(|m| {
+            serde_json::from_slice(&m).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&m).to_string())
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "members": json_members }))
+}
+
+async fn handle_set_size_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let count = state.set_store.scard(key)?;
+
+    Ok(serde_json::json!({ "size": count }))
+}
+
+async fn handle_set_pop_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let count = request
+        .payload
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .map(|c| c as usize);
+
+    let members = state.set_store.spop(key, count)?;
+
+    // Update key version for WATCH (optimistic locking) if members were popped
+    if !members.is_empty() {
+        state.transaction_manager.update_key_version(key);
+    }
+
+    let json_members: Vec<serde_json::Value> = members
+        .into_iter()
+        .map(|m| {
+            serde_json::from_slice(&m).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&m).to_string())
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "members": json_members }))
+}
+
+async fn handle_set_randmember_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let key = request
+        .payload
+        .get("key")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
+
+    let count = request
+        .payload
+        .get("count")
+        .and_then(|v| v.as_u64())
+        .map(|c| c as usize);
+
+    let members = state.set_store.srandmember(key, count)?;
+
+    let json_members: Vec<serde_json::Value> = members
+        .into_iter()
+        .map(|m| {
+            serde_json::from_slice(&m).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&m).to_string())
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "members": json_members }))
+}
+
+async fn handle_set_move_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let source = request
+        .payload
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'source' field".to_string()))?;
+
+    let destination = request
+        .payload
+        .get("destination")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
+
+    let member = request
+        .payload
+        .get("member")
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'member' field".to_string()))?;
+
+    let member_bytes =
+        serde_json::to_vec(member).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+
+    let moved = state.set_store.smove(source, destination, member_bytes)?;
+
+    // Update key versions for WATCH (optimistic locking) if moved
+    if moved {
+        state.transaction_manager.update_key_version(source);
+        state.transaction_manager.update_key_version(destination);
+    }
+
+    Ok(serde_json::json!({ "moved": moved }))
+}
+
+async fn handle_set_inter_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let keys: Vec<String> = request
+        .payload
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'keys' array".to_string()))?
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+
+    let members = state.set_store.sinter(&keys)?;
+
+    let json_members: Vec<serde_json::Value> = members
+        .into_iter()
+        .map(|m| {
+            serde_json::from_slice(&m).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&m).to_string())
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "members": json_members }))
+}
+
+async fn handle_set_union_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let keys: Vec<String> = request
+        .payload
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'keys' array".to_string()))?
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+
+    let members = state.set_store.sunion(&keys)?;
+
+    let json_members: Vec<serde_json::Value> = members
+        .into_iter()
+        .map(|m| {
+            serde_json::from_slice(&m).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&m).to_string())
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "members": json_members }))
+}
+
+async fn handle_set_diff_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let keys: Vec<String> = request
+        .payload
+        .get("keys")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'keys' array".to_string()))?
+        .iter()
+        .filter_map(|v| v.as_str().map(String::from))
+        .collect();
+
+    let members = state.set_store.sdiff(&keys)?;
+
+    let json_members: Vec<serde_json::Value> = members
+        .into_iter()
+        .map(|m| {
+            serde_json::from_slice(&m).unwrap_or_else(|_| {
+                serde_json::Value::String(String::from_utf8_lossy(&m).to_string())
+            })
+        })
+        .collect();
+
+    Ok(serde_json::json!({ "members": json_members }))
+}
+
+async fn handle_set_stats_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let stats = state.set_store.stats();
+
+    Ok(serde_json::json!({
+        "total_sets": stats.total_sets,
+        "total_members": stats.total_members,
+        "operations": {
+            "sadd_count": stats.sadd_count,
+            "srem_count": stats.srem_count,
+            "sismember_count": stats.sismember_count,
+            "smembers_count": stats.smembers_count,
+            "scard_count": stats.scard_count,
+            "spop_count": stats.spop_count,
+            "srandmember_count": stats.srandmember_count,
+            "smove_count": stats.smove_count,
+            "sinter_count": stats.sinter_count,
+            "sunion_count": stats.sunion_count,
+            "sdiff_count": stats.sdiff_count,
+        }
+    }))
 }
 
 async fn handle_list_stats_cmd(

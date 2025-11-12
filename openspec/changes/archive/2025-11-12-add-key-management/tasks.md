@@ -2,7 +2,7 @@
 
 > **Status**: ✅ Complete  
 > **Completion Date**: October 2025  
-> **Note**: Integration tests and benchmarks deferred to v1.1
+> **Note**: Integration tests and benchmarks completed ✅
 
 ## Core (6 commands, ~60 tasks, 2 weeks)
 
@@ -17,8 +17,8 @@
 
 ### Testing
 - [x] 11 unit tests (KV, Hash, List, Set, SortedSet coverage)
-- [ ] 10+ integration tests (deferred - REST/StreamableHTTP endpoints already tested)
-- [ ] 6 benchmarks (deferred to v1.1)
+- [x] 11 S2S integration tests (EXISTS, TYPE, RENAME, RENAMENX, COPY, RANDOMKEY across all data types) ✅
+- [x] 6 benchmarks (EXISTS, TYPE, RENAME, RENAMENX, COPY, RANDOMKEY) ✅
 
 ### Performance Targets
 - [x] All operations <200µs (verified through existing benchmarks)

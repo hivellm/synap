@@ -1,8 +1,8 @@
 # Tasks: Add Enhanced Monitoring Commands
 
-> **Status**: ✅ Complete (Core Implementation)  
+> **Status**: ✅ Complete  
 > **Completion Date**: January 2025  
-> **Note**: Unit/integration tests deferred - endpoints validated via REST API
+> **Note**: Unit tests and integration tests completed ✅
 
 ## Core (8 commands, ~80 tasks, 3 weeks)
 
@@ -20,8 +20,8 @@
 ### Testing
 - [x] Core monitoring modules implemented
 - [x] All test files updated with monitoring field
-- [ ] Unit tests for monitoring modules (deferred - REST endpoints validated in integration)
-- [ ] Integration tests (deferred - REST endpoints tested via integration tests)
+- [x] Unit tests for monitoring modules (14 tests: SlowLogManager, ClientListManager) ✅
+- [x] Integration tests (13 S2S tests: info, slowlog, memory.usage, client.list) ✅
 
 ### Performance Targets
 - [x] INFO command structure complete (performance verified through existing benchmarks)

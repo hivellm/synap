@@ -28,11 +28,23 @@ public class TransactionManagerS2STests
         var result = await _client.Transaction.MultiAsync(clientId);
         Assert.True(result.Success);
 
-        // Execute empty transaction (commands queuing requires handler modification)
+        // Queue commands using ExecuteAsync with client_id (automatic queuing)
+        var setData1 = new Dictionary<string, object?> { ["key"] = "tx:key1", ["value"] = "value1", ["client_id"] = clientId };
+        var setData2 = new Dictionary<string, object?> { ["key"] = "tx:key2", ["value"] = "value2", ["client_id"] = clientId };
+        await _client.ExecuteAsync("kv.set", string.Empty, setData1);
+        await _client.ExecuteAsync("kv.set", string.Empty, setData2);
+
+        // Execute transaction
         var execResult = await _client.Transaction.ExecAsync(clientId);
         Assert.True(execResult is TransactionExecSuccess);
         var success = (TransactionExecSuccess)execResult;
-        Assert.NotNull(success.Results);
+        Assert.Equal(2, success.Results.Count);
+
+        // Verify values were set
+        var value1 = await _client.KV.GetAsync<string>("tx:key1");
+        var value2 = await _client.KV.GetAsync<string>("tx:key2");
+        Assert.Equal("value1", value1);
+        Assert.Equal("value2", value2);
     }
 
     [Fact]
@@ -43,9 +55,17 @@ public class TransactionManagerS2STests
         // Start transaction
         await _client.Transaction.MultiAsync(clientId);
 
+        // Queue a command (will be discarded)
+        var setData = new Dictionary<string, object?> { ["key"] = "tx:discard:key", ["value"] = "value", ["client_id"] = clientId };
+        await _client.ExecuteAsync("kv.set", string.Empty, setData);
+
         // Discard transaction
         var result = await _client.Transaction.DiscardAsync(clientId);
         Assert.True(result.Success);
+
+        // Verify value was NOT set
+        var value = await _client.KV.GetAsync<string>("tx:discard:key");
+        Assert.Null(value);
     }
 
     [Fact]

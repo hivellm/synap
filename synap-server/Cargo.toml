@@ -56,6 +56,11 @@ sys-info = "0.9"
 # Testing
 tempfile = "3.15"
 
+[features]
+# Enable S2S (Server-to-Server) tests that require a running Synap server
+# These tests are excluded from CI/CD by default
+s2s-tests = []
+
 [dev-dependencies]
 criterion = { version = "0.7", features = ["async_tokio"] }
 reqwest = { version = "0.12", features = ["json"] }
@@ -65,4 +70,65 @@ tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
 # NOTE: Benchmark declarations removed to allow Docker builds without copying benchmark files
 # Cargo auto-detects benchmarks in benches/ directory, so they still work with `cargo bench`
 # Explicit [[bench]] declarations only needed for custom configurations
+
+# Configure benchmarks to use Criterion (harness = false)
+[[bench]]
+name = "transaction_bench"
+harness = false
+
+[[bench]]
+name = "kv_bench"
+harness = false
+
+[[bench]]
+name = "hash_bench"
+harness = false
+
+[[bench]]
+name = "list_bench"
+harness = false
+
+[[bench]]
+name = "queue_bench"
+harness = false
+
+[[bench]]
+name = "pubsub_bench"
+harness = false
+
+[[bench]]
+name = "stream_bench"
+harness = false
+
+[[bench]]
+name = "persistence_bench"
+harness = false
+
+[[bench]]
+name = "kv_persistence_bench"
+harness = false
+
+[[bench]]
+name = "queue_persistence_bench"
+harness = false
+
+[[bench]]
+name = "replication_bench"
+harness = false
+
+[[bench]]
+name = "kv_replication_bench"
+harness = false
+
+[[bench]]
+name = "compression_bench"
+harness = false
+
+[[bench]]
+name = "hybrid_bench"
+harness = false
+
+[[bench]]
+name = "key_management_bench"
+harness = false
 

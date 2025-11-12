@@ -151,3 +151,133 @@ pub struct SlowLog {
     pub entries: Vec<SlowLogEntry>,
     pub total: usize,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_slowlog_new() {
+        let slowlog = SlowLogManager::new();
+        assert_eq!(slowlog.config().threshold_ms, 10);
+        assert_eq!(slowlog.config().max_entries, 128);
+        assert_eq!(slowlog.len().await, 0);
+        assert!(slowlog.is_empty().await);
+    }
+
+    #[tokio::test]
+    async fn test_slowlog_with_config() {
+        let config = SlowLogConfig {
+            threshold_ms: 5,
+            max_entries: 64,
+        };
+        let slowlog = SlowLogManager::with_config(config);
+        assert_eq!(slowlog.config().threshold_ms, 5);
+        assert_eq!(slowlog.config().max_entries, 64);
+    }
+
+    #[tokio::test]
+    async fn test_slowlog_record_below_threshold() {
+        let slowlog = SlowLogManager::new();
+        slowlog
+            .record("test".to_string(), vec![], Duration::from_millis(5))
+            .await;
+        assert_eq!(slowlog.len().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_slowlog_record_above_threshold() {
+        let slowlog = SlowLogManager::new();
+        slowlog
+            .record(
+                "test".to_string(),
+                vec!["arg1".to_string()],
+                Duration::from_millis(15),
+            )
+            .await;
+        assert_eq!(slowlog.len().await, 1);
+
+        let entries = slowlog.get(None).await;
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].command, "test");
+        assert_eq!(entries[0].args, vec!["arg1"]);
+        assert!(entries[0].duration_us >= 15000);
+    }
+
+    #[tokio::test]
+    async fn test_slowlog_get_with_count() {
+        let slowlog = SlowLogManager::new();
+
+        // Record multiple entries
+        for i in 0..5 {
+            slowlog
+                .record(format!("cmd{}", i), vec![], Duration::from_millis(15))
+                .await;
+        }
+
+        assert_eq!(slowlog.len().await, 5);
+
+        // Get only 3 entries
+        let entries = slowlog.get(Some(3)).await;
+        assert_eq!(entries.len(), 3);
+
+        // Should be most recent (reversed order)
+        assert_eq!(entries[0].command, "cmd4");
+        assert_eq!(entries[1].command, "cmd3");
+        assert_eq!(entries[2].command, "cmd2");
+    }
+
+    #[tokio::test]
+    async fn test_slowlog_reset() {
+        let slowlog = SlowLogManager::new();
+
+        slowlog
+            .record("test".to_string(), vec![], Duration::from_millis(15))
+            .await;
+        assert_eq!(slowlog.len().await, 1);
+
+        let count = slowlog.reset().await;
+        assert_eq!(count, 1);
+        assert_eq!(slowlog.len().await, 0);
+        assert!(slowlog.is_empty().await);
+    }
+
+    #[tokio::test]
+    async fn test_slowlog_max_entries() {
+        let config = SlowLogConfig {
+            threshold_ms: 1,
+            max_entries: 3,
+        };
+        let slowlog = SlowLogManager::with_config(config);
+
+        // Record more than max_entries
+        for i in 0..5 {
+            slowlog
+                .record(format!("cmd{}", i), vec![], Duration::from_millis(2))
+                .await;
+        }
+
+        // Should only keep last 3 entries
+        assert_eq!(slowlog.len().await, 3);
+        let entries = slowlog.get(None).await;
+        assert_eq!(entries[0].command, "cmd4");
+        assert_eq!(entries[1].command, "cmd3");
+        assert_eq!(entries[2].command, "cmd2");
+    }
+
+    #[tokio::test]
+    async fn test_slowlog_entry_ids() {
+        let slowlog = SlowLogManager::new();
+
+        for i in 0..3 {
+            slowlog
+                .record(format!("cmd{}", i), vec![], Duration::from_millis(15))
+                .await;
+        }
+
+        let entries = slowlog.get(None).await;
+        assert_eq!(entries[0].id, 2);
+        assert_eq!(entries[1].id, 1);
+        assert_eq!(entries[2].id, 0);
+    }
+}
