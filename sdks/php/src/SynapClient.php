@@ -18,6 +18,7 @@ use Synap\SDK\Module\PubSubManager;
 use Synap\SDK\Module\QueueManager;
 use Synap\SDK\Module\SetManager;
 use Synap\SDK\Module\StreamManager;
+use Synap\SDK\Module\TransactionManager;
 
 /**
  * Main Synap SDK client
@@ -36,6 +37,7 @@ class SynapClient
     private ?BitmapManager $bitmap = null;
     private ?HyperLogLogManager $hyperloglog = null;
     private ?GeospatialManager $geospatial = null;
+    private ?TransactionManager $transaction = null;
 
     public function __construct(SynapConfig $config)
     {
@@ -135,6 +137,15 @@ class SynapClient
         }
 
         return $this->geospatial;
+    }
+
+    public function transaction(): TransactionManager
+    {
+        if ($this->transaction === null) {
+            $this->transaction = new TransactionManager($this);
+        }
+
+        return $this->transaction;
     }
 
     /**

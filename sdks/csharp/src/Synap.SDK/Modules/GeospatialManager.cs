@@ -350,11 +350,11 @@ public sealed class GeospatialManager
         }
         if (byRadius.HasValue)
         {
-            data["by_radius"] = new[] { byRadius.Value.radius, DistanceUnitToString(byRadius.Value.unit) };
+            data["by_radius"] = new object[] { byRadius.Value.radius, DistanceUnitToString(byRadius.Value.unit) };
         }
         if (byBox.HasValue)
         {
-            data["by_box"] = new[] { byBox.Value.width, byBox.Value.height, DistanceUnitToString(byBox.Value.unit) };
+            data["by_box"] = new object[] { byBox.Value.width, byBox.Value.height, DistanceUnitToString(byBox.Value.unit) };
         }
         if (count.HasValue)
         {

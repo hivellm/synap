@@ -19,6 +19,7 @@ from synap_sdk.modules.stream import StreamManager
 from synap_sdk.modules.bitmap import BitmapManager
 from synap_sdk.modules.hyperloglog import HyperLogLogManager
 from synap_sdk.modules.geospatial import GeospatialManager
+from synap_sdk.modules.transaction import TransactionManager
 
 
 class SynapClient:
@@ -67,6 +68,7 @@ class SynapClient:
         self._bitmap: BitmapManager | None = None
         self._hyperloglog: HyperLogLogManager | None = None
         self._geospatial: GeospatialManager | None = None
+        self._transaction: TransactionManager | None = None
 
     @property
     def kv(self) -> KVStore:
@@ -137,6 +139,13 @@ class SynapClient:
         if self._geospatial is None:
             self._geospatial = GeospatialManager(self)
         return self._geospatial
+
+    @property
+    def transaction(self) -> TransactionManager:
+        """Get the Transaction operations."""
+        if self._transaction is None:
+            self._transaction = TransactionManager(self)
+        return self._transaction
 
     @property
     def config(self) -> SynapConfig:

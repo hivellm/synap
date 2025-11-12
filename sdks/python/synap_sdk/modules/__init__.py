@@ -10,6 +10,11 @@ from synap_sdk.modules.geospatial import (
     Coordinate,
     GeoradiusResult,
 )
+from synap_sdk.modules.transaction import (
+    TransactionManager,
+    TransactionResponse,
+    TransactionExecResult,
+)
 from synap_sdk.modules.kv_store import KVStore
 from synap_sdk.modules.list import ListManager
 from synap_sdk.modules.pubsub import PubSubManager
@@ -28,6 +33,9 @@ __all__ = [
     "Location",
     "Coordinate",
     "GeoradiusResult",
+    "TransactionManager",
+    "TransactionResponse",
+    "TransactionExecResult",
     "KVStore",
     "ListManager",
     "PubSubManager",

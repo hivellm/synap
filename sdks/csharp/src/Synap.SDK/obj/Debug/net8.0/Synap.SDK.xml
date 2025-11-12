@@ -294,6 +294,11 @@
             Get geohash strings for members (GEOHASH).
             </summary>
         </member>
+        <member name="M:Synap.SDK.Modules.GeospatialManager.GeoSearchAsync(System.String,System.String,System.Nullable{System.ValueTuple{System.Double,System.Double}},System.Nullable{System.ValueTuple{System.Double,Synap.SDK.Modules.DistanceUnit}},System.Nullable{System.ValueTuple{System.Double,System.Double,Synap.SDK.Modules.DistanceUnit}},System.Boolean,System.Boolean,System.Boolean,System.Nullable{System.Int32},System.String,System.Threading.CancellationToken)">
+            <summary>
+            Advanced geospatial search (GEOSEARCH).
+            </summary>
+        </member>
         <member name="M:Synap.SDK.Modules.GeospatialManager.StatsAsync(System.Threading.CancellationToken)">
             <summary>
             Retrieve geospatial statistics.
@@ -790,6 +795,74 @@
             <param name="cancellationToken">Cancellation token.</param>
             <returns>List of room names.</returns>
         </member>
+        <member name="T:Synap.SDK.Modules.TransactionResponse">
+            <summary>
+            Response from transaction operations.
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.Modules.TransactionExecSuccess">
+            <summary>
+            Successful transaction execution result.
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.Modules.TransactionExecAborted">
+            <summary>
+            Aborted transaction execution result.
+            </summary>
+        </member>
+        <member name="T:Synap.SDK.Modules.TransactionManager">
+            <summary>
+            Transaction operations (Redis-compatible).
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.Modules.TransactionManager.#ctor(Synap.SDK.SynapClient)">
+            <summary>
+            Initializes a new instance of the <see cref="T:Synap.SDK.Modules.TransactionManager"/> class.
+            </summary>
+            <param name="client">The Synap client instance.</param>
+        </member>
+        <member name="M:Synap.SDK.Modules.TransactionManager.MultiAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Start a transaction (MULTI).
+            </summary>
+            <param name="clientId">Optional client identifier to group commands within the same transaction.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Transaction response with success status and message.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.TransactionManager.DiscardAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Discard the current transaction (DISCARD).
+            </summary>
+            <param name="clientId">Optional client identifier for the transaction.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Transaction response with success status and message.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.TransactionManager.WatchAsync(System.Collections.Generic.IReadOnlyCollection{System.String},System.String,System.Threading.CancellationToken)">
+            <summary>
+            Watch keys for optimistic locking (WATCH).
+            </summary>
+            <param name="keys">Collection of keys to watch for changes.</param>
+            <param name="clientId">Optional client identifier for the transaction.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Transaction response with success status and message.</returns>
+            <exception cref="T:System.ArgumentException">Thrown when keys collection is empty.</exception>
+        </member>
+        <member name="M:Synap.SDK.Modules.TransactionManager.UnwatchAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Remove all watched keys (UNWATCH).
+            </summary>
+            <param name="clientId">Optional client identifier for the transaction.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Transaction response with success status and message.</returns>
+        </member>
+        <member name="M:Synap.SDK.Modules.TransactionManager.ExecAsync(System.String,System.Threading.CancellationToken)">
+            <summary>
+            Execute queued commands (EXEC).
+            </summary>
+            <param name="clientId">Optional client identifier for the transaction.</param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>Transaction execution result. If successful, returns results array. If aborted (due to watched keys changed), returns aborted status.</returns>
+        </member>
         <member name="T:Synap.SDK.SynapClient">
             <summary>
             Main Synap SDK client for interacting with the Synap server.
@@ -856,6 +929,11 @@
         <member name="P:Synap.SDK.SynapClient.Geospatial">
             <summary>
             Gets the Geospatial operations.
+            </summary>
+        </member>
+        <member name="P:Synap.SDK.SynapClient.Transaction">
+            <summary>
+            Gets the Transaction operations.
             </summary>
         </member>
         <member name="P:Synap.SDK.SynapClient.Config">

@@ -1,7 +1,7 @@
 {
-  "version": "0.15.0",
+  "version": "1.0.0",
   "installedAt": "2025-10-31T04:09:55.080Z",
-  "updatedAt": "2025-10-31T07:03:54.174Z",
+  "updatedAt": "2025-11-12T02:05:36.728Z",
   "projectId": "synap",
   "mode": "full",
   "features": {
@@ -30,5 +30,15 @@
     "taskExecution": 3600000,
     "cliResponse": 180000,
     "testRun": 600000
-  }
+  },
+  "languages": [
+    "rust"
+  ],
+  "frameworks": [],
+  "modules": [
+    "openspec",
+    "context7"
+  ],
+  "modular": true,
+  "rulebookDir": "rulebook"
 }

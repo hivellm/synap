@@ -24,6 +24,7 @@ public sealed class SynapClient : IDisposable
     private BitmapManager? _bitmap;
     private HyperLogLogManager? _hyperloglog;
     private GeospatialManager? _geospatial;
+    private TransactionManager? _transaction;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SynapClient"/> class.
@@ -115,6 +116,11 @@ public sealed class SynapClient : IDisposable
     /// Gets the Geospatial operations.
     /// </summary>
     public GeospatialManager Geospatial => _geospatial ??= new GeospatialManager(this);
+
+    /// <summary>
+    /// Gets the Transaction operations.
+    /// </summary>
+    public TransactionManager Transaction => _transaction ??= new TransactionManager(this);
 
     /// <summary>
     /// Gets the client configuration.
