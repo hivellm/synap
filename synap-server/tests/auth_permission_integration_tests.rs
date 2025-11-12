@@ -78,13 +78,13 @@ async fn spawn_test_server_with_auth(
 
     // Initialize root user
     user_manager
-        .initialize_root_user("root", "root123", true)
+        .initialize_root_user("root", "root12345", true)
         .unwrap();
 
     // Create test users with different permissions
     user_manager.create_user("admin", "admin123", true).unwrap();
     user_manager
-        .create_user("readonly", "read123", false)
+        .create_user("readonly", "read12345", false)
         .unwrap();
     user_manager
         .create_user("writer", "write123", false)
@@ -175,7 +175,7 @@ async fn test_basic_auth_success() {
     // Test successful authentication with root user
     let response = client
         .get(format!("{}/kv/get/test", base_url))
-        .header("Authorization", basic_auth_header("root", "root123"))
+        .header("Authorization", basic_auth_header("root", "root12345"))
         .send()
         .await
         .unwrap();
@@ -291,7 +291,7 @@ async fn test_read_permission_success() {
     // Create a key first with admin user
     client
         .post(format!("{}/kv/set", base_url))
-        .header("Authorization", basic_auth_header("root", "root123"))
+        .header("Authorization", basic_auth_header("root", "root12345"))
         .json(&json!({
             "key": "test_read",
             "value": "test_value"
@@ -330,7 +330,7 @@ async fn test_read_permission_denied() {
     // Create a key first with admin user
     client
         .post(format!("{}/kv/set", base_url))
-        .header("Authorization", basic_auth_header("root", "root123"))
+        .header("Authorization", basic_auth_header("root", "root12345"))
         .json(&json!({
             "key": "test_read_denied",
             "value": "test_value"
@@ -445,7 +445,7 @@ async fn test_delete_permission() {
     // Create a key first with admin user
     client
         .post(format!("{}/kv/set", base_url))
-        .header("Authorization", basic_auth_header("root", "root123"))
+        .header("Authorization", basic_auth_header("root", "root12345"))
         .json(&json!({
             "key": "test_delete",
             "value": "test_value"
@@ -495,7 +495,7 @@ async fn test_wildcard_permission() {
     // Create a key first
     client
         .post(format!("{}/kv/set", base_url))
-        .header("Authorization", basic_auth_header("root", "root123"))
+        .header("Authorization", basic_auth_header("root", "root12345"))
         .json(&json!({
             "key": "test_wildcard",
             "value": "test_value"
