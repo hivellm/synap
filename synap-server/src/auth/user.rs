@@ -1,9 +1,9 @@
-use super::{AuthResult, Permission, Role};
+use super::{AuthResult, Permission, Role, password_validation::validate_password};
 use crate::core::SynapError;
-use bcrypt::{DEFAULT_COST, hash, verify};
 use chrono::{DateTime, Utc};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha512};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, info};
@@ -13,7 +13,7 @@ use tracing::{debug, info};
 pub struct User {
     /// Unique username
     pub username: String,
-    /// Hashed password (bcrypt)
+    /// Hashed password (SHA512)
     #[serde(skip_serializing)]
     pub password_hash: String,
     /// User roles
@@ -33,8 +33,10 @@ pub struct User {
 impl User {
     /// Create a new user with password
     pub fn new(username: impl Into<String>, password: &str, is_admin: bool) -> AuthResult<Self> {
-        let password_hash = hash(password, DEFAULT_COST)
-            .map_err(|e| SynapError::InternalError(format!("Failed to hash password: {}", e)))?;
+        // Validate password requirements
+        validate_password(password)?;
+
+        let password_hash = Self::hash_password(password);
 
         Ok(Self {
             username: username.into(),
@@ -48,15 +50,25 @@ impl User {
         })
     }
 
+    /// Hash password using SHA512
+    fn hash_password(password: &str) -> String {
+        let mut hasher = Sha512::new();
+        hasher.update(password.as_bytes());
+        hex::encode(hasher.finalize())
+    }
+
     /// Verify password
     pub fn verify_password(&self, password: &str) -> bool {
-        verify(password, &self.password_hash).unwrap_or(false)
+        let hashed = Self::hash_password(password);
+        hashed == self.password_hash
     }
 
     /// Change password
     pub fn change_password(&mut self, new_password: &str) -> AuthResult<()> {
-        self.password_hash = hash(new_password, DEFAULT_COST)
-            .map_err(|e| SynapError::InternalError(format!("Failed to hash password: {}", e)))?;
+        // Validate password requirements
+        validate_password(new_password)?;
+
+        self.password_hash = Self::hash_password(new_password);
         Ok(())
     }
 
@@ -84,6 +96,8 @@ impl User {
 pub struct UserManager {
     users: Arc<RwLock<HashMap<String, User>>>,
     roles: Arc<RwLock<HashMap<String, Role>>>,
+    /// Root username (protected user, cannot be deleted)
+    root_username: Arc<RwLock<Option<String>>>,
 }
 
 impl UserManager {
@@ -98,10 +112,65 @@ impl UserManager {
         Self {
             users: Arc::new(RwLock::new(HashMap::new())),
             roles: Arc::new(RwLock::new(roles)),
+            root_username: Arc::new(RwLock::new(None)),
         }
     }
 
-    /// Create default admin user if no users exist
+    /// Initialize root user from configuration
+    /// Root user has full permissions and cannot be deleted
+    pub fn initialize_root_user(
+        &self,
+        username: &str,
+        password: &str,
+        enabled: bool,
+    ) -> AuthResult<()> {
+        debug!(
+            "Initializing root user: {} (enabled: {})",
+            username, enabled
+        );
+
+        let mut users = self.users.write();
+        let mut root_username = self.root_username.write();
+
+        // If root user already exists, update password and enabled status
+        if let Some(existing_root) = root_username.as_ref() {
+            if existing_root == username {
+                if let Some(user) = users.get_mut(username) {
+                    // Update password if provided
+                    if !password.is_empty() {
+                        user.change_password(password)?;
+                    }
+                    user.enabled = enabled;
+                    info!("Updated root user: {} (enabled: {})", username, enabled);
+                    return Ok(());
+                }
+            }
+        }
+
+        // Create root user if it doesn't exist
+        if !users.contains_key(username) {
+            info!("Creating root user: {}", username);
+            let mut root = User::new(username, password, true)?;
+            root.add_role("admin");
+            root.enabled = enabled;
+            users.insert(username.to_string(), root);
+        } else {
+            // Update existing user to be root
+            if let Some(user) = users.get_mut(username) {
+                user.is_admin = true;
+                user.add_role("admin");
+                if !password.is_empty() {
+                    user.change_password(password)?;
+                }
+                user.enabled = enabled;
+            }
+        }
+
+        *root_username = Some(username.to_string());
+        Ok(())
+    }
+
+    /// Create default admin user if no users exist (legacy method, use initialize_root_user)
     pub fn ensure_admin_exists(&self, username: &str, password: &str) -> AuthResult<()> {
         let users = self.users.read();
         if users.is_empty() {
@@ -114,6 +183,19 @@ impl UserManager {
             self.users.write().insert(username.to_string(), admin);
         }
         Ok(())
+    }
+
+    /// Check if username is the root user
+    pub fn is_root_user(&self, username: &str) -> bool {
+        self.root_username
+            .read()
+            .as_ref()
+            .map_or(false, |root| root == username)
+    }
+
+    /// Get root username
+    pub fn get_root_username(&self) -> Option<String> {
+        self.root_username.read().clone()
     }
 
     /// Create a new user
@@ -145,6 +227,23 @@ impl UserManager {
     pub fn authenticate(&self, username: &str, password: &str) -> AuthResult<User> {
         debug!("Authenticating user: {}", username);
 
+        // Check if root user is disabled
+        if self.is_root_user(username) {
+            let root_username = self.root_username.read();
+            if let Some(root) = root_username.as_ref() {
+                if root == username {
+                    let users = self.users.read();
+                    if let Some(user) = users.get(username) {
+                        if !user.enabled {
+                            return Err(SynapError::InvalidRequest(
+                                "Root user is disabled".to_string(),
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
         let mut users = self.users.write();
 
         let user = users
@@ -170,9 +269,17 @@ impl UserManager {
         self.users.read().get(username).cloned()
     }
 
-    /// Delete user
+    /// Delete user (cannot delete root user)
     pub fn delete_user(&self, username: &str) -> AuthResult<bool> {
         debug!("Deleting user: {}", username);
+
+        // Protect root user from deletion
+        if self.is_root_user(username) {
+            return Err(SynapError::InvalidRequest(
+                "Cannot delete root user".to_string(),
+            ));
+        }
+
         Ok(self.users.write().remove(username).is_some())
     }
 
@@ -189,7 +296,7 @@ impl UserManager {
         Ok(())
     }
 
-    /// Enable/disable user
+    /// Enable/disable user (can disable root user via config)
     pub fn set_user_enabled(&self, username: &str, enabled: bool) -> AuthResult<()> {
         debug!("Setting user {} enabled: {}", username, enabled);
 
@@ -200,6 +307,18 @@ impl UserManager {
 
         user.enabled = enabled;
         Ok(())
+    }
+
+    /// Disable root user (for security after initial setup)
+    pub fn disable_root_user(&self) -> AuthResult<()> {
+        if let Some(root_username) = self.get_root_username() {
+            debug!("Disabling root user: {}", root_username);
+            self.set_user_enabled(&root_username, false)
+        } else {
+            Err(SynapError::InvalidRequest(
+                "No root user configured".to_string(),
+            ))
+        }
     }
 
     /// Get user permissions (from roles)
@@ -311,18 +430,18 @@ mod tests {
 
     #[test]
     fn test_change_password() {
-        let mut user = User::new("testuser", "oldpass", false).unwrap();
-        assert!(user.verify_password("oldpass"));
+        let mut user = User::new("testuser", "oldpass123", false).unwrap();
+        assert!(user.verify_password("oldpass123"));
 
-        user.change_password("newpass").unwrap();
-        assert!(!user.verify_password("oldpass"));
-        assert!(user.verify_password("newpass"));
+        user.change_password("newpass123").unwrap();
+        assert!(!user.verify_password("oldpass123"));
+        assert!(user.verify_password("newpass123"));
     }
 
     #[test]
     fn test_user_manager_create() {
         let manager = UserManager::new();
-        manager.create_user("user1", "pass123", false).unwrap();
+        manager.create_user("user1", "pass12345", false).unwrap();
 
         let user = manager.get_user("user1").unwrap();
         assert_eq!(user.username, "user1");
@@ -331,10 +450,10 @@ mod tests {
     #[test]
     fn test_user_manager_authenticate() {
         let manager = UserManager::new();
-        manager.create_user("user1", "pass123", false).unwrap();
+        manager.create_user("user1", "pass12345", false).unwrap();
 
         // Valid credentials
-        let result = manager.authenticate("user1", "pass123");
+        let result = manager.authenticate("user1", "pass12345");
         assert!(result.is_ok());
 
         // Invalid password
@@ -342,29 +461,29 @@ mod tests {
         assert!(result.is_err());
 
         // Non-existent user
-        let result = manager.authenticate("nonexistent", "pass");
+        let result = manager.authenticate("nonexistent", "pass12345");
         assert!(result.is_err());
     }
 
     #[test]
     fn test_user_manager_disable_user() {
         let manager = UserManager::new();
-        manager.create_user("user1", "pass123", false).unwrap();
+        manager.create_user("user1", "pass12345", false).unwrap();
 
         // Can authenticate when enabled
-        assert!(manager.authenticate("user1", "pass123").is_ok());
+        assert!(manager.authenticate("user1", "pass12345").is_ok());
 
         // Disable user
         manager.set_user_enabled("user1", false).unwrap();
 
         // Cannot authenticate when disabled
-        assert!(manager.authenticate("user1", "pass123").is_err());
+        assert!(manager.authenticate("user1", "pass12345").is_err());
     }
 
     #[test]
     fn test_user_roles() {
         let manager = UserManager::new();
-        manager.create_user("user1", "pass123", false).unwrap();
+        manager.create_user("user1", "pass12345", false).unwrap();
 
         manager.add_user_role("user1", "readonly").unwrap();
         let user = manager.get_user("user1").unwrap();
@@ -373,5 +492,222 @@ mod tests {
         manager.remove_user_role("user1", "readonly").unwrap();
         let user = manager.get_user("user1").unwrap();
         assert!(!user.roles.contains(&"readonly".to_string()));
+    }
+
+    // Root user tests
+    #[test]
+    fn test_initialize_root_user() {
+        let manager = UserManager::new();
+        manager
+            .initialize_root_user("root", "rootpass", true)
+            .unwrap();
+
+        assert!(manager.is_root_user("root"));
+        assert_eq!(manager.get_root_username(), Some("root".to_string()));
+
+        let root = manager.get_user("root").unwrap();
+        assert!(root.is_admin);
+        assert!(root.enabled);
+        assert!(root.roles.contains(&"admin".to_string()));
+    }
+
+    #[test]
+    fn test_root_user_cannot_be_deleted() {
+        let manager = UserManager::new();
+        manager
+            .initialize_root_user("root", "rootpass", true)
+            .unwrap();
+
+        let result = manager.delete_user("root");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Cannot delete root user")
+        );
+
+        // Root user still exists
+        assert!(manager.get_user("root").is_some());
+    }
+
+    #[test]
+    fn test_root_user_disabled_cannot_authenticate() {
+        let manager = UserManager::new();
+        manager
+            .initialize_root_user("root", "rootpass", false)
+            .unwrap();
+
+        // Root user exists but is disabled
+        let root = manager.get_user("root").unwrap();
+        assert!(!root.enabled);
+
+        // Cannot authenticate when disabled
+        let result = manager.authenticate("root", "rootpass");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Root user is disabled")
+        );
+    }
+
+    #[test]
+    fn test_root_user_enabled_can_authenticate() {
+        let manager = UserManager::new();
+        manager
+            .initialize_root_user("root", "rootpass", true)
+            .unwrap();
+
+        let result = manager.authenticate("root", "rootpass");
+        assert!(result.is_ok());
+
+        let authenticated = result.unwrap();
+        assert_eq!(authenticated.username, "root");
+        assert!(authenticated.is_admin);
+    }
+
+    #[test]
+    fn test_update_root_user_password() {
+        let manager = UserManager::new();
+        manager
+            .initialize_root_user("root", "oldpass123", true)
+            .unwrap();
+
+        // Update password
+        manager
+            .initialize_root_user("root", "newpass123", true)
+            .unwrap();
+
+        // Old password doesn't work
+        assert!(manager.authenticate("root", "oldpass123").is_err());
+
+        // New password works
+        assert!(manager.authenticate("root", "newpass123").is_ok());
+    }
+
+    #[test]
+    fn test_disable_root_user() {
+        let manager = UserManager::new();
+        manager
+            .initialize_root_user("root", "rootpass", true)
+            .unwrap();
+
+        // Can authenticate initially
+        assert!(manager.authenticate("root", "rootpass").is_ok());
+
+        // Disable root user
+        manager.disable_root_user().unwrap();
+
+        // Cannot authenticate after disable
+        let result = manager.authenticate("root", "rootpass");
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("Root user is disabled")
+        );
+    }
+
+    #[test]
+    fn test_disable_root_user_when_not_configured() {
+        let manager = UserManager::new();
+        // No root user initialized
+
+        let result = manager.disable_root_user();
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No root user configured")
+        );
+    }
+
+    #[test]
+    fn test_root_user_has_admin_permissions() {
+        let manager = UserManager::new();
+        manager
+            .initialize_root_user("root", "rootpass", true)
+            .unwrap();
+
+        let permissions = manager.get_user_permissions("root");
+        assert!(!permissions.is_empty());
+        assert!(permissions[0].resource_pattern == "*");
+    }
+
+    #[test]
+    fn test_multiple_root_users_not_allowed() {
+        let manager = UserManager::new();
+        manager
+            .initialize_root_user("root1", "pass12345", true)
+            .unwrap();
+        assert_eq!(manager.get_root_username(), Some("root1".to_string()));
+
+        // Initialize different root user - should update root_username
+        manager
+            .initialize_root_user("root2", "pass23456", true)
+            .unwrap();
+        assert_eq!(manager.get_root_username(), Some("root2".to_string()));
+
+        // root1 is no longer root
+        assert!(!manager.is_root_user("root1"));
+        assert!(manager.is_root_user("root2"));
+    }
+
+    #[test]
+    fn test_regular_user_can_be_deleted() {
+        let manager = UserManager::new();
+        manager
+            .initialize_root_user("root", "rootpass123", true)
+            .unwrap();
+        manager.create_user("regular", "pass12345", false).unwrap();
+
+        // Regular user can be deleted
+        let deleted = manager.delete_user("regular").unwrap();
+        assert!(deleted);
+        assert!(manager.get_user("regular").is_none());
+
+        // Root user still exists
+        assert!(manager.get_user("root").is_some());
+    }
+
+    #[test]
+    fn test_root_user_initialization_with_existing_user() {
+        let manager = UserManager::new();
+        // Create regular user first
+        manager.create_user("admin", "oldpass123", false).unwrap();
+
+        // Initialize as root user
+        manager
+            .initialize_root_user("admin", "newpass123", true)
+            .unwrap();
+
+        assert!(manager.is_root_user("admin"));
+        let admin = manager.get_user("admin").unwrap();
+        assert!(admin.is_admin);
+        assert!(admin.verify_password("newpass123"));
+    }
+
+    #[test]
+    fn test_root_user_get_root_username() {
+        let manager = UserManager::new();
+        assert_eq!(manager.get_root_username(), None);
+
+        manager.initialize_root_user("root", "pass12345", true).unwrap();
+        assert_eq!(manager.get_root_username(), Some("root".to_string()));
+    }
+
+    #[test]
+    fn test_is_root_user() {
+        let manager = UserManager::new();
+        assert!(!manager.is_root_user("root"));
+        assert!(!manager.is_root_user("admin"));
+
+        manager.initialize_root_user("root", "pass12345", true).unwrap();
+        assert!(manager.is_root_user("root"));
+        assert!(!manager.is_root_user("admin"));
     }
 }
