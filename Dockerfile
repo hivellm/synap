@@ -14,9 +14,19 @@
 # - Volume mounts for persistence
 #
 # Docker Commands:
-#   Build image:
+#   Build image (AMD64):
 #     docker build -t synap:0.8.0 -t synap:latest .
 #     docker build -t hivellm/synap:0.8.0 -t hivellm/synap:latest .
+#
+#   Build for ARM64:
+#     docker buildx build --platform linux/arm64 -t synap:0.8.0-arm64 .
+#
+#   Build multi-arch (AMD64 + ARM64):
+#     docker buildx build --platform linux/amd64,linux/arm64 \
+#       -t hivellm/synap:0.8.0 -t hivellm/synap:latest --push .
+#
+#   Build for pre-release testing:
+#     docker build -t synap:0.8.0-rc -t synap:latest .
 #
 #   Run container:
 #     docker run -d --name synap-server-0.8.0 \
@@ -79,7 +89,9 @@ RUN apk add --no-cache \
     musl-dev \
     pkgconfig \
     openssl-dev \
-    openssl-libs-static
+    openssl-libs-static \
+    gcc \
+    musl-tools
 
 # Install nightly toolchain for Rust Edition 2024
 RUN rustup toolchain install nightly && \
@@ -109,9 +121,19 @@ RUN sed -i '/^# Configure benchmarks to use Criterion/,/^$/d' synap-server/Cargo
 # - Strip symbols for smaller size
 # - LTO for better optimization
 # - --bins flag compiles only binaries (ignores benches, examples, tests)
-RUN cargo build --release --bins \
-    --target x86_64-unknown-linux-musl && \
-    strip /usr/src/synap/target/x86_64-unknown-linux-musl/release/synap-server
+# - Support multi-arch builds (AMD64 and ARM64)
+ARG TARGETARCH
+ARG TARGETPLATFORM
+RUN case ${TARGETARCH} in \
+    amd64) TARGET_TRIPLE=x86_64-unknown-linux-musl ;; \
+    arm64) TARGET_TRIPLE=aarch64-unknown-linux-musl ;; \
+    *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
+    esac && \
+    rustup target add ${TARGET_TRIPLE} && \
+    cargo build --release --bins \
+    --target ${TARGET_TRIPLE} && \
+    strip /usr/src/synap/target/${TARGET_TRIPLE}/release/synap-server && \
+    cp /usr/src/synap/target/${TARGET_TRIPLE}/release/synap-server /usr/src/synap/synap-server
 
 # ============================================================================
 # Stage 2: Runtime
@@ -135,8 +157,10 @@ RUN mkdir -p /data/wal /data/snapshots && \
 # Set working directory
 WORKDIR /app
 
-# Copy binary from builder
-COPY --from=builder /usr/src/synap/target/x86_64-unknown-linux-musl/release/synap-server /usr/local/bin/synap-server
+# Copy binary from builder (multi-arch support)
+# Binary is copied to a fixed location in builder stage
+COPY --from=builder --chown=synap:synap /usr/src/synap/synap-server /usr/local/bin/synap-server
+RUN chmod +x /usr/local/bin/synap-server
 
 # Copy default configuration
 COPY config.yml /app/config.yml
