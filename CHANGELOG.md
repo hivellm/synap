@@ -35,6 +35,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Test Coverage**: All 7 tasks have test coverage (100%)
 
+### Fixed - WebSocket Tests Hanging Issue (January 2025) ✅
+
+**Test Infrastructure Improvements**
+
+- ✅ **Added s2s-tests Feature to WebSocket Tests** - All WebSocket tests now require `s2s-tests` feature to run, preventing hanging when servers are not properly shut down
+- ✅ **Graceful Shutdown Implementation** - Implemented graceful shutdown for test servers using `with_graceful_shutdown()` and shutdown handles
+- ✅ **Proper Server Cleanup** - Test servers now properly shut down after each test completes, preventing resource leaks
+
+**Files Changed**:
+- `synap-server/tests/websocket_stream_tests.rs` - Added `#[cfg(feature = "s2s-tests")]`, implemented graceful shutdown
+- `synap-server/tests/websocket_pubsub_tests.rs` - Added `#[cfg(feature = "s2s-tests")]`, implemented graceful shutdown
+- `synap-server/tests/websocket_queue_tests.rs` - Added `#[cfg(feature = "s2s-tests")]`, implemented graceful shutdown
+
+**Impact**: Tests no longer hang when executed without the `s2s-tests` feature, improving CI/CD reliability
+
 ### Changed - Docker Image Updates (January 2025) ✅
 
 **Docker Build Improvements**
