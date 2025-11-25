@@ -71,6 +71,18 @@ pub enum SynapError {
 
     #[error("Forbidden: {0}")]
     Forbidden(String),
+
+    /// Cluster error: Key belongs to different node (MOVED redirect)
+    #[error("MOVED {slot} {node_address}")]
+    ClusterMoved { slot: u16, node_address: String },
+
+    /// Cluster error: Key is migrating (ASK redirect)
+    #[error("ASK {slot} {node_address}")]
+    ClusterAsk { slot: u16, node_address: String },
+
+    /// Cluster error: Slot not assigned
+    #[error("CLUSTERDOWN Slot {slot} not assigned")]
+    ClusterSlotNotAssigned { slot: u16 },
 }
 
 impl SynapError {
@@ -99,6 +111,8 @@ impl SynapError {
             Self::Timeout => StatusCode::REQUEST_TIMEOUT,
             Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
+            Self::ClusterMoved { .. } | Self::ClusterAsk { .. } => StatusCode::MOVED_PERMANENTLY,
+            Self::ClusterSlotNotAssigned { .. } => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
 }

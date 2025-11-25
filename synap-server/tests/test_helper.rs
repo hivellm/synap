@@ -58,6 +58,8 @@ pub fn create_test_app_state() -> AppState {
         transaction_manager,
         script_manager,
         client_list_manager,
+        cluster_topology: None,
+        cluster_migration: None,
     }
 }
 

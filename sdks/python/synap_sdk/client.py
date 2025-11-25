@@ -160,6 +160,22 @@ class SynapClient:
         """Get the client configuration."""
         return self._config
 
+    async def health(self) -> dict[str, Any]:
+        """Check the health status of the Synap server.
+
+        Returns:
+            A dictionary containing server health information
+
+        Raises:
+            SynapException: If the health check fails
+        """
+        try:
+            response = await self._http_client.get("/health")
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPError as e:
+            raise SynapException.network_error(f"Health check failed: {e}") from e
+
     async def send_command(
         self,
         command: str,

@@ -58,5 +58,7 @@ pub fn create_test_app_state_with_stores(
         transaction_manager,
         script_manager,
         client_list_manager,
+        cluster_topology: None,
+        cluster_migration: None,
     }
 }

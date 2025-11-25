@@ -102,6 +102,8 @@ class SynapConfig:
             self._base_url,
             timeout=timeout,
             auth_token=self._auth_token,
+            username=self._username,
+            password=self._password,
             max_retries=self._max_retries,
         )
 
@@ -118,6 +120,8 @@ class SynapConfig:
             self._base_url,
             timeout=self._timeout,
             auth_token=token,
+            username=None,
+            password=None,
             max_retries=self._max_retries,
         )
 
@@ -134,6 +138,7 @@ class SynapConfig:
         return SynapConfig(
             self._base_url,
             timeout=self._timeout,
+            auth_token=None,
             username=username,
             password=password,
             max_retries=self._max_retries,
@@ -152,5 +157,7 @@ class SynapConfig:
             self._base_url,
             timeout=self._timeout,
             auth_token=self._auth_token,
+            username=self._username,
+            password=self._password,
             max_retries=retries,
         )

@@ -78,6 +78,7 @@ fn get_kv_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_kv_set"),
@@ -99,6 +100,7 @@ fn get_kv_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_kv_delete"),
@@ -118,6 +120,7 @@ fn get_kv_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
+            meta: None,
         },
         // String Extension tools (3)
         Tool {
@@ -147,6 +150,7 @@ fn get_kv_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_kv_getrange"),
@@ -179,6 +183,7 @@ fn get_kv_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_kv_strlen"),
@@ -201,6 +206,7 @@ fn get_kv_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+            meta: None,
         },
         // Key Management tools (3)
         Tool {
@@ -226,6 +232,7 @@ fn get_kv_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_key_exists"),
@@ -250,6 +257,7 @@ fn get_kv_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_key_rename"),
@@ -278,6 +286,7 @@ fn get_kv_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
+            meta: None,
         },
     ]
 }
@@ -304,6 +313,7 @@ fn get_hash_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_hash_get"),
@@ -324,6 +334,7 @@ fn get_hash_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_hash_getall"),
@@ -343,6 +354,7 @@ fn get_hash_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+            meta: None,
         },
     ]
 }
@@ -370,6 +382,7 @@ fn get_list_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_list_pop"),
@@ -391,6 +404,7 @@ fn get_list_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_list_range"),
@@ -412,6 +426,7 @@ fn get_list_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+            meta: None,
         },
     ]
 }
@@ -441,6 +456,7 @@ fn get_set_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_set_members"),
@@ -460,6 +476,7 @@ fn get_set_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_set_inter"),
@@ -483,6 +500,7 @@ fn get_set_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+            meta: None,
         },
     ]
 }
@@ -508,6 +526,7 @@ fn get_queue_tools() -> Vec<Tool> {
         output_schema: None,
         icons: None,
         annotations: Some(ToolAnnotations::new().read_only(false)),
+        meta: None,
     }]
 }
 
@@ -533,6 +552,7 @@ fn get_sortedset_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_sortedset_zrange"),
@@ -555,6 +575,7 @@ fn get_sortedset_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_sortedset_zrank"),
@@ -575,6 +596,7 @@ fn get_sortedset_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
+            meta: None,
         },
     ]
 }
@@ -625,6 +647,7 @@ fn get_transaction_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
+            meta: None,
         },
         Tool {
             name: Cow::Borrowed("synap_transaction_exec"),
@@ -649,6 +672,7 @@ fn get_transaction_tools() -> Vec<Tool> {
             output_schema: None,
             icons: None,
             annotations: Some(ToolAnnotations::new().read_only(false)),
+            meta: None,
         },
     ]
 }

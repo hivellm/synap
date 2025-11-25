@@ -401,6 +401,32 @@ pub fn create_router(
         )
         // StreamableHTTP command endpoint
         .route("/api/v1/command", post(handlers::command_handler))
+        // Cluster management endpoints
+        .route("/cluster/info", get(handlers::cluster_info))
+        .route("/cluster/nodes", get(handlers::cluster_nodes))
+        .route("/cluster/nodes", post(handlers::cluster_add_node))
+        .route("/cluster/nodes/{node_id}", get(handlers::cluster_node_info))
+        .route(
+            "/cluster/nodes/{node_id}",
+            delete(handlers::cluster_remove_node),
+        )
+        .route("/cluster/slots", get(handlers::cluster_slots))
+        .route(
+            "/cluster/slots/assign",
+            post(handlers::cluster_assign_slots),
+        )
+        .route(
+            "/cluster/migration/start",
+            post(handlers::cluster_start_migration),
+        )
+        .route(
+            "/cluster/migration/complete",
+            post(handlers::cluster_complete_migration),
+        )
+        .route(
+            "/cluster/migration/{slot}",
+            get(handlers::cluster_migration_status),
+        )
         // Add state
         .with_state(state);
 

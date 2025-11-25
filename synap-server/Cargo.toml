@@ -1,6 +1,6 @@
 [package]
 name = "synap-server"
-version.workspace = true
+version = "0.8.1"
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -37,10 +37,10 @@ rand.workspace = true
 bincode = { version = "2.0", features = ["serde"] }
 crc32fast = "1.4"
 compact_str.workspace = true
-rmcp = { version = "0.8.5", features = ["server", "transport-streamable-http-server"] }
+rmcp = { version = "0.9.1", features = ["server", "transport-streamable-http-server"] }
 hyper = "1.7"
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
-mlua = { version = "0.11.4", features = ["lua54", "async", "send", "serialize", "vendored"] }
+mlua = { version = "0.11.5", features = ["lua54", "async", "send", "serialize", "vendored"] }
 sha1 = "0.10"
 hex = "0.4"
 geohash = "0.13"
