@@ -1,122 +1,84 @@
+# ============================================================================
 # Synap Server Configuration
-# Similar to redis.conf pattern
-
 # ============================================================================
-# NETWORK
+# High-Performance In-Memory Key-Value Store & Message Broker
+# Similar to redis.conf pattern with modern YAML structure
 # ============================================================================
 
+# ----------------------------------------------------------------------------
+# Network Configuration
+# ----------------------------------------------------------------------------
 server:
-  # By default Synap listens for connections from all the network interfaces
-  # available on the server. Use "bind" to listen on specific interfaces.
+  # Bind address - listen on all interfaces by default
   # Examples:
-  # bind 127.0.0.1    # listens on loopback only (localhost)
-  # bind 0.0.0.0      # listens on all interfaces
+  #   "127.0.0.1"  -> localhost only
+  #   "0.0.0.0"    -> all interfaces (default)
   host: "0.0.0.0"
   
-  # Accept connections on the specified port, default is 15500.
-  # If port 0 is specified Synap will not listen on a TCP socket.
+  # HTTP API port
   port: 15500
   
   # Enable WebSocket support for real-time subscriptions
-  # (Planned for Phase 2)
   websocket_enabled: false
 
-# ============================================================================
-# MEMORY MANAGEMENT
-# ============================================================================
-
+# ----------------------------------------------------------------------------
+# Memory Management
+# ----------------------------------------------------------------------------
 kv_store:
-  # Set a memory usage limit to the specified amount of bytes.
-  # When the memory limit is reached Synap will try to remove keys
-  # according to the eviction policy selected (see maxmemory-policy).
-  #
-  # If Synap can't remove keys according to the policy, or if the policy is
-  # set to 'noeviction', Synap will start to reply with errors to commands
-  # that would use more memory, like SET, INCR, etc.
-  #
-  # WARNING: maxmemory can be a good idea if you're using Synap as an LRU
-  # or LFU cache, or to set a hard memory limit (using 'noeviction' policy).
-  #
-  # Redis-style memory specifications supported (future):
-  # 1k  => 1000 bytes
-  # 1kb => 1024 bytes
-  # 1m  => 1000000 bytes
-  # 1mb => 1024*1024 bytes
-  # 1g  => 1000000000 bytes
-  # 1gb => 1024*1024*1024 bytes
-  #
-  # units are case insensitive: 1GB 1Gb 1gB are all the same.
-  max_memory_mb: 4096  # 4GB default
+  # Maximum memory usage in MB
+  # When limit is reached, keys are evicted based on policy
+  # Common values: 256 (small), 1024 (medium), 4096 (large), 8192 (very large)
+  max_memory_mb: 4096
   
-  # DANGEROUS COMMANDS (disabled by default for production safety)
-  # Like Redis, FLUSHDB and FLUSHALL are disabled by default to prevent
-  # accidental data loss. Enable only in development/testing environments.
-  allow_flush_commands: false
-  
-  # MAXMEMORY POLICY: how Synap will select what to remove when maxmemory
-  # is reached. You can select one from the following behaviors:
-  #
-  # lru      -> Evict least recently used keys (recommended for cache)
-  # lfu      -> Evict least frequently used keys
-  # ttl      -> Evict keys with shortest time-to-live first
-  # none     -> Don't evict anything, just return an error on write operations
-  #
-  # LRU means Least Recently Used
-  # LFU means Least Frequently Used
-  #
-  # Both LRU, LFU and TTL are implemented using approximated algorithms.
-  #
-  # The default is: lru
+  # Eviction policy when memory limit is reached
+  # Options:
+  #   lru  -> Least Recently Used (recommended for cache)
+  #   lfu  -> Least Frequently Used
+  #   ttl  -> Shortest Time-To-Live first
+  #   none -> No eviction (returns errors on write)
   eviction_policy: "lru"
   
-  # TTL cleanup runs in background to remove expired keys.
-  # Lower interval = more CPU usage but faster cleanup
-  # Higher interval = less CPU usage but slower cleanup
-  # Default: 100ms (same as Redis default of 10 times per second)
+  # TTL cleanup interval in milliseconds
+  # Lower = faster cleanup, higher CPU usage
+  # Higher = slower cleanup, lower CPU usage
   ttl_cleanup_interval_ms: 100
+  
+  # Allow dangerous commands (FLUSHDB, FLUSHALL)
+  # WARNING: Disabled by default to prevent accidental data loss
+  # Enable only in development/testing environments
+  allow_flush_commands: false
 
-# ============================================================================
-# QUEUE SYSTEM (Phase 2)
-# ============================================================================
-
+# ----------------------------------------------------------------------------
+# Queue System
+# ----------------------------------------------------------------------------
 queue:
-  # Enable or disable queue system
-  # Default: true
+  # Enable queue system
   enabled: true
   
-  # Maximum number of messages per queue
+  # Maximum messages per queue
   # When limit is reached, new publishes will fail
-  # Default: 100000
   max_depth: 100000
   
   # ACK deadline in seconds
-  # After this time, unacknowledged messages are requeued
-  # Default: 30 seconds
+  # Unacknowledged messages are requeued after this time
   ack_deadline_secs: 30
   
   # Default maximum retry attempts before moving to DLQ
-  # Can be overridden per message
-  # Default: 3
   default_max_retries: 3
   
   # Default message priority (0-9, where 9 is highest)
-  # Can be overridden per message
-  # Default: 5
   default_priority: 5
 
-# ============================================================================
-# AUTHENTICATION & SECURITY
-# ============================================================================
-
+# ----------------------------------------------------------------------------
+# Authentication & Security
+# ----------------------------------------------------------------------------
 auth:
-  # Enable/disable authentication
-  # Default: false (disabled for development)
-  # IMPORTANT: Authentication is REQUIRED when binding to 0.0.0.0
+  # Enable authentication system
+  # IMPORTANT: Required when binding to 0.0.0.0 in production
   enabled: false
   
   # Require authentication for all endpoints
   # If false, anonymous access is allowed (with limited permissions)
-  # Default: false
   require_auth: false
   
   # Root user configuration (created on first startup)
@@ -124,14 +86,13 @@ auth:
   root:
     username: "root"
     password: "root"  # MUST be changed in production!
-    enabled: true     # Can be disabled after initial setup for security
+    enabled: true
   
   # Default TTL for temporary API keys (in seconds)
-  # Default: 3600 (1 hour)
   default_key_ttl: 3600
 
 # Access Control Lists (ACL)
-# Define who can access what resources
+# Define resource-level permissions
 acl:
   # Enable ACL enforcement
   enabled: false
@@ -147,7 +108,7 @@ acl:
     - resource: "queue:private"
       require_auth: true
       actions: ["read", "write"]
-      allowed_users: []  # Empty = all authenticated users
+      allowed_users: []
       allowed_roles: ["admin", "queue_user"]
     
     # Admin-only queue
@@ -168,63 +129,43 @@ acl:
       actions: ["write", "delete"]
       allowed_roles: ["admin"]
 
-# ============================================================================
-# RATE LIMITING
-# ============================================================================
-
+# ----------------------------------------------------------------------------
+# Rate Limiting
+# ----------------------------------------------------------------------------
 rate_limit:
-  # Enable or disable rate limiting (tower-governor implementation)
-  # Uses token bucket algorithm with per-IP tracking
+  # Enable rate limiting (token bucket algorithm)
   # Protects against DoS attacks and excessive API usage
-  # Default: false (disabled for maximum performance)
   enabled: false
   
   # Maximum requests per second per IP
-  # Controls the refill rate of the token bucket
-  # Recommended: 100-1000 for public APIs, 10000+ for internal services
-  # Default: 1000 req/s
+  # Recommended: 100-1000 (public), 10000+ (internal)
   requests_per_second: 1000
   
   # Burst size (maximum tokens in bucket)
-  # Allows temporary spikes above the rate limit
+  # Allows temporary spikes above rate limit
   # Should be >= requests_per_second for smooth traffic
-  # Recommended: 10-20% of requests_per_second
-  # Default: 100
   burst_size: 100
-  
-  # Examples:
-  # - Public API: enabled: true, requests_per_second: 100, burst_size: 20
-  # - Internal API: enabled: false (or high limits: 10000 req/s)
-  # - Development: enabled: false
 
-# ============================================================================
-# LOGGING
-# ============================================================================
-
+# ----------------------------------------------------------------------------
+# Logging
+# ----------------------------------------------------------------------------
 logging:
-  # Specify the server verbosity level.
-  # This can be one of:
-  # trace (very verbose, for debugging)
-  # debug (a lot of information, useful for development/testing)
-  # info  (moderately verbose, what you want in production probably)
-  # warn  (only very important / critical messages are logged)
-  # error (only errors are logged)
-  #
-  # Default: info
+  # Log verbosity level
+  # Options: trace, debug, info, warn, error
   level: "info"
   
-  # Log format: "json" or "pretty"
-  # json: Machine-readable structured logs (recommended for production)
-  # pretty: Human-readable colored output (good for development)
+  # Log format
+  # Options:
+  #   json   -> Machine-readable structured logs (production)
+  #   pretty -> Human-readable colored output (development)
   format: "json"
 
-# ============================================================================
-# PROTOCOLS
-# ============================================================================
-
+# ----------------------------------------------------------------------------
+# Protocols
+# ----------------------------------------------------------------------------
 protocols:
   # StreamableHTTP Protocol
-  # Modern HTTP-based protocol with command routing and streaming support
+  # Modern HTTP-based protocol with command routing and streaming
   streamable_http:
     enabled: true
     path: "/api/v1/command"
@@ -234,29 +175,10 @@ protocols:
   rest:
     enabled: true
     prefix: "/kv"
-  
-  # MCP (Model Context Protocol) - Planned for Phase 3
-  # Integration with AI tools and agents
-  # mcp:
-  #   enabled: false
-  #   port: 15501
-  
-  # UMICP (Universal Matrix Inter-Communication Protocol) - Planned for Phase 3
-  # High-performance matrix and vector operations
-  # umicp:
-  #   enabled: false
-  #   websocket_path: "/umicp"
-  
-  # Raw TCP Socket - Planned for Phase 3
-  # High-performance binary protocol
-  # tcp:
-  #   enabled: false
-  #   port: 15502
 
-# ============================================================================
-# MCP (Model Context Protocol) TOOLS
-# ============================================================================
-
+# ----------------------------------------------------------------------------
+# MCP (Model Context Protocol) Tools
+# ----------------------------------------------------------------------------
 # Configure which MCP tool categories to expose
 # Note: Cursor has limits on the number of MCP tools it can handle efficiently
 # Default: Only essential tools (KV + Queue = 4 tools total)
@@ -286,89 +208,56 @@ mcp:
 # Note: All functionality is available via REST API and StreamableHTTP
 # regardless of MCP tool configuration
 
-# ============================================================================
-# REPLICATION (✅ COMPLETE - Phase 3)
-# ============================================================================
-
+# ----------------------------------------------------------------------------
+# Replication
+# ----------------------------------------------------------------------------
 # Master-Slave replication for high availability and read scaling
 # - 1 write master node + N read-only replica nodes
 # - TCP binary protocol with length-prefixed framing
 # - Full sync via snapshot transfer (CRC32 verified)
 # - Partial sync via replication log (incremental updates)
 # - Auto-reconnect with intelligent resync
+
 replication:
-  # Enable or disable replication
-  # Default: false
+  # Enable replication
   enabled: false
   
-  # Node role: "master", "replica", or "standalone"
-  # - master: Accepts writes, replicates to replicas
-  # - replica: Read-only, syncs from master
-  # - standalone: No replication (single node)
-  # Default: "standalone"
+  # Node role
+  # Options:
+  #   master     -> Accepts writes, replicates to replicas
+  #   replica    -> Read-only, syncs from master
+  #   standalone -> No replication (single node)
   role: "standalone"
   
-  # === MASTER CONFIGURATION ===
-  # (Only used when role = "master")
-  
-  # Address where master listens for replica connections
-  # Format: "host:port"
-  # Default: "0.0.0.0:15501"
+  # Master configuration (only used when role = "master")
   # replica_listen_address: "0.0.0.0:15501"
   
-  # === REPLICA CONFIGURATION ===
-  # (Only used when role = "replica")
-  
-  # Master node address to sync from
-  # Format: "host:port"
-  # Example: "master.synap.local:15501"
+  # Replica configuration (only used when role = "replica")
   # master_address: "127.0.0.1:15501"
   
-  # === PERFORMANCE TUNING ===
-  
-  # Heartbeat interval in milliseconds
-  # Lower = faster failure detection, higher network overhead
-  # Default: 1000 (1 second)
-  heartbeat_interval_ms: 1000
-  
-  # Maximum replication lag threshold (milliseconds)
-  # Alert/log warning when replica lags beyond this
-  # Default: 10000 (10 seconds)
-  max_lag_ms: 10000
-  
-  # Replication buffer size in KB
-  # Larger buffer = better throughput, more memory
-  # Default: 256 (256KB)
-  buffer_size_kb: 256
-  
-  # Auto-reconnect on disconnect
-  # Default: true
-  auto_reconnect: true
-  
-  # Reconnect delay in milliseconds
-  # Delay between reconnection attempts
-  # Default: 5000 (5 seconds)
-  reconnect_delay_ms: 5000
-  
-  # Replica timeout in seconds
-  # Master marks replica as dead after this timeout
-  # Default: 30 seconds
-  replica_timeout_secs: 30
+  # Performance tuning
+  heartbeat_interval_ms: 1000      # Heartbeat interval (ms)
+  max_lag_ms: 10000                # Maximum replication lag threshold (ms)
+  buffer_size_kb: 256              # Replication buffer size (KB)
+  auto_reconnect: true             # Auto-reconnect on disconnect
+  reconnect_delay_ms: 5000         # Reconnect delay (ms)
+  replica_timeout_secs: 30         # Replica timeout (seconds)
 
-# ============================================================================
-# PERSISTENCE (Phase 2 - IMPLEMENTED)
-# ============================================================================
-
+# ----------------------------------------------------------------------------
+# Persistence
+# ----------------------------------------------------------------------------
 # Optional persistence using Write-Ahead Log and Snapshots
+
 persistence:
-  enabled: true  # Data durability enabled by default
+  # Enable data durability
+  enabled: true
   
   # Write-Ahead Log (WAL) settings
   wal:
     enabled: true
     path: "./data/wal/synap.wal"
     buffer_size_kb: 64
-    fsync_mode: "always"  # always, periodic, never - CHANGED TO ALWAYS FOR TESTING
+    fsync_mode: "always"            # Options: always, periodic, never
     fsync_interval_ms: 1000
     max_size_mb: 1024
   
@@ -376,60 +265,7 @@ persistence:
   snapshot:
     enabled: true
     directory: "./data/snapshots"
-    interval_secs: 300  # Every 5 minutes
-    operation_threshold: 10000  # Or every 10K operations
-    max_snapshots: 10  # Keep last 10 snapshots
-    compression: false  # Not yet implemented
-
-# ============================================================================
-# SECURITY (Planned for Phase 4)
-# ============================================================================
-
-# Authentication and authorization
-# security:
-#   # Require password authentication
-#   require_auth: false
-#   password: ""
-#   
-#   # API keys for programmatic access
-#   api_keys:
-#     enabled: false
-#     keys: []
-#   
-#   # TLS/SSL encryption
-#   tls:
-#     enabled: false
-#     cert_path: ""
-#     key_path: ""
-
-# ============================================================================
-# COMPRESSION (Phase 3 - Not yet active)
-# ============================================================================
-
-# Payload compression to save memory and bandwidth
-# compression:
-#   # Enable compression globally
-#   enabled: false
-#   
-#   # Default algorithm: lz4 (fast) or zstd (better ratio)
-#   default_algorithm: "lz4"
-#   
-#   # Minimum payload size to compress (bytes)
-#   # Don't compress payloads smaller than this (overhead not worth it)
-#   min_payload_size: 1024  # 1KB
-#   
-#   # Zstd-specific settings
-#   zstd:
-#     level: 3  # Compression level (1-22, 3 = balanced)
-
-# ============================================================================
-# ADVANCED
-# ============================================================================
-
-# Performance and resource limits
-# limits:
-#   max_clients: 10000
-#   timeout: 0  # Close connection after N seconds of idleness (0 = no timeout)
-#   tcp_keepalive: 300
-#   tcp_backlog: 511
-
+    interval_secs: 300              # Snapshot every 5 minutes
+    operation_threshold: 10000      # Or every 10K operations
+    max_snapshots: 10               # Keep last 10 snapshots
+    compression: false              # Not yet implemented
