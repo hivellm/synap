@@ -150,7 +150,7 @@ autoscaling:
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `replicaCount` | Number of Synap replicas | `1` |
-| `image.repository` | Synap image repository | `hivellm/synap` |
+| `image.repository` | Synap image repository | `hivehub/synap` |
 | `image.tag` | Synap image tag | `""` (uses appVersion) |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 

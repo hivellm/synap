@@ -1,38 +1,8 @@
-# Cargo build configuration for optimized builds
-# This file configures Cargo to use optimal build settings
-
-[build]
-# Incremental compilation (faster rebuilds)
-# Note: jobs is controlled by CARGO_BUILD_JOBS env var (0 = all cores)
-incremental = true
-
-# Target directory (can be overridden by environment)
-# target-dir = "target"
-
 [target.x86_64-unknown-linux-musl]
-# Linker for musl target
-linker = "x86_64-linux-musl-gcc"
+linker = "gcc"
 
 [target.aarch64-unknown-linux-musl]
-# Linker for ARM64 musl target
-linker = "aarch64-linux-musl-gcc"
+linker = "gcc"
 
-# Network configuration for faster dependency downloads
-[net]
-retry = 2
-git-fetch-with-cli = true
-
-# Registry configuration
-[registry]
-default = "crates-io"
-
-[registry.crates-io]
-protocol = "sparse"
-
-# Build optimization flags
-# Note: These are set in Dockerfile, not here
-# CARGO_INCREMENTAL = "1"  # Set via environment
-# CARGO_BUILD_JOBS = "0"    # Set via environment (0 = all cores)
-
-# Optimize for faster builds in development
-# (Release builds use settings from Cargo.toml [profile.release])
+[build]
+target-dir = "target"

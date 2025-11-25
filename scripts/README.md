@@ -255,6 +255,109 @@ Or use the version parameter in build scripts to override.
 
 ---
 
+---
+
+## Docker Scripts
+
+### `docker-build.ps1` / `docker-build.sh`
+
+Build Docker images locally for testing.
+
+**Usage**:
+```powershell
+# PowerShell
+.\scripts\docker-build.ps1 [version]
+
+# Bash
+./scripts/docker-build.sh [version]
+```
+
+**Examples**:
+```powershell
+# Build latest
+.\scripts\docker-build.ps1
+
+# Build specific version
+.\scripts\docker-build.ps1 0.8.1
+```
+
+**Output**: Local Docker image tagged as `hivehub/synap:{version}` and `hivehub/synap:latest`
+
+---
+
+### `docker-publish.ps1` / `docker-publish.sh`
+
+Build and publish multi-arch Docker images to DockerHub.
+
+**Requirements**:
+- Docker with buildx enabled
+- DockerHub credentials (DOCKER_USERNAME and DOCKER_PASSWORD env vars)
+
+**Usage**:
+```powershell
+# PowerShell
+.\scripts\docker-publish.ps1 [version] [--no-build] [--no-push]
+
+# Bash
+./scripts/docker-publish.sh [version] [--no-build] [--no-push]
+```
+
+**Examples**:
+```powershell
+# Build and push latest
+.\scripts\docker-publish.ps1
+
+# Build and push specific version
+.\scripts\docker-publish.ps1 0.8.1
+
+# Only push (skip build)
+.\scripts\docker-publish.ps1 0.8.1 --no-build
+
+# Only build (skip push)
+.\scripts\docker-publish.ps1 0.8.1 --no-push
+```
+
+**Features**:
+- Multi-arch support (AMD64 + ARM64)
+- Automatic DockerHub login
+- Buildx builder setup
+- Progress output
+
+**Output**: Published to DockerHub as `hivehub/synap:{version}` and `hivehub/synap:latest`
+
+---
+
+### `docker-deploy.ps1` / `docker-deploy.sh`
+
+Manage Synap replication cluster using Docker Compose.
+
+**Usage**:
+```powershell
+# PowerShell
+.\scripts\docker-deploy.ps1 [command]
+
+# Bash
+./scripts/docker-deploy.sh [command]
+```
+
+**Commands**:
+- `start` - Start the cluster (1 master + 3 replicas)
+- `stop` - Stop the cluster
+- `restart` - Restart the cluster
+- `status` - Show cluster status
+- `logs` - Show logs (all nodes)
+- `health` - Check health of all nodes
+- `clean` - Stop and remove all data (DANGER!)
+
+**Examples**:
+```powershell
+.\scripts\docker-deploy.ps1 start
+.\scripts\docker-deploy.ps1 logs
+.\scripts\docker-deploy.ps1 health
+```
+
+---
+
 ## See Also
 
 - [Packaging & Distribution Guide](../docs/PACKAGING_AND_DISTRIBUTION.md)

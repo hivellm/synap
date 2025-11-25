@@ -16,14 +16,14 @@
 # Docker Commands:
 #   Build image (AMD64):
 #     docker build -t synap:0.8.0 -t synap:latest .
-#     docker build -t hivellm/synap:0.8.0 -t hivellm/synap:latest .
+#     docker build -t hivehub/synap:0.8.0 -t hivehub/synap:latest .
 #
 #   Build for ARM64:
 #     docker buildx build --platform linux/arm64 -t synap:0.8.0-arm64 .
 #
 #   Build multi-arch (AMD64 + ARM64):
 #     docker buildx build --platform linux/amd64,linux/arm64 \
-#       -t hivellm/synap:0.8.0 -t hivellm/synap:latest --push .
+#       -t hivehub/synap:0.8.0 -t hivehub/synap:latest --push .
 #
 #   Build for pre-release testing:
 #     docker build -t synap:0.8.0-rc -t synap:latest .
@@ -106,7 +106,7 @@ WORKDIR /usr/src/synap
 ENV CARGO_INCREMENTAL=1
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 ENV CARGO_NET_RETRY=2
-ENV CARGO_BUILD_JOBS=0
+# Note: CARGO_BUILD_JOBS is not set (uses all available cores by default)
 # Note: RUSTFLAGS for stripping is handled by Cargo.toml [profile.release].strip = true
 # target-cpu=native is not used for cross-compilation (musl targets)
 
@@ -119,14 +119,7 @@ COPY synap-server/Cargo.toml ./synap-server/
 COPY synap-cli/Cargo.toml ./synap-cli/
 COPY sdks/rust/Cargo.toml ./sdks/rust/
 
-# Download dependencies (this layer will be cached if Cargo files don't change)
-# Use BuildKit cache mount for cargo registry and git cache
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/usr/src/synap/target \
-    cargo fetch --locked
-
-# Copy source code (this invalidates cache only when source changes)
+# Copy source code (needed for cargo to validate workspace)
 COPY synap-server/src ./synap-server/src
 COPY synap-cli/src ./synap-cli/src
 COPY sdks/rust/src ./sdks/rust/src

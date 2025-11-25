@@ -19,7 +19,7 @@ param(
 
 # Configuration
 $ImageName = "synap"
-$Registry = if ($env:DOCKER_REGISTRY) { $env:DOCKER_REGISTRY } else { "hivellm" }
+$Registry = if ($env:DOCKER_REGISTRY) { $env:DOCKER_REGISTRY } else { "hivehub" }
 $BuildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
 Write-Host "============================================================================" -ForegroundColor Blue

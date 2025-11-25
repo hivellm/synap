@@ -26,7 +26,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 IMAGE_NAME="synap"
-REGISTRY="${DOCKER_REGISTRY:-hivellm}"
+REGISTRY="${DOCKER_REGISTRY:-hivehub}"
 VERSION="${1:-latest}"
 
 echo -e "${BLUE}============================================================================${NC}"

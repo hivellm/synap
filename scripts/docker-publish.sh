@@ -52,7 +52,7 @@ done
 
 # Configuration
 IMAGE_NAME="synap"
-REGISTRY="${DOCKER_REGISTRY:-hivellm}"
+REGISTRY="${DOCKER_REGISTRY:-hivehub}"
 DOCKER_USERNAME="${DOCKER_USERNAME:-}"
 DOCKER_PASSWORD="${DOCKER_PASSWORD:-}"
 BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')

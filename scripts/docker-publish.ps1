@@ -28,7 +28,7 @@ param(
 
 # Configuration
 $ImageName = "synap"
-$Registry = if ($env:DOCKER_REGISTRY) { $env:DOCKER_REGISTRY } else { "hivellm" }
+$Registry = if ($env:DOCKER_REGISTRY) { $env:DOCKER_REGISTRY } else { "hivehub" }
 $DockerUsername = $env:DOCKER_USERNAME
 $DockerPassword = $env:DOCKER_PASSWORD
 $BuildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
