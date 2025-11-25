@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added - Docker Publishing & Documentation (November 2025) ✅
+
+**Docker Infrastructure**
+- ✅ **Docker Publishing Scripts** - Added `docker-publish.ps1` and `docker-publish.sh` scripts for multi-arch builds (AMD64 + ARM64)
+- ✅ **Docker Build Scripts** - Added `docker-build.ps1` and `docker-build.sh` scripts for local builds
+- ✅ **Docker Hub README** - Created comprehensive `DOCKER_README.md` with usage examples, configuration, and troubleshooting
+- ✅ **Multi-Architecture Support** - Docker images now support both `linux/amd64` and `linux/arm64` architectures
+- ✅ **OCI Image Labels** - Added Open Container Initiative labels for version, build date, source, and licensing
+- ✅ **Docker Registry Update** - Updated registry from `hivellm` to `hivehub` across all Docker-related files
+
+**Docker Features**
+- ✅ **BuildKit Cache Mounts** - Optimized builds with cache mounts for Cargo registry, git, and target directory
+- ✅ **Health Checks** - Built-in HTTP health check endpoint for container orchestration
+- ✅ **Non-Root User** - Images run as non-root user (`synap:synap`, UID 1000) for security
+- ✅ **Alpine-Based** - Minimal image size (~50MB) using Alpine Linux 3.19
+- ✅ **Persistence Support** - Volume mounts for WAL and snapshots at `/data`
+
+### Changed - License & SDK Versions (November 2025) ✅
+
+**License Update**
+- ✅ **Apache 2.0 License** - Updated project license from MIT to Apache License 2.0
+- ✅ **All SDKs Updated** - Updated license in all SDKs (Rust, TypeScript, Python, PHP, C#)
+- ✅ **Documentation Updated** - Updated license badges and references in README, Dockerfile, and documentation
+
+**SDK Version Bumps**
+- ✅ **Rust SDK**: `0.3.1` → `0.3.2`
+- ✅ **TypeScript SDK**: `0.3.1` → `0.3.2`
+- ✅ **C# SDK**: `0.3.0` → `0.3.1`
+- ✅ **Python SDK**: `0.3.1` → `0.3.2`
+- ✅ **PHP SDK**: License updated (version managed via Git tags)
+
+### Fixed - SDK Command Compatibility (November 2025) ✅
+
+**Command Aliases for SDK Compatibility**
+- ✅ **List Commands** - Added aliases for SDK compatibility:
+  - `list.len` → `list.llen`
+  - `list.index` → `list.lindex`
+  - `list.set` → `list.lset`
+  - `list.range` → `list.lrange`
+  - `list.trim` → `list.ltrim`
+- ✅ **Set Commands** - Added aliases for SDK compatibility:
+  - `set.card` → `set.size` (Redis-style compatibility)
+  - `set.interstore` → `set.inter` (returns intersection result)
+
+**Impact**
+- SDKs can now use shorter command names without breaking changes
+- Maintains backward compatibility with existing Redis-style command names
+- Improves developer experience with more intuitive command names
+
 ## [0.8.1] - 2025-11-12
 
 ### Changed - Dependency Updates (November 2025) ✅

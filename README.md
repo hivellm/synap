@@ -151,34 +151,80 @@ cd synap-macos-aarch64
 
 **🐳 Docker**:
 
+**Quick Start (Docker Hub)**:
 ```bash
-# Build Docker image locally
+# Pull and run latest image
+docker pull hivehub/synap:latest
+docker run -d \
+  --name synap \
+  -p 15500:15500 \
+  -p 15501:15501 \
+  -v synap-data:/data \
+  hivehub/synap:latest
+
+# Check health
+curl http://localhost:15500/health
+```
+
+**Build Locally**:
+```bash
+# Clone and build
 git clone https://github.com/hivellm/synap.git
 cd synap
-docker build -t synap:latest .
-docker run -d -p 15500:15500 synap:latest
+docker build -t hivehub/synap:latest .
 
-# Run with authentication enabled
-docker run -d --name synap-server \
-  -p 15500:15500 -p 15501:15501 \
+# Run container
+docker run -d \
+  --name synap-server \
+  -p 15500:15500 \
+  -p 15501:15501 \
+  -v synap-data:/data \
+  hivehub/synap:latest
+```
+
+**With Authentication**:
+```bash
+docker run -d \
+  --name synap-server \
+  -p 15500:15500 \
+  -p 15501:15501 \
   -v synap-data:/data \
   -e SYNAP_AUTH_ENABLED=true \
   -e SYNAP_AUTH_REQUIRE_AUTH=true \
   -e SYNAP_AUTH_ROOT_USERNAME=admin \
   -e SYNAP_AUTH_ROOT_PASSWORD=SecurePassword123! \
   -e SYNAP_AUTH_ROOT_ENABLED=true \
-  synap:latest
+  hivehub/synap:latest
+```
 
-# Or use docker-compose for replication setup
+**Multi-Architecture Build**:
+```bash
+# Build and push multi-arch images (AMD64 + ARM64)
+./scripts/docker-publish.sh 0.8.1
+
+# Or using PowerShell
+.\scripts\docker-publish.ps1 0.8.1
+```
+
+**Docker Compose**:
+```bash
+# Use docker-compose for replication setup
 docker-compose up -d
 
-# With authentication (set environment variables before running)
+# With authentication (set environment variables)
 export SYNAP_AUTH_ENABLED=true
 export SYNAP_AUTH_REQUIRE_AUTH=true
 export SYNAP_AUTH_ROOT_USERNAME=admin
 export SYNAP_AUTH_ROOT_PASSWORD=SecurePassword123!
 docker-compose up -d
 ```
+
+**Available Images**:
+- `hivehub/synap:latest` - Latest stable release
+- `hivehub/synap:0.8.1` - Specific version
+- Supports `linux/amd64` and `linux/arm64` architectures
+
+📖 **For detailed Docker documentation, see [DOCKER_README.md](DOCKER_README.md)**
 
 **🛠️ From Source**:
 
@@ -413,7 +459,9 @@ curl http://localhost:15501/health/replication
 
 See [docs/specs/REPLICATION.md](docs/specs/REPLICATION.md) for complete replication documentation.
 
-For detailed Docker deployment guide, see [docs/DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md).
+For detailed Docker deployment guide, see:
+- **[DOCKER_README.md](DOCKER_README.md)** - Complete Docker Hub documentation with examples
+- **[docs/DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md)** - Advanced deployment guide
 
 ## 🎯 Use Cases
 
