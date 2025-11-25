@@ -1,10 +1,10 @@
 [package]
 name = "synap-sdk"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 rust-version = "1.85"
 authors = ["HiveLLM Team"]
-license = "MIT"
+license = "Apache-2.0"
 description = "Rust SDK for Synap - High-Performance In-Memory Key-Value Store & Message Broker"
 repository = "https://github.com/hivellm/synap"
 keywords = ["synap", "kv-store", "message-queue", "event-stream", "pubsub"]

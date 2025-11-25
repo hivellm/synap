@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "synap_sdk"
-version = "0.3.1"
+version = "0.3.2"
 description = "Official Python SDK for Synap - High-Performance In-Memory Key-Value Store & Message Broker"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "Apache-2.0"
 authors = [
     { name = "HiveLLM", email = "contact@hivellm.com" }
 ]
@@ -16,7 +16,7 @@ keywords = ["synap", "kv-store", "message-queue", "pubsub", "event-stream", "red
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",

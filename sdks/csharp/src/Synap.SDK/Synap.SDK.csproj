@@ -10,11 +10,11 @@
 
     <!-- Package Metadata -->
     <PackageId>HiveLLM.Synap.SDK</PackageId>
-    <Version>0.3.0</Version>
+    <Version>0.3.1</Version>
     <Authors>HiveLLM</Authors>
     <Company>HiveLLM</Company>
     <Description>Official C# SDK for Synap - High-Performance In-Memory Key-Value Store &amp; Message Broker</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <PackageProjectUrl>https://github.com/hivellm/hivellm</PackageProjectUrl>
     <RepositoryUrl>https://github.com/hivellm/hivellm</RepositoryUrl>
     <RepositoryType>git</RepositoryType>

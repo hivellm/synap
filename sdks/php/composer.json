@@ -2,7 +2,7 @@
     "name": "hivellm/synap-sdk",
     "description": "PHP SDK for Synap - High-Performance In-Memory Key-Value Store & Message Broker",
     "type": "library",
-    "license": "MIT",
+    "license": "Apache-2.0",
     "keywords": ["synap", "kv-store", "message-queue", "event-stream", "pubsub", "cache", "async"],
     "authors": [
         {

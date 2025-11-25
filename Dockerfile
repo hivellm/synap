@@ -168,7 +168,7 @@ LABEL org.opencontainers.image.version="${VERSION}"
 LABEL org.opencontainers.image.created="${BUILD_DATE}"
 LABEL org.opencontainers.image.source="https://github.com/hivellm/synap"
 LABEL org.opencontainers.image.vendor="HiveLLM"
-LABEL org.opencontainers.image.licenses="MIT"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 # Install runtime dependencies (minimal)
 RUN apk add --no-cache \

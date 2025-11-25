@@ -1,6 +1,6 @@
 {
   "name": "@hivellm/synap",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Official TypeScript/JavaScript SDK for Synap - High-Performance In-Memory Key-Value Store & Message Broker",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -47,7 +47,7 @@
     "sdk"
   ],
   "author": "HiveLLM Team",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/hivellm/synap.git",
