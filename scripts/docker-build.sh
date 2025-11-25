@@ -44,9 +44,14 @@ if [ ! -f "Dockerfile" ]; then
     exit 1
 fi
 
-# Build the image
-echo -e "${BLUE}Building Docker image...${NC}"
+# Enable BuildKit for cache mounts and faster builds
+export DOCKER_BUILDKIT=1
+export COMPOSE_DOCKER_CLI_BUILD=1
+
+# Build the image with BuildKit optimizations
+echo -e "${BLUE}Building Docker image with BuildKit...${NC}"
 docker build \
+    --progress=plain \
     -t "${REGISTRY}/${IMAGE_NAME}:${VERSION}" \
     -t "${REGISTRY}/${IMAGE_NAME}:latest" \
     --build-arg BUILD_DATE="$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \

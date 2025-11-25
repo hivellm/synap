@@ -102,6 +102,8 @@ async fn spawn_test_server_with_auth(
         pubsub_router: None,
         persistence: None,
         client_list_manager,
+        cluster_topology: None,
+        cluster_migration: None,
     };
 
     let router = create_router(

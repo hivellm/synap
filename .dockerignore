@@ -3,6 +3,10 @@ target/
 **/*.rs.bk
 *.pdb
 
+# Cargo cache (will be handled by BuildKit cache mounts)
+.cargo/registry/
+.cargo/git/
+
 # IDE
 .vscode/
 .idea/

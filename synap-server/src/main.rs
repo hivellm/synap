@@ -399,6 +399,8 @@ async fn main() -> Result<()> {
         transaction_manager,
         script_manager,
         client_list_manager,
+        cluster_topology: None, // TODO: Initialize cluster topology from config
+        cluster_migration: None, // TODO: Initialize cluster migration from config
     };
 
     // Initialize Prometheus metrics

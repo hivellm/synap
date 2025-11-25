@@ -7,7 +7,7 @@ members = ["synap-server", "synap-cli", "sdks/rust"]
 field_reassign_with_default = "allow"
 
 [workspace.package]
-version = "0.8.0"
+version = "0.8.1"
 edition = "2024"
 rust-version = "1.85"
 authors = ["HiveLLM Team"]
@@ -38,7 +38,9 @@ compact_str = { version = "0.9", features = ["serde"] }
 
 [profile.release]
 opt-level = 3
-lto = true
-codegen-units = 1
-strip = true
+lto = "fat"              # Fat LTO for better optimization across crates
+codegen-units = 1        # Single codegen unit for maximum optimization
+strip = true             # Strip symbols for smaller binary
+panic = "abort"          # Smaller binary size (no unwinding code)
+incremental = false      # Disable incremental for release (faster final build)
 

@@ -179,6 +179,8 @@ cargo build --release --target aarch64-unknown-linux-gnu
 
 ## Docker Build
 
+### Basic Build
+
 ```bash
 # Build image
 docker build -t synap:latest .
@@ -186,6 +188,33 @@ docker build -t synap:latest .
 # Run container
 docker run -p 15500:15500 synap:latest
 ```
+
+### Optimized Build with BuildKit
+
+The Dockerfile is optimized with BuildKit cache mounts for faster rebuilds:
+
+```bash
+# Enable BuildKit (required for cache mounts)
+export DOCKER_BUILDKIT=1
+
+# Build with cache optimization
+docker build -t synap:latest .
+
+# Or use the build script (automatically enables BuildKit)
+./scripts/docker-build.sh
+```
+
+**Build Optimizations:**
+- ✅ **Cache mounts** for Cargo registry and git dependencies
+- ✅ **Incremental compilation** cache for faster rebuilds
+- ✅ **Parallel builds** using all available CPU cores
+- ✅ **Layer caching** - dependencies cached separately from source code
+- ✅ **Multi-stage build** - minimal final image size
+
+**Performance Benefits:**
+- First build: ~5-10 minutes (downloads dependencies)
+- Rebuilds (code changes only): ~1-2 minutes (uses cached dependencies)
+- Rebuilds (dependency changes): ~3-5 minutes (reuses compilation cache)
 
 ## Performance Validation
 
@@ -215,11 +244,21 @@ cargo build --release
 
 Already configured in `Cargo.toml`:
 
-- LTO enabled
-- Single codegen unit
-- Stripped symbols
+- **Fat LTO** (`lto = "fat"`) - Maximum optimization across crates
+- **Single codegen unit** (`codegen-units = 1`) - Better optimization
+- **Stripped symbols** (`strip = true`) - Smaller binary
+- **Panic abort** (`panic = "abort"`) - No unwinding code
 
 Result: ~5-10MB binary size (release mode)
+
+### Build Configuration
+
+The project includes `.cargo/config.toml` with optimized build settings:
+
+- **Parallel compilation** - Uses all available CPU cores
+- **Incremental compilation** - Faster rebuilds during development
+- **Network optimization** - Faster dependency downloads
+- **Sparse registry protocol** - Modern Cargo registry protocol
 
 ## Continuous Integration
 

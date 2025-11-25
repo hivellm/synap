@@ -39,9 +39,14 @@ if (-not (Test-Path "Dockerfile")) {
     exit 1
 }
 
-# Build the image
-Write-Host "Building Docker image..." -ForegroundColor Blue
+# Enable BuildKit for cache mounts and faster builds
+$env:DOCKER_BUILDKIT = "1"
+$env:COMPOSE_DOCKER_CLI_BUILD = "1"
+
+# Build the image with BuildKit optimizations
+Write-Host "Building Docker image with BuildKit..." -ForegroundColor Blue
 docker build `
+    --progress=plain `
     -t "${Registry}/${ImageName}:${Version}" `
     -t "${Registry}/${ImageName}:latest" `
     --build-arg BUILD_DATE="$BuildDate" `

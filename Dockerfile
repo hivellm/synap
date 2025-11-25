@@ -90,7 +90,9 @@ RUN apk add --no-cache \
     pkgconfig \
     openssl-dev \
     openssl-libs-static \
-    gcc
+    gcc \
+    make \
+    perl
 
 # Install nightly toolchain for Rust Edition 2024
 RUN rustup toolchain install nightly && \
@@ -99,13 +101,32 @@ RUN rustup toolchain install nightly && \
 # Set working directory
 WORKDIR /usr/src/synap
 
-# Copy manifest files
+# Configure Cargo for optimized builds
+# Use BuildKit cache mounts for faster rebuilds
+ENV CARGO_INCREMENTAL=1
+ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
+ENV CARGO_NET_RETRY=2
+ENV CARGO_BUILD_JOBS=0
+# Note: RUSTFLAGS for stripping is handled by Cargo.toml [profile.release].strip = true
+# target-cpu=native is not used for cross-compilation (musl targets)
+
+# Copy Cargo configuration
+COPY .cargo/config.toml ./.cargo/config.toml
+
+# Copy manifest files first (for better Docker layer caching)
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY synap-server/Cargo.toml ./synap-server/
 COPY synap-cli/Cargo.toml ./synap-cli/
 COPY sdks/rust/Cargo.toml ./sdks/rust/
 
-# Copy source code
+# Download dependencies (this layer will be cached if Cargo files don't change)
+# Use BuildKit cache mount for cargo registry and git cache
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/src/synap/target \
+    cargo fetch --locked
+
+# Copy source code (this invalidates cache only when source changes)
 COPY synap-server/src ./synap-server/src
 COPY synap-cli/src ./synap-cli/src
 COPY sdks/rust/src ./sdks/rust/src
@@ -121,9 +142,15 @@ RUN sed -i '/^# Configure benchmarks to use Criterion/,/^$/d' synap-server/Cargo
 # - LTO for better optimization
 # - --bins flag compiles only binaries (ignores benches, examples, tests)
 # - Support multi-arch builds (AMD64 and ARM64)
+# - Use BuildKit cache mounts for incremental compilation
+ARG BUILD_DATE
+ARG VERSION
 ARG TARGETARCH
 ARG TARGETPLATFORM
-RUN case ${TARGETARCH} in \
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/src/synap/target \
+    case ${TARGETARCH} in \
     amd64) TARGET_TRIPLE=x86_64-unknown-linux-musl ;; \
     arm64) TARGET_TRIPLE=aarch64-unknown-linux-musl ;; \
     *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
@@ -138,6 +165,17 @@ RUN case ${TARGETARCH} in \
 # Stage 2: Runtime
 # ============================================================================
 FROM alpine:3.19
+
+# Build metadata
+ARG BUILD_DATE
+ARG VERSION
+LABEL org.opencontainers.image.title="Synap"
+LABEL org.opencontainers.image.description="High-performance in-memory key-value store and message broker"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.source="https://github.com/hivellm/synap"
+LABEL org.opencontainers.image.vendor="HiveLLM"
+LABEL org.opencontainers.image.licenses="MIT"
 
 # Install runtime dependencies (minimal)
 RUN apk add --no-cache \

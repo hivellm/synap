@@ -73,6 +73,8 @@ async fn spawn_test_server_with_mcp_auth(
         transaction_manager,
         script_manager,
         client_list_manager,
+        cluster_topology: None,
+        cluster_migration: None,
     };
 
     // Create user manager and API key manager
@@ -313,6 +315,8 @@ async fn test_mcp_permission_check_read_only() {
         transaction_manager,
         script_manager: Arc::new(ScriptManager::default()),
         client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
+        cluster_topology: None,
+        cluster_migration: None,
     });
 
     // Set a value first
@@ -408,6 +412,8 @@ async fn test_mcp_permission_check_write_allowed() {
         transaction_manager,
         script_manager: Arc::new(ScriptManager::default()),
         client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
+        cluster_topology: None,
+        cluster_migration: None,
     });
 
     // Create write-enabled auth context
@@ -486,6 +492,8 @@ async fn test_mcp_admin_bypass_permissions() {
         transaction_manager,
         script_manager: Arc::new(ScriptManager::default()),
         client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
+        cluster_topology: None,
+        cluster_migration: None,
     });
 
     // Create admin auth context (no specific permissions needed)

@@ -48,7 +48,12 @@ class TestBasicAuth:
     async def test_basic_auth_config_validation(self):
         """Test that config prevents using both auth_token and Basic Auth."""
         with pytest.raises(SynapException, match="Cannot use both"):
-            SynapConfig.create(SYNAP_URL, auth_token="test", username="user", password="pass")
+            SynapConfig(
+                SYNAP_URL,
+                auth_token="test",
+                username="user",
+                password="pass"
+            )
 
 
 @pytest.mark.asyncio
@@ -109,7 +114,6 @@ class TestNoAuth:
                 pass
 
 
-@pytest.mark.asyncio
 class TestAuthConfig:
     """Tests for authentication configuration."""
 
@@ -141,5 +145,10 @@ class TestAuthConfig:
     def test_config_with_both_auth_methods_raises_error(self):
         """Test that providing both auth methods raises error."""
         with pytest.raises(SynapException, match="Cannot use both"):
-            SynapConfig.create(SYNAP_URL, auth_token="test", username="user", password="pass")
+            SynapConfig(
+                SYNAP_URL,
+                auth_token="test",
+                username="user",
+                password="pass"
+            )
 

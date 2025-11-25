@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod cache;
+pub mod cluster;
 pub mod compression;
 pub mod config;
 pub mod core;

@@ -54,6 +54,8 @@ async fn spawn_test_server() -> String {
         transaction_manager,
         script_manager,
         client_list_manager,
+        cluster_topology: None,
+        cluster_migration: None,
     };
 
     let user_manager = Arc::new(UserManager::new());

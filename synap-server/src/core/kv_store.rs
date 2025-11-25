@@ -148,6 +148,10 @@ pub struct KVStore {
     config: KVConfig,
     /// Optional L1/L2 cache layer
     cache: Option<Arc<crate::core::CacheLayer>>,
+    /// Optional cluster topology for cluster mode routing
+    cluster_topology: Option<Arc<crate::cluster::topology::ClusterTopology>>,
+    /// Optional migration manager for cluster mode
+    cluster_migration: Option<Arc<crate::cluster::migration::SlotMigrationManager>>,
 }
 
 impl KVStore {
@@ -177,6 +181,88 @@ impl KVStore {
             stats: Arc::new(RwLock::new(KVStats::default())),
             config,
             cache,
+            cluster_topology: None,
+            cluster_migration: None,
+        }
+    }
+
+    /// Create KV store with cluster mode enabled
+    pub fn new_with_cluster(
+        config: KVConfig,
+        cache_size: Option<usize>,
+        topology: Arc<crate::cluster::topology::ClusterTopology>,
+        migration: Option<Arc<crate::cluster::migration::SlotMigrationManager>>,
+    ) -> Self {
+        info!(
+            "Initializing sharded KV store with cluster mode (64 shards) with max_memory={}MB, eviction={:?}",
+            config.max_memory_mb, config.eviction_policy
+        );
+
+        // Initialize all 64 shards
+        let shards: [Arc<KVShard>; SHARD_COUNT] = std::array::from_fn(|_| Arc::new(KVShard::new()));
+
+        // Initialize cache if requested
+        let cache = cache_size.map(|size| {
+            info!("Enabling L1 cache with {} entries", size);
+            Arc::new(crate::core::CacheLayer::new(size))
+        });
+
+        Self {
+            shards: Arc::new(shards),
+            stats: Arc::new(RwLock::new(KVStats::default())),
+            config,
+            cache,
+            cluster_topology: Some(topology),
+            cluster_migration: migration,
+        }
+    }
+
+    /// Check if key belongs to this node (cluster mode routing)
+    fn check_cluster_routing(&self, key: &str) -> Result<()> {
+        if let Some(ref topology) = self.cluster_topology {
+            use crate::cluster::hash_slot::hash_slot;
+
+            let slot = hash_slot(key);
+            let my_node_id = topology.my_node_id();
+
+            // Check if slot is migrating FIRST (before ownership check)
+            // During migration, keys should be redirected to destination node
+            if let Some(ref migration) = self.cluster_migration {
+                if let Some(migration_status) = migration.get_migration(slot) {
+                    // Slot is migrating - return ASK redirect to destination node
+                    let to_node = migration_status.to_node;
+                    if let Ok(node) = topology.get_node(&to_node) {
+                        return Err(SynapError::ClusterAsk {
+                            slot,
+                            node_address: node.address.to_string(),
+                        });
+                    }
+                }
+            }
+
+            // Check if slot belongs to this node
+            match topology.get_slot_owner(slot) {
+                Ok(owner) => {
+                    if owner != my_node_id {
+                        // Key belongs to different node - return MOVED redirect
+                        if let Ok(node) = topology.get_node(&owner) {
+                            return Err(SynapError::ClusterMoved {
+                                slot,
+                                node_address: node.address.to_string(),
+                            });
+                        }
+                    }
+                    // Key belongs to this node - OK
+                    Ok(())
+                }
+                Err(_) => {
+                    // Slot not assigned - cluster not ready
+                    Err(SynapError::ClusterSlotNotAssigned { slot })
+                }
+            }
+        } else {
+            // Cluster mode not enabled - always OK
+            Ok(())
         }
     }
 
@@ -214,6 +300,9 @@ impl KVStore {
     /// Set a key-value pair
     pub async fn set(&self, key: &str, value: Vec<u8>, ttl_secs: Option<u64>) -> Result<()> {
         debug!("SET key={}, size={}, ttl={:?}", key, value.len(), ttl_secs);
+
+        // Check cluster routing (returns error if key doesn't belong to this node)
+        self.check_cluster_routing(key)?;
 
         let stored = StoredValue::new(value.clone(), ttl_secs);
         let entry_size = self.estimate_entry_size(key, &stored);
@@ -262,6 +351,9 @@ impl KVStore {
     /// Get a value by key
     pub async fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
         debug!("GET key={}", key);
+
+        // Check cluster routing (returns error if key doesn't belong to this node)
+        self.check_cluster_routing(key)?;
 
         // Try L1 cache first
         if let Some(ref cache) = self.cache {
@@ -313,6 +405,9 @@ impl KVStore {
     /// Delete a key
     pub async fn delete(&self, key: &str) -> Result<bool> {
         debug!("DELETE key={}", key);
+
+        // Check cluster routing (returns error if key doesn't belong to this node)
+        self.check_cluster_routing(key)?;
 
         // Invalidate cache first
         if let Some(ref cache) = self.cache {

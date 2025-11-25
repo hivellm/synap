@@ -72,6 +72,8 @@ async fn spawn_test_server_with_auth(
         transaction_manager,
         script_manager,
         client_list_manager,
+        cluster_topology: None,
+        cluster_migration: None,
     };
 
     // Create user manager and API key manager
