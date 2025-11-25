@@ -1,0 +1,207 @@
+[1mdiff --git a/.github/workflows/release.yml b/.github/workflows/release.yml[m
+[1mindex b3ee829..8c7379f 100644[m
+[1m--- a/.github/workflows/release.yml[m
+[1m+++ b/.github/workflows/release.yml[m
+[36m@@ -3,11 +3,11 @@[m [mname: Release[m
+ on:[m
+   push:[m
+     tags:[m
+[31m-      - 'v*.*.*'[m
+[32m+[m[32m      - "v*.*.*"[m[41m[m
+   workflow_dispatch:[m
+     inputs:[m
+       version:[m
+[31m-        description: 'Version to release (e.g., v0.3.0)'[m
+[32m+[m[32m        description: "Version to release (e.g., v0.3.0)"[m[41m[m
+         required: true[m
+         type: string[m
+ [m
+[36m@@ -24,19 +24,19 @@[m [mjobs:[m
+           - os: ubuntu-latest[m
+             target: x86_64-unknown-linux-gnu[m
+             artifact_name: synap-linux-x64[m
+[31m-            [m
+[32m+[m[41m[m
+           - os: ubuntu-latest[m
+             target: aarch64-unknown-linux-gnu[m
+             artifact_name: synap-linux-arm64[m
+[31m-            [m
+[32m+[m[41m[m
+           - os: windows-latest[m
+             target: x86_64-pc-windows-msvc[m
+             artifact_name: synap-windows-x64[m
+[31m-            [m
+[32m+[m[41m[m
+           - os: macos-latest[m
+             target: x86_64-apple-darwin[m
+             artifact_name: synap-macos-x64[m
+[31m-            [m
+[32m+[m[41m[m
+           - os: macos-latest[m
+             target: aarch64-apple-darwin[m
+             artifact_name: synap-macos-arm64[m
+[36m@@ -46,28 +46,32 @@[m [mjobs:[m
+         uses: actions/checkout@v4[m
+ [m
+       - name: Install Rust toolchain[m
+[31m-        uses: dtolnay/rust-toolchain@stable[m
+[32m+[m[32m        uses: dtolnay/rust-toolchain@master[m[41m[m
+         with:[m
+[32m+[m[32m          toolchain: nightly[m[41m[m
+           targets: ${{ matrix.target }}[m
+[31m-          [m
+[32m+[m[41m[m
+       - name: Install cross-compilation tools (ARM64 Linux)[m
+         if: matrix.target == 'aarch64-unknown-linux-gnu'[m
+         run: |[m
+           sudo apt-get update[m
+           sudo apt-get install -y gcc-aarch64-linux-gnu[m
+[31m-          [m
+[32m+[m[41m[m
+[32m+[m[32m      - name: Install Rust target[m[41m[m
+[32m+[m[32m        run: rustup target add ${{ matrix.target }}[m[41m[m
+[32m+[m[41m[m
+       - name: Cache cargo registry[m
+         uses: actions/cache@v4[m
+         with:[m
+           path: ~/.cargo/registry[m
+           key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}[m
+[31m-          [m
+[32m+[m[41m[m
+       - name: Cache cargo index[m
+         uses: actions/cache@v4[m
+         with:[m
+           path: ~/.cargo/git[m
+           key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}[m
+[31m-          [m
+[32m+[m[41m[m
+       - name: Cache target directory[m
+         uses: actions/cache@v4[m
+         with:[m
+[36m@@ -78,7 +82,7 @@[m [mjobs:[m
+         run: cargo build --release --bin synap-server --target ${{ matrix.target }}[m
+         env:[m
+           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc[m
+[31m-          [m
+[32m+[m[41m[m
+       - name: Build synap-cli[m
+         run: cargo build --release --bin synap-cli --target ${{ matrix.target }}[m
+         env:[m
+[36m@@ -96,7 +100,7 @@[m [mjobs:[m
+           cp config.yml dist/config.example.yml[m
+           cd dist[m
+           tar czf ../${{ matrix.artifact_name }}.tar.gz *[m
+[31m-          [m
+[32m+[m[41m[m
+       - name: Prepare artifacts (Windows)[m
+         if: runner.os == 'Windows'[m
+         run: |[m
+[36m@@ -108,142 +112,17 @@[m [mjobs:[m
+           Copy-Item LICENSE dist\[m
+           Copy-Item config.yml dist\config.example.yml[m
+           Compress-Archive -Path dist\* -DestinationPath ${{ matrix.artifact_name }}.zip[m
+[31m-          [m
+[32m+[m[41m[m
+       - name: Upload artifacts (Unix)[m
+         if: runner.os != 'Windows'[m
+         uses: actions/upload-artifact@v5[m
+         with:[m
+           name: ${{ matrix.artifact_name }}[m
+           path: ${{ matrix.artifact_name }}.tar.gz[m
+[31m-          [m
+[32m+[m[41m[m
+       - name: Upload artifacts (Windows)[m
+         if: runner.os == 'Windows'[m
+         uses: actions/upload-artifact@v5[m
+         with:[m
+           name: ${{ matrix.artifact_name }}[m
+           path: ${{ matrix.artifact_name }}.zip[m
+[31m-[m
+[31m-  release:[m
+[31m-    name: Create Release[m
+[31m-    needs: build[m
+[31m-    runs-on: ubuntu-latest[m
+[31m-    steps:[m
+[31m-      - name: Checkout code[m
+[31m-        uses: actions/checkout@v4[m
+[31m-        [m
+[31m-      - name: Download all artifacts[m
+[31m-        uses: actions/download-artifact@v6[m
+[31m-        with:[m
+[31m-          path: artifacts[m
+[31m-          [m
+[31m-      - name: Display structure of downloaded files[m
+[31m-        run: ls -R artifacts[m
+[31m-        [m
+[31m-      - name: Extract version from tag[m
+[31m-        id: version[m
+[31m-        run: |[m
+[31m-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then[m
+[31m-            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT[m
+[31m-          else[m
+[31m-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT[m
+[31m-          fi[m
+[31m-          [m
+[31m-      - name: Create checksums[m
+[31m-        run: |[m
+[31m-          cd artifacts[m
+[31m-          for dir in */; do[m
+[31m-            cd "$dir"[m
+[31m-            for file in *; do[m
+[31m-              if [ -f "$file" ]; then[m
+[31m-                sha256sum "$file" > "$file.sha256"[m
+[31m-              fi[m
+[31m-            done[m
+[31m-            cd ..[m
+[31m-          done[m
+[31m-          [m
+[31m-      - name: Generate release notes[m
+[31m-        id: notes[m
+[31m-        run: |[m
+[31m-          VERSION=${{ steps.version.outputs.VERSION }}[m
+[31m-          echo "Generating release notes for $VERSION"[m
+[31m-          [m
+[31m-          # Extract changelog section for this version[m
+[31m-          awk "/## \[$VERSION\]/,/## \[/" CHANGELOG.md | head -n -1 > release_notes.md[m
+[31m-          [m
+[31m-          # If empty, use a default message[m
+[31m-          if [ ! -s release_notes.md ]; then[m
+[31m-            echo "Release $VERSION" > release_notes.md[m
+[31m-            echo "" >> release_notes.md[m
+[31m-            echo "See [CHANGELOG.md](CHANGELOG.md) for details." >> release_notes.md[m
+[31m-          fi[m
+[31m-          [m
+[31m-          cat release_notes.md[m
+[31m-          [m
+[31m-      - name: Create GitHub Release[m
+[31m-        uses: softprops/action-gh-release@v2[m
+[31m-        with:[m
+[31m-          tag_name: ${{ steps.version.outputs.VERSION }}[m
+[31m-          name: Synap ${{ steps.version.outputs.VERSION }}[m
+[31m-          body_path: release_notes.md[m
+[31m-          draft: false[m
+[31m-          prerelease: ${{ contains(steps.version.outputs.VERSION, 'rc') || contains(steps.version.outputs.VERSION, 'beta') || contains(steps.version.outputs.VERSION, 'alpha') }}[m
+[31m-          files: |[m
+[31m-            artifacts/**/*.tar.gz[m
+[31m-            artifacts/**/*.zip[m
+[31m-            artifacts/**/*.sha256[m
+[31m-        env:[m
+[31m-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}[m
+[31m-[m
+[31m-  docker:[m
+[31m-    name: Build Docker Images[m
+[31m-    needs: release[m
+[31m-    runs-on: ubuntu-latest[m
+[31m-    steps:[m
+[31m-      - name: Checkout code[m
+[31m-        uses: actions/checkout@v4[m
+[31m-        [m
+[31m-      - name: Extract version[m
+[31m-        id: version[m
+[31m-        run: |[m
+[31m-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then[m
+[31m-            VERSION="${{ github.event.inputs.version }}"[m
+[31m-          else[m
+[31m-            VERSION="${GITHUB_REF#refs/tags/}"[m
+[31m-          fi[m
+[31m-          #
