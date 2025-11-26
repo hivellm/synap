@@ -312,7 +312,7 @@ impl InventoryService {
     }
     
     pub async fn start(&self) -> Result<()> {
-        println!("Inventory service starting...");
+        tracing::info!("Inventory service starting...");
         
         // Subscribe to order events
         self.client.pubsub_subscribe(
@@ -326,7 +326,7 @@ impl InventoryService {
             }
         ).await?;
         
-        println!("Inventory service listening...");
+        tracing::info!("Inventory service listening...");
         
         tokio::signal::ctrl_c().await?;
         Ok(())
@@ -336,7 +336,7 @@ impl InventoryService {
         let order_id = message["orderId"].as_str().unwrap();
         let items = message["items"].as_array().unwrap();
         
-        println!("Reserving inventory for order {}", order_id);
+        tracing::info!("Reserving inventory for order {}", order_id);
         
         // Reserve items logic
         for item in items {
@@ -351,7 +351,7 @@ impl InventoryService {
     }
     
     async fn release_inventory(message: serde_json::Value) -> Result<()> {
-        println!("Releasing inventory for cancelled order");
+        tracing::info!("Releasing inventory for cancelled order");
         Ok(())
     }
 }

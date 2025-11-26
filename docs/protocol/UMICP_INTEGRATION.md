@@ -173,7 +173,7 @@ let response = client
 
 // Parse response envelope
 let response_envelope: Envelope = response.json().await?;
-println!("Result: {:?}", response_envelope.capabilities());
+tracing::info!("Result: {:?}", response_envelope.capabilities());
 ```
 
 ### Using cURL

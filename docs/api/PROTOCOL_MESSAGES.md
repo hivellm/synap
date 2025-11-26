@@ -15,15 +15,27 @@ Synap protocol defines four message types:
 
 ```typescript
 interface RequestEnvelope {
-  type: "request";
-  request_id: string;        // UUID v4
   command: string;           // Command name (e.g., "kv.set")
-  version: string;           // Protocol version ("1.0")
-  payload: object;           // Command-specific parameters
+  request_id: string;        // UUID v4 (required)
+  payload: object;           // Command-specific parameters (required)
 }
 ```
 
-### Example
+**Note**: The `type` and `version` fields are optional in the actual implementation. The minimal required format is:
+
+```json
+{
+  "command": "kv.set",
+  "request_id": "550e8400-e29b-41d4-a716-446655440000",
+  "payload": {
+    "key": "user:1001",
+    "value": {"name": "Alice", "email": "alice@example.com"},
+    "ttl": 3600
+  }
+}
+```
+
+### Full Example (with optional fields)
 
 ```json
 {
@@ -45,13 +57,14 @@ interface RequestEnvelope {
 
 ```typescript
 interface ResponseEnvelope {
-  type: "response";
+  success: boolean;          // true if operation succeeded
   request_id: string;        // Matches request
-  status: "success" | "error";
-  payload?: object;          // Result data
-  error?: ErrorObject;       // Error details if status=error
+  payload?: object;          // Result data (if successful)
+  error?: string;            // Error message (if failed)
 }
 ```
+
+**Note**: The actual StreamableHTTP response format uses `success` boolean instead of `status` field, and `error` is a string rather than an ErrorObject.
 
 ### Success Example
 

@@ -162,7 +162,7 @@ async fn test_stream_partial_sync() {
         // Small delay
         sleep(Duration::from_millis(10)).await;
 
-        eprintln!("Published event {} at offset {}", i, offset);
+        tracing::debug!("Published event {} at offset {}", i, offset);
     }
 
     // Wait for replication
@@ -181,7 +181,7 @@ async fn test_stream_partial_sync() {
         .await
         .unwrap();
 
-    eprintln!("Replica received {} events", events.len());
+    tracing::info!("Replica received {} events", events.len());
     assert!(
         events.len() >= 15,
         "Expected at least 15 events, got {}",

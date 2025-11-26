@@ -136,14 +136,14 @@ cache:
 ```rust
 // Get cache stats
 let stats = cache.get_stats();
-println!("Hit rate: {:.2}%", stats.hit_rate * 100.0);
-println!("Hits: {}, Misses: {}", stats.hits, stats.misses);
-println!("Evictions: {}", stats.evictions);
+tracing::info!("Hit rate: {:.2}%", stats.hit_rate * 100.0);
+tracing::info!("Hits: {}, Misses: {}", stats.hits, stats.misses);
+tracing::info!("Evictions: {}", stats.evictions);
 
 // Get all strategy stats
 let all_stats = cache.get_all_stats();
 for (strategy, stats) in all_stats {
-    println!("{:?}: {:.2}% hit rate", strategy, stats.hit_rate * 100.0);
+    tracing::info!("{:?}: {:.2}% hit rate", strategy, stats.hit_rate * 100.0);
 }
 ```
 

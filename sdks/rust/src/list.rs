@@ -47,14 +47,21 @@ impl ListManager {
     }
 
     /// Pop elements from left (head) of list
-    pub async fn lpop<K>(&self, key: K, count: usize) -> Result<Vec<String>>
+    ///
+    /// # Arguments
+    /// * `key` - The list key
+    /// * `count` - Number of elements to pop (optional, defaults to 1)
+    pub async fn lpop<K>(&self, key: K, count: Option<usize>) -> Result<Vec<String>>
     where
         K: AsRef<str>,
     {
-        let payload = json!({
+        let mut payload = json!({
             "key": key.as_ref(),
-            "count": count,
         });
+
+        if let Some(c) = count {
+            payload["count"] = json!(c);
+        }
 
         let response = self.client.send_command("list.lpop", payload).await?;
         let values = response
@@ -66,14 +73,21 @@ impl ListManager {
     }
 
     /// Pop elements from right (tail) of list
-    pub async fn rpop<K>(&self, key: K, count: usize) -> Result<Vec<String>>
+    ///
+    /// # Arguments
+    /// * `key` - The list key
+    /// * `count` - Number of elements to pop (optional, defaults to 1)
+    pub async fn rpop<K>(&self, key: K, count: Option<usize>) -> Result<Vec<String>>
     where
         K: AsRef<str>,
     {
-        let payload = json!({
+        let mut payload = json!({
             "key": key.as_ref(),
-            "count": count,
         });
+
+        if let Some(c) = count {
+            payload["count"] = json!(c);
+        }
 
         let response = self.client.send_command("list.rpop", payload).await?;
         let values = response

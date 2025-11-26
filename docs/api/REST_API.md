@@ -2,9 +2,104 @@
 
 ## Base URL
 
+**REST API Endpoints**:
+```
+http://localhost:15500
+```
+
+**StreamableHTTP Endpoint**:
 ```
 http://localhost:15500/api/v1
 ```
+
+## Request Format Compatibility
+
+Synap supports multiple request formats for improved SDK compatibility:
+
+### Hash Operations - Multiple Set (HMSET)
+
+**REST Endpoint**: `POST /hash/{key}/mset`
+
+**Object Format** (original):
+```json
+{
+  "fields": {
+    "name": "Alice",
+    "age": 30,
+    "email": "alice@example.com"
+  }
+}
+```
+
+**Array Format** (SDK compatibility):
+```json
+[
+  {"field": "name", "value": "Alice"},
+  {"field": "age", "value": 30},
+  {"field": "email", "value": "alice@example.com"}
+]
+```
+
+### String Operations - Set if Not Exists (MSETNX)
+
+**REST Endpoint**: `POST /kv/msetnx`
+
+**Object Format** (preferred):
+```json
+{
+  "key": "user:1001",
+  "value": {"name": "Alice", "age": 30}
+}
+```
+
+**Tuple Format** (backward compatible):
+```json
+["user:1001", {"name": "Alice", "age": 30}]
+```
+
+### List Operations - Pop (LPOP/RPOP)
+
+**REST Endpoint**: `POST /list/{key}/lpop` or `POST /list/{key}/rpop`
+
+**With Count**:
+```json
+{
+  "count": 3
+}
+```
+
+**Without Count** (defaults to 1):
+```json
+{}
+```
+
+### Sorted Set Operations - Add (ZADD)
+
+**REST Endpoint**: `POST /sortedset/{key}/zadd`
+
+**Single Member**:
+```json
+{
+  "member": "player1",
+  "score": 100.5
+}
+```
+
+**Multiple Members** (Redis-compatible):
+```json
+{
+  "members": [
+    {"member": "player1", "score": 100.5},
+    {"member": "player2", "score": 200.0}
+  ]
+}
+```
+
+### Memory Usage
+
+**REST Endpoint**: `GET /memory/{key}/usage`
+
+Returns `{"bytes": 0, "human": "0B"}` for non-existent keys instead of 404 error.
 
 ## Authentication
 
@@ -415,7 +510,42 @@ Authorization: Bearer your_jwt_token_here
 
 ### PUBLISH - Publish to Topic
 
-`POST /api/v1/command`
+**REST Endpoint**: `POST /pubsub/{topic}/publish`
+
+**Request Body** (supports both `payload` and `data` fields):
+```json
+{
+  "payload": {
+    "to": "alice@example.com",
+    "subject": "Welcome!"
+  },
+  "metadata": {
+    "source": "web-app",
+    "priority": "high"
+  }
+}
+```
+
+**Alternative format** (SDK compatibility):
+```json
+{
+  "data": {
+    "to": "alice@example.com",
+    "subject": "Welcome!"
+  }
+}
+```
+
+**Note**: The `payload` field is preferred, but `data` is accepted for SDK compatibility.
+
+**Response**:
+```json
+{
+  "subscribers_notified": 3
+}
+```
+
+**StreamableHTTP Format**: `POST /api/v1/command`
 
 ```json
 {
@@ -426,18 +556,6 @@ Authorization: Bearer your_jwt_token_here
       "to": "alice@example.com",
       "subject": "Welcome!"
     }
-  }
-}
-```
-
-**Response**:
-```json
-{
-  "status": "success",
-  "payload": {
-    "message_id": "msg_def456",
-    "topic": "notifications.email.user",
-    "subscribers_matched": 3
   }
 }
 ```

@@ -133,12 +133,12 @@ pub struct GetResult<V> {
 let result = client.kv_get::<User>("user:1001").await?;
 
 if let Some(user) = result.value {
-    println!("User: {} ({})", user.name, user.email);
+    tracing::info!("User: {} ({})", user.name, user.email);
     if let Some(ttl) = result.ttl {
-        println!("Expires in {} seconds", ttl);
+        tracing::info!("Expires in {} seconds", ttl);
     }
 } else {
-    println!("User not found");
+    tracing::info!("User not found");
 }
 ```
 
@@ -160,7 +160,7 @@ let deleted = client.kv_del(&[
     "user:1003"
 ]).await?;
 
-println!("Deleted {} keys", deleted);
+tracing::info!("Deleted {} keys", deleted);
 ```
 
 ### INCR/DECR - Atomic Increment
@@ -178,7 +178,7 @@ let views = client.kv_incr("article:123:views", 1).await?;
 // Decrement inventory
 let remaining = client.kv_decr("inventory:item:42", 1).await?;
 if remaining <= 0 {
-    println!("Out of stock!");
+    tracing::info!("Out of stock!");
 }
 ```
 
@@ -220,7 +220,7 @@ loop {
     cursor = result.cursor;
 }
 
-println!("Found {} user keys", all_keys.len());
+tracing::info!("Found {} user keys", all_keys.len());
 ```
 
 ## Queue API
@@ -272,7 +272,7 @@ let result = client.queue_publish(
     })
 ).await?;
 
-println!("Published message {} at position {}", 
+tracing::info!("Published message {} at position {}", 
          result.message_id, result.position);
 ```
 
@@ -391,7 +391,7 @@ let result = client.stream_publish(
     None
 ).await?;
 
-println!("Event {} sent to {} subscribers", 
+tracing::info!("Event {} sent to {} subscribers", 
          result.offset, result.subscribers_notified);
 ```
 
@@ -433,7 +433,7 @@ let subscription = client.stream_subscribe(
     "chat-room-1",
     |event| async move {
         if event.event_type == "message" {
-            println!("Message at offset {}: {:?}", event.offset, event.data);
+            tracing::info!("Message at offset {}: {:?}", event.offset, event.data);
         }
     },
     Some(SubscribeOptions {
@@ -501,7 +501,7 @@ where
 let subscription = client.pubsub_subscribe(
     &["notifications.email.*", "events.user.#"],
     |topic, message| async move {
-        println!("[{}] {:?}", topic, message);
+        tracing::info!("[{}] {:?}", topic, message);
     }
 ).await?;
 
@@ -557,20 +557,20 @@ use synap_client::error::SynapError;
 match client.kv_get::<String>("nonexistent-key").await {
     Ok(result) => {
         if result.found {
-            println!("Value: {:?}", result.value);
+            tracing::info!("Value: {:?}", result.value);
         } else {
-            println!("Key not found");
+            tracing::info!("Key not found");
         }
     }
     Err(SynapError::KeyNotFound(key)) => {
-        println!("Key {} doesn't exist", key);
+        tracing::info!("Key {} doesn't exist", key);
     }
     Err(SynapError::RateLimitExceeded { retry_after }) => {
-        println!("Rate limited, retry after {} seconds", retry_after);
+        tracing::info!("Rate limited, retry after {} seconds", retry_after);
         tokio::time::sleep(Duration::from_secs(retry_after)).await;
     }
     Err(e) => {
-        eprintln!("Error: {}", e);
+        etracing::info!("Error: {}", e);
     }
 }
 ```
@@ -596,7 +596,7 @@ client.kv_set("user:1", &user, None).await?;
 let result = client.kv_get::<User>("user:1").await?;
 
 if let Some(user) = result.value {
-    println!("User: {} ({})", user.name, user.email);
+    tracing::info!("User: {} ({})", user.name, user.email);
 }
 ```
 
@@ -693,8 +693,8 @@ let results = client.batch(commands).await?;
 
 for result in results {
     match result {
-        Ok(payload) => println!("Success: {:?}", payload),
-        Err(e) => println!("Error: {}", e),
+        Ok(payload) => tracing::info!("Success: {:?}", payload),
+        Err(e) => tracing::info!("Error: {}", e),
     }
 }
 ```
@@ -787,7 +787,7 @@ impl TaskWorker {
                         self.client.queue_ack(&self.queue_name, &msg.message_id).await?;
                     }
                     Err(e) => {
-                        eprintln!("Task processing failed: {}", e);
+                        etracing::info!("Task processing failed: {}", e);
                         self.client.queue_nack(&self.queue_name, &msg.message_id, true).await?;
                     }
                 }
@@ -803,7 +803,7 @@ impl TaskWorker {
     
     async fn process_task(&self, msg: &QueueMessage<serde_json::Value>) -> Result<()> {
         // Task processing logic
-        println!("Processing: {:?}", msg.message);
+        tracing::info!("Processing: {:?}", msg.message);
         Ok(())
     }
 }
@@ -838,7 +838,7 @@ pub async fn subscribe_to_events(client: &SynapClient, room: &str) -> Result<()>
                 "message" => handle_message(event.data).await,
                 "join" => handle_join(event.data).await,
                 "leave" => handle_leave(event.data).await,
-                _ => println!("Unknown event type: {}", event.event_type),
+                _ => tracing::info!("Unknown event type: {}", event.event_type),
             }
         },
         Some(SubscribeOptions {

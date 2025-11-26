@@ -533,7 +533,7 @@ client.kv_set("session:abc", token, Some(3600)).await?;
 
 // Check remaining TTL
 let ttl = client.kv_ttl("session:abc").await?;
-println!("Expires in {} seconds", ttl);
+tracing::info!("Expires in {} seconds", ttl);
 ```
 
 ### Atomic Counter

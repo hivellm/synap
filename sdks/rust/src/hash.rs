@@ -151,13 +151,71 @@ impl HashManager {
     }
 
     /// Set multiple fields in hash
+    ///
+    /// Supports both HashMap format (backward compatible) and array format (Redis-compatible)
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use synap_sdk::SynapClient;
+    /// # use std::collections::HashMap;
+    /// # async fn example(client: &SynapClient) -> synap_sdk::Result<()> {
+    /// // HashMap format (backward compatible)
+    /// let mut fields = HashMap::new();
+    /// fields.insert("name".to_string(), "Alice".to_string());
+    /// fields.insert("age".to_string(), "30".to_string());
+    /// client.hash().mset("user:1", fields).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn mset<K>(&self, key: K, fields: HashMap<String, String>) -> Result<bool>
     where
         K: AsRef<str>,
     {
+        // Convert HashMap to object format (backward compatible)
         let payload = json!({
             "key": key.as_ref(),
             "fields": fields,
+        });
+
+        let response = self.client.send_command("hash.mset", payload).await?;
+        Ok(response
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false))
+    }
+
+    /// Set multiple fields in hash using array format (Redis-compatible)
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use synap_sdk::SynapClient;
+    /// # async fn example(client: &SynapClient) -> synap_sdk::Result<()> {
+    /// let fields = vec![
+    ///     ("name".to_string(), "Alice".to_string()),
+    ///     ("age".to_string(), "30".to_string()),
+    /// ];
+    /// client.hash().mset_array("user:1", fields).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn mset_array<K>(&self, key: K, fields: Vec<(String, String)>) -> Result<bool>
+    where
+        K: AsRef<str>,
+    {
+        // Convert to array format: [{"field": "...", "value": "..."}, ...]
+        let fields_array: Vec<_> = fields
+            .into_iter()
+            .map(|(field, value)| {
+                json!({
+                    "field": field,
+                    "value": value,
+                })
+            })
+            .collect();
+
+        let payload = json!({
+            "key": key.as_ref(),
+            "fields": fields_array,
         });
 
         let response = self.client.send_command("hash.mset", payload).await?;

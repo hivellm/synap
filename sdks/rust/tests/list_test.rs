@@ -19,11 +19,11 @@ async fn test_list_push_pop() {
     assert!(lpush_result.is_ok() || lpush_result.is_err());
 
     // Test lpop
-    let lpop_result = list.lpop("test:tasks", 1).await;
+    let lpop_result = list.lpop("test:tasks", Some(1)).await;
     assert!(lpop_result.is_ok() || lpop_result.is_err());
 
     // Test rpop
-    let rpop_result = list.rpop("test:tasks", 1).await;
+    let rpop_result = list.rpop("test:tasks", Some(1)).await;
     assert!(rpop_result.is_ok() || rpop_result.is_err());
 }
 

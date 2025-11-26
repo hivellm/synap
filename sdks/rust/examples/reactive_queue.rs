@@ -18,18 +18,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config)?;
 
-    println!("🔄 Synap Rust SDK - Reactive Queue Example\n");
+    tracing::info!("🔄 Synap Rust SDK - Reactive Queue Example\n");
 
     // 1. Create a queue
-    println!("1. Creating queue 'reactive-tasks'");
+    tracing::info!("1. Creating queue 'reactive-tasks'");
     client
         .queue()
         .create_queue("reactive-tasks", Some(10000), Some(30))
         .await?;
-    println!("   ✅ Queue created\n");
+    tracing::info!("   ✅ Queue created\n");
 
     // 2. Publish some messages
-    println!("2. Publishing 10 messages");
+    tracing::info!("2. Publishing 10 messages");
     for i in 1..=10 {
         client
             .queue()
@@ -41,17 +41,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .await?;
     }
-    println!("   ✅ Published 10 messages\n");
+    tracing::info!("   ✅ Published 10 messages\n");
 
     // 3. Observe messages reactively (manual ACK)
-    println!("3. Consuming messages reactively (with Stream)");
+    tracing::info!("3. Consuming messages reactively (with Stream)");
     let queue = client.queue();
     let (mut stream, handle) =
         queue.observe_messages("reactive-tasks", "worker-1", Duration::from_millis(100));
 
     let mut count = 0;
     while let Some(message) = stream.next().await {
-        println!(
+        tracing::info!(
             "   📨 Received message {} (priority {}): {:?}",
             message.id,
             message.priority,
@@ -60,25 +60,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // Manual ACK
         client.queue().ack("reactive-tasks", &message.id).await?;
-        println!("      ✅ ACKed");
+        tracing::info!("      ✅ ACKed");
 
         count += 1;
         if count >= 5 {
-            println!("   Stopping after 5 messages...\n");
+            tracing::info!("   Stopping after 5 messages...\n");
             handle.unsubscribe();
             break;
         }
     }
 
     // 4. Process messages with automatic ACK/NACK
-    println!("4. Processing remaining messages (auto ACK/NACK)");
+    tracing::info!("4. Processing remaining messages (auto ACK/NACK)");
 
     let handle = client.queue().process_messages(
         "reactive-tasks",
         "worker-2",
         Duration::from_millis(100),
         |message| async move {
-            println!(
+            tracing::info!(
                 "   ⚙️  Processing message {}: {:?}",
                 message.id,
                 String::from_utf8_lossy(&message.payload)
@@ -89,12 +89,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // Simulate occasional failure
             if message.priority == 3 {
-                println!("      ❌ Processing failed (will NACK)");
+                tracing::info!("      ❌ Processing failed (will NACK)");
                 Err(synap_sdk::SynapError::Other(
                     "Simulated failure".to_string(),
                 ))
             } else {
-                println!("      ✅ Processing succeeded (will ACK)");
+                tracing::info!("      ✅ Processing succeeded (will ACK)");
                 Ok(())
             }
         },
@@ -103,26 +103,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Let it process for 3 seconds
     tokio::time::sleep(Duration::from_secs(3)).await;
     handle.unsubscribe();
-    println!("   Stopped processing\n");
+    tracing::info!("   Stopped processing\n");
 
     // 5. Get final stats
-    println!("5. Queue statistics");
+    tracing::info!("5. Queue statistics");
     let stats = client.queue().stats("reactive-tasks").await?;
-    println!("   Depth: {}", stats.depth);
-    println!("   Total consumed: {}", stats.total_consumed);
-    println!("   Total acked: {}", stats.total_acked);
-    println!("   Total nacked: {}\n", stats.total_nacked);
+    tracing::info!("   Depth: {}", stats.depth);
+    tracing::info!("   Total consumed: {}", stats.total_consumed);
+    tracing::info!("   Total acked: {}", stats.total_acked);
+    tracing::info!("   Total nacked: {}\n", stats.total_nacked);
 
     // 6. Cleanup
-    println!("6. Deleting queue");
+    tracing::info!("6. Deleting queue");
     client.queue().delete_queue("reactive-tasks").await?;
-    println!("   ✅ Queue deleted");
+    tracing::info!("   ✅ Queue deleted");
 
-    println!("\n✅ Reactive example completed successfully!");
-    println!("\n💡 Key Concepts:");
-    println!("   - observe_messages(): Stream-based consumption with manual ACK");
-    println!("   - process_messages(): Automatic ACK/NACK based on handler result");
-    println!("   - SubscriptionHandle: Graceful cancellation support");
+    tracing::info!("\n✅ Reactive example completed successfully!");
+    tracing::info!("\n💡 Key Concepts:");
+    tracing::info!("   - observe_messages(): Stream-based consumption with manual ACK");
+    tracing::info!("   - process_messages(): Automatic ACK/NACK based on handler result");
+    tracing::info!("   - SubscriptionHandle: Graceful cancellation support");
 
     Ok(())
 }

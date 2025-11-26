@@ -207,6 +207,74 @@ async fn test_hash_del_rest() {
 }
 
 #[tokio::test]
+async fn test_hash_mset_with_array_format() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test HMSET with array format
+    let res = client
+        .post(format!("{}/hash/user:array:test/mset", base_url))
+        .json(&json!([
+            {"field": "name", "value": "Alice"},
+            {"field": "age", "value": 30},
+            {"field": "email", "value": "alice@example.com"}
+        ]))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["success"], true);
+
+    // Verify fields were set
+    let getall_resp = client
+        .get(format!("{}/hash/user:array:test/getall", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(getall_resp.status(), 200);
+    let fields: HashMap<String, serde_json::Value> = getall_resp.json().await.unwrap();
+    assert_eq!(fields.len(), 3);
+    assert_eq!(fields["name"], "Alice");
+    assert_eq!(fields["age"], 30);
+    assert_eq!(fields["email"], "alice@example.com");
+}
+
+#[tokio::test]
+async fn test_hash_mset_backward_compatibility_with_object_format() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test HMSET with object format (backward compatibility)
+    let res = client
+        .post(format!("{}/hash/user:object:test/mset", base_url))
+        .json(&json!({
+            "fields": {
+                "name": "Bob",
+                "age": 25
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["success"], true);
+
+    // Verify fields were set
+    let getall_resp = client
+        .get(format!("{}/hash/user:object:test/getall", base_url))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(getall_resp.status(), 200);
+    let fields: HashMap<String, serde_json::Value> = getall_resp.json().await.unwrap();
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields["name"], "Bob");
+    assert_eq!(fields["age"], 25);
+}
+
+#[tokio::test]
 async fn test_hash_incrby_rest() {
     let base_url = spawn_test_server().await;
     let client = Client::new();

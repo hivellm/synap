@@ -16,11 +16,11 @@ use tokio::sync::broadcast;
 ///
 /// // Subscribe
 /// subject.subscribe(|value| {
-///     println!("Subscriber 1: {}", value);
+///     tracing::info!("Subscriber 1: {}", value);
 /// });
 ///
 /// subject.subscribe(|value| {
-///     println!("Subscriber 2: {}", value);
+///     tracing::info!("Subscriber 2: {}", value);
 /// });
 ///
 /// // Emit values

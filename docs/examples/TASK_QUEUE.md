@@ -553,17 +553,17 @@ impl VideoWorker {
     
     pub async fn start(&self) -> Result<()> {
         self.running.store(true, Ordering::SeqCst);
-        println!("{} started, waiting for tasks...", self.worker_id);
+        tracing::info!("{} started, waiting for tasks...", self.worker_id);
         
         while self.running.load(Ordering::SeqCst) {
             match self.process_next_task().await {
                 Ok(processed) => {
                     if processed {
-                        println!("{} completed task", self.worker_id);
+                        tracing::info!("{} completed task", self.worker_id);
                     }
                 }
                 Err(e) => {
-                    eprintln!("{} error: {}", self.worker_id, e);
+                    etracing::info!("{} error: {}", self.worker_id, e);
                     tokio::time::sleep(Duration::from_secs(1)).await;
                 }
             }
@@ -586,7 +586,7 @@ impl VideoWorker {
             return Ok(false);
         };
         
-        println!("{} processing {}", self.worker_id, msg.message_id);
+        tracing::info!("{} processing {}", self.worker_id, msg.message_id);
         
         // Process based on task type
         let result = match msg.message.task_type {
@@ -602,7 +602,7 @@ impl VideoWorker {
                 self.client.queue_ack(&self.queue_name, &msg.message_id).await?;
             }
             Err(e) => {
-                eprintln!("Task processing failed: {}", e);
+                etracing::info!("Task processing failed: {}", e);
                 
                 // NACK (will retry)
                 self.client.queue_nack(&self.queue_name, &msg.message_id, true).await?;
@@ -613,7 +613,7 @@ impl VideoWorker {
     }
     
     async fn transcode_video(&self, task: &VideoTask) -> Result<()> {
-        println!("Transcoding video {}", task.video_id);
+        tracing::info!("Transcoding video {}", task.video_id);
         
         // Simulate transcoding work
         tokio::time::sleep(Duration::from_secs(5)).await;
@@ -629,19 +629,19 @@ impl VideoWorker {
     }
     
     async fn generate_thumbnail(&self, task: &VideoTask) -> Result<()> {
-        println!("Generating thumbnail for {}", task.video_id);
+        tracing::info!("Generating thumbnail for {}", task.video_id);
         tokio::time::sleep(Duration::from_secs(2)).await;
         Ok(())
     }
     
     async fn upload_to_cdn(&self, task: &VideoTask) -> Result<()> {
-        println!("Uploading {} to CDN", task.video_id);
+        tracing::info!("Uploading {} to CDN", task.video_id);
         tokio::time::sleep(Duration::from_secs(3)).await;
         Ok(())
     }
     
     async fn notify_user(&self, task: &VideoTask) -> Result<()> {
-        println!("Notifying user {} about video {}", task.user_id, task.video_id);
+        tracing::info!("Notifying user {} about video {}", task.user_id, task.video_id);
         Ok(())
     }
     
@@ -661,7 +661,7 @@ async fn main() -> Result<()> {
     let running = worker.running.clone();
     tokio::spawn(async move {
         signal::ctrl_c().await.unwrap();
-        println!("\nShutting down gracefully...");
+        tracing::info!("\nShutting down gracefully...");
         running.store(false, Ordering::SeqCst);
     });
     

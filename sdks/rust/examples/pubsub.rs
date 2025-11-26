@@ -17,10 +17,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config)?;
 
-    println!("🔔 Synap Rust SDK - Pub/Sub Example\n");
+    tracing::info!("🔔 Synap Rust SDK - Pub/Sub Example\n");
 
     // 1. Subscribe to topics with wildcards
-    println!("1. Subscribing to topics");
+    tracing::info!("1. Subscribing to topics");
     let sub_id = client
         .pubsub()
         .subscribe_topics(
@@ -31,10 +31,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             ],
         )
         .await?;
-    println!("   Subscription ID: {}\n", sub_id);
+    tracing::info!("   Subscription ID: {}\n", sub_id);
 
     // 2. Publish messages to different topics
-    println!("2. Publishing messages");
+    tracing::info!("2. Publishing messages");
 
     let count = client
         .pubsub()
@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             None,
         )
         .await?;
-    println!(
+    tracing::info!(
         "   Published to events.user.login - delivered to {} subscribers",
         count
     );
@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             None,
         )
         .await?;
-    println!(
+    tracing::info!(
         "   Published to events.user.logout - delivered to {} subscribers",
         count
     );
@@ -73,18 +73,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             None,
         )
         .await?;
-    println!(
+    tracing::info!(
         "   Published to notifications.email.sent - delivered to {} subscribers\n",
         count
     );
 
     // 3. List active topics
-    println!("3. Listing active topics");
+    tracing::info!("3. Listing active topics");
     let topics = client.pubsub().list_topics().await?;
-    println!("   Active topics: {:?}\n", topics);
+    tracing::info!("   Active topics: {:?}\n", topics);
 
     // 4. Unsubscribe
-    println!("4. Unsubscribing");
+    tracing::info!("4. Unsubscribing");
     client
         .pubsub()
         .unsubscribe(
@@ -92,11 +92,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             vec!["events.user.*".to_string(), "notifications.#".to_string()],
         )
         .await?;
-    println!("   ✅ Unsubscribed from topics");
+    tracing::info!("   ✅ Unsubscribed from topics");
 
-    println!("\n✅ Example completed successfully!");
-    println!("\n📝 Note: To see message delivery in real-time, run multiple");
-    println!("   instances of this example in different terminals.");
+    tracing::info!("\n✅ Example completed successfully!");
+    tracing::info!("\n📝 Note: To see message delivery in real-time, run multiple");
+    tracing::info!("   instances of this example in different terminals.");
 
     Ok(())
 }

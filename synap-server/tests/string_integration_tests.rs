@@ -371,6 +371,76 @@ async fn test_string_msetnx_fails_when_any_key_exists() {
 }
 
 #[tokio::test]
+async fn test_string_msetnx_with_object_format() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test MSETNX with object format {key, value}
+    let res = client
+        .post(format!("{}/kv/msetnx", base_url))
+        .json(&json!({
+            "pairs": [
+                {"key": "string:msetnx:obj:one", "value": "one"},
+                {"key": "string:msetnx:obj:two", "value": "two"}
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["success"], true);
+
+    // Verify values were set
+    let res = client
+        .get(format!("{}/kv/get/string:msetnx:obj:one", base_url))
+        .send()
+        .await
+        .unwrap();
+    let value_str: String = res.json().await.unwrap();
+    assert_eq!(value_str, "\"one\"");
+
+    let res = client
+        .get(format!("{}/kv/get/string:msetnx:obj:two", base_url))
+        .send()
+        .await
+        .unwrap();
+    let value_str: String = res.json().await.unwrap();
+    assert_eq!(value_str, "\"two\"");
+}
+
+#[tokio::test]
+async fn test_string_msetnx_backward_compatibility_with_tuple_format() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test MSETNX with tuple format (backward compatibility)
+    let res = client
+        .post(format!("{}/kv/msetnx", base_url))
+        .json(&json!({
+            "pairs": [
+                ["string:msetnx:tuple:one", "one"],
+                ["string:msetnx:tuple:two", "two"]
+            ]
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["success"], true);
+
+    // Verify values were set
+    let res = client
+        .get(format!("{}/kv/get/string:msetnx:tuple:one", base_url))
+        .send()
+        .await
+        .unwrap();
+    let value_str: String = res.json().await.unwrap();
+    assert_eq!(value_str, "\"one\"");
+}
+
+#[tokio::test]
 async fn test_string_strlen_returns_zero_for_missing_key() {
     let base_url = spawn_test_server().await;
     let client = Client::new();

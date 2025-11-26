@@ -34,7 +34,9 @@ export class PubSubManager {
   ): Promise<boolean> {
     const cmdPayload: Record<string, any> = {
       topic,
-      payload: data,  // ✅ FIX: Use "payload" instead of "data" to match server API
+      // Server accepts both "payload" and "data" fields for backward compatibility
+      // We use "payload" as the primary field, but server will also accept "data"
+      payload: data,
     };
 
     if (options?.priority !== undefined) {

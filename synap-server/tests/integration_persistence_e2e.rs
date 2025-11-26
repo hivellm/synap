@@ -20,7 +20,7 @@ async fn test_e2e_persistence_layer_initialization() {
     // Initialize persistence
     let persistence = PersistenceLayer::new(config.clone()).await.unwrap();
 
-    println!("✅ PersistenceLayer initialized successfully");
+    tracing::info!("✅ PersistenceLayer initialized successfully");
 
     // Test WAL logging
     let kv_store = KVStore::new(KVConfig::default());
@@ -36,7 +36,7 @@ async fn test_e2e_persistence_layer_initialization() {
     // Give WAL time to flush
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-    println!("✅ Logged 10 operations to WAL");
+    tracing::info!("✅ Logged 10 operations to WAL");
 
     // Cleanup
     drop(persistence);
@@ -73,13 +73,13 @@ async fn test_e2e_wal_logging() {
     // Give WAL time to flush (AsyncWAL batches writes)
     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-    println!("✅ Logged 20 SETs and 5 DELETEs to WAL");
+    tracing::info!("✅ Logged 20 SETs and 5 DELETEs to WAL");
 
     // Verify WAL file exists (content might be buffered in AsyncWAL)
     let _wal_path = PathBuf::from("./target/e2e_wal/test.wal");
     // WAL file might not exist yet if AsyncWAL hasn't flushed
     // Just verify the operations completed without errors
-    println!("✅ WAL operations completed successfully");
+    tracing::info!("✅ WAL operations completed successfully");
 
     drop(persistence);
     let _ = std::fs::remove_dir_all("./target/e2e_wal");
@@ -128,7 +128,7 @@ async fn test_e2e_persistence_integration() {
     let size = kv_store.dbsize().await.unwrap();
     assert_eq!(size, 24, "Should have 24 keys (25 - 1 deleted)");
 
-    println!("✅ Persistence integration: {} keys with WAL logging", size);
+    tracing::info!("✅ Persistence integration: {} keys with WAL logging", size);
 
     drop(persistence);
     let _ = std::fs::remove_dir_all("./target/e2e_integration");
@@ -220,7 +220,7 @@ async fn test_e2e_queue_persistence_integration() {
         "Should have 4 messages (5 published - 1 ACKed, 1 requeued)"
     );
 
-    println!(
+    tracing::info!(
         "✅ Queue persistence integration: {} messages in queue",
         stats.depth
     );

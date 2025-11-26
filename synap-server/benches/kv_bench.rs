@@ -240,7 +240,7 @@ fn bench_memory_footprint(c: &mut Criterion) {
                 // Sample progress
                 if i % 100_000 == 0 {
                     let stats = store.stats().await;
-                    println!(
+                    tracing::info!(
                         "Loaded {} keys, memory: {}MB",
                         stats.total_keys,
                         stats.total_memory_bytes / 1024 / 1024

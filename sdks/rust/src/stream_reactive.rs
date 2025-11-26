@@ -29,7 +29,7 @@ impl crate::stream::StreamManager {
     ///
     /// // Process events reactively
     /// while let Some(event) = stream.next().await {
-    ///     println!("Event {}: {:?}", event.offset, event.data);
+    ///     tracing::info!("Event {}: {:?}", event.offset, event.data);
     /// }
     ///
     /// // Stop observing

@@ -143,6 +143,95 @@ async fn test_list_push_pop_rest() {
 }
 
 #[tokio::test]
+async fn test_list_lpop_without_count_defaults_to_one() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // RPUSH elements
+    client
+        .post(format!("{}/list/test:lpop:default/rpush", base_url))
+        .json(&json!({
+            "values": ["a", "b", "c"]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // LPOP without count (should default to 1)
+    let pop_resp = client
+        .post(format!("{}/list/test:lpop:default/lpop", base_url))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(pop_resp.status(), 200);
+    let pop_body: serde_json::Value = pop_resp.json().await.unwrap();
+    assert_eq!(pop_body["values"], json!(["a"]));
+    assert_eq!(pop_body["values"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn test_list_rpop_without_count_defaults_to_one() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // RPUSH elements
+    client
+        .post(format!("{}/list/test:rpop:default/rpush", base_url))
+        .json(&json!({
+            "values": ["x", "y", "z"]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // RPOP without count (should default to 1)
+    let pop_resp = client
+        .post(format!("{}/list/test:rpop:default/rpop", base_url))
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(pop_resp.status(), 200);
+    let pop_body: serde_json::Value = pop_resp.json().await.unwrap();
+    assert_eq!(pop_body["values"], json!(["z"]));
+    assert_eq!(pop_body["values"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn test_list_lpop_with_count() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // RPUSH elements
+    client
+        .post(format!("{}/list/test:lpop:count/rpush", base_url))
+        .json(&json!({
+            "values": ["1", "2", "3", "4"]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // LPOP with count
+    let pop_resp = client
+        .post(format!("{}/list/test:lpop:count/lpop", base_url))
+        .json(&json!({
+            "count": 2
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(pop_resp.status(), 200);
+    let pop_body: serde_json::Value = pop_resp.json().await.unwrap();
+    assert_eq!(pop_body["values"], json!(["1", "2"]));
+    assert_eq!(pop_body["values"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
 async fn test_list_range_rest() {
     let base_url = spawn_test_server().await;
     let client = Client::new();

@@ -7,6 +7,98 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed - GUI Dashboard Data Display & API Integration (November 2025) ✅
+
+**API Integration Fixes**
+- ✅ **Removed Mock Data** - All views now use real API data from Synap server
+- ✅ **Corrected API Endpoints** - Fixed all endpoints to match OpenAPI specification
+- ✅ **StreamableHTTP Support** - Implemented proper handling of StreamableHTTP format with `payload` wrapper
+- ✅ **Response Format Processing** - Fixed processing of different response formats (REST, StreamableHTTP, direct values)
+
+**Data Display Fixes**
+- ✅ **KV Store Size Calculation** - Fixed "0 B" display by calculating size from actual values
+- ✅ **Queue Pending Messages** - Fixed pending count to show correct number (uses `depth` when `pending` not provided)
+- ✅ **Decimal Formatting** - Limited all percentage values to 2 decimal places (e.g., Cache Hit Rate)
+- ✅ **Replication Info** - Fixed "undefined:undefined" display for master host/port
+- ✅ **Master Link Status** - Improved status display (N/A for master, Down instead of Unknown)
+
+**Real-time Updates**
+- ✅ **Auto-refresh** - Added automatic refresh every 5 seconds for Queues, Streams, and Pub/Sub views
+- ✅ **Last Update Timestamp** - Added timestamp display showing when data was last updated
+- ✅ **Log Streaming** - Implemented real-time log streaming using StreamableHTTP (SSE with polling fallback)
+
+**Value Processing**
+- ✅ **Double-encoded JSON** - Fixed processing of JSON values with double encoding (escaped JSON strings)
+- ✅ **Value Size Calculation** - Improved size calculation for strings, objects, and arrays
+- ✅ **Error Handling** - Better error handling and logging for API calls
+
+**Testing Scripts**
+- ✅ **API Activity Script** - Added `test-api-activity.ps1` for generating real-time activity and logs
+- ✅ **KV Values Test** - Added `test-kv-values.ps1` for verifying key values and sizes
+
+### Added - Synap Desktop GUI Dashboard (November 2025) 🎉
+
+**Desktop Application**
+- ✅ **Electron + Vue.js 3** - Cross-platform desktop application
+- ✅ **TypeScript + TailwindCSS** - Modern, type-safe frontend stack
+- ✅ **Custom Titlebar** - Frameless window with custom window controls
+- ✅ **Multi-Platform Builds** - Windows (NSIS, portable), macOS (DMG, ZIP), Linux (AppImage, DEB)
+
+**Dashboard Features**
+- ✅ **Real-time Metrics** - Live operations/sec, memory usage, cache hit rates
+- ✅ **Interactive Charts** - Performance graphs with Chart.js
+- ✅ **Multi-Server Management** - Connect to multiple Synap instances with persistence
+
+**Data Inspectors**
+- ✅ **KV Store Browser** - Browse, search, and edit key-value pairs
+- ✅ **Hash Inspector** - View and edit hash fields
+- ✅ **List Inspector** - Browse list elements with LPUSH/RPUSH
+- ✅ **Set Inspector** - Manage set members
+- ✅ **Sorted Set Inspector** - View ranked members with scores
+
+**System Monitors**
+- ✅ **Queue Viewer** - Monitor message queues, sizes, and DLQ
+- ✅ **Stream Monitor** - View event streams, rooms, and partitions
+- ✅ **Pub/Sub Dashboard** - Topic management and subscriptions
+- ✅ **Replication Monitor** - Topology visualization and lag tracking
+
+**Configuration & Logs**
+- ✅ **Configuration Editor** - YAML editor with live preview and rollback
+- ✅ **Log Viewer** - Real-time log streaming with level filters and search
+- ✅ **Log Export** - Export logs to JSON format
+
+**Infrastructure**
+- ✅ **REST API Client** - Axios-based client with error handling
+- ✅ **WebSocket Client** - Real-time updates with auto-reconnection
+- ✅ **Pinia Stores** - State management for servers, metrics, logs
+- ✅ **IPC Bridge** - Secure communication between renderer and main process
+
+### Fixed - REST API Request Format Compatibility (November 2025) ✅
+
+**Request Format Improvements**
+- ✅ **MSetNxRequest** - Now accepts both object format `{"key": "...", "value": "..."}` and tuple format `["key", "value"]` for backward compatibility
+- ✅ **HashMSetRequest** - Now accepts both array format `[{"field": "...", "value": "..."}]` and object format `{"fields": {...}}` for backward compatibility
+- ✅ **ListPopRequest** - Made `count` parameter optional (defaults to 1) for `lpop` and `rpop` operations
+- ✅ **ZAddRequest** - Now supports both single member format and array of members format (Redis-compatible)
+- ✅ **PublishMessageRequest** - Now accepts both `payload` and `data` fields for pub/sub publish operations
+- ✅ **Memory Usage** - Returns `{"bytes": 0, "human": "0B"}` for non-existent keys instead of error
+
+**Testing**
+- ✅ Added comprehensive test suite covering all fixed endpoints
+- ✅ Added backward compatibility tests for all format variations
+- ✅ Added integration tests for format variations
+- ✅ Fixed stream room creation test by initializing StreamManager in test server
+
+**SDK Updates**
+- ✅ **TypeScript SDK** - Updated `hash.mset` to support array format, `sortedset.zadd` with `addMultiple()`, `kv.msetnx` method, `pubsub.publish` uses payload field
+- ✅ **Rust SDK** - Updated `list.lpop/rpop` to use `Option<usize>` for count, `sortedset.zadd` with `add_multiple()`, `hash.mset` with `mset_array()` method
+- ✅ **Python SDK** - Updated `hash.mset` to support array format, `list.lpop/rpop` with optional count parameter
+
+**Impact**
+- Improved SDK compatibility with flexible request formats
+- Maintains full backward compatibility with existing formats
+- Better developer experience with more intuitive request structures
+
 ### Added - Docker Publishing & Documentation (November 2025) ✅
 
 **Docker Infrastructure**
@@ -1038,12 +1130,12 @@ Observable::from_stream(stream)
     .filter(|x| *x > 2)
     .map(|x| x * 2)
     .take(10)
-    .subscribe_next(|value| println!("{}", value));
+    .subscribe_next(|value| tracing::info!("{}", value));
 
 // Subject for multicasting
 let subject = Subject::new();
-subject.subscribe(|msg| println!("Sub 1: {}", msg));
-subject.subscribe(|msg| println!("Sub 2: {}", msg));
+subject.subscribe(|msg| tracing::info!("Sub 1: {}", msg));
+subject.subscribe(|msg| tracing::info!("Sub 2: {}", msg));
 subject.next("Hello");  // Both receive it!
 ```
 

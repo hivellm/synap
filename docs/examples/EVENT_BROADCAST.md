@@ -208,7 +208,7 @@ impl AnalyticsService {
     }
     
     pub async fn start(&self) -> Result<()> {
-        println!("Analytics service listening for events...");
+        tracing::info!("Analytics service listening for events...");
         
         self.client.stream_subscribe(
             "system-events",
@@ -229,17 +229,17 @@ impl AnalyticsService {
     }
     
     async fn track_registration(data: Value) {
-        println!("Tracking registration: {:?}", data);
+        tracing::info!("Tracking registration: {:?}", data);
         // Send to analytics platform
     }
     
     async fn track_order(data: Value) {
-        println!("Tracking order: {:?}", data);
+        tracing::info!("Tracking order: {:?}", data);
         // Record order metrics
     }
     
     async fn track_payment(data: Value) {
-        println!("Tracking payment: {:?}", data);
+        tracing::info!("Tracking payment: {:?}", data);
         // Record revenue
     }
 }
@@ -396,12 +396,12 @@ impl EventConsumer {
         loop {
             match self.subscribe_and_consume().await {
                 Ok(_) => {
-                    println!("Subscription ended normally");
+                    tracing::info!("Subscription ended normally");
                     break;
                 }
                 Err(e) => {
-                    eprintln!("Error consuming events: {}", e);
-                    println!("Retrying in 5 seconds...");
+                    etracing::info!("Error consuming events: {}", e);
+                    tracing::info!("Retrying in 5 seconds...");
                     tokio::time::sleep(Duration::from_secs(5)).await;
                 }
             }
@@ -414,7 +414,7 @@ impl EventConsumer {
             "system-events",
             |event| async move {
                 self.handle_event(event).await.unwrap_or_else(|e| {
-                    eprintln!("Error handling event: {}", e);
+                    etracing::info!("Error handling event: {}", e);
                 });
             },
             None

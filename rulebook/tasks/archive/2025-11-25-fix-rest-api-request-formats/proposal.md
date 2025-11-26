@@ -1,9 +1,10 @@
 # Fix REST API Request Formats
 
-> **Status**: Draft  
+> **Status**: 🔄 **IN PROGRESS** (90% Complete)  
 > **Priority**: Medium  
 > **Target**: v0.8.2  
-> **Duration**: 1-2 days
+> **Duration**: 1-2 days  
+> **Last Updated**: November 25, 2025
 
 ## Why
 
@@ -74,6 +75,14 @@ Fix request body format mismatches for the following endpoints:
 **Current Status** (from REST API testing):
 - ✅ **75/85 routes working** (88% success rate)
 - ❌ **10 routes with format issues** (12% need fixes)
+
+**Implementation Status** (Updated: November 25, 2025):
+- ✅ **All critical format fixes implemented** (MSETNX, HMSET, LPOP/RPOP, ZADD, Pub/Sub, Memory Usage)
+- ✅ **Comprehensive test coverage added** (10+ integration tests)
+- ✅ **OpenAPI specification updated** with corrected schemas and examples
+- ✅ **CHANGELOG.md updated** with all fixes
+- 🔄 **REST_API.md documentation** - In progress
+- ⏳ **Full test suite validation** - Pending
 
 **Categories**:
 - Health & Monitoring: 4/5 (80%)

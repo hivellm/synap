@@ -150,6 +150,76 @@ async fn test_pubsub_publish() {
 }
 
 #[tokio::test]
+async fn test_pubsub_publish_with_data_field() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Subscribe first
+    client
+        .post(format!("{}/pubsub/test.data.topic/subscribe", base_url))
+        .json(&json!({
+            "topics": ["test.data.topic"]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // Publish with "data" field instead of "payload"
+    let res = client
+        .post(format!("{}/pubsub/test.data.topic/publish", base_url))
+        .json(&json!({
+            "data": {"message": "test with data field", "value": 42},
+            "metadata": {"source": "test"}
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert!(body["message_id"].as_str().is_some());
+    assert_eq!(body["topic"], "test.data.topic");
+    // Note: subscribers_matched is 0 because REST subscribe doesn't create active connections
+    // Only WebSocket subscriptions create active connections that receive messages
+    assert_eq!(body["subscribers_matched"], 0);
+}
+
+#[tokio::test]
+async fn test_pubsub_publish_backward_compatibility_with_payload_field() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Subscribe first
+    client
+        .post(format!("{}/pubsub/test.payload.topic/subscribe", base_url))
+        .json(&json!({
+            "topics": ["test.payload.topic"]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // Publish with "payload" field (backward compatibility)
+    let res = client
+        .post(format!("{}/pubsub/test.payload.topic/publish", base_url))
+        .json(&json!({
+            "payload": {"message": "test with payload field", "value": 100},
+            "metadata": {"source": "test"}
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert!(body["message_id"].as_str().is_some());
+    assert_eq!(body["topic"], "test.payload.topic");
+    // Note: subscribers_matched is 0 because REST subscribe doesn't create active connections
+    // Only WebSocket subscriptions create active connections that receive messages
+    assert_eq!(body["subscribers_matched"], 0);
+}
+
+#[tokio::test]
 async fn test_pubsub_wildcard_single_level() {
     let base_url = spawn_test_server().await;
     let client = Client::new();

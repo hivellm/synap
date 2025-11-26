@@ -30,7 +30,7 @@ let subscription = obs
     .map(|x| x * 2)               // Double them
     .take(2)                      // Take first 2
     .subscribe_next(|value| {     // Subscribe
-        println!("Value: {}", value);
+        tracing::info!("Value: {}", value);
     });
 
 // Cleanup
@@ -47,11 +47,11 @@ let subject = Subject::new();
 
 // Multiple subscribers
 let sub1 = subject.subscribe(|value| {
-    println!("Subscriber 1: {}", value);
+    tracing::info!("Subscriber 1: {}", value);
 });
 
 let sub2 = subject.subscribe(|value| {
-    println!("Subscriber 2: {}", value);
+    tracing::info!("Subscriber 2: {}", value);
 });
 
 // Emit values (multicast to all subscribers)
@@ -84,9 +84,9 @@ let subscription = observable
     .map(|msg| String::from_utf8_lossy(&msg.payload).to_string())
     .take(10)  // First 10 messages
     .subscribe(
-        |data| println!("✅ Processed: {}", data),  // next
-        |err| eprintln!("❌ Error: {}", err),        // error
-        || println!("🏁 Complete!")                  // complete
+        |data| tracing::info!("✅ Processed: {}", data),  // next
+        |err| tracing::error!("❌ Error: {}", err),        // error
+        || tracing::info!("🏁 Complete!")                  // complete
     );
 
 // Later: cleanup
@@ -142,7 +142,7 @@ let buffered = operators::buffer_time(obs, Duration::from_secs(5));
 
 ```rust
 let subject = Subject::new();
-subject.subscribe(|x| println!("{}", x));
+subject.subscribe(|x| tracing::info!("{}", x));
 subject.next(1);  // All subscribers receive this
 ```
 
@@ -168,7 +168,7 @@ subject.next(1);  // All subscribers receive this
 
 1. **Use `.subscribe_next()` for simple cases**
    ```rust
-   obs.subscribe_next(|value| println!("{}", value))
+   obs.subscribe_next(|value| tracing::info!("{}", value))
    ```
 
 2. **Chain operators for readability**
@@ -176,12 +176,12 @@ subject.next(1);  // All subscribers receive this
    obs.filter(|x| *x > 0)
       .map(|x| x * 2)
       .take(10)
-      .subscribe_next(|x| println!("{}", x))
+      .subscribe_next(|x| tracing::info!("{}", x))
    ```
 
 3. **Always unsubscribe when done**
    ```rust
-   let sub = obs.subscribe_next(|x| println!("{}", x));
+   let sub = obs.subscribe_next(|x| tracing::info!("{}", x));
    // ... later
    sub.unsubscribe();
    ```

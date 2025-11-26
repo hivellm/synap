@@ -419,8 +419,18 @@ pub enum GetSetResponse {
 }
 
 #[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum MSetNxPair {
+    Tuple((String, serde_json::Value)),
+    Object {
+        key: String,
+        value: serde_json::Value,
+    },
+}
+
+#[derive(Debug, Deserialize)]
 pub struct MSetNxRequest {
-    pub pairs: Vec<(String, serde_json::Value)>,
+    pub pairs: Vec<MSetNxPair>,
 }
 
 #[derive(Debug, Serialize)]
@@ -560,7 +570,11 @@ pub async fn kv_msetnx(
     let pairs: Vec<(String, Vec<u8>)> = req
         .pairs
         .into_iter()
-        .map(|(key, value)| {
+        .map(|pair| {
+            let (key, value) = match pair {
+                MSetNxPair::Tuple((k, v)) => (k, v),
+                MSetNxPair::Object { key: k, value: v } => (k, v),
+            };
             let value_bytes = serde_json::to_vec(&value)
                 .map_err(|e| SynapError::SerializationError(e.to_string()))?;
             Ok((key, value_bytes))
@@ -849,13 +863,27 @@ pub async fn memory_usage(
     );
 
     let stores = state.monitoring.stores();
-    let key_type = key_manager.key_type(&key).await?;
+    let key_type = match key_manager.key_type(&key).await {
+        Ok(kt) => kt,
+        Err(_) => {
+            // Key doesn't exist, return 0 usage
+            return Ok(Json(serde_json::json!({
+                "key": key,
+                "bytes": 0,
+                "human": "0B"
+            })));
+        }
+    };
 
     let usage = MemoryUsage::calculate_with_stores(
         key_type, &key, &stores.0, &stores.1, &stores.2, &stores.3, &stores.4,
     )
     .await
-    .ok_or_else(|| SynapError::KeyNotFound(key.clone()))?;
+    .unwrap_or_else(|| MemoryUsage {
+        key: key.clone(),
+        bytes: 0,
+        human: "0B".to_string(),
+    });
 
     Ok(Json(serde_json::to_value(usage).map_err(|e| {
         SynapError::SerializationError(e.to_string())
@@ -1011,8 +1039,12 @@ pub struct HashSetRequest {
 }
 
 #[derive(Debug, Deserialize)]
-pub struct HashMSetRequest {
-    pub fields: HashMap<String, serde_json::Value>,
+#[serde(untagged)]
+pub enum HashMSetRequest {
+    Object {
+        fields: HashMap<String, serde_json::Value>,
+    },
+    Array(Vec<serde_json::Value>),
 }
 
 #[derive(Debug, Deserialize)]
@@ -1190,20 +1222,51 @@ pub async fn hash_mset(
     Path(key): Path<String>,
     Json(req): Json<HashMSetRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
-    debug!("REST HMSET key={} fields={}", key, req.fields.len());
+    let fields_map: HashMap<String, Vec<u8>> = match req {
+        HashMSetRequest::Object { fields } => {
+            debug!(
+                "REST HMSET key={} fields={} (object format)",
+                key,
+                fields.len()
+            );
+            fields
+                .into_iter()
+                .map(|(k, v)| {
+                    let bytes = serde_json::to_vec(&v).map_err(|e| {
+                        SynapError::InvalidValue(format!("Failed to serialize field {}: {}", k, e))
+                    })?;
+                    Ok((k, bytes))
+                })
+                .collect::<Result<HashMap<_, _>, SynapError>>()?
+        }
+        HashMSetRequest::Array(arr) => {
+            debug!("REST HMSET key={} fields={} (array format)", key, arr.len());
+            let mut fields_map = HashMap::new();
+            for item in arr {
+                let obj = item.as_object().ok_or_else(|| {
+                    SynapError::InvalidRequest(
+                        "Array items must be objects with 'field' and 'value'".to_string(),
+                    )
+                })?;
+                let field_name = obj.get("field").and_then(|v| v.as_str()).ok_or_else(|| {
+                    SynapError::InvalidRequest("Missing 'field' in array item".to_string())
+                })?;
+                let value = obj.get("value").ok_or_else(|| {
+                    SynapError::InvalidRequest("Missing 'value' in array item".to_string())
+                })?;
+                let bytes = serde_json::to_vec(value).map_err(|e| {
+                    SynapError::InvalidValue(format!(
+                        "Failed to serialize field {}: {}",
+                        field_name, e
+                    ))
+                })?;
+                fields_map.insert(field_name.to_string(), bytes);
+            }
+            fields_map
+        }
+    };
 
-    let fields: HashMap<String, Vec<u8>> = req
-        .fields
-        .into_iter()
-        .map(|(k, v)| {
-            let bytes = serde_json::to_vec(&v).map_err(|e| {
-                SynapError::InvalidValue(format!("Failed to serialize field {}: {}", k, e))
-            })?;
-            Ok((k, bytes))
-        })
-        .collect::<Result<HashMap<_, _>, SynapError>>()?;
-
-    state.hash_store.hmset(&key, fields)?;
+    state.hash_store.hmset(&key, fields_map)?;
 
     Ok(Json(json!({ "success": true, "key": key })))
 }
@@ -6012,6 +6075,7 @@ pub struct SubscribeRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct PublishMessageRequest {
+    #[serde(alias = "data")]
     pub payload: serde_json::Value,
     pub metadata: Option<HashMap<String, String>>,
 }
@@ -6266,7 +6330,8 @@ async fn handle_pubsub_publish_cmd(
     let payload = request
         .payload
         .get("payload")
-        .ok_or_else(|| SynapError::InvalidRequest("Missing 'payload' field".to_string()))?
+        .or_else(|| request.payload.get("data"))
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'payload' or 'data' field".to_string()))?
         .clone();
 
     let metadata = request.payload.get("metadata").and_then(|v| {
@@ -6477,13 +6542,27 @@ async fn handle_memory_usage_cmd(
     );
 
     let stores = state.monitoring.stores();
-    let key_type = key_manager.key_type(key).await?;
+    let key_type = match key_manager.key_type(key).await {
+        Ok(kt) => kt,
+        Err(_) => {
+            // Key doesn't exist, return 0 usage
+            return Ok(serde_json::json!({
+                "key": key,
+                "bytes": 0,
+                "human": "0B"
+            }));
+        }
+    };
 
     let usage = MemoryUsage::calculate_with_stores(
         key_type, key, &stores.0, &stores.1, &stores.2, &stores.3, &stores.4,
     )
     .await
-    .ok_or_else(|| SynapError::KeyNotFound(key.to_string()))?;
+    .unwrap_or_else(|| MemoryUsage {
+        key: key.to_string(),
+        bytes: 0,
+        human: "0B".to_string(),
+    });
 
     serde_json::to_value(usage).map_err(|e| SynapError::SerializationError(e.to_string()))
 }
@@ -7811,9 +7890,10 @@ pub async fn list_lpop(
     Path(key): Path<String>,
     Json(req): Json<ListPopRequest>,
 ) -> Result<Json<ListPopResponse>, SynapError> {
-    debug!("REST LPOP key={} count={:?}", key, req.count);
+    let count = req.count.unwrap_or(1);
+    debug!("REST LPOP key={} count={}", key, count);
 
-    let values = state.list_store.lpop(&key, req.count)?;
+    let values = state.list_store.lpop(&key, Some(count))?;
 
     let json_values: Result<Vec<serde_json::Value>, _> = values
         .into_iter()
@@ -7837,9 +7917,10 @@ pub async fn list_rpop(
     Path(key): Path<String>,
     Json(req): Json<ListPopRequest>,
 ) -> Result<Json<ListPopResponse>, SynapError> {
-    debug!("REST RPOP key={} count={:?}", key, req.count);
+    let count = req.count.unwrap_or(1);
+    debug!("REST RPOP key={} count={}", key, count);
 
-    let values = state.list_store.rpop(&key, req.count)?;
+    let values = state.list_store.rpop(&key, Some(count))?;
 
     let json_values: Vec<serde_json::Value> = values
         .into_iter()
@@ -8645,17 +8726,32 @@ async fn handle_bitmap_stats_cmd(
 // ==================== Sorted Set Handlers ====================
 
 #[derive(Debug, Deserialize)]
-pub struct ZAddRequest {
-    pub member: serde_json::Value,
-    pub score: f64,
-    #[serde(default)]
-    pub nx: bool,
-    #[serde(default)]
-    pub xx: bool,
-    #[serde(default)]
-    pub gt: bool,
-    #[serde(default)]
-    pub lt: bool,
+#[serde(untagged)]
+pub enum ZAddRequest {
+    Single {
+        member: serde_json::Value,
+        score: f64,
+        #[serde(default)]
+        nx: bool,
+        #[serde(default)]
+        xx: bool,
+        #[serde(default)]
+        gt: bool,
+        #[serde(default)]
+        lt: bool,
+    },
+    Multiple {
+        members: Vec<serde_json::Value>,
+        scores: Vec<f64>,
+        #[serde(default)]
+        nx: bool,
+        #[serde(default)]
+        xx: bool,
+        #[serde(default)]
+        gt: bool,
+        #[serde(default)]
+        lt: bool,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -8673,36 +8769,73 @@ pub struct ZInterstoreRequest {
     pub aggregate: String, // "sum", "min", "max"
 }
 
-/// POST /sortedset/:key/zadd - Add member with score
+/// POST /sortedset/:key/zadd - Add member(s) with score(s)
 pub async fn sortedset_zadd(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ZAddRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
-    debug!(
-        "REST ZADD key={} member={:?} score={}",
-        key, req.member, req.score
-    );
-
     // Check permission
     require_permission(&ctx, &format!("sortedset:{}", key), Action::Write)?;
 
-    let member = serde_json::to_vec(&req.member)
-        .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize member: {}", e)))?;
-
-    let opts = crate::core::ZAddOptions {
-        nx: req.nx,
-        xx: req.xx,
-        gt: req.gt,
-        lt: req.lt,
-        ch: false,
-        incr: false,
+    let opts = match &req {
+        ZAddRequest::Single { nx, xx, gt, lt, .. } => crate::core::ZAddOptions {
+            nx: *nx,
+            xx: *xx,
+            gt: *gt,
+            lt: *lt,
+            ch: false,
+            incr: false,
+        },
+        ZAddRequest::Multiple { nx, xx, gt, lt, .. } => crate::core::ZAddOptions {
+            nx: *nx,
+            xx: *xx,
+            gt: *gt,
+            lt: *lt,
+            ch: false,
+            incr: false,
+        },
     };
 
-    let (added, _) = state.sorted_set_store.zadd(&key, member, req.score, &opts);
+    let total_added = match req {
+        ZAddRequest::Single { member, score, .. } => {
+            debug!(
+                "REST ZADD key={} member={:?} score={} (single)",
+                key, member, score
+            );
+            let member_bytes = serde_json::to_vec(&member).map_err(|e| {
+                SynapError::InvalidValue(format!("Failed to serialize member: {}", e))
+            })?;
+            let (added, _) = state
+                .sorted_set_store
+                .zadd(&key, member_bytes, score, &opts);
+            added
+        }
+        ZAddRequest::Multiple {
+            members, scores, ..
+        } => {
+            debug!("REST ZADD key={} members={} (multiple)", key, members.len());
+            if members.len() != scores.len() {
+                return Err(SynapError::InvalidRequest(
+                    "members and scores arrays must have the same length".to_string(),
+                ));
+            }
+            let mut total_added = 0;
+            for (member, score) in members.into_iter().zip(scores.into_iter()) {
+                let member_bytes = serde_json::to_vec(&member).map_err(|e| {
+                    SynapError::InvalidValue(format!("Failed to serialize member: {}", e))
+                })?;
+                let (added, _) = state
+                    .sorted_set_store
+                    .zadd(&key, member_bytes, score, &opts);
+                total_added += added;
+            }
+            total_added
+        }
+    };
 
-    Ok(Json(json!({ "added": added, "key": key })))
+    Ok(Json(json!({ "added": total_added, "key": key })))
 }
 
 /// POST /sortedset/:key/zrem - Remove members
@@ -8760,15 +8893,26 @@ pub async fn sortedset_zincrby(
     Path(key): Path<String>,
     Json(req): Json<ZAddRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    let (member, increment) = match req {
+        ZAddRequest::Single { member, score, .. } => (member, score),
+        ZAddRequest::Multiple { .. } => {
+            return Err(SynapError::InvalidRequest(
+                "ZINCRBY only supports single member".to_string(),
+            ));
+        }
+    };
+
     debug!(
         "REST ZINCRBY key={} member={:?} increment={}",
-        key, req.member, req.score
+        key, member, increment
     );
 
-    let member = serde_json::to_vec(&req.member)
+    let member_bytes = serde_json::to_vec(&member)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize member: {}", e)))?;
 
-    let new_score = state.sorted_set_store.zincrby(&key, member, req.score);
+    let new_score = state
+        .sorted_set_store
+        .zincrby(&key, member_bytes, increment);
 
     Ok(Json(json!({ "score": new_score, "key": key })))
 }

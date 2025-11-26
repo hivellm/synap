@@ -35,7 +35,7 @@ impl crate::queue::QueueManager {
     ///
     /// // Process messages reactively
     /// while let Some(message) = stream.next().await {
-    ///     println!("Received: {:?}", message);
+    ///     tracing::info!("Received: {:?}", message);
     ///     // ACK handled automatically
     /// }
     ///
@@ -110,7 +110,7 @@ impl crate::queue::QueueManager {
     ///     Duration::from_millis(100),
     ///     |message| async move {
     ///         // Process the message
-    ///         println!("Processing: {:?}", message.id);
+    ///         tracing::info!("Processing: {:?}", message.id);
     ///         Ok(()) // Success = ACK, Err = NACK
     ///     }
     /// );

@@ -5,12 +5,13 @@
 
 use std::time::Duration;
 use synap_sdk::client::{SynapClient, SynapConfig};
+use tracing::info;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("🔐 Synap Rust SDK - Authentication Examples\n");
-    println!("{}", "=".repeat(50));
-    println!();
+    tracing_subscriber::fmt::init();
+    info!("🔐 Synap Rust SDK - Authentication Examples\n");
+    info!("{}", "=".repeat(50));
 
     // Example 1: Basic Auth
     example_basic_auth().await?;
@@ -24,21 +25,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Example 4: Switch Auth Methods
     example_switch_auth_methods().await?;
 
-    println!("{}", "=".repeat(50));
-    println!("✅ All authentication examples completed successfully!");
+    info!("{}", "=".repeat(50));
+    info!("✅ All authentication examples completed successfully!");
 
     Ok(())
 }
 
 async fn example_basic_auth() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== Basic Auth Example ===\n");
+    info!("=== Basic Auth Example ===\n");
 
     // Create config with Basic Auth credentials
     let config = SynapConfig::new("http://localhost:15500").with_basic_auth("root", "root");
 
     let client = SynapClient::new(config)?;
 
-    println!("Testing connection with Basic Auth...");
+    info!("Testing connection with Basic Auth...");
 
     // Perform operations - authentication is automatic
     client.kv().set("test:key", "test_value", None).await?;
@@ -46,25 +47,25 @@ async fn example_basic_auth() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(bytes) = value {
         let value_str = String::from_utf8_lossy(&bytes);
-        println!("✅ Successfully set and retrieved value: {}", value_str);
+        info!("✅ Successfully set and retrieved value: {}", value_str);
     }
 
     // Clean up
     client.kv().delete("test:key").await?;
-    println!("✅ Cleaned up test key\n");
+    info!("✅ Cleaned up test key\n");
 
     Ok(())
 }
 
 async fn example_api_key_auth() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== API Key Authentication Example ===\n");
+    info!("=== API Key Authentication Example ===\n");
 
     // Create config with API Key
     let config = SynapConfig::new("http://localhost:15500").with_auth_token("your-api-key-here"); // Replace with actual API key
 
     let client = SynapClient::new(config)?;
 
-    println!("Using API key authentication...");
+    info!("Using API key authentication...");
 
     // Perform operations - API key authentication is automatic
     client.kv().set("test:api_key", "test_value", None).await?;
@@ -72,7 +73,7 @@ async fn example_api_key_auth() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(bytes) = value {
         let value_str = String::from_utf8_lossy(&bytes);
-        println!(
+        info!(
             "✅ Successfully set and retrieved value with API key: {}",
             value_str
         );
@@ -80,13 +81,13 @@ async fn example_api_key_auth() -> Result<(), Box<dyn std::error::Error>> {
 
     // Clean up
     client.kv().delete("test:api_key").await?;
-    println!("✅ Cleaned up test key\n");
+    info!("✅ Cleaned up test key\n");
 
     Ok(())
 }
 
 async fn example_builder_pattern() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== Builder Pattern Example ===\n");
+    info!("=== Builder Pattern Example ===\n");
 
     // Create base config
     let config = SynapConfig::new("http://localhost:15500")
@@ -100,18 +101,18 @@ async fn example_builder_pattern() -> Result<(), Box<dyn std::error::Error>> {
 
     if let Some(bytes) = value {
         let value_str = String::from_utf8_lossy(&bytes);
-        println!("✅ Successfully used builder pattern: {}", value_str);
+        info!("✅ Successfully used builder pattern: {}", value_str);
     }
 
     // Clean up
     client.kv().delete("test:builder").await?;
-    println!("✅ Cleaned up test key\n");
+    info!("✅ Cleaned up test key\n");
 
     Ok(())
 }
 
 async fn example_switch_auth_methods() -> Result<(), Box<dyn std::error::Error>> {
-    println!("=== Switching Auth Methods Example ===\n");
+    info!("=== Switching Auth Methods Example ===\n");
 
     // Start with Basic Auth
     let basic_config = SynapConfig::new("http://localhost:15500").with_basic_auth("root", "root");
@@ -121,7 +122,7 @@ async fn example_switch_auth_methods() -> Result<(), Box<dyn std::error::Error>>
         .kv()
         .set("test:switch", "basic_auth", None)
         .await?;
-    println!("✅ Set value using Basic Auth");
+    info!("✅ Set value using Basic Auth");
 
     // Switch to API Key (if you have one)
     // let api_key_config = SynapConfig::new("http://localhost:15500")
@@ -130,12 +131,12 @@ async fn example_switch_auth_methods() -> Result<(), Box<dyn std::error::Error>>
     // let value = api_key_client.kv().get("test:switch").await?;
     // if let Some(bytes) = value {
     //     let value_str = String::from_utf8_lossy(&bytes);
-    //     println!("✅ Retrieved value using API Key: {}", value_str);
+    //     tracing::info!("✅ Retrieved value using API Key: {}", value_str);
     // }
 
     // Clean up
     basic_client.kv().delete("test:switch").await?;
-    println!("✅ Cleaned up test key\n");
+    info!("✅ Cleaned up test key\n");
 
     Ok(())
 }

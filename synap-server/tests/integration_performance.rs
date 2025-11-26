@@ -128,7 +128,7 @@ async fn test_adaptive_ttl_cleanup() {
         "All 100 keys should have expired and return None on GET"
     );
 
-    println!("✅ Adaptive TTL: {} keys expired correctly", expired_count);
+    tracing::info!("✅ Adaptive TTL: {} keys expired correctly", expired_count);
 }
 
 #[tokio::test]
@@ -298,7 +298,7 @@ async fn test_memory_efficiency() {
     // (key:8 + value:64 + overhead:24-32 = ~96-104 bytes per entry)
     assert!(memory_mb < 20, "Memory usage too high: {}MB", memory_mb);
 
-    println!("✅ Memory efficiency: 100K keys use {}MB", memory_mb);
+    tracing::info!("✅ Memory efficiency: 100K keys use {}MB", memory_mb);
 }
 
 #[tokio::test]
@@ -345,7 +345,7 @@ async fn test_concurrent_read_latency() {
         avg_latency_micros
     );
 
-    println!(
+    tracing::info!(
         "✅ Concurrent read latency: {}μs average",
         avg_latency_micros
     );

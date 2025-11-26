@@ -167,7 +167,7 @@ fn bench_compression_ratio(c: &mut Criterion) {
             .unwrap();
         let zstd_ratio = original_size as f64 / zstd_compressed.len() as f64;
 
-        println!(
+        tracing::info!(
             "\n{} ({}KB): LZ4={:.2}x ({} bytes), Zstd={:.2}x ({} bytes)",
             name,
             original_size / 1024,

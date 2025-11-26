@@ -135,18 +135,36 @@ class HashManager:
         response = await self._client.send_command("hash.len", {"key": key})
         return response.get("length", 0)
 
-    async def mset(self, key: str, fields: dict[str, str | int | float]) -> bool:
+    async def mset(
+        self, 
+        key: str, 
+        fields: dict[str, str | int | float] | list[dict[str, str]]
+    ) -> bool:
         """Set multiple fields in hash.
+
+        Supports both dict format (backward compatible) and array format (Redis-compatible).
 
         Args:
             key: Hash key
-            fields: Dictionary of field-value pairs
+            fields: Dictionary of field-value pairs OR list of {"field": "...", "value": "..."} dicts
 
         Returns:
             True if fields were set
+
+        Example:
+            >>> # Dict format (backward compatible)
+            >>> await hash.mset("user:1", {"name": "Alice", "age": 30})
+            >>> # Array format (Redis-compatible)
+            >>> await hash.mset("user:1", [{"field": "name", "value": "Alice"}, {"field": "age", "value": "30"}])
         """
-        str_fields = {k: str(v) for k, v in fields.items()}
-        response = await self._client.send_command("hash.mset", {"key": key, "fields": str_fields})
+        if isinstance(fields, list):
+            # Array format: [{"field": "...", "value": "..."}, ...]
+            fields_array = [{"field": f["field"], "value": str(f["value"])} for f in fields]
+            response = await self._client.send_command("hash.mset", {"key": key, "fields": fields_array})
+        else:
+            # Dict format (backward compatible)
+            str_fields = {k: str(v) for k, v in fields.items()}
+            response = await self._client.send_command("hash.mset", {"key": key, "fields": str_fields})
         return response.get("success", False)
 
     async def mget(self, key: str, fields: list[str]) -> dict[str, str | None]:

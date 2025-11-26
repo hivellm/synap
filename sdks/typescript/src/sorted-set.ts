@@ -49,9 +49,18 @@ export class SortedSetManager {
   /**
    * Add member with score to sorted set (ZADD)
    * 
+   * Supports both single member (backward compatible) and array of members (Redis-compatible)
+   * 
    * @example
    * ```typescript
+   * // Single member (backward compatible)
    * await sortedSet.add('leaderboard', 'player1', 100);
+   * 
+   * // Multiple members (Redis-compatible)
+   * await sortedSet.addMultiple('leaderboard', [
+   *   { member: 'player1', score: 100 },
+   *   { member: 'player2', score: 200 }
+   * ]);
    * ```
    */
   async add(key: string, member: string, score: number): Promise<boolean> {
@@ -65,6 +74,29 @@ export class SortedSetManager {
     );
     const payload = extractPayload(response);
     return (payload?.added ?? 0) > 0;
+  }
+
+  /**
+   * Add multiple members with scores to sorted set (ZADD with array)
+   * 
+   * @example
+   * ```typescript
+   * await sortedSet.addMultiple('leaderboard', [
+   *   { member: 'player1', score: 100 },
+   *   { member: 'player2', score: 200 }
+   * ]);
+   * ```
+   */
+  async addMultiple(key: string, members: Array<{ member: string; score: number }>): Promise<number> {
+    const response = await this.client.sendCommand<{ added?: number } | { payload: { added?: number } }>(
+      'sortedset.zadd',
+      {
+        key,
+        members: members.map(m => ({ member: m.member, score: m.score })),
+      }
+    );
+    const payload = extractPayload(response);
+    return payload?.added ?? 0;
   }
 
   /**

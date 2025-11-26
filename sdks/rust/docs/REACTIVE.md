@@ -19,7 +19,7 @@ let (mut stream, handle) = client.queue()
     .observe_messages("tasks", "worker-1", Duration::from_millis(100));
 
 while let Some(message) = stream.next().await {
-    println!("Received: {:?}", message);
+    tracing::info!("Received: {:?}", message);
 }
 ```
 
@@ -53,7 +53,7 @@ let (mut stream, handle) = client.queue()
 
 while let Some(message) = stream.next().await {
     // Process message
-    println!("Processing: {:?}", message.id);
+    tracing::info!("Processing: {:?}", message.id);
     
     // Manual ACK
     client.queue().ack("tasks", &message.id).await?;
@@ -81,7 +81,7 @@ let handle = client.queue().process_messages(
     Duration::from_millis(100),
     |message| async move {
         // Process the message
-        println!("Processing: {:?}", message.id);
+        tracing::info!("Processing: {:?}", message.id);
         
         // Result determines ACK/NACK:
         // Ok(()) = ACK (success)
@@ -117,7 +117,7 @@ let (mut stream, handle) = client.stream()
     .observe_events("chat-room-1", Some(0), Duration::from_millis(100));
 
 while let Some(event) = stream.next().await {
-    println!("Event {}: {} = {:?}", event.offset, event.event_type, event.data);
+    tracing::info!("Event {}: {} = {:?}", event.offset, event.event_type, event.data);
 }
 
 handle.unsubscribe();
@@ -140,7 +140,7 @@ let (mut stream, handle) = client.stream()
     .observe_event("chat-room-1", "message", Some(0), Duration::from_millis(100));
 
 while let Some(event) = stream.next().await {
-    println!("Message event: {:?}", event.data);
+    tracing::info!("Message event: {:?}", event.data);
 }
 
 handle.unsubscribe();
@@ -304,7 +304,7 @@ let with_recovery = stream.then(|message| async move {
     match process(message).await {
         Ok(result) => Some(result),
         Err(e) => {
-            eprintln!("Error: {}", e);
+            etracing::info!("Error: {}", e);
             None // Skip failed items
         }
     }

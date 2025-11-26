@@ -107,14 +107,36 @@ export class HashManager {
 
   /**
    * Set multiple fields in hash
+   * 
+   * Supports both object format (backward compatible) and array format (Redis-compatible)
+   * 
+   * @example
+   * ```typescript
+   * // Object format (backward compatible)
+   * await hash.mset('user:1', { name: 'Alice', age: 30 });
+   * 
+   * // Array format (Redis-compatible)
+   * await hash.mset('user:1', [{ field: 'name', value: 'Alice' }, { field: 'age', value: '30' }]);
+   * ```
    */
-  async mset(key: string, fields: Record<string, string | number>): Promise<boolean> {
-    const response = await this.client.sendCommand<{ success?: boolean }>('hash.mset', {
-      key,
-      fields: Object.fromEntries(
+  async mset(key: string, fields: Record<string, string | number> | Array<{ field: string; value: string | number }>): Promise<boolean> {
+    let payload: Record<string, any> = { key };
+    
+    // Check if fields is an array (new format) or object (backward compatible)
+    if (Array.isArray(fields)) {
+      // Array format: [{"field": "...", "value": "..."}, ...]
+      payload.fields = fields.map(f => ({
+        field: f.field,
+        value: String(f.value)
+      }));
+    } else {
+      // Object format (backward compatible)
+      payload.fields = Object.fromEntries(
         Object.entries(fields).map(([k, v]) => [k, String(v)])
-      ),
-    });
+      );
+    }
+    
+    const response = await this.client.sendCommand<{ success?: boolean }>('hash.mset', payload);
     return response?.success ?? false;
   }
 

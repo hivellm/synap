@@ -110,7 +110,7 @@ let api_key = api_key_manager.create(
 )?;
 
 // Key format: sk_XXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-println!("API Key: {}", api_key.key);
+tracing::info!("API Key: {}", api_key.key);
 ```
 
 #### Features
@@ -129,8 +129,8 @@ use std::net::IpAddr;
 let client_ip = IpAddr::from([192, 168, 1, 100]);
 let verified_key = api_key_manager.verify("sk_XXXX...", client_ip)?;
 
-println!("Key Name: {}", verified_key.name);
-println!("Usage Count: {}", verified_key.usage_count);
+tracing::info!("Key Name: {}", verified_key.name);
+tracing::info!("Usage Count: {}", verified_key.usage_count);
 ```
 
 #### Cleanup Expired Keys
@@ -138,7 +138,7 @@ println!("Usage Count: {}", verified_key.usage_count);
 ```rust
 // Remove all expired keys
 let removed_count = api_key_manager.cleanup_expired();
-println!("Removed {} expired keys", removed_count);
+tracing::info!("Removed {} expired keys", removed_count);
 ```
 
 ---
@@ -200,7 +200,7 @@ let result = acl.check_access(
 );
 
 if result.is_ok() {
-    println!("Access granted!");
+    tracing::info!("Access granted!");
 }
 ```
 
@@ -397,7 +397,7 @@ let api_key = api_key_manager.create(
     Some(365),  // 1 year
 )?;
 
-println!("Service API Key: {}", api_key.key);
+tracing::info!("Service API Key: {}", api_key.key);
 ```
 
 ### Example 2: Multi-Tenant Setup

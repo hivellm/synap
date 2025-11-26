@@ -3,14 +3,14 @@ info:
   title: Synap API
   description: |
     High-Performance In-Memory Key-Value Store & Message Broker
-    
+
     Synap combines Redis, RabbitMQ, and Kafka features in a single platform:
     - **Key-Value Store**: Radix-tree based storage with TTL support
     - **Hash Store**: Redis-compatible hash data structure for structured objects
     - **Message Queues**: RabbitMQ-style queues with ACK/NACK
     - **Event Streams**: Kafka-style partitioned topics with consumer groups
     - **Pub/Sub**: Topic-based messaging with wildcard support
-    
+
     **Authentication & Security** (✅ Production Ready):
     - **Basic Auth**: HTTP Basic Authentication (username:password)
     - **Bearer Token**: API Key authentication via Authorization header
@@ -83,7 +83,7 @@ paths:
       description: Check if the server is running and healthy
       operationId: healthCheck
       responses:
-        '200':
+        "200":
           description: Server is healthy
           content:
             application/json:
@@ -122,13 +122,13 @@ paths:
                   example: user:123
                 value:
                   type: object
-                  example: {"name": "John Doe", "age": 30}
+                  example: { "name": "John Doe", "age": 30 }
                 ttl:
                   type: integer
                   description: Time-to-live in seconds
                   example: 3600
       responses:
-        '200':
+        "200":
           description: Key set successfully
           content:
             application/json:
@@ -156,7 +156,7 @@ paths:
             type: string
           example: user:123
       responses:
-        '200':
+        "200":
           description: Value retrieved successfully
           content:
             application/json:
@@ -168,7 +168,7 @@ paths:
                     example: true
                   value:
                     type: object
-                    example: {"name": "John Doe", "age": 30}
+                    example: { "name": "John Doe", "age": 30 }
                   ttl:
                     type: integer
                     nullable: true
@@ -188,7 +188,7 @@ paths:
             type: string
           example: user:123
       responses:
-        '200':
+        "200":
           description: Key deleted successfully
           content:
             application/json:
@@ -209,12 +209,12 @@ paths:
       description: Retrieve statistics about the key-value store
       operationId: kvStats
       responses:
-        '200':
+        "200":
           description: Statistics retrieved successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/KVStats'
+                $ref: "#/components/schemas/KVStats"
 
   # ==========================================
   # Hash Endpoints
@@ -247,12 +247,12 @@ paths:
                   description: Value (can be string, number, or object)
                   example: Alice
       responses:
-        '200':
+        "200":
           description: Field set successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HashSetResponse'
+                $ref: "#/components/schemas/HashSetResponse"
 
   /hash/{key}/{field}:
     get:
@@ -274,14 +274,14 @@ paths:
             type: string
           example: name
       responses:
-        '200':
+        "200":
           description: Field value retrieved
           content:
             application/json:
               schema:
                 description: Field value (string, number, or null if not found)
                 example: Alice
-        '404':
+        "404":
           description: Hash or field not found
 
   /hash/{key}/getall:
@@ -298,7 +298,7 @@ paths:
             type: string
           example: user:1000
       responses:
-        '200':
+        "200":
           description: All fields retrieved
           content:
             application/json:
@@ -324,7 +324,7 @@ paths:
             type: string
           example: user:1000
       responses:
-        '200':
+        "200":
           description: Field names retrieved
           content:
             application/json:
@@ -348,7 +348,7 @@ paths:
             type: string
           example: user:1000
       responses:
-        '200':
+        "200":
           description: Values retrieved
           content:
             application/json:
@@ -372,7 +372,7 @@ paths:
             type: string
           example: user:1000
       responses:
-        '200':
+        "200":
           description: Field count retrieved
           content:
             application/json:
@@ -387,7 +387,12 @@ paths:
     post:
       tags: [Hash]
       summary: Set multiple hash fields
-      description: Set multiple field-value pairs in a hash
+      description: |
+        Set multiple field-value pairs in a hash.
+
+        **Supported Formats:**
+        - Object format: `{"fields": {"name": "Alice", "age": 30}}`
+        - Array format: `[{"field": "name", "value": "Alice"}, {"field": "age", "value": 30}]`
       operationId: hashMSet
       parameters:
         - name: key
@@ -401,18 +406,37 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [fields]
-              properties:
-                fields:
-                  type: object
-                  additionalProperties: true
+              oneOf:
+                - type: object
+                  required: [fields]
+                  properties:
+                    fields:
+                      type: object
+                      additionalProperties: true
+                      example:
+                        name: Alice
+                        age: 30
+                        email: alice@example.com
+                - type: array
+                  items:
+                    type: object
+                    required: [field, value]
+                    properties:
+                      field:
+                        type: string
+                        example: name
+                      value:
+                        description: Field value (any JSON type)
+                        example: Alice
                   example:
-                    name: Alice
-                    age: 30
-                    email: alice@example.com
+                    - field: name
+                      value: Alice
+                    - field: age
+                      value: 30
+                    - field: email
+                      value: alice@example.com
       responses:
-        '200':
+        "200":
           description: Fields set successfully
           content:
             application/json:
@@ -450,7 +474,7 @@ paths:
                     type: string
                   example: [name, age, email]
       responses:
-        '200':
+        "200":
           description: Field values retrieved
           content:
             application/json:
@@ -487,12 +511,12 @@ paths:
                     type: string
                   example: [email, age]
       responses:
-        '200':
+        "200":
           description: Fields deleted
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HashDelResponse'
+                $ref: "#/components/schemas/HashDelResponse"
 
   /hash/{key}/{field}/exists:
     get:
@@ -514,7 +538,7 @@ paths:
             type: string
           example: name
       responses:
-        '200':
+        "200":
           description: Existence check result
           content:
             application/json:
@@ -554,7 +578,7 @@ paths:
                   format: int64
                   example: 1
       responses:
-        '200':
+        "200":
           description: Field incremented
           content:
             application/json:
@@ -595,7 +619,7 @@ paths:
                   format: double
                   example: 0.25
       responses:
-        '200':
+        "200":
           description: Field incremented
           content:
             application/json:
@@ -633,9 +657,9 @@ paths:
                   example: created_at
                 value:
                   description: Value to set
-                  example: '2025-10-24T12:00:00Z'
+                  example: "2025-10-24T12:00:00Z"
       responses:
-        '200':
+        "200":
           description: Set operation result
           content:
             application/json:
@@ -653,12 +677,12 @@ paths:
       description: Retrieve statistics about the hash store
       operationId: hashStats
       responses:
-        '200':
+        "200":
           description: Statistics retrieved
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HashStatsResponse'
+                $ref: "#/components/schemas/HashStatsResponse"
 
   # ==========================================
   # Bitmap Endpoints
@@ -696,7 +720,7 @@ paths:
                   description: Bit value (0 or 1)
                   example: 1
       responses:
-        '200':
+        "200":
           description: Bit set successfully
           content:
             application/json:
@@ -731,7 +755,7 @@ paths:
             format: int64
           example: 5
       responses:
-        '200':
+        "200":
           description: Bit value retrieved
           content:
             application/json:
@@ -776,7 +800,7 @@ paths:
           description: End byte offset (optional)
           example: 10
       responses:
-        '200':
+        "200":
           description: Bit count retrieved
           content:
             application/json:
@@ -827,7 +851,7 @@ paths:
           description: End byte offset (optional)
           example: 10
       responses:
-        '200':
+        "200":
           description: Bit position found
           content:
             application/json:
@@ -873,7 +897,7 @@ paths:
                     type: string
                   example: [bitmap1, bitmap2]
       responses:
-        '200':
+        "200":
           description: Bitwise operation completed
           content:
             application/json:
@@ -907,7 +931,7 @@ paths:
             schema:
               type: array
               items:
-                $ref: '#/components/schemas/BitfieldOperation'
+                $ref: "#/components/schemas/BitfieldOperation"
               example:
                 - operation: SET
                   offset: 0
@@ -925,7 +949,7 @@ paths:
                   increment: 10
                   overflow: WRAP
       responses:
-        '200':
+        "200":
           description: Bitfield operations completed
           content:
             application/json:
@@ -949,12 +973,12 @@ paths:
       description: Retrieve statistics about the bitmap store
       operationId: bitmapStats
       responses:
-        '200':
+        "200":
           description: Statistics retrieved
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/BitmapStatsResponse'
+                $ref: "#/components/schemas/BitmapStatsResponse"
 
   # ==========================================
   # HyperLogLog Endpoints
@@ -985,14 +1009,17 @@ paths:
                   items:
                     type: string
                   description: Elements to add to the HyperLogLog
-                  example: [user:1, user:2, user:3]
+                  example:
+                    - "user:1"
+                    - "user:2"
+                    - "user:3"
                 ttl_secs:
                   type: integer
                   format: int64
                   description: Optional TTL in seconds for the HyperLogLog
                   example: 3600
       responses:
-        '200':
+        "200":
           description: Elements added successfully
           content:
             application/json:
@@ -1021,7 +1048,7 @@ paths:
             type: string
           example: unique-visitors
       responses:
-        '200':
+        "200":
           description: Cardinality estimate retrieved
           content:
             application/json:
@@ -1063,9 +1090,12 @@ paths:
                   items:
                     type: string
                   description: Source HyperLogLog keys to merge
-                  example: [visitors:day1, visitors:day2, visitors:day3]
+                  example:
+                    - "visitors:day1"
+                    - "visitors:day2"
+                    - "visitors:day3"
       responses:
-        '200':
+        "200":
           description: HyperLogLog structures merged successfully
           content:
             application/json:
@@ -1088,12 +1118,12 @@ paths:
       description: Retrieve statistics about the HyperLogLog store
       operationId: hyperloglogStats
       responses:
-        '200':
+        "200":
           description: Statistics retrieved
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HyperLogLogStatsResponse'
+                $ref: "#/components/schemas/HyperLogLogStatsResponse"
 
   # ==========================================
   # Geospatial Endpoints
@@ -1149,7 +1179,7 @@ paths:
                   description: Return count of changed elements
                   default: false
       responses:
-        '200':
+        "200":
           description: Locations added successfully
           content:
             application/json:
@@ -1196,7 +1226,7 @@ paths:
             default: m
           description: Distance unit
       responses:
-        '200':
+        "200":
           description: Distance calculated
           content:
             application/json:
@@ -1276,7 +1306,7 @@ paths:
             type: string
             enum: [ASC, DESC]
       responses:
-        '200':
+        "200":
           description: Results retrieved
           content:
             application/json:
@@ -1289,7 +1319,7 @@ paths:
                   results:
                     type: array
                     items:
-                      $ref: '#/components/schemas/GeoradiusResult'
+                      $ref: "#/components/schemas/GeoradiusResult"
 
   /geospatial/{key}/georadiusbymember/{member}:
     get:
@@ -1344,7 +1374,7 @@ paths:
             type: string
             enum: [ASC, DESC]
       responses:
-        '200':
+        "200":
           description: Results retrieved
           content:
             application/json:
@@ -1357,7 +1387,7 @@ paths:
                   results:
                     type: array
                     items:
-                      $ref: '#/components/schemas/GeoradiusResult'
+                      $ref: "#/components/schemas/GeoradiusResult"
 
   /geospatial/{key}/geopos:
     post:
@@ -1386,7 +1416,7 @@ paths:
                     type: string
                   example: [San Francisco, New York]
       responses:
-        '200':
+        "200":
           description: Coordinates retrieved
           content:
             application/json:
@@ -1436,7 +1466,7 @@ paths:
                     type: string
                   example: [San Francisco, New York]
       responses:
-        '200':
+        "200":
           description: Geohashes retrieved
           content:
             application/json:
@@ -1471,9 +1501,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GeospatialSearchRequest'
+              $ref: "#/components/schemas/GeospatialSearchRequest"
       responses:
-        '200':
+        "200":
           description: Search results retrieved
           content:
             application/json:
@@ -1486,7 +1516,7 @@ paths:
                   results:
                     type: array
                     items:
-                      $ref: '#/components/schemas/GeoradiusResult'
+                      $ref: "#/components/schemas/GeoradiusResult"
 
   /geospatial/stats:
     get:
@@ -1495,12 +1525,12 @@ paths:
       description: Retrieve statistics about the geospatial store
       operationId: geospatialStats
       responses:
-        '200':
+        "200":
           description: Statistics retrieved
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GeospatialStatsResponse'
+                $ref: "#/components/schemas/GeospatialStatsResponse"
 
   # ==========================================
   # Queue Endpoints
@@ -1523,9 +1553,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateQueueRequest'
+              $ref: "#/components/schemas/CreateQueueRequest"
       responses:
-        '200':
+        "200":
           description: Queue created successfully
           content:
             application/json:
@@ -1551,7 +1581,7 @@ paths:
             type: string
           example: tasks
       responses:
-        '200':
+        "200":
           description: Queue deleted successfully
 
   /queue/{name}/publish:
@@ -1572,14 +1602,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PublishRequest'
+              $ref: "#/components/schemas/PublishRequest"
       responses:
-        '200':
+        "200":
           description: Message published successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PublishResponse'
+                $ref: "#/components/schemas/PublishResponse"
 
   /queue/{name}/consume/{consumer_id}:
     get:
@@ -1601,12 +1631,12 @@ paths:
             type: string
           example: worker-1
       responses:
-        '200':
+        "200":
           description: Message consumed successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConsumeResponse'
+                $ref: "#/components/schemas/ConsumeResponse"
 
   /queue/{name}/ack:
     post:
@@ -1633,7 +1663,7 @@ paths:
                   type: string
                   example: msg_abc123xyz
       responses:
-        '200':
+        "200":
           description: Message acknowledged successfully
 
   /queue/{name}/nack:
@@ -1665,7 +1695,7 @@ paths:
                   default: true
                   example: true
       responses:
-        '200':
+        "200":
           description: Message rejected successfully
 
   /queue/{name}/stats:
@@ -1682,12 +1712,12 @@ paths:
             type: string
           example: tasks
       responses:
-        '200':
+        "200":
           description: Statistics retrieved successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/QueueStats'
+                $ref: "#/components/schemas/QueueStats"
 
   /queue/list:
     get:
@@ -1696,7 +1726,7 @@ paths:
       description: Get a list of all queues
       operationId: queueList
       responses:
-        '200':
+        "200":
           description: Queue list retrieved successfully
           content:
             application/json:
@@ -1726,7 +1756,7 @@ paths:
             type: string
           example: chat-room-1
       responses:
-        '200':
+        "200":
           description: Room created successfully
     delete:
       tags: [Event Streams (Simple)]
@@ -1741,7 +1771,7 @@ paths:
             type: string
           example: chat-room-1
       responses:
-        '200':
+        "200":
           description: Room deleted successfully
 
   /stream/{room}/publish:
@@ -1762,14 +1792,14 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/StreamPublishRequest'
+              $ref: "#/components/schemas/StreamPublishRequest"
       responses:
-        '200':
+        "200":
           description: Event published successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StreamPublishResponse'
+                $ref: "#/components/schemas/StreamPublishResponse"
 
   /stream/{room}/consume/{subscriber_id}:
     get:
@@ -1803,12 +1833,12 @@ paths:
             default: 100
           example: 50
       responses:
-        '200':
+        "200":
           description: Events retrieved successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StreamConsumeResponse'
+                $ref: "#/components/schemas/StreamConsumeResponse"
 
   /stream/{room}/stats:
     get:
@@ -1824,12 +1854,12 @@ paths:
             type: string
           example: chat-room-1
       responses:
-        '200':
+        "200":
           description: Statistics retrieved successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/RoomStats'
+                $ref: "#/components/schemas/RoomStats"
 
   /stream/list:
     get:
@@ -1838,7 +1868,7 @@ paths:
       description: Get a list of all event stream rooms
       operationId: streamListRooms
       responses:
-        '200':
+        "200":
           description: Room list retrieved successfully
           content:
             application/json:
@@ -1864,7 +1894,7 @@ paths:
       description: Get a list of all partitioned topics
       operationId: listTopics
       responses:
-        '200':
+        "200":
           description: Topic list retrieved successfully
           content:
             application/json:
@@ -1898,9 +1928,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateTopicRequest'
+              $ref: "#/components/schemas/CreateTopicRequest"
       responses:
-        '200':
+        "200":
           description: Topic created successfully
           content:
             application/json:
@@ -1932,7 +1962,7 @@ paths:
             type: string
           example: orders
       responses:
-        '200':
+        "200":
           description: Topic deleted successfully
           content:
             application/json:
@@ -1960,7 +1990,7 @@ paths:
             type: string
           example: orders
       responses:
-        '200':
+        "200":
           description: Statistics retrieved successfully
           content:
             application/json:
@@ -1973,7 +2003,7 @@ paths:
                   partitions:
                     type: array
                     items:
-                      $ref: '#/components/schemas/PartitionStats'
+                      $ref: "#/components/schemas/PartitionStats"
 
   /topics/{topic}/publish:
     post:
@@ -1993,9 +2023,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PartitionPublishRequest'
+              $ref: "#/components/schemas/PartitionPublishRequest"
       responses:
-        '200':
+        "200":
           description: Event published successfully
           content:
             application/json:
@@ -2037,9 +2067,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ConsumePartitionRequest'
+              $ref: "#/components/schemas/ConsumePartitionRequest"
       responses:
-        '200':
+        "200":
           description: Events consumed successfully
           content:
             application/json:
@@ -2055,7 +2085,7 @@ paths:
                   events:
                     type: array
                     items:
-                      $ref: '#/components/schemas/PartitionEvent'
+                      $ref: "#/components/schemas/PartitionEvent"
                   next_offset:
                     type: integer
                     format: int64
@@ -2074,7 +2104,7 @@ paths:
       description: Get a list of all consumer groups
       operationId: listConsumerGroups
       responses:
-        '200':
+        "200":
           description: Consumer group list retrieved successfully
           content:
             application/json:
@@ -2108,9 +2138,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateConsumerGroupRequest'
+              $ref: "#/components/schemas/CreateConsumerGroupRequest"
       responses:
-        '200':
+        "200":
           description: Consumer group created successfully
           content:
             application/json:
@@ -2145,9 +2175,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/JoinGroupRequest'
+              $ref: "#/components/schemas/JoinGroupRequest"
       responses:
-        '200':
+        "200":
           description: Successfully joined consumer group
           content:
             application/json:
@@ -2181,7 +2211,7 @@ paths:
             type: string
           example: 550e8400-e29b-41d4-a716-446655440000
       responses:
-        '200':
+        "200":
           description: Successfully left consumer group
           content:
             application/json:
@@ -2215,7 +2245,7 @@ paths:
             type: string
           example: 550e8400-e29b-41d4-a716-446655440000
       responses:
-        '200':
+        "200":
           description: Assignment retrieved successfully
           content:
             application/json:
@@ -2254,7 +2284,7 @@ paths:
             type: string
           example: 550e8400-e29b-41d4-a716-446655440000
       responses:
-        '200':
+        "200":
           description: Heartbeat accepted
           content:
             application/json:
@@ -2283,9 +2313,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CommitOffsetRequest'
+              $ref: "#/components/schemas/CommitOffsetRequest"
       responses:
-        '200':
+        "200":
           description: Offset committed successfully
           content:
             application/json:
@@ -2323,7 +2353,7 @@ paths:
             type: integer
           example: 0
       responses:
-        '200':
+        "200":
           description: Offset retrieved successfully
           content:
             application/json:
@@ -2356,12 +2386,12 @@ paths:
             type: string
           example: order-processors
       responses:
-        '200':
+        "200":
           description: Statistics retrieved successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ConsumerGroupStats'
+                $ref: "#/components/schemas/ConsumerGroupStats"
 
   # ==========================================
   # Pub/Sub Endpoints
@@ -2370,7 +2400,13 @@ paths:
     post:
       tags: [Pub/Sub]
       summary: Publish message
-      description: Publish a message to a pub/sub topic
+      description: |
+        Publish a message to a pub/sub topic.
+
+        **Supported Fields:**
+        - `payload` (preferred): Message payload (any JSON type)
+        - `data` (alias): Alternative field name for payload (for SDK compatibility)
+        - `metadata` (optional): Additional metadata as key-value pairs
       operationId: pubsubPublish
       parameters:
         - name: topic
@@ -2385,13 +2421,26 @@ paths:
           application/json:
             schema:
               type: object
-              required: [message]
               properties:
-                message:
+                payload:
+                  description: Message payload (preferred field name)
+                  example: { "to": "user@example.com", "subject": "Welcome" }
+                data:
+                  description: Message payload (alias for SDK compatibility)
+                  example: { "to": "user@example.com", "subject": "Welcome" }
+                metadata:
                   type: object
-                  example: {"to": "user@example.com", "subject": "Welcome"}
+                  additionalProperties:
+                    type: string
+                  description: Optional metadata key-value pairs
+                  example:
+                    source: web-app
+                    priority: high
+              anyOf:
+                - required: [payload]
+                - required: [data]
       responses:
-        '200':
+        "200":
           description: Message published successfully
           content:
             application/json:
@@ -2409,12 +2458,12 @@ paths:
       description: Retrieve statistics about the pub/sub system
       operationId: pubsubStats
       responses:
-        '200':
+        "200":
           description: Statistics retrieved successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PubSubStats'
+                $ref: "#/components/schemas/PubSubStats"
 
   /pubsub/topics:
     get:
@@ -2423,7 +2472,7 @@ paths:
       description: Get a list of all pub/sub topics
       operationId: pubsubListTopics
       responses:
-        '200':
+        "200":
           description: Topic list retrieved successfully
           content:
             application/json:
@@ -2434,7 +2483,12 @@ paths:
                     type: array
                     items:
                       type: string
-                    example: [notifications.email, notifications.sms, events.user.login]
+                    example:
+                      [
+                        notifications.email,
+                        notifications.sms,
+                        events.user.login,
+                      ]
 
   /pubsub/{topic}/info:
     get:
@@ -2450,12 +2504,12 @@ paths:
             type: string
           example: notifications.email
       responses:
-        '200':
+        "200":
           description: Topic info retrieved successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TopicInfo'
+                $ref: "#/components/schemas/TopicInfo"
 
   # ==========================================
   # Authentication Endpoints
@@ -2482,7 +2536,7 @@ paths:
                   format: password
                   example: SecurePassword123!
       responses:
-        '200':
+        "200":
           description: Login response
           content:
             application/json:
@@ -2493,7 +2547,7 @@ paths:
                     type: boolean
                     example: true
                   user:
-                    $ref: '#/components/schemas/UserInfo'
+                    $ref: "#/components/schemas/UserInfo"
                   message:
                     type: string
                     example: Login successful
@@ -2508,13 +2562,13 @@ paths:
         - BasicAuth: []
         - BearerAuth: []
       responses:
-        '200':
+        "200":
           description: User information
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserInfo'
-        '401':
+                $ref: "#/components/schemas/UserInfo"
+        "401":
           description: Unauthorized
 
   /auth/keys:
@@ -2531,17 +2585,17 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateKeyRequest'
+              $ref: "#/components/schemas/CreateKeyRequest"
       responses:
-        '200':
+        "200":
           description: API key created successfully
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/CreateKeyResponse'
-        '401':
+                $ref: "#/components/schemas/CreateKeyResponse"
+        "401":
           description: Unauthorized
-        '403':
+        "403":
           description: Forbidden (insufficient permissions)
     get:
       tags: [Authentication]
@@ -2552,7 +2606,7 @@ paths:
         - BasicAuth: []
         - BearerAuth: []
       responses:
-        '200':
+        "200":
           description: List of API keys
           content:
             application/json:
@@ -2565,8 +2619,8 @@ paths:
                   keys:
                     type: array
                     items:
-                      $ref: '#/components/schemas/ApiKeyInfo'
-        '401':
+                      $ref: "#/components/schemas/ApiKeyInfo"
+        "401":
           description: Unauthorized
 
   /auth/keys/{id}:
@@ -2586,7 +2640,7 @@ paths:
             type: string
           example: key_abc123xyz
       responses:
-        '200':
+        "200":
           description: API key revoked successfully
           content:
             application/json:
@@ -2599,9 +2653,9 @@ paths:
                   message:
                     type: string
                     example: API key revoked
-        '401':
+        "401":
           description: Unauthorized
-        '404':
+        "404":
           description: API key not found
 
   /auth/users:
@@ -2618,9 +2672,9 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateUserRequest'
+              $ref: "#/components/schemas/CreateUserRequest"
       responses:
-        '200':
+        "200":
           description: User created successfully
           content:
             application/json:
@@ -2633,9 +2687,9 @@ paths:
                   username:
                     type: string
                     example: newuser
-        '401':
+        "401":
           description: Unauthorized
-        '403':
+        "403":
           description: Forbidden (admin required)
     get:
       tags: [Authentication]
@@ -2646,17 +2700,17 @@ paths:
         - BasicAuth: []
         - BearerAuth: []
       responses:
-        '200':
+        "200":
           description: List of users
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/UserInfo'
-        '401':
+                  $ref: "#/components/schemas/UserInfo"
+        "401":
           description: Unauthorized
-        '403':
+        "403":
           description: Forbidden (admin required)
 
   /auth/users/{username}:
@@ -2676,15 +2730,15 @@ paths:
             type: string
           example: admin
       responses:
-        '200':
+        "200":
           description: User information
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserInfo'
-        '401':
+                $ref: "#/components/schemas/UserInfo"
+        "401":
           description: Unauthorized
-        '404':
+        "404":
           description: User not found
     delete:
       tags: [Authentication]
@@ -2702,7 +2756,7 @@ paths:
             type: string
           example: olduser
       responses:
-        '200':
+        "200":
           description: User deleted successfully
           content:
             application/json:
@@ -2712,11 +2766,11 @@ paths:
                   success:
                     type: boolean
                     example: true
-        '401':
+        "401":
           description: Unauthorized
-        '403':
+        "403":
           description: Forbidden (admin required)
-        '400':
+        "400":
           description: Cannot delete root user
 
   /auth/users/{username}/password:
@@ -2748,7 +2802,7 @@ paths:
                   format: password
                   example: NewSecurePassword123!
       responses:
-        '200':
+        "200":
           description: Password changed successfully
           content:
             application/json:
@@ -2758,9 +2812,9 @@ paths:
                   success:
                     type: boolean
                     example: true
-        '401':
+        "401":
           description: Unauthorized
-        '400':
+        "400":
           description: Invalid password (doesn't meet requirements)
 
   /auth/users/{username}/enable:
@@ -2780,7 +2834,7 @@ paths:
             type: string
           example: disableduser
       responses:
-        '200':
+        "200":
           description: User enabled successfully
           content:
             application/json:
@@ -2790,9 +2844,9 @@ paths:
                   success:
                     type: boolean
                     example: true
-        '401':
+        "401":
           description: Unauthorized
-        '403':
+        "403":
           description: Forbidden (admin required)
 
   /auth/users/{username}/disable:
@@ -2812,7 +2866,7 @@ paths:
             type: string
           example: problematicuser
       responses:
-        '200':
+        "200":
           description: User disabled successfully
           content:
             application/json:
@@ -2822,9 +2876,9 @@ paths:
                   success:
                     type: boolean
                     example: true
-        '401':
+        "401":
           description: Unauthorized
-        '403':
+        "403":
           description: Forbidden (admin required)
 
   /auth/users/{username}/roles:
@@ -2855,7 +2909,7 @@ paths:
                   type: string
                   example: readonly
       responses:
-        '200':
+        "200":
           description: Role granted successfully
           content:
             application/json:
@@ -2865,9 +2919,9 @@ paths:
                   success:
                     type: boolean
                     example: true
-        '401':
+        "401":
           description: Unauthorized
-        '403':
+        "403":
           description: Forbidden (admin required)
 
   /auth/users/{username}/roles/{role}:
@@ -2893,7 +2947,7 @@ paths:
             type: string
           example: readonly
       responses:
-        '200':
+        "200":
           description: Role revoked successfully
           content:
             application/json:
@@ -2903,9 +2957,9 @@ paths:
                   success:
                     type: boolean
                     example: true
-        '401':
+        "401":
           description: Unauthorized
-        '403':
+        "403":
           description: Forbidden (admin required)
 
   /auth/roles:
@@ -2918,15 +2972,15 @@ paths:
         - BasicAuth: []
         - BearerAuth: []
       responses:
-        '200':
+        "200":
           description: List of roles
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/RoleInfo'
-        '401':
+                  $ref: "#/components/schemas/RoleInfo"
+        "401":
           description: Unauthorized
 
   # ==========================================
@@ -2939,7 +2993,7 @@ paths:
       description: Manually trigger a snapshot creation
       operationId: triggerSnapshot
       responses:
-        '200':
+        "200":
           description: Snapshot created successfully
           content:
             application/json:
@@ -2959,12 +3013,12 @@ components:
       type: http
       scheme: basic
       description: HTTP Basic Authentication (username:password)
-    
+
     BearerAuth:
       type: http
       scheme: bearer
       description: API Key as Bearer token
-    
+
     ApiKeyAuth:
       type: apiKey
       in: query
@@ -3162,7 +3216,7 @@ components:
           type: object
           additionalProperties:
             type: string
-          example: {"content-type": "application/json"}
+          example: { "content-type": "application/json" }
 
     PublishResponse:
       type: object
@@ -3243,7 +3297,7 @@ components:
           example: message
         data:
           type: object
-          example: {"user": "alice", "text": "Hello!"}
+          example: { "user": "alice", "text": "Hello!" }
 
     StreamPublishResponse:
       type: object
@@ -3262,7 +3316,7 @@ components:
         events:
           type: array
           items:
-            $ref: '#/components/schemas/StreamEvent'
+            $ref: "#/components/schemas/StreamEvent"
         next_offset:
           type: integer
           format: int64
@@ -3340,7 +3394,7 @@ components:
           default: 1
           example: 1
         retention_policy:
-          $ref: '#/components/schemas/RetentionPolicy'
+          $ref: "#/components/schemas/RetentionPolicy"
         segment_bytes:
           type: integer
           format: int64
@@ -3385,7 +3439,7 @@ components:
           example: customer-123
         data:
           type: object
-          example: {"order_id": "ORD-456", "amount": 99.99}
+          example: { "order_id": "ORD-456", "amount": 99.99 }
 
     ConsumePartitionRequest:
       type: object
@@ -3429,7 +3483,25 @@ components:
           type: array
           items:
             type: integer
-          example: [123, 34, 97, 109, 111, 117, 110, 116, 34, 58, 57, 57, 46, 57, 57, 125]
+          example:
+            [
+              123,
+              34,
+              97,
+              109,
+              111,
+              117,
+              110,
+              116,
+              34,
+              58,
+              57,
+              57,
+              46,
+              57,
+              57,
+              125,
+            ]
         timestamp:
           type: integer
           format: int64
@@ -3805,9 +3877,125 @@ components:
           description: Total number of GEOHASH operations
           example: 1500
 
+    # Authentication Schemas
+    UserInfo:
+      type: object
+      properties:
+        username:
+          type: string
+          example: admin
+        roles:
+          type: array
+          items:
+            type: string
+          example: [admin, readonly]
+        is_admin:
+          type: boolean
+          example: true
+        enabled:
+          type: boolean
+          example: true
+
+    CreateKeyRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          example: my-api-key
+        expires_in_seconds:
+          type: integer
+          format: int64
+          nullable: true
+          description: Optional expiration time in seconds
+          example: 86400
+        permissions:
+          type: array
+          items:
+            type: object
+            properties:
+              resource:
+                type: string
+                example: kv:*
+              action:
+                type: string
+                enum: [read, write, delete, configure, admin, all]
+                example: read
+          nullable: true
+        allowed_ips:
+          type: array
+          items:
+            type: string
+          nullable: true
+          description: Optional list of allowed IP addresses
+          example: ["192.168.1.1", "10.0.0.1"]
+
+    CreateKeyResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        key:
+          $ref: "#/components/schemas/ApiKeyInfo"
+        message:
+          type: string
+          example: API key created successfully
+
+    ApiKeyInfo:
+      type: object
+      properties:
+        id:
+          type: string
+          example: key_abc123xyz
+        key:
+          type: string
+          description: API key secret (only shown on creation)
+          example: synap_sk_live_abc123xyz789
+        name:
+          type: string
+          example: my-api-key
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          example: "2025-12-31T23:59:59Z"
+        created_at:
+          type: string
+          format: date-time
+          example: "2025-11-25T12:00:00Z"
+
+    CreateUserRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          example: newuser
+        password:
+          type: string
+          format: password
+          example: SecurePassword123!
+        roles:
+          type: array
+          items:
+            type: string
+          nullable: true
+          example: [readonly]
+
+    RoleInfo:
+      type: object
+      properties:
+        name:
+          type: string
+          example: readonly
+        description:
+          type: string
+          example: Read-only access to resources
+
 security:
   - BasicAuth: []
   - BearerAuth: []
   - ApiKeyAuth: []
-  - {}  # Allow unauthenticated access (optional auth)
+  - {} # Allow unauthenticated access (optional auth)
 

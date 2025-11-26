@@ -506,7 +506,7 @@ client.stream_subscribe("system-events", None, false).await?;
 // Events automatically pushed
 loop {
     let event = subscriber.next_event().await?;
-    println!("System event: {:?}", event);
+    tracing::info!("System event: {:?}", event);
 }
 ```
 

@@ -19,15 +19,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config)?;
 
-    println!("🔄 Synap Rust SDK - Reactive Event Stream Example\n");
+    tracing::info!("🔄 Synap Rust SDK - Reactive Event Stream Example\n");
 
     // 1. Create a stream room
-    println!("1. Creating stream room 'reactive-chat'");
+    tracing::info!("1. Creating stream room 'reactive-chat'");
     client
         .stream()
         .create_room("reactive-chat", Some(10000))
         .await?;
-    println!("   ✅ Room created\n");
+    tracing::info!("   ✅ Room created\n");
 
     // 2. Publish events in background
     let publish_client = client.clone();
@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .await;
 
             if let Ok(offset) = offset {
-                println!("   📤 Published event at offset {}", offset);
+                tracing::info!("   📤 Published event at offset {}", offset);
             }
 
             tokio::time::sleep(Duration::from_millis(200)).await;
@@ -55,7 +55,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // 3. Observe ALL events reactively
-    println!("2. Observing all events (reactive Stream)\n");
+    tracing::info!("2. Observing all events (reactive Stream)\n");
     let stream_mgr = client.stream();
     let (mut stream, handle) =
         stream_mgr.observe_events("reactive-chat", Some(0), Duration::from_millis(150));
@@ -63,14 +63,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut event_count = 0;
     tokio::time::timeout(Duration::from_secs(5), async {
         while let Some(event) = stream.next().await {
-            println!(
+            tracing::info!(
                 "   📨 Event {}: {} by {:?}",
-                event.offset, event.data["text"], event.data["user"]
+                event.offset,
+                event.data["text"],
+                event.data["user"]
             );
 
             event_count += 1;
             if event_count >= 10 {
-                println!("   Stopping after 10 events...\n");
+                tracing::info!("   Stopping after 10 events...\n");
                 break;
             }
         }
@@ -81,7 +83,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     handle.unsubscribe();
 
     // 4. Observe specific event type
-    println!("3. Observing only 'message' events (filtered)\n");
+    tracing::info!("3. Observing only 'message' events (filtered)\n");
     let stream_mgr2 = client.stream();
     let (mut stream, handle) = stream_mgr2.observe_event(
         "reactive-chat",
@@ -93,11 +95,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut filtered_count = 0;
     tokio::time::timeout(Duration::from_secs(3), async {
         while let Some(event) = stream.next().await {
-            println!("   📨 Message event {}: {:?}", event.offset, event.data);
+            tracing::info!("   📨 Message event {}: {:?}", event.offset, event.data);
 
             filtered_count += 1;
             if filtered_count >= 5 {
-                println!("   Stopping after 5 filtered events...\n");
+                tracing::info!("   Stopping after 5 filtered events...\n");
                 break;
             }
         }
@@ -111,23 +113,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = publish_handle.await;
 
     // 5. Get final stats
-    println!("4. Stream statistics");
+    tracing::info!("4. Stream statistics");
     let stats = client.stream().stats("reactive-chat").await?;
-    println!("   Room: {}", stats.room);
-    println!("   Total events: {}", stats.total_events);
-    println!("   Max offset: {}\n", stats.max_offset);
+    tracing::info!("   Room: {}", stats.room);
+    tracing::info!("   Total events: {}", stats.total_events);
+    tracing::info!("   Max offset: {}\n", stats.max_offset);
 
     // 6. Cleanup
-    println!("5. Deleting room");
+    tracing::info!("5. Deleting room");
     client.stream().delete_room("reactive-chat").await?;
-    println!("   ✅ Room deleted");
+    tracing::info!("   ✅ Room deleted");
 
-    println!("\n✅ Reactive stream example completed successfully!");
-    println!("\n💡 Key Concepts:");
-    println!("   - observe_events(): Stream all events from a room");
-    println!("   - observe_event(): Filter events by type");
-    println!("   - SubscriptionHandle: Automatic cleanup on drop");
-    println!("   - Offset tracking: Automatically maintains position");
+    tracing::info!("\n✅ Reactive stream example completed successfully!");
+    tracing::info!("\n💡 Key Concepts:");
+    tracing::info!("   - observe_events(): Stream all events from a room");
+    tracing::info!("   - observe_event(): Filter events by type");
+    tracing::info!("   - SubscriptionHandle: Automatic cleanup on drop");
+    tracing::info!("   - Offset tracking: Automatically maintains position");
 
     Ok(())
 }

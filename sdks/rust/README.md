@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Key-Value operations
     client.kv().set("user:1", "John Doe", None).await?;
     let value: Option<String> = client.kv().get("user:1").await?;
-    println!("Value: {:?}", value);
+    tracing::info!("Value: {:?}", value);
 
     // Queue operations
     client.queue().create_queue("tasks", None, None).await?;
@@ -49,7 +49,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let message = client.queue().consume("tasks", "worker-1").await?;
     
     if let Some(msg) = message {
-        println!("Received: {:?}", msg);
+        tracing::info!("Received: {:?}", msg);
         client.queue().ack("tasks", &msg.id).await?;
     }
 
@@ -73,7 +73,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             },
         )
         .await?;
-    println!("Script result: {:?} (sha1={})", eval.result, eval.sha1);
+    tracing::info!("Script result: {:?} (sha1={})", eval.result, eval.sha1);
 
     // HyperLogLog
     client
@@ -81,7 +81,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .pfadd("visitors", ["user:a", "user:b", "user:c"])
         .await?;
     let visitors = client.hyperloglog().pfcount("visitors").await?;
-    println!("Approx unique visitors: {}", visitors);
+    tracing::info!("Approx unique visitors: {}", visitors);
 
     // Transactions
     let tx = client.transaction();
@@ -89,10 +89,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     client.kv().set("txn:key", "value", None).await?;
     match tx.exec(Default::default()).await? {
         synap_sdk::TransactionExecResult::Success { results } => {
-            println!("TX results: {:?}", results);
+            tracing::info!("TX results: {:?}", results);
         }
         synap_sdk::TransactionExecResult::Aborted { message, .. } => {
-            println!("Transaction aborted: {:?}", message);
+            tracing::info!("Transaction aborted: {:?}", message);
         }
     }
     
@@ -102,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .observe_events("chat-room-1", Some(0), Duration::from_millis(500));
     
     while let Some(event) = events.next().await {
-        println!("Event {}: {:?}", event.offset, event.data);
+        tracing::info!("Event {}: {:?}", event.offset, event.data);
         if event.offset > 10 { break; }
     }
     handle.unsubscribe();
@@ -114,7 +114,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         None,
         None
     ).await?;
-    println!("Delivered to {} subscribers", count);
+    tracing::info!("Delivered to {} subscribers", count);
 
     Ok(())
 }
@@ -145,7 +145,7 @@ let new_value = client.kv().decr("counter").await?;
 
 // Get statistics
 let stats = client.kv().stats().await?;
-println!("Total keys: {}", stats.total_keys);
+tracing::info!("Total keys: {}", stats.total_keys);
 ```
 
 ### Message Queues
@@ -167,7 +167,7 @@ let message = client.queue().consume("tasks", "worker-1").await?;
 
 if let Some(msg) = message {
     // Process message
-    println!("Processing: {:?}", msg);
+    tracing::info!("Processing: {:?}", msg);
     
     // Acknowledge (success)
     client.queue().ack("tasks", &msg.id).await?;
@@ -178,7 +178,7 @@ if let Some(msg) = message {
 
 // Get queue stats
 let stats = client.queue().stats("tasks").await?;
-println!("Queue depth: {}", stats.depth);
+tracing::info!("Queue depth: {}", stats.depth);
 
 // List all queues
 let queues = client.queue().list().await?;
@@ -211,7 +211,7 @@ let (mut events, handle) = client.stream()
 
 tokio::spawn(async move {
     while let Some(event) = events.next().await {
-        println!("Event {}: {:?}", event.offset, event.data);
+        tracing::info!("Event {}: {:?}", event.offset, event.data);
     }
 });
 
@@ -220,7 +220,7 @@ let (mut messages, handle2) = client.stream()
     .observe_event("chat-room-1", "message", Some(0), Duration::from_millis(500));
 
 while let Some(event) = messages.next().await {
-    println!("Message: {:?}", event.data);
+    tracing::info!("Message: {:?}", event.data);
 }
 
 // Stop observing
@@ -271,7 +271,7 @@ let (mut messages, handle) = client.pubsub()
 
 tokio::spawn(async move {
     while let Some(message) = messages.next().await {
-        println!("Received on {}: {:?}", message.topic, message.data);
+        tracing::info!("Received on {}: {:?}", message.topic, message.data);
     }
 });
 
@@ -312,11 +312,11 @@ let client = SynapClient::new(config)?;
 use synap_sdk::SynapError;
 
 match client.kv().get::<String>("key").await {
-    Ok(Some(value)) => println!("Found: {}", value),
-    Ok(None) => println!("Key not found"),
-    Err(SynapError::HttpError(e)) => eprintln!("HTTP error: {}", e),
-    Err(SynapError::ServerError(e)) => eprintln!("Server error: {}", e),
-    Err(e) => eprintln!("Error: {}", e),
+    Ok(Some(value)) => tracing::info!("Found: {}", value),
+    Ok(None) => tracing::info!("Key not found"),
+    Err(SynapError::HttpError(e)) => etracing::info!("HTTP error: {}", e),
+    Err(SynapError::ServerError(e)) => etracing::info!("Server error: {}", e),
+    Err(e) => etracing::info!("Error: {}", e),
 }
 ```
 
@@ -333,13 +333,13 @@ obs.filter(|x| *x > 2)
    .map(|x| x * 2)
    .take(10)
    .subscribe_next(|value| {
-       println!("Value: {}", value);
+       tracing::info!("Value: {}", value);
    });
 
 // Subject for multicasting
 let subject = Subject::new();
-subject.subscribe(|msg| println!("Sub 1: {}", msg));
-subject.subscribe(|msg| println!("Sub 2: {}", msg));
+subject.subscribe(|msg| tracing::info!("Sub 1: {}", msg));
+subject.subscribe(|msg| tracing::info!("Sub 2: {}", msg));
 subject.next("Hello");  // Both subscribers receive it
 ```
 

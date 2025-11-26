@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from synap_sdk.client import SynapClient
@@ -54,30 +54,36 @@ class ListManager:
         response = await self._client.send_command("list.rpush", {"key": key, "values": list(values)})
         return response.get("length", 0)
 
-    async def lpop(self, key: str, count: int = 1) -> list[str]:
+    async def lpop(self, key: str, count: int | None = None) -> list[str]:
         """Pop elements from left (head) of list.
 
         Args:
             key: List key
-            count: Number of elements to pop
+            count: Number of elements to pop (optional, defaults to 1)
 
         Returns:
             List of popped values
         """
-        response = await self._client.send_command("list.lpop", {"key": key, "count": count})
+        payload: dict[str, Any] = {"key": key}
+        if count is not None:
+            payload["count"] = count
+        response = await self._client.send_command("list.lpop", payload)
         return response.get("values", [])
 
-    async def rpop(self, key: str, count: int = 1) -> list[str]:
+    async def rpop(self, key: str, count: int | None = None) -> list[str]:
         """Pop elements from right (tail) of list.
 
         Args:
             key: List key
-            count: Number of elements to pop
+            count: Number of elements to pop (optional, defaults to 1)
 
         Returns:
             List of popped values
         """
-        response = await self._client.send_command("list.rpop", {"key": key, "count": count})
+        payload: dict[str, Any] = {"key": key}
+        if count is not None:
+            payload["count"] = count
+        response = await self._client.send_command("list.rpop", payload)
         return response.get("values", [])
 
     async def range(self, key: str, start: int = 0, stop: int = -1) -> list[str]:

@@ -17,18 +17,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config)?;
 
-    println!("📡 Synap Rust SDK - Event Stream Example\n");
+    tracing::info!("📡 Synap Rust SDK - Event Stream Example\n");
 
     // 1. Create a stream room
-    println!("1. Creating stream room 'chat-room-1'");
+    tracing::info!("1. Creating stream room 'chat-room-1'");
     client
         .stream()
         .create_room("chat-room-1", Some(10000))
         .await?;
-    println!("   ✅ Room created\n");
+    tracing::info!("   ✅ Room created\n");
 
     // 2. Publish events
-    println!("2. Publishing events");
+    tracing::info!("2. Publishing events");
     let offset1 = client
         .stream()
         .publish(
@@ -37,7 +37,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             json!({"user": "alice", "text": "Hello everyone!"}),
         )
         .await?;
-    println!("   Published event at offset {}", offset1);
+    tracing::info!("   Published event at offset {}", offset1);
 
     let offset2 = client
         .stream()
@@ -47,62 +47,64 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             json!({"user": "bob", "text": "Hi Alice!"}),
         )
         .await?;
-    println!("   Published event at offset {}", offset2);
+    tracing::info!("   Published event at offset {}", offset2);
 
     let offset3 = client
         .stream()
         .publish("chat-room-1", "join", json!({"user": "charlie"}))
         .await?;
-    println!("   Published event at offset {}\n", offset3);
+    tracing::info!("   Published event at offset {}\n", offset3);
 
     // 3. Consume events from beginning
-    println!("3. Consuming all events from offset 0");
+    tracing::info!("3. Consuming all events from offset 0");
     let events = client
         .stream()
         .consume("chat-room-1", Some(0), Some(10))
         .await?;
-    println!("   Received {} events:", events.len());
+    tracing::info!("   Received {} events:", events.len());
     for event in &events {
-        println!(
+        tracing::info!(
             "   - Offset {}: {} = {:?}",
-            event.offset, event.event, event.data
+            event.offset,
+            event.event,
+            event.data
         );
     }
-    println!();
 
     // 4. Consume events from specific offset
-    println!("4. Consuming events from offset 1");
+    tracing::info!("4. Consuming events from offset 1");
     let events = client
         .stream()
         .consume("chat-room-1", Some(1), Some(10))
         .await?;
-    println!("   Received {} events:", events.len());
+    tracing::info!("   Received {} events:", events.len());
     for event in &events {
-        println!(
+        tracing::info!(
             "   - Offset {}: {} = {:?}",
-            event.offset, event.event, event.data
+            event.offset,
+            event.event,
+            event.data
         );
     }
-    println!();
 
     // 5. Get room statistics
-    println!("5. Getting room statistics");
+    tracing::info!("5. Getting room statistics");
     let stats = client.stream().stats("chat-room-1").await?;
-    println!("   Room: {}", stats.room);
-    println!("   Max offset: {}", stats.max_offset);
-    println!("   Total events: {}\n", stats.total_events);
+    tracing::info!("   Room: {}", stats.room);
+    tracing::info!("   Max offset: {}", stats.max_offset);
+    tracing::info!("   Total events: {}\n", stats.total_events);
 
     // 6. List all rooms
-    println!("6. Listing all stream rooms");
+    tracing::info!("6. Listing all stream rooms");
     let rooms = client.stream().list().await?;
-    println!("   Rooms: {:?}\n", rooms);
+    tracing::info!("   Rooms: {:?}\n", rooms);
 
     // 7. Cleanup
-    println!("7. Deleting room 'chat-room-1'");
+    tracing::info!("7. Deleting room 'chat-room-1'");
     client.stream().delete_room("chat-room-1").await?;
-    println!("   ✅ Room deleted");
+    tracing::info!("   ✅ Room deleted");
 
-    println!("\n✅ Example completed successfully!");
+    tracing::info!("\n✅ Example completed successfully!");
 
     Ok(())
 }

@@ -984,5 +984,5 @@ async fn test_all_status_codes_comprehensive() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
-    println!("✅ All HTTP status codes verified!");
+    tracing::info!("✅ All HTTP status codes verified!");
 }

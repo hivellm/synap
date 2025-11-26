@@ -61,6 +61,36 @@ impl SortedSetManager {
         Ok(response.get("added").and_then(|v| v.as_u64()).unwrap_or(0) > 0)
     }
 
+    /// Add multiple members with scores to sorted set (ZADD with array)
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use synap_sdk::{SynapClient, sorted_set::ScoredMember};
+    /// # async fn example(client: &SynapClient) -> synap_sdk::Result<()> {
+    /// let members = vec![
+    ///     ScoredMember { member: "player1".to_string(), score: 100.0 },
+    ///     ScoredMember { member: "player2".to_string(), score: 200.0 },
+    /// ];
+    /// client.sorted_set().add_multiple("leaderboard", members).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn add_multiple<K>(&self, key: K, members: Vec<ScoredMember>) -> Result<usize>
+    where
+        K: AsRef<str>,
+    {
+        let payload = json!({
+            "key": key.as_ref(),
+            "members": members.iter().map(|m| json!({
+                "member": m.member,
+                "score": m.score,
+            })).collect::<Vec<_>>(),
+        });
+
+        let response = self.client.send_command("sortedset.zadd", payload).await?;
+        Ok(response.get("added").and_then(|v| v.as_u64()).unwrap_or(0) as usize)
+    }
+
     /// Remove members from sorted set (ZREM)
     pub async fn rem<K>(&self, key: K, members: Vec<String>) -> Result<usize>
     where
@@ -137,7 +167,7 @@ impl SortedSetManager {
     /// // Get top 10 from leaderboard
     /// let top10 = client.sorted_set().range("leaderboard", 0, 9, true).await?;
     /// for member in top10 {
-    ///     println!("{}: {}", member.member, member.score);
+    ///     tracing::info!("{}: {}", member.member, member.score);
     /// }
     /// # Ok(())
     /// # }

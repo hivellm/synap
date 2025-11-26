@@ -36,7 +36,7 @@ async fn test_hybrid_storage_upgrades_to_trie() {
         store.set(&key, vec![0], None).await.unwrap();
 
         if i % 100_000 == 0 {
-            println!("Inserted {} keys...", i);
+            tracing::info!("Inserted {} keys...", i);
         }
     }
 
@@ -51,7 +51,7 @@ async fn test_hybrid_storage_upgrades_to_trie() {
         assert_eq!(value, Some(vec![0]));
     }
 
-    println!("✅ Hybrid storage upgrade validated: 640K keys inserted and verified");
+    tracing::info!("✅ Hybrid storage upgrade validated: 640K keys inserted and verified");
 }
 
 #[tokio::test]
@@ -91,7 +91,7 @@ async fn test_hybrid_storage_operations_after_upgrade() {
         store.set(&key, vec![(i % 256) as u8], None).await.unwrap();
     }
 
-    println!("Inserted 20K keys, testing operations...");
+    tracing::info!("Inserted 20K keys, testing operations...");
 
     // Test GET
     let value = store.get("key_00000100").await.unwrap();
@@ -116,7 +116,7 @@ async fn test_hybrid_storage_operations_after_upgrade() {
     assert!(!keys.is_empty());
     assert!(keys.iter().all(|k| k.starts_with("key_0000")));
 
-    println!("✅ All operations working correctly after upgrade");
+    tracing::info!("✅ All operations working correctly after upgrade");
 }
 
 #[tokio::test]
@@ -142,13 +142,13 @@ async fn test_hybrid_storage_performance_characteristics() {
     }
     let read_duration = start.elapsed();
 
-    println!("Small dataset (1K keys):");
-    println!(
+    tracing::info!("Small dataset (1K keys):");
+    tracing::info!(
         "  Insert: {:?} ({:.2} µs/key)",
         insert_duration,
         insert_duration.as_micros() as f64 / 1000.0
     );
-    println!(
+    tracing::info!(
         "  Read: {:?} ({:.2} µs/key)",
         read_duration,
         read_duration.as_micros() as f64 / 1000.0

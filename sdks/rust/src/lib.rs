@@ -25,7 +25,7 @@
 //!     // Key-Value operations
 //!     client.kv().set("user:1", "John Doe", None).await?;
 //!     let value: Option<String> = client.kv().get("user:1").await?;
-//!     println!("Value: {:?}", value);
+//!     tracing::info!("Value: {:?}", value);
 //!
 //!     Ok(())
 //! }

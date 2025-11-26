@@ -6,7 +6,9 @@ use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
 use synap_server::auth::{ApiKeyManager, UserManager};
-use synap_server::{AppState, KVConfig, KVStore, ScriptManager, create_router};
+use synap_server::{
+    AppState, KVConfig, KVStore, ScriptManager, StreamConfig, StreamManager, create_router,
+};
 use tokio::net::TcpListener;
 
 async fn spawn_test_server() -> String {
@@ -35,6 +37,11 @@ async fn spawn_test_server() -> String {
     let geospatial_store = Arc::new(synap_server::core::GeospatialStore::new(
         sorted_set_store.clone(),
     ));
+
+    // Initialize StreamManager for stream tests
+    let stream_mgr = Arc::new(StreamManager::new(StreamConfig::default()));
+    stream_mgr.clone().start_compaction_task();
+
     let state = AppState {
         kv_store,
         hash_store,
@@ -46,7 +53,7 @@ async fn spawn_test_server() -> String {
         bitmap_store: Arc::new(synap_server::core::BitmapStore::new()),
         geospatial_store,
         queue_manager: None,
-        stream_manager: None,
+        stream_manager: Some(stream_mgr),
         pubsub_router: None,
         persistence: None,
         consumer_group_manager: None,
@@ -427,4 +434,301 @@ async fn test_rest_concurrent_requests() {
 
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["total_keys"].as_u64().unwrap(), 10);
+}
+
+#[tokio::test]
+async fn test_rest_memory_usage_nonexistent_key() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test memory usage for non-existent key (should return 0)
+    let res = client
+        .get(format!("{}/memory/nonexistent:key/usage", base_url))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["bytes"], 0);
+    assert_eq!(body["human"], "0B");
+    assert_eq!(body["key"], "nonexistent:key");
+}
+
+#[tokio::test]
+async fn test_rest_sortedset_zadd_with_array_format() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test ZADD with array format (multiple members)
+    let res = client
+        .post(format!("{}/sortedset/leaders/zadd", base_url))
+        .json(&json!({
+            "members": ["alice", "bob", "charlie"],
+            "scores": [100.0, 200.0, 150.0]
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["added"], 3);
+    assert_eq!(body["key"], "leaders");
+
+    // Verify members were added
+    let zcard_res = client
+        .get(format!("{}/sortedset/leaders/zcard", base_url))
+        .send()
+        .await
+        .unwrap();
+    let zcard_body: serde_json::Value = zcard_res.json().await.unwrap();
+    assert_eq!(zcard_body["count"], 3);
+}
+
+#[tokio::test]
+async fn test_rest_sortedset_zadd_backward_compatibility_single_member() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test ZADD with single member format (backward compatibility)
+    let res = client
+        .post(format!("{}/sortedset/player/zadd", base_url))
+        .json(&json!({
+            "member": "alice",
+            "score": 100.0
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["added"], 1);
+    assert_eq!(body["key"], "player");
+
+    // Verify member was added
+    let zcard_res = client
+        .get(format!("{}/sortedset/player/zcard", base_url))
+        .send()
+        .await
+        .unwrap();
+    let zcard_body: serde_json::Value = zcard_res.json().await.unwrap();
+    assert_eq!(zcard_body["count"], 1);
+}
+
+#[tokio::test]
+async fn test_rest_stream_room_creation() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test stream room creation via REST (POST /stream/{room})
+    let res = client
+        .post(format!("{}/stream/test_room_123", base_url))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert!(body["success"].as_bool().unwrap_or(false) || body.get("room").is_some());
+
+    // Verify room exists by getting stats
+    let stats_res = client
+        .get(format!("{}/stream/test_room_123/stats", base_url))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(stats_res.status(), 200);
+    let stats_body: serde_json::Value = stats_res.json().await.unwrap();
+    assert_eq!(stats_body["name"], "test_room_123");
+}
+
+#[tokio::test]
+async fn test_rest_geoadd_format_validation() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test GEOADD with correct format (locations array)
+    let res = client
+        .post(format!("{}/geospatial/cities/geoadd", base_url))
+        .json(&json!({
+            "locations": [
+                {"lat": 37.7749, "lon": -122.4194, "member": "San Francisco"},
+                {"lat": 40.7128, "lon": -74.0060, "member": "New York"}
+            ],
+            "nx": false,
+            "xx": false,
+            "ch": false
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["added"], 2);
+    assert_eq!(body["key"], "cities");
+}
+
+#[tokio::test]
+async fn test_rest_error_handling_invalid_format_msetnx() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test MSETNX with invalid format (missing required fields)
+    let res = client
+        .post(format!("{}/kv/msetnx", base_url))
+        .json(&json!({
+            "invalid": "format"
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // Should return error (400 or 422)
+    assert!(res.status().is_client_error());
+}
+
+#[tokio::test]
+async fn test_rest_error_handling_invalid_format_hash_mset() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test HMSET with invalid format (not object or array)
+    let res = client
+        .post(format!("{}/hash/test_key/mset", base_url))
+        .json(&json!("invalid_string_format"))
+        .send()
+        .await
+        .unwrap();
+
+    // Should return error (400 or 422)
+    assert!(res.status().is_client_error());
+}
+
+#[tokio::test]
+async fn test_rest_error_handling_invalid_format_zadd() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test ZADD with invalid format (missing both member and members)
+    let res = client
+        .post(format!("{}/sortedset/test_key/zadd", base_url))
+        .json(&json!({
+            "score": 100.0
+            // Missing member or members
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // Should return error (400 or 422)
+    assert!(res.status().is_client_error());
+}
+
+#[tokio::test]
+async fn test_rest_error_handling_invalid_format_pubsub_publish() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test Pub/Sub publish with invalid format (missing both payload and data)
+    let res = client
+        .post(format!("{}/pubsub/test_topic/publish", base_url))
+        .json(&json!({
+            "metadata": {"source": "test"}
+            // Missing payload and data
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // Should return error (400 or 422)
+    assert!(res.status().is_client_error());
+}
+
+#[tokio::test]
+async fn test_rest_streamablehttp_command_format() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test StreamableHTTP command endpoint with correct format
+    let res = client
+        .post(format!("{}/api/v1/command", base_url))
+        .json(&json!({
+            "command": "kv.set",
+            "request_id": "test-streamable-123",
+            "payload": {
+                "key": "streamable_test",
+                "value": "test_value"
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["success"], true);
+    assert_eq!(body["request_id"], "test-streamable-123");
+    assert!(body["payload"].is_object());
+
+    // Verify the value was set
+    let get_res = client
+        .post(format!("{}/api/v1/command", base_url))
+        .json(&json!({
+            "command": "kv.get",
+            "request_id": "test-streamable-456",
+            "payload": {
+                "key": "streamable_test"
+            }
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(get_res.status(), 200);
+    let get_body: serde_json::Value = get_res.json().await.unwrap();
+    assert_eq!(get_body["success"], true);
+    let value_str = get_body["payload"].as_str().unwrap();
+    assert_eq!(value_str, "\"test_value\"");
+}
+
+#[tokio::test]
+async fn test_rest_streamablehttp_error_handling() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    // Test with missing command field
+    let res = client
+        .post(format!("{}/api/v1/command", base_url))
+        .json(&json!({
+            "request_id": "test-error-1",
+            "payload": {}
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // Should return 400 Bad Request for missing required field
+    assert!(res.status().is_client_error());
+
+    // Test with unknown command
+    let res = client
+        .post(format!("{}/api/v1/command", base_url))
+        .json(&json!({
+            "command": "unknown.command",
+            "request_id": "test-error-2",
+            "payload": {}
+        }))
+        .send()
+        .await
+        .unwrap();
+
+    // StreamableHTTP returns 200 but with success: false
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value = res.json().await.unwrap();
+    assert_eq!(body["success"], false);
+    assert!(body["error"].as_str().unwrap().contains("Unknown command"));
 }

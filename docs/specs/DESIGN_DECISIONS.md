@@ -449,7 +449,7 @@ enum SynapError {
 Use `tracing` for structured logging and `prometheus` for metrics.
 
 ### Rationale
-1. **Structured Logging**: Better than println! for production
+1. **Structured Logging**: Better than tracing::info! for production
 2. **Filtering**: Runtime log level control
 3. **Context**: Span-based context propagation
 4. **Metrics**: Industry-standard Prometheus format

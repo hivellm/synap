@@ -73,9 +73,9 @@ impl<T: Send + 'static> Observable<T> {
     /// let obs = Observable::from_stream(stream::iter(vec![1, 2, 3]));
     ///
     /// obs.subscribe(
-    ///     |value| println!("Next: {}", value),
-    ///     |err| eprintln!("Error: {}", err),
-    ///     || println!("Complete!")
+    ///     |value| tracing::info!("Next: {}", value),
+    ///     |err| tracing::error!("Error: {}", err),
+    ///     || tracing::info!("Complete!")
     /// );
     /// ```
     pub fn subscribe<N, E, C>(self, mut next: N, mut _on_error: E, mut complete: C) -> Subscription

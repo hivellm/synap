@@ -428,7 +428,7 @@ impl ChatClient {
         for event in history.events {
             if event.event_type == "message" {
                 let msg: ChatMessage = serde_json::from_value(event.data)?;
-                println!("[{}] {}: {}", event.offset, msg.username, msg.text);
+                tracing::info!("[{}] {}: {}", event.offset, msg.username, msg.text);
             }
         }
         
@@ -438,7 +438,7 @@ impl ChatClient {
             |event: StreamEvent| async move {
                 if event.event_type == "message" {
                     if let Ok(msg) = serde_json::from_value::<ChatMessage>(event.data) {
-                        println!("{}: {}", msg.username, msg.text);
+                        tracing::info!("{}: {}", msg.username, msg.text);
                     }
                 }
             },

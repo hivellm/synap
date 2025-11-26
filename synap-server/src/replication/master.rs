@@ -179,34 +179,36 @@ impl MasterNode {
         stream_manager: Option<Arc<StreamManager>>,
     ) {
         let replica_id = Uuid::new_v4().to_string();
-        eprintln!(
-            "[MASTER] New replica connection from {}, ID: {}",
-            addr, replica_id
+        info!(
+            replica_id = %replica_id,
+            addr = %addr,
+            "New replica connection from master"
         );
 
         // Read replica handshake (request offset)
         let mut buf = vec![0u8; 1024];
-        eprintln!("[MASTER] Waiting for handshake from replica...");
+        debug!("Waiting for handshake from replica");
         let requested_offset = match stream.read(&mut buf).await {
             Ok(n) => {
                 if n == 0 {
-                    eprintln!("[MASTER] Connection closed before handshake");
+                    warn!("Connection closed before handshake");
                     return;
                 }
-                eprintln!("[MASTER] Received {} bytes handshake", n);
+                debug!(bytes = n, "Received handshake bytes");
                 bincode::serde::decode_from_slice::<u64, _>(&buf[..n], bincode::config::legacy())
                     .map(|(v, _)| v)
                     .unwrap_or_default()
             }
             Err(e) => {
-                eprintln!("[MASTER] Error reading handshake: {}", e);
+                error!(error = %e, "Error reading handshake");
                 return;
             }
         };
 
-        eprintln!(
-            "[MASTER] Replica {} requesting sync from offset {}",
-            replica_id, requested_offset
+        info!(
+            replica_id = %replica_id,
+            requested_offset = requested_offset,
+            "Replica requesting sync from offset"
         );
 
         // Determine sync type
@@ -219,16 +221,19 @@ impl MasterNode {
         let needs_full_sync =
             requested_offset < oldest_offset || (requested_offset == 0 && current_offset == 0);
 
-        eprintln!(
-            "[MASTER] oldest_offset: {}, current_offset: {}, requested: {}, needs_full_sync: {}",
-            oldest_offset, current_offset, requested_offset, needs_full_sync
+        debug!(
+            oldest_offset = oldest_offset,
+            current_offset = current_offset,
+            requested_offset = requested_offset,
+            needs_full_sync = needs_full_sync,
+            "Determining sync type"
         );
 
         if needs_full_sync {
-            eprintln!("[MASTER] Performing full sync for replica {}", replica_id);
+            info!(replica_id = %replica_id, "Performing full sync for replica");
 
             // Send full snapshot
-            eprintln!("[MASTER] Calling send_full_sync...");
+            debug!("Calling send_full_sync");
             if let Err(e) = Self::send_full_sync(
                 &mut stream,
                 &kv_store,
@@ -237,30 +242,29 @@ impl MasterNode {
             )
             .await
             {
-                eprintln!(
-                    "[MASTER] Full sync failed for replica {}: {}",
-                    replica_id, e
+                error!(
+                    replica_id = %replica_id,
+                    error = %e,
+                    "Full sync failed for replica"
                 );
                 return;
             }
-            eprintln!("[MASTER] Full sync sent successfully");
+            info!(replica_id = %replica_id, "Full sync sent successfully");
         } else {
-            eprintln!(
-                "[MASTER] Performing partial sync for replica {}",
-                replica_id
-            );
+            info!(replica_id = %replica_id, "Performing partial sync for replica");
 
             // Send incremental updates
             if let Err(e) =
                 Self::send_partial_sync(&mut stream, requested_offset, &replication_log).await
             {
-                eprintln!(
-                    "[MASTER] Partial sync failed for replica {}: {}",
-                    replica_id, e
+                error!(
+                    replica_id = %replica_id,
+                    error = %e,
+                    "Partial sync failed for replica"
                 );
                 return;
             }
-            eprintln!("[MASTER] Partial sync sent successfully");
+            info!(replica_id = %replica_id, "Partial sync sent successfully");
         }
 
         // Register replica

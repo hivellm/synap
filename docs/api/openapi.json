@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Synap API",
-    "description": "High-Performance In-Memory Key-Value Store & Message Broker\n\nSynap combines Redis, RabbitMQ, and Kafka features in a single platform:\n- **Key-Value Store**: Radix-tree based storage with TTL support\n- **Hash Store**: Redis-compatible hash data structure for structured objects\n- **Message Queues**: RabbitMQ-style queues with ACK/NACK\n- **Event Streams**: Kafka-style partitioned topics with consumer groups\n- **Pub/Sub**: Topic-based messaging with wildcard support\n\n**Authentication & Security** (\u2705 Production Ready):\n- **Basic Auth**: HTTP Basic Authentication (username:password)\n- **Bearer Token**: API Key authentication via Authorization header\n- **API Key**: Query parameter authentication for GET requests\n- **User Management**: Create, delete, enable/disable users\n- **API Key Management**: Generate, revoke, and manage API keys with expiration\n- **Fine-grained Permissions**: Resource-based permissions (RabbitMQ-style)\n- **Audit Logging**: Track all authentication events\n- **Password Validation**: Configurable password requirements\n",
+    "description": "High-Performance In-Memory Key-Value Store & Message Broker\n\nSynap combines Redis, RabbitMQ, and Kafka features in a single platform:\n- **Key-Value Store**: Radix-tree based storage with TTL support\n- **Hash Store**: Redis-compatible hash data structure for structured objects\n- **Message Queues**: RabbitMQ-style queues with ACK/NACK\n- **Event Streams**: Kafka-style partitioned topics with consumer groups\n- **Pub/Sub**: Topic-based messaging with wildcard support\n\n**Authentication & Security** (✅ Production Ready):\n- **Basic Auth**: HTTP Basic Authentication (username:password)\n- **Bearer Token**: API Key authentication via Authorization header\n- **API Key**: Query parameter authentication for GET requests\n- **User Management**: Create, delete, enable/disable users\n- **API Key Management**: Generate, revoke, and manage API keys with expiration\n- **Fine-grained Permissions**: Resource-based permissions (RabbitMQ-style)\n- **Audit Logging**: Track all authentication events\n- **Password Validation**: Configurable password requirements\n",
     "version": "0.9.0",
     "contact": {
       "name": "Synap Team",
@@ -583,7 +583,7 @@
           "Hash"
         ],
         "summary": "Set multiple hash fields",
-        "description": "Set multiple field-value pairs in a hash",
+        "description": "Set multiple field-value pairs in a hash.\n\n**Supported Formats:**\n- Object format: `{\"fields\": {\"name\": \"Alice\", \"age\": 30}}`\n- Array format: `[{\"field\": \"name\", \"value\": \"Alice\"}, {\"field\": \"age\", \"value\": 30}]`\n",
         "operationId": "hashMSet",
         "parameters": [
           {
@@ -601,21 +601,59 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "required": [
-                  "fields"
-                ],
-                "properties": {
-                  "fields": {
+                "oneOf": [
+                  {
                     "type": "object",
-                    "additionalProperties": true,
-                    "example": {
-                      "name": "Alice",
-                      "age": 30,
-                      "email": "alice@example.com"
+                    "required": [
+                      "fields"
+                    ],
+                    "properties": {
+                      "fields": {
+                        "type": "object",
+                        "additionalProperties": true,
+                        "example": {
+                          "name": "Alice",
+                          "age": 30,
+                          "email": "alice@example.com"
+                        }
+                      }
                     }
+                  },
+                  {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "field",
+                        "value"
+                      ],
+                      "properties": {
+                        "field": {
+                          "type": "string",
+                          "example": "name"
+                        },
+                        "value": {
+                          "description": "Field value (any JSON type)",
+                          "example": "Alice"
+                        }
+                      }
+                    },
+                    "example": [
+                      {
+                        "field": "name",
+                        "value": "Alice"
+                      },
+                      {
+                        "field": "age",
+                        "value": 30
+                      },
+                      {
+                        "field": "email",
+                        "value": "alice@example.com"
+                      }
+                    ]
                   }
-                }
+                ]
               }
             }
           }
@@ -3684,7 +3722,7 @@
           "Pub/Sub"
         ],
         "summary": "Publish message",
-        "description": "Publish a message to a pub/sub topic",
+        "description": "Publish a message to a pub/sub topic.\n\n**Supported Fields:**\n- `payload` (preferred): Message payload (any JSON type)\n- `data` (alias): Alternative field name for payload (for SDK compatibility)\n- `metadata` (optional): Additional metadata as key-value pairs\n",
         "operationId": "pubsubPublish",
         "parameters": [
           {
@@ -3703,18 +3741,45 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": [
-                  "message"
-                ],
                 "properties": {
-                  "message": {
-                    "type": "object",
+                  "payload": {
+                    "description": "Message payload (preferred field name)",
                     "example": {
                       "to": "user@example.com",
                       "subject": "Welcome"
                     }
+                  },
+                  "data": {
+                    "description": "Message payload (alias for SDK compatibility)",
+                    "example": {
+                      "to": "user@example.com",
+                      "subject": "Welcome"
+                    }
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "description": "Optional metadata key-value pairs",
+                    "example": {
+                      "source": "web-app",
+                      "priority": "high"
+                    }
                   }
-                }
+                },
+                "anyOf": [
+                  {
+                    "required": [
+                      "payload"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "data"
+                    ]
+                  }
+                ]
               }
             }
           }
@@ -5805,6 +5870,175 @@
             "format": "int64",
             "description": "Total number of GEOHASH operations",
             "example": 1500
+          }
+        }
+      },
+      "UserInfo": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string",
+            "example": "admin"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "admin",
+              "readonly"
+            ]
+          },
+          "is_admin": {
+            "type": "boolean",
+            "example": true
+          },
+          "enabled": {
+            "type": "boolean",
+            "example": true
+          }
+        }
+      },
+      "CreateKeyRequest": {
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "my-api-key"
+          },
+          "expires_in_seconds": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true,
+            "description": "Optional expiration time in seconds",
+            "example": 86400
+          },
+          "permissions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "resource": {
+                  "type": "string",
+                  "example": "kv:*"
+                },
+                "action": {
+                  "type": "string",
+                  "enum": [
+                    "read",
+                    "write",
+                    "delete",
+                    "configure",
+                    "admin",
+                    "all"
+                  ],
+                  "example": "read"
+                }
+              }
+            },
+            "nullable": true
+          },
+          "allowed_ips": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "description": "Optional list of allowed IP addresses",
+            "example": [
+              "192.168.1.1",
+              "10.0.0.1"
+            ]
+          }
+        }
+      },
+      "CreateKeyResponse": {
+        "type": "object",
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "example": true
+          },
+          "key": {
+            "$ref": "#/components/schemas/ApiKeyInfo"
+          },
+          "message": {
+            "type": "string",
+            "example": "API key created successfully"
+          }
+        }
+      },
+      "ApiKeyInfo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "key_abc123xyz"
+          },
+          "key": {
+            "type": "string",
+            "description": "API key secret (only shown on creation)",
+            "example": "synap_sk_live_abc123xyz789"
+          },
+          "name": {
+            "type": "string",
+            "example": "my-api-key"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true,
+            "example": "2025-12-31T23:59:59Z"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "example": "2025-11-25T12:00:00Z"
+          }
+        }
+      },
+      "CreateUserRequest": {
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "properties": {
+          "username": {
+            "type": "string",
+            "example": "newuser"
+          },
+          "password": {
+            "type": "string",
+            "format": "password",
+            "example": "SecurePassword123!"
+          },
+          "roles": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true,
+            "example": [
+              "readonly"
+            ]
+          }
+        }
+      },
+      "RoleInfo": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "readonly"
+          },
+          "description": {
+            "type": "string",
+            "example": "Read-only access to resources"
           }
         }
       }

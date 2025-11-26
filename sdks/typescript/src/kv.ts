@@ -100,6 +100,30 @@ export class KVStore {
   }
 
   /**
+   * Set multiple key-value pairs atomically only if none of the keys exist (MSETNX)
+   * 
+   * Supports both object format (new) and tuple format (backward compatible)
+   * 
+   * @example
+   * ```typescript
+   * // Object format (preferred)
+   * await kv.msetnx({ key: 'user:1', value: 'Alice' });
+   * 
+   * // Multiple pairs (tuple format - backward compatible)
+   * await kv.msetnx({ key: 'user:1', value: 'Alice' }, { key: 'user:2', value: 'Bob' });
+   * ```
+   */
+  async msetnx(...pairs: Array<{ key: string; value: JSONValue }>): Promise<boolean> {
+    // If single pair, use object format; otherwise use array format
+    const payload = pairs.length === 1 
+      ? { key: pairs[0].key, value: pairs[0].value }  // Object format
+      : { pairs: pairs.map(p => ({ key: p.key, value: p.value })) };  // Array format
+    
+    const result = await this.client.sendCommand<{ success: boolean }>('kv.msetnx', payload);
+    return result.success;
+  }
+
+  /**
    * Get multiple values by keys
    */
   async mget<T = JSONValue>(keys: string[]): Promise<Record<string, T | null>> {

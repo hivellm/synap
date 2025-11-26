@@ -358,6 +358,54 @@ Manage Synap replication cluster using Docker Compose.
 
 ---
 
+---
+
+## Testing Scripts
+
+### `populate-synap-dashboard.ps1`
+
+Popula o servidor Synap com dados reais para visualizar no dashboard GUI.
+
+**Uso**:
+```powershell
+# Com servidor padrão (localhost:8080)
+.\scripts\populate-synap-dashboard.ps1
+
+# Com servidor customizado
+.\scripts\populate-synap-dashboard.ps1 -Url "http://localhost" -Port 8080
+
+# Com API key
+.\scripts\populate-synap-dashboard.ps1 -Url "http://localhost" -Port 8080 -ApiKey "your-api-key"
+```
+
+**O que o script faz**:
+- ✅ Cria 10+ keys no KV Store (users, configs, sessions, cache)
+- ✅ Cria keys com TTL para testar expiração
+- ✅ Cria 5 queues diferentes
+- ✅ Publica 10+ mensagens nas queues com diferentes prioridades
+- ✅ Cria 5 streams com diferentes números de partições
+- ✅ Publica 12+ mensagens nos streams
+- ✅ Cria Hash, List, Set e Sorted Set structures
+- ✅ Publica mensagens em Pub/Sub topics
+- ✅ Executa 50+ operações para gerar métricas
+
+**Exemplo de saída**:
+```
+🚀 Populando Synap em http://localhost:8080 com dados de teste...
+📊 Verificando saúde do servidor...
+✅ Servidor está saudável!
+🔑 Criando keys no KV Store...
+✅ Criadas 10 keys no KV Store
+📬 Criando queues...
+✅ Publicadas 10 mensagens nas queues
+🌊 Criando streams...
+✅ Publicadas 12 mensagens nos streams
+...
+✅ Dashboard populado com sucesso!
+```
+
+---
+
 ## See Also
 
 - [Packaging & Distribution Guide](../docs/PACKAGING_AND_DISTRIBUTION.md)

@@ -273,19 +273,19 @@ pub async fn recover(
     let (kv_store, queue_manager, last_offset) = if let Some((snapshot, _)) = 
         snapshot_mgr.load_latest().await? 
     {
-        println!("Loading snapshot from offset {}", snapshot.wal_offset);
+        tracing::info!("Loading snapshot from offset {}", snapshot.wal_offset);
         
         let kv = KVStore::from_snapshot(snapshot.kv_data)?;
         let queues = QueueManager::from_snapshot(snapshot.queues)?;
         
         (kv, queues, snapshot.wal_offset)
     } else {
-        println!("No snapshot found, starting fresh");
+        tracing::info!("No snapshot found, starting fresh");
         (KVStore::new(), QueueManager::new(), 0)
     };
     
     // 2. Replay WAL from snapshot offset
-    println!("Replaying WAL from offset {}...", last_offset);
+    tracing::info!("Replaying WAL from offset {}...", last_offset);
     let entries = wal.replay(last_offset).await?;
     
     for entry in entries {
@@ -307,7 +307,7 @@ pub async fn recover(
         }
     }
     
-    println!("Recovery complete. Replayed {} operations", entries.len());
+    tracing::info!("Recovery complete. Replayed {} operations", entries.len());
     
     Ok((kv_store, queue_manager, last_offset + entries.len() as u64))
 }
@@ -338,13 +338,13 @@ pub async fn auto_snapshot_task(
             wal_offset
         ).await {
             Ok(path) => {
-                println!("Snapshot created: {:?}", path);
+                tracing::info!("Snapshot created: {:?}", path);
                 
                 // Truncate WAL
                 wal.write().truncate(wal_offset).await.ok();
             }
             Err(e) => {
-                eprintln!("Snapshot failed: {}", e);
+                etracing::info!("Snapshot failed: {}", e);
             }
         }
     }

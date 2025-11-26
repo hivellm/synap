@@ -5,6 +5,7 @@ use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 use serde_json::json;
 use std::time::Instant;
+use tracing::{error, info};
 
 #[derive(Parser, Debug)]
 #[command(name = "synap-cli")]
@@ -622,6 +623,19 @@ impl SynapClient {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize tracing subscriber for CLI output
+    // Use info level by default to show user-facing messages
+    let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stdout)
+        .with_env_filter(tracing_subscriber::EnvFilter::new(log_level))
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .with_file(false)
+        .with_line_number(false)
+        .init();
+
     let args = Args::parse();
     let client = SynapClient::new(&args.host, args.port);
 
@@ -633,11 +647,11 @@ async fn main() -> Result<()> {
 
         match client.execute_command(cmd, &cmd_args).await {
             Ok(output) => {
-                println!("{}", output);
+                info!("{}", output);
                 Ok(())
             }
             Err(e) => {
-                eprintln!("{}", format!("Error: {}", e).red());
+                error!(error = %e, "{}", format!("Error: {}", e).red());
                 std::process::exit(1);
             }
         }
@@ -648,14 +662,14 @@ async fn main() -> Result<()> {
 }
 
 async fn run_interactive(client: SynapClient, host: &str, port: u16) -> Result<()> {
-    println!(
+    info!(
         "{}",
         format!("Synap CLI v{}", env!("CARGO_PKG_VERSION"))
             .bold()
             .cyan()
     );
-    println!("Connected to {}:{}", host, port);
-    println!("Type {} for available commands\n", "HELP".bold());
+    info!("Connected to {}:{}", host, port);
+    info!("Type {} for available commands\n", "HELP".bold());
 
     let mut rl = DefaultEditor::new()?;
 
@@ -680,25 +694,27 @@ async fn run_interactive(client: SynapClient, host: &str, port: u16) -> Result<(
                 let args = &parts[1..];
 
                 if cmd.to_uppercase() == "QUIT" || cmd.to_uppercase() == "EXIT" {
-                    println!("Goodbye!");
+                    info!("Goodbye!");
                     break;
                 }
 
                 match client.execute_command(cmd, args).await {
-                    Ok(output) => println!("{}", output),
-                    Err(e) => eprintln!("{}", format!("Error: {}", e).red()),
+                    Ok(output) => info!("{}", output),
+                    Err(e) => {
+                        error!(error = %e, "{}", format!("Error: {}", e).red());
+                    }
                 }
             }
             Err(ReadlineError::Interrupted) => {
-                println!("^C");
+                info!("^C");
                 continue;
             }
             Err(ReadlineError::Eof) => {
-                println!("Goodbye!");
+                info!("Goodbye!");
                 break;
             }
             Err(err) => {
-                eprintln!("Error: {:?}", err);
+                error!(error = ?err, "Readline error: {:?}", err);
                 break;
             }
         }

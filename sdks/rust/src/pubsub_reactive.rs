@@ -34,7 +34,7 @@ impl crate::pubsub::PubSubManager {
     ///
     /// // Process messages reactively
     /// while let Some(message) = stream.next().await {
-    ///     println!("Received on {}: {:?}", message.topic, message.data);
+    ///     tracing::info!("Received on {}: {:?}", message.topic, message.data);
     /// }
     ///
     /// // Stop subscribing
@@ -208,7 +208,7 @@ impl crate::pubsub::PubSubManager {
     ///     .observe_topic("subscriber-1", "user.events");
     ///
     /// while let Some(message) = stream.next().await {
-    ///     println!("Received: {:?}", message);
+    ///     tracing::info!("Received: {:?}", message);
     /// }
     ///
     /// handle.unsubscribe();
