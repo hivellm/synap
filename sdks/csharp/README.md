@@ -1,6 +1,6 @@
 # Synap C# SDK
 
-Official C# client library for [Synap](https://github.com/hivellm/hivellm) - High-Performance In-Memory Key-Value Store & Message Broker.
+Official C# client library for [Synap](https://github.com/hivellm/synap) - High-Performance In-Memory Key-Value Store & Message Broker.
 
 ## Features
 
@@ -20,7 +20,7 @@ Official C# client library for [Synap](https://github.com/hivellm/hivellm) - Hig
 ## Installation
 
 ```bash
-dotnet add package HiveLLM.Synap.SDK
+dotnet add package HiveHub.Synap.SDK
 ```
 
 ## Quick Start
@@ -248,7 +248,7 @@ Contributions are welcome! Please see [CONTRIBUTING.md](../../CONTRIBUTING.md) f
 
 ## Links
 
-- [Synap Server](https://github.com/hivellm/hivellm/tree/main/synap)
-- [Documentation](https://github.com/hivellm/hivellm/blob/main/synap/README.md)
-- [Other SDKs](https://github.com/hivellm/hivellm/tree/main/synap/sdks)
+- [Synap Server](https://github.com/hivellm/synap/tree/main)
+- [Documentation](https://github.com/hivellm/synap/tree/main/docs)
+- [Other SDKs](https://github.com/hivellm/synap/tree/main/sdks)
 

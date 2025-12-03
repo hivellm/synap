@@ -21,7 +21,7 @@ Official PHP client library for [Synap](https://github.com/hivellm/synap) - High
 ## Installation
 
 ```bash
-composer require hivellm/synap-sdk
+composer require hivehub/synap-sdk
 ```
 
 ## Quick Start

@@ -44,7 +44,7 @@ A microservices architecture where services need to be notified of system events
 ### Event Publisher (TypeScript)
 
 ```typescript
-import { SynapClient } from '@hivellm/synap-client';
+import { Synap } from '@hivehub/synap';
 
 class EventBroadcaster {
   private synap: SynapClient;

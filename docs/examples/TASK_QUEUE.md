@@ -69,7 +69,7 @@ interface VideoTask {
 ### TypeScript Producer
 
 ```typescript
-import { SynapClient } from '@hivellm/synap-client';
+import { Synap } from '@hivehub/synap';
 
 class VideoTaskProducer {
   private synap: SynapClient;
@@ -229,7 +229,7 @@ async def main():
 ### TypeScript Worker
 
 ```typescript
-import { SynapClient, QueueMessage } from '@hivellm/synap-client';
+import { Synap, QueueMessage } from '@hivehub/synap';
 
 class VideoWorker {
   private synap: SynapClient;

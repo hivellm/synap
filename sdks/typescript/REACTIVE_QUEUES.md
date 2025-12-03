@@ -26,7 +26,7 @@ The reactive approach with RxJS provides:
 The SDK includes RxJS as a dependency:
 
 ```bash
-npm install @hivellm/synap
+npm install @hivehub/synap
 ```
 
 ## Basic Reactive Consumer
@@ -34,7 +34,7 @@ npm install @hivellm/synap
 ### Simple Consumer with Manual ACK
 
 ```typescript
-import { Synap } from '@hivellm/synap';
+import { Synap } from '@hivehub/synap';
 
 const synap = new Synap({ url: 'http://localhost:15500' });
 

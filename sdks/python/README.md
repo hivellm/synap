@@ -1,6 +1,6 @@
 # Synap Python SDK
 
-Official Python client library for [Synap](https://github.com/hivellm/hivellm) - High-Performance In-Memory Key-Value Store & Message Broker.
+Official Python client library for [Synap](https://github.com/hivellm/synap) - High-Performance In-Memory Key-Value Store & Message Broker.
 
 ## Features
 
@@ -289,7 +289,7 @@ Contributions are welcome! Please see [CONTRIBUTING.md](../../CONTRIBUTING.md) f
 
 ## Links
 
-- [Synap Server](https://github.com/hivellm/hivellm/tree/main/synap)
-- [Documentation](https://github.com/hivellm/hivellm/blob/main/synap/README.md)
-- [Other SDKs](https://github.com/hivellm/hivellm/tree/main/synap/sdks)
+- [Synap Server](https://github.com/hivellm/synap/tree/main/synap)
+- [Documentation](https://github.com/hivellm/synap/blob/main/synap/README.md)
+- [Other SDKs](https://github.com/hivellm/synap/tree/main/synap/sdks)
 

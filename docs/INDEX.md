@@ -170,7 +170,7 @@ admin.*     → Administrative operations
 
 ```bash
 # TypeScript
-npm install @hivellm/synap-client
+npm install @hivehub/synap
 
 # Python
 pip install synap-client

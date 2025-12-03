@@ -250,3 +250,11 @@ When user approves installation
 Then the system SHALL download and install the update
 And the application SHALL restart with the new version
 
+
+
+
+
+
+
+
+

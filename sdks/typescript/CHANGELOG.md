@@ -1,4 +1,4 @@
-# Changelog - @hivellm/synap
+# Changelog - @hivehub/synap
 
 All notable changes to the Synap TypeScript SDK will be documented in this file.
 
@@ -73,7 +73,7 @@ All notable changes to the Synap TypeScript SDK will be documented in this file.
 ## [0.2.0-beta.2] - 2025-10-21
 
 ### Changed
-- **BREAKING**: Package name changed from `@synap/client` to `@hivellm/synap`
+- **BREAKING**: Package name changed from `@synap/client` to `@hivellm/synap` (now `@hivehub/synap` in v0.8.1+)
 - **BREAKING**: `mset()` now returns `boolean` instead of `number`
 - Fixed `get()` to return `null` instead of `undefined` for non-existent keys
 - Fixed `mset()`, `mget()`, `mdel()` batch operations to use correct server format

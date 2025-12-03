@@ -5,7 +5,7 @@
  * 
  * @example
  * ```typescript
- * import { Synap } from '@hivellm/synap';
+ * import { Synap } from '@hivehub/synap';
  * 
  * const synap = new Synap({ url: 'http://localhost:15500' });
  * 

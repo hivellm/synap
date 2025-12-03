@@ -7,17 +7,17 @@ The Synap TypeScript SDK provides a type-safe, Promise-based client for Node.js 
 ## Installation
 
 ```bash
-npm install @hivellm/synap-client
+npm install @hivehub/synap
 # or
-pnpm add @hivellm/synap-client
+pnpm add @hivehub/synap
 # or
-yarn add @hivellm/synap-client
+yarn add @hivehub/synap
 ```
 
 ## Quick Start
 
 ```typescript
-import { SynapClient } from '@hivellm/synap-client';
+import { Synap } from '@hivehub/synap';
 
 const client = new SynapClient({
   url: 'http://localhost:15500',
@@ -637,7 +637,7 @@ interface Subscription {
 ### Module Structure
 
 ```
-@hivellm/synap-client/
+@hivehub/synap/
 ├── src/
 │   ├── index.ts              # Main exports
 │   ├── client.ts             # SynapClient class
@@ -896,7 +896,7 @@ class NotificationService {
 ### Mock Client
 
 ```typescript
-import { createMockClient } from '@hivellm/synap-client/testing';
+import { createMockClient } from '@hivehub/synap/testing';
 
 const mockClient = createMockClient();
 
@@ -914,7 +914,7 @@ expect(result.value.name).toBe('Alice');
 ### Integration Tests
 
 ```typescript
-import { SynapClient } from '@hivellm/synap-client';
+import { Synap } from '@hivehub/synap';
 
 describe('Synap Integration', () => {
   let client: SynapClient;

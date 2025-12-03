@@ -1,4 +1,4 @@
-# @hivellm/synap
+# @hivehub/synap
 
 Official TypeScript/JavaScript SDK for [Synap](https://github.com/hivellm/synap) - High-Performance In-Memory Key-Value Store & Message Broker.
 
@@ -25,11 +25,11 @@ Official TypeScript/JavaScript SDK for [Synap](https://github.com/hivellm/synap)
 ## Installation
 
 ```bash
-npm install @hivellm/synap
+npm install @hivehub/synap
 # or
-yarn add @hivellm/synap
+yarn add @hivehub/synap
 # or
-pnpm add @hivellm/synap
+pnpm add @hivehub/synap
 ```
 
 ---
@@ -39,7 +39,7 @@ pnpm add @hivellm/synap
 ### Basic Usage
 
 ```typescript
-import { Synap } from '@hivellm/synap';
+import { Synap } from '@hivehub/synap';
 
 // Create client
 const synap = new Synap({
@@ -756,7 +756,7 @@ await synap.queue.publishString('secure-queue', 'message');
 ## Error Handling
 
 ```typescript
-import { SynapError, NetworkError, ServerError, TimeoutError } from '@hivellm/synap';
+import { SynapError, NetworkError, ServerError, TimeoutError } from '@hivehub/synap';
 
 try {
   await synap.kv.set('mykey', 'value');
@@ -898,7 +898,7 @@ See [API Documentation](./docs/API.md) for complete API reference.
 The SDK is written in TypeScript and provides full type safety:
 
 ```typescript
-import { Synap, QueueMessage, KVStats } from '@hivellm/synap';
+import { Synap, QueueMessage, KVStats } from '@hivehub/synap';
 
 const synap = new Synap();
 
@@ -918,25 +918,6 @@ if (data) {
   console.log(data.task); // TypeScript infers the type
 }
 ```
-
----
-
-## Browser Support
-
-The SDK works in modern browsers (ES2022+):
-
-```html
-<script type="module">
-  import { Synap } from 'https://cdn.jsdelivr.net/npm/@hivellm/synap/+esm';
-  
-  const synap = new Synap({ url: 'http://localhost:15500' });
-  await synap.kv.set('browser:key', 'value');
-  const value = await synap.kv.get('browser:key');
-  console.log(value);
-</script>
-```
-
----
 
 ## Development
 

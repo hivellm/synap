@@ -39,7 +39,7 @@ This example demonstrates how to build a multi-room chat application using Synap
 ### Backend (TypeScript)
 
 ```typescript
-import { SynapClient } from '@hivellm/synap-client';
+import { Synap } from '@hivehub/synap';
 import express from 'express';
 import http from 'http';
 
@@ -154,7 +154,7 @@ server.listen(3000, () => {
 ### Frontend (TypeScript)
 
 ```typescript
-import { SynapClient } from '@hivellm/synap-client';
+import { Synap } from '@hivehub/synap';
 
 class ChatClient {
   private synap: SynapClient;
@@ -603,8 +603,8 @@ await synap.stream.publish(
 ### Unit Tests
 
 ```typescript
-import { SynapClient } from '@hivellm/synap-client';
-import { createMockClient } from '@hivellm/synap-client/testing';
+import { Synap } from '@hivehub/synap';
+import { createMockClient } from '@hivehub/synap/testing';
 
 describe('ChatClient', () => {
   it('should join room and receive history', async () => {

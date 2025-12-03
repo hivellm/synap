@@ -863,17 +863,16 @@ pub async fn memory_usage(
     );
 
     let stores = state.monitoring.stores();
-    let key_type = match key_manager.key_type(&key).await {
-        Ok(kt) => kt,
-        Err(_) => {
-            // Key doesn't exist, return 0 usage
-            return Ok(Json(serde_json::json!({
-                "key": key,
-                "bytes": 0,
-                "human": "0B"
-            })));
-        }
-    };
+    let key_type = key_manager.key_type(&key).await?;
+
+    // Return 0 usage if key doesn't exist (REST endpoint behavior)
+    if key_type == crate::core::KeyType::None {
+        return Ok(Json(serde_json::json!({
+            "key": key,
+            "bytes": 0,
+            "human": "0B"
+        })));
+    }
 
     let usage = MemoryUsage::calculate_with_stores(
         key_type, &key, &stores.0, &stores.1, &stores.2, &stores.3, &stores.4,
@@ -6542,17 +6541,15 @@ async fn handle_memory_usage_cmd(
     );
 
     let stores = state.monitoring.stores();
-    let key_type = match key_manager.key_type(key).await {
-        Ok(kt) => kt,
-        Err(_) => {
-            // Key doesn't exist, return 0 usage
-            return Ok(serde_json::json!({
-                "key": key,
-                "bytes": 0,
-                "human": "0B"
-            }));
-        }
-    };
+    let key_type = key_manager.key_type(key).await?;
+
+    // Return error if key doesn't exist
+    if key_type == crate::core::KeyType::None {
+        return Err(SynapError::KeyNotFound(format!(
+            "Key '{}' does not exist",
+            key
+        )));
+    }
 
     let usage = MemoryUsage::calculate_with_stores(
         key_type, key, &stores.0, &stores.1, &stores.2, &stores.3, &stores.4,

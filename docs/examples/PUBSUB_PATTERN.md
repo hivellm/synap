@@ -79,7 +79,7 @@ users.
 ### TypeScript Publisher
 
 ```typescript
-import { SynapClient } from '@hivellm/synap-client';
+import { Synap } from '@hivehub/synap';
 
 class EventPublisher {
   private synap: SynapClient;
