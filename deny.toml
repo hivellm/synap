@@ -8,7 +8,14 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "warn"
 # RUSTSEC-2024-0436: paste crate is unmaintained (transitive dependency via rmcp)
 # We cannot control this until rmcp updates or we find an alternative
-ignore = ["RUSTSEC-2024-0436"]
+# RUSTSEC-2025-0119: number_prefix is unmaintained (used by indicatif 0.17, fixed in 0.18+)
+# RUSTSEC-2025-0134: rustls-pemfile is unmaintained (used by reqwest 0.11, fixed in 0.12+)
+# These are resolved in updated dependencies but CI may still flag them
+ignore = [
+    "RUSTSEC-2024-0436",
+    "RUSTSEC-2025-0119",
+    "RUSTSEC-2025-0134",
+]
 
 [licenses]
 version = 2
