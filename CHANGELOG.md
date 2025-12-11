@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Dependency Updates**
+  - **rmcp** `0.9.1 → 0.11.0` - Updated MCP library with breaking changes
+    - Added required `meta` field to `ListToolsResult` struct (set to `None`)
+  - **reqwest** `0.11 → 0.12` - Updated HTTP client in CLI and SDK
+  - **indicatif** `0.17 → 0.18` - Updated progress bar library in migration tool
+
 ## [0.9.1] - 2025-12-11
 
 ### Changed
