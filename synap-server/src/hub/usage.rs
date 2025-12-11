@@ -4,7 +4,7 @@
 //! reports to HiveHub API every 5 minutes for billing purposes.
 
 use super::client::HubClient;
-use super::sdk_stubs::ResourceType;
+use super::sdk::ResourceType;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;

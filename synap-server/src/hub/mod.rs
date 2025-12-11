@@ -9,7 +9,7 @@
 //! - SaaS restrictions for shared server protection
 
 #[cfg(feature = "hub-integration")]
-mod sdk_stubs;
+pub mod sdk;
 
 #[cfg(feature = "hub-integration")]
 pub mod client;

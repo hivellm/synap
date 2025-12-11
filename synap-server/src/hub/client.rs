@@ -5,7 +5,7 @@
 use super::config::HubConfig;
 use super::quota::{QuotaManager, UserQuota};
 use super::restrictions::Plan;
-use super::sdk_stubs::{
+use super::sdk::{
     CreateResourceRequest, HiveHubCloudClient, HiveHubCloudError, ResourceType,
     SynapUpdateUsageRequest,
 };
