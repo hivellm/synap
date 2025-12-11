@@ -22,8 +22,8 @@
 //! 6. Master aggregates deltas, updates global quotas
 //! 7. Master syncs updated quotas to all replicas via Raft
 
-#[cfg(feature = "hub-integration")]
 use crate::hub::HubClient;
+use crate::hub::sdk::ResourceType;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -89,7 +89,6 @@ pub struct ClusterQuotaManager {
     pending_deltas: Arc<RwLock<HashMap<Uuid, UsageDelta>>>,
 
     /// Hub client for fetching quotas from HiveHub API
-    #[cfg(feature = "hub-integration")]
     hub_client: Option<Arc<HubClient>>,
 
     /// This node's ID
@@ -107,7 +106,6 @@ pub struct ClusterQuotaManager {
 
 impl ClusterQuotaManager {
     /// Create new cluster quota manager
-    #[cfg(feature = "hub-integration")]
     pub fn new(node_id: String, is_master: bool, hub_client: Option<Arc<HubClient>>) -> Self {
         Self {
             quota_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -117,19 +115,6 @@ impl ClusterQuotaManager {
             is_master,
             cache_ttl: Duration::from_secs(60),     // 60s cache
             sync_interval: Duration::from_secs(30), // 30s sync
-        }
-    }
-
-    /// Create new cluster quota manager (non-Hub mode)
-    #[cfg(not(feature = "hub-integration"))]
-    pub fn new(node_id: String, is_master: bool) -> Self {
-        Self {
-            quota_cache: Arc::new(RwLock::new(HashMap::new())),
-            pending_deltas: Arc::new(RwLock::new(HashMap::new())),
-            node_id,
-            is_master,
-            cache_ttl: Duration::from_secs(60),
-            sync_interval: Duration::from_secs(30),
         }
     }
 
@@ -156,7 +141,6 @@ impl ClusterQuotaManager {
     }
 
     /// Fetch quota from HiveHub API (master node only)
-    #[cfg(feature = "hub-integration")]
     async fn fetch_from_hub(&self, user_id: Uuid) -> Result<CachedQuota, String> {
         let hub_client = self
             .hub_client
@@ -185,12 +169,6 @@ impl ClusterQuotaManager {
             .insert(user_id, cached_quota.clone());
 
         Ok(cached_quota)
-    }
-
-    /// Fetch quota from HiveHub API (stub for non-Hub mode)
-    #[cfg(not(feature = "hub-integration"))]
-    async fn fetch_from_hub(&self, _user_id: Uuid) -> Result<CachedQuota, String> {
-        Err("Hub integration not enabled".to_string())
     }
 
     /// Fetch quota from master node (replica nodes)
@@ -263,11 +241,8 @@ impl ClusterQuotaManager {
                 }
             }
 
-            // Sync to Hub API (if Hub integration enabled)
-            #[cfg(feature = "hub-integration")]
+            // Sync to Hub API if client is configured
             if let Some(hub_client) = &self.hub_client {
-                use crate::hub::sdk::ResourceType;
-
                 let net_storage = if delta.storage_added > delta.storage_removed {
                     Some(delta.storage_added - delta.storage_removed)
                 } else {
@@ -387,11 +362,7 @@ mod tests {
 
     #[test]
     fn test_usage_delta_tracking() {
-        #[cfg(feature = "hub-integration")]
         let manager = ClusterQuotaManager::new("node-1".to_string(), true, None);
-
-        #[cfg(not(feature = "hub-integration"))]
-        let manager = ClusterQuotaManager::new("node-1".to_string(), true);
 
         let user_id = Uuid::new_v4();
 
@@ -410,20 +381,12 @@ mod tests {
 
     #[test]
     fn test_master_node_identification() {
-        #[cfg(feature = "hub-integration")]
         let master = ClusterQuotaManager::new("node-1".to_string(), true, None);
-
-        #[cfg(not(feature = "hub-integration"))]
-        let master = ClusterQuotaManager::new("node-1".to_string(), true);
 
         assert!(master.is_master());
         assert_eq!(master.node_id(), "node-1");
 
-        #[cfg(feature = "hub-integration")]
         let replica = ClusterQuotaManager::new("node-2".to_string(), false, None);
-
-        #[cfg(not(feature = "hub-integration"))]
-        let replica = ClusterQuotaManager::new("node-2".to_string(), false);
 
         assert!(!replica.is_master());
         assert_eq!(replica.node_id(), "node-2");

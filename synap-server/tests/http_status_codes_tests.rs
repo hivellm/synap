@@ -1,4 +1,4 @@
-// HTTP Status Code Tests
+﻿// HTTP Status Code Tests
 // Tests that REST API returns correct HTTP status codes for various scenarios
 
 use reqwest::{Client, StatusCode};
@@ -59,7 +59,6 @@ async fn spawn_test_server() -> String {
         client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
         cluster_topology: None,
         cluster_migration: None,
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     };
 
@@ -986,5 +985,5 @@ async fn test_all_status_codes_comprehensive() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 
-    tracing::info!("✅ All HTTP status codes verified!");
+    tracing::info!("âœ… All HTTP status codes verified!");
 }

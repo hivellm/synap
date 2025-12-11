@@ -1,4 +1,4 @@
-use rmcp::model::CallToolRequestParam;
+﻿use rmcp::model::CallToolRequestParam;
 use serde_json::json;
 use std::sync::Arc;
 use synap_server::monitoring::MonitoringManager;
@@ -54,7 +54,6 @@ async fn test_mcp_kv_get() {
         client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
         cluster_topology: None,
         cluster_migration: None,
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     });
 
@@ -120,7 +119,6 @@ async fn test_mcp_kv_set() {
         client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
         cluster_topology: None,
         cluster_migration: None,
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     });
 
@@ -191,7 +189,6 @@ async fn test_mcp_kv_delete() {
         client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
         cluster_topology: None,
         cluster_migration: None,
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     });
 
@@ -267,7 +264,6 @@ async fn test_mcp_queue_publish() {
         client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
         cluster_topology: None,
         cluster_migration: None,
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     });
 

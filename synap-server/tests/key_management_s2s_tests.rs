@@ -1,4 +1,4 @@
-//! S2S (Server-to-Server) integration tests for Key Management operations
+﻿//! S2S (Server-to-Server) integration tests for Key Management operations
 //! These tests require a running Synap server
 
 #[cfg(feature = "s2s-tests")]
@@ -80,7 +80,6 @@ async fn spawn_test_server() -> String {
         client_list_manager,
         cluster_topology: None,
         cluster_migration: None,
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     };
 

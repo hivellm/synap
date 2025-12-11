@@ -1,4 +1,4 @@
-//! Cluster REST API Integration Tests
+﻿//! Cluster REST API Integration Tests
 //!
 //! Tests REST API endpoints for cluster management
 
@@ -63,7 +63,6 @@ async fn spawn_test_server_with_cluster() -> String {
         client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
         cluster_topology: Some(topology),
         cluster_migration: Some(migration),
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     };
 

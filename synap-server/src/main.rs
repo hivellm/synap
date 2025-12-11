@@ -92,7 +92,7 @@ async fn main() -> Result<()> {
 
     // Override HiveHub config from environment variables (Docker/Cloud support)
     // Task 9.7: Add environment variable support for HiveHub service API key
-    #[cfg(feature = "hub-integration")]
+
     {
         if let Ok(enabled) = std::env::var("SYNAP_HUB_ENABLED") {
             config.hub.enabled = enabled.parse().unwrap_or(false);
@@ -410,7 +410,7 @@ async fn main() -> Result<()> {
     }
 
     // Task 9.4: Validate cluster mode configuration with Hub integration
-    #[cfg(feature = "hub-integration")]
+
     if config.hub.enabled && config.replication.enabled {
         warn!("⚠️  Hub integration + Cluster mode detected - ensure proper configuration");
         info!(
@@ -432,7 +432,7 @@ async fn main() -> Result<()> {
     }
 
     // Initialize HubClient if Hub integration is enabled
-    #[cfg(feature = "hub-integration")]
+
     let hub_client = if config.hub.enabled {
         info!("HiveHub integration enabled");
 
@@ -509,7 +509,7 @@ async fn main() -> Result<()> {
         client_list_manager,
         cluster_topology: None, // TODO: Initialize cluster topology from config
         cluster_migration: None, // TODO: Initialize cluster migration from config
-        #[cfg(feature = "hub-integration")]
+
         hub_client,
     };
 

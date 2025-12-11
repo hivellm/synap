@@ -15,7 +15,6 @@ use std::time::{Duration, Instant};
 
 use crate::config::RateLimitConfig;
 
-#[cfg(feature = "hub-integration")]
 use crate::hub::{
     HubUserContext,
     restrictions::{HubSaaSRestrictions, Plan},
@@ -102,7 +101,6 @@ impl RateLimiter {
     /// Check rate limit for authenticated user (Hub mode)
     ///
     /// Uses Plan-based limits from HubSaaSRestrictions
-    #[cfg(feature = "hub-integration")]
     pub fn check_user_rate_limit(&self, user_id: &str, plan: Plan) -> RateLimitResult {
         let mut buckets = self.buckets.write();
 
@@ -154,7 +152,6 @@ pub async fn rate_limit_middleware(
     mut request: axum::extract::Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    #[cfg(feature = "hub-integration")]
     {
         // Try to get Hub user context
         if let Some(hub_ctx) = request.extensions().get::<HubUserContext>().cloned() {
@@ -210,7 +207,6 @@ pub async fn rate_limit_middleware(
 /// - X-RateLimit-Limit: Requests per second allowed
 /// - X-RateLimit-Remaining: Remaining requests in current window
 /// - X-RateLimit-Reset: Seconds until rate limit resets
-#[cfg(feature = "hub-integration")]
 fn add_rate_limit_headers(
     response: &mut Response,
     limiter: &RateLimiter,
@@ -246,26 +242,6 @@ fn add_rate_limit_headers(
     }
 
     // Fallback: Add global config-based headers
-    response.headers_mut().insert(
-        "X-RateLimit-Limit",
-        limiter
-            .config
-            .requests_per_second
-            .to_string()
-            .parse()
-            .unwrap(),
-    );
-}
-
-/// Add rate limit headers to response (non-Hub version)
-#[cfg(not(feature = "hub-integration"))]
-fn add_rate_limit_headers(
-    response: &mut Response,
-    limiter: &RateLimiter,
-    _user_id: Option<&str>,
-    _plan: Option<()>,
-) {
-    // Add global config-based headers
     response.headers_mut().insert(
         "X-RateLimit-Limit",
         limiter
@@ -339,7 +315,6 @@ mod tests {
         assert_eq!(limiter.buckets.read().len(), 2);
     }
 
-    #[cfg(feature = "hub-integration")]
     #[test]
     fn test_user_rate_limiting() {
         let config = RateLimitConfig {
@@ -369,7 +344,6 @@ mod tests {
         assert!(result.allowed, "Different user should have own bucket");
     }
 
-    #[cfg(feature = "hub-integration")]
     #[test]
     fn test_plan_based_limits() {
         let config = RateLimitConfig {

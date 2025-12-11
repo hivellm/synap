@@ -60,7 +60,6 @@ pub fn create_test_app_state() -> AppState {
         client_list_manager,
         cluster_topology: None,
         cluster_migration: None,
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     }
 }

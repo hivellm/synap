@@ -230,20 +230,31 @@ impl HubClient {
     /// Convert Hub SDK error to Synap error
     fn convert_sdk_error(err: HiveHubCloudError) -> SynapError {
         match err {
-            HiveHubCloudError::Authentication(_) => {
-                SynapError::Unauthorized("Invalid or expired access key".to_string())
+            HiveHubCloudError::Authentication(msg) => {
+                SynapError::Unauthorized(format!("Invalid or expired access key: {}", msg))
             }
             HiveHubCloudError::QuotaExceeded(msg) => SynapError::QuotaExceeded(msg),
-            HiveHubCloudError::NotFound(_) => {
-                SynapError::ResourceNotFound("Resource not found in Hub".to_string())
-            }
+            HiveHubCloudError::NotFound(msg) => SynapError::ResourceNotFound(msg),
             HiveHubCloudError::BadRequest(msg) => SynapError::BadRequest(msg),
+            HiveHubCloudError::Validation(msg) => SynapError::BadRequest(msg),
+            HiveHubCloudError::ServiceUnavailable(msg) => {
+                error!("Hub service unavailable: {}", msg);
+                SynapError::InternalServerError(format!("Hub service unavailable: {}", msg))
+            }
             HiveHubCloudError::Http(e) => {
                 error!("Hub API HTTP error: {}", e);
                 SynapError::InternalServerError(format!("Hub API HTTP error: {}", e))
             }
+            HiveHubCloudError::Serialization(e) => {
+                error!("Hub API serialization error: {}", e);
+                SynapError::InternalServerError(format!("Hub API serialization error: {}", e))
+            }
+            HiveHubCloudError::Configuration(msg) => {
+                error!("Hub configuration error: {}", msg);
+                SynapError::InternalServerError(format!("Hub configuration error: {}", msg))
+            }
             HiveHubCloudError::Unknown(msg) => {
-                error!("Hub API server error: {}", msg);
+                error!("Hub API error: {}", msg);
                 SynapError::InternalServerError(format!("Hub API error: {}", msg))
             }
         }

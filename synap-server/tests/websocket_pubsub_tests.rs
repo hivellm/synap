@@ -1,4 +1,4 @@
-//! WebSocket PubSub Tests
+﻿//! WebSocket PubSub Tests
 //! These tests require a running Synap server
 
 #[cfg(feature = "s2s-tests")]
@@ -67,7 +67,6 @@ async fn spawn_test_server() -> (String, tokio::sync::oneshot::Sender<()>) {
         client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
         cluster_topology: None,
         cluster_migration: None,
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     };
 

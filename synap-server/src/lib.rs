@@ -4,7 +4,7 @@ pub mod cluster;
 pub mod compression;
 pub mod config;
 pub mod core;
-#[cfg(feature = "hub-integration")]
+
 pub mod hub;
 pub mod metrics;
 pub mod monitoring;
@@ -14,7 +14,6 @@ pub mod replication;
 pub mod scripting;
 pub mod server;
 
-#[cfg(feature = "hub-integration")]
 pub use hub::{HubClient, HubConfig, QuotaManager, ResourceNaming, UsageReporter};
 
 // Re-export commonly used types

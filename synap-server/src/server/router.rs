@@ -429,7 +429,7 @@ pub fn create_router(
         );
 
     // HiveHub Integration endpoints (conditionally compiled)
-    #[cfg(feature = "hub-integration")]
+
     let api_router = api_router.route("/hub/quota", get(handlers::hub_quota_stats));
 
     // Add state to API router

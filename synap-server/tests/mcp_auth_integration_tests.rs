@@ -1,4 +1,4 @@
-//! MCP Authentication Integration Tests
+﻿//! MCP Authentication Integration Tests
 //!
 //! Tests that verify authentication and permission checks work correctly
 //! for MCP (Model Context Protocol) requests.
@@ -75,7 +75,6 @@ async fn spawn_test_server_with_mcp_auth(
         client_list_manager,
         cluster_topology: None,
         cluster_migration: None,
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     };
 
@@ -319,7 +318,6 @@ async fn test_mcp_permission_check_read_only() {
         client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
         cluster_topology: None,
         cluster_migration: None,
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     });
 
@@ -418,7 +416,6 @@ async fn test_mcp_permission_check_write_allowed() {
         client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
         cluster_topology: None,
         cluster_migration: None,
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     });
 
@@ -500,7 +497,6 @@ async fn test_mcp_admin_bypass_permissions() {
         client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
         cluster_topology: None,
         cluster_migration: None,
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     });
 

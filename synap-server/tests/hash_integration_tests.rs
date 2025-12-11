@@ -1,4 +1,4 @@
-// Hash Integration Tests
+﻿// Hash Integration Tests
 // End-to-end tests for hash operations via REST API, StreamableHTTP, and MCP
 
 use reqwest::Client;
@@ -63,7 +63,6 @@ async fn spawn_test_server() -> String {
         client_list_manager: Arc::new(synap_server::monitoring::ClientListManager::new()),
         cluster_topology: None,
         cluster_migration: None,
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     };
 

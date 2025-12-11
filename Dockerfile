@@ -15,11 +15,11 @@
 #
 # Docker Commands:
 #   Build image (AMD64):
-#     docker build -t synap:0.9.0 -t synap:latest .
-#     docker build -t hivehub/synap:0.9.0 -t hivehub/synap:latest .
+#     docker build -t synap:0.9.1 -t synap:latest .
+#     docker build -t hivehub/synap:0.9.1 -t hivehub/synap:latest .
 #
 #   Build for ARM64:
-#     docker buildx build --platform linux/arm64 -t synap:0.9.0-arm64 .
+#     docker buildx build --platform linux/arm64 -t synap:0.9.1-arm64 .
 #
 #   Build multi-arch (AMD64 + ARM64):
 #     docker buildx build --platform linux/amd64,linux/arm64 \
@@ -126,13 +126,10 @@ COPY synap-cli/src ./synap-cli/src
 COPY synap-migrate/src ./synap-migrate/src
 COPY sdks/rust/src ./sdks/rust/src
 
-# Remove benchmark declarations and external dependencies from Cargo.toml for Docker build
-# (benchmarks are not needed for production image, HiveHub SDK requires external path)
+# Remove benchmark declarations from Cargo.toml for Docker build
+# (benchmarks are not needed for production image)
 RUN sed -i '/^# Configure benchmarks to use Criterion/,/^$/d' synap-server/Cargo.toml && \
-    sed -i '/^\[\[bench\]\]/,/^$/d' synap-server/Cargo.toml && \
-    sed -i '/^# HiveHub Cloud Integration$/d' synap-server/Cargo.toml && \
-    sed -i '/^hivehub-internal-sdk/d' synap-server/Cargo.toml && \
-    sed -i 's/hub-integration = \["dep:hivehub-internal-sdk"\]/hub-integration = []/g' synap-server/Cargo.toml
+    sed -i '/^\[\[bench\]\]/,/^$/d' synap-server/Cargo.toml
 
 # Build release binary with optimizations
 # - Static linking for portability

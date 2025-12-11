@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2025-12-11
+
+### Changed
+
+- **HiveHub SDK**: Switched from local path dependency to official `hivehub-internal-sdk = "1.0"` from crates.io
+- **Hub Integration**: Hub module is now always compiled in (no longer a feature flag)
+- **Runtime Configuration**: Hub enablement controlled via `hub.enabled` config at runtime instead of compile-time feature
+
+### Fixed
+
+- **CI/CD Build**: Fixed build failures caused by missing local SDK path dependency
+- **Multi-Tenant Scoping**: `MultiTenant::scope_*()` functions properly handle `None` user_id (standalone mode)
+
 ### Added
 
 - **HiveHub.Cloud Integration**: Full integration with HiveHub.Cloud platform for managed SaaS deployments

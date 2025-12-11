@@ -1,4 +1,4 @@
-//! Integration tests for authentication and permission checking
+﻿//! Integration tests for authentication and permission checking
 //!
 //! Tests that verify authentication middleware and permission checks work correctly
 //! across all REST API endpoints.
@@ -74,7 +74,6 @@ async fn spawn_test_server_with_auth(
         client_list_manager,
         cluster_topology: None,
         cluster_migration: None,
-        #[cfg(feature = "hub-integration")]
         hub_client: None,
     };
 
