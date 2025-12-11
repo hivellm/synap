@@ -5,13 +5,12 @@
 use super::config::HubConfig;
 use super::quota::{QuotaManager, UserQuota};
 use super::restrictions::Plan;
+use super::sdk_stubs::{
+    CreateResourceRequest, HiveHubCloudClient, HiveHubCloudError, ResourceType,
+    SynapUpdateUsageRequest,
+};
 use super::usage::UsageReporter;
 use crate::core::error::SynapError;
-
-use hivehub_internal_sdk::{
-    HiveHubCloudClient, HiveHubCloudError,
-    models::{CreateResourceRequest, ResourceType, SynapUpdateUsageRequest},
-};
 
 use parking_lot::RwLock;
 use std::collections::HashMap;
@@ -239,17 +238,13 @@ impl HubClient {
                 SynapError::ResourceNotFound("Resource not found in Hub".to_string())
             }
             HiveHubCloudError::BadRequest(msg) => SynapError::BadRequest(msg),
-            HiveHubCloudError::Unknown(msg) => {
-                error!("Hub API server error: {}", msg);
-                SynapError::InternalServerError(format!("Hub API error: {}", msg))
-            }
             HiveHubCloudError::Http(e) => {
                 error!("Hub API HTTP error: {}", e);
                 SynapError::InternalServerError(format!("Hub API HTTP error: {}", e))
             }
-            _ => {
-                error!("Unexpected Hub SDK error: {:?}", err);
-                SynapError::InternalServerError(format!("Hub API error: {}", err))
+            HiveHubCloudError::Unknown(msg) => {
+                error!("Hub API server error: {}", msg);
+                SynapError::InternalServerError(format!("Hub API error: {}", msg))
             }
         }
     }

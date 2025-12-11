@@ -266,7 +266,7 @@ impl ClusterQuotaManager {
             // Sync to Hub API (if Hub integration enabled)
             #[cfg(feature = "hub-integration")]
             if let Some(hub_client) = &self.hub_client {
-                use hivehub_internal_sdk::models::ResourceType;
+                use crate::hub::sdk_stubs::ResourceType;
 
                 let net_storage = if delta.storage_added > delta.storage_removed {
                     Some(delta.storage_added - delta.storage_removed)
