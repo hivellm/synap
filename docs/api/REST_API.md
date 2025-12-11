@@ -928,6 +928,204 @@ curl -X POST http://localhost:15500/api/v1/command \
   }'
 ```
 
+## HiveHub.Cloud Integration (SaaS Mode)
+
+### GET /hub/quota
+
+Get current quota usage and limits for authenticated user.
+
+**Requires Hub Integration**: This endpoint is only available when Synap is integrated with HiveHub.Cloud (`hub.enabled: true`).
+
+**Authentication**: Required - Hub access key via `Authorization: Bearer` or `X-Hub-Access-Key` header
+
+**Request**:
+```bash
+curl -X GET http://localhost:15500/hub/quota \
+  -H "Authorization: Bearer sk_live_a1b2c3d4e5f6..."
+```
+
+**Response**:
+```json
+{
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "plan": "Pro",
+  "quotas": {
+    "storage": {
+      "limit": 10737418240,
+      "used": 5368709120,
+      "available": 5368709120,
+      "percentage": 50.0
+    },
+    "operations": {
+      "limit": 10000000,
+      "used": 3456789,
+      "available": 6543211,
+      "percentage": 34.6,
+      "resets_at": "2025-02-01T00:00:00Z"
+    },
+    "connections": {
+      "limit": 100,
+      "active": 12,
+      "available": 88,
+      "percentage": 12.0
+    }
+  },
+  "restrictions": {
+    "max_ttl_seconds": 2592000,
+    "max_payload_bytes": 10485760,
+    "max_batch_size": 1000
+  }
+}
+```
+
+**Response Fields**:
+
+- `user_id` (string): UUID of the authenticated user
+- `plan` (string): User's subscription plan (`Free`, `Pro`, `Enterprise`)
+- `quotas.storage` (object): Storage quota information
+  - `limit` (number): Maximum storage in bytes
+  - `used` (number): Current storage used in bytes
+  - `available` (number): Remaining storage in bytes
+  - `percentage` (number): Usage percentage (0-100)
+- `quotas.operations` (object): Monthly operation quota
+  - `limit` (number): Maximum operations per month
+  - `used` (number): Operations used this month
+  - `available` (number): Remaining operations
+  - `percentage` (number): Usage percentage (0-100)
+  - `resets_at` (string): ISO 8601 timestamp when quota resets
+- `quotas.connections` (object): Connection quota
+  - `limit` (number): Maximum concurrent connections
+  - `active` (number): Currently active connections
+  - `available` (number): Available connection slots
+  - `percentage` (number): Usage percentage (0-100)
+- `restrictions` (object): Plan-based restrictions
+  - `max_ttl_seconds` (number): Maximum TTL for resources
+  - `max_payload_bytes` (number): Maximum payload size
+  - `max_batch_size` (number): Maximum batch operation size
+
+**Status Codes**:
+
+- `200 OK`: Quota information returned successfully
+- `401 Unauthorized`: Invalid or missing access key
+- `500 Internal Server Error`: Failed to fetch quota from Hub API
+
+**Example - Free Plan**:
+```json
+{
+  "user_id": "123e4567-e89b-12d3-a456-426614174000",
+  "plan": "Free",
+  "quotas": {
+    "storage": {
+      "limit": 104857600,
+      "used": 52428800,
+      "available": 52428800,
+      "percentage": 50.0
+    },
+    "operations": {
+      "limit": 100000,
+      "used": 45000,
+      "available": 55000,
+      "percentage": 45.0,
+      "resets_at": "2025-02-01T00:00:00Z"
+    },
+    "connections": {
+      "limit": 10,
+      "active": 3,
+      "available": 7,
+      "percentage": 30.0
+    }
+  },
+  "restrictions": {
+    "max_ttl_seconds": 86400,
+    "max_payload_bytes": 1048576,
+    "max_batch_size": 100
+  }
+}
+```
+
+**Example - Enterprise Plan**:
+```json
+{
+  "user_id": "789e0123-e45f-67g8-h901-234567890abc",
+  "plan": "Enterprise",
+  "quotas": {
+    "storage": {
+      "limit": 1099511627776,
+      "used": 549755813888,
+      "available": 549755813888,
+      "percentage": 50.0
+    },
+    "operations": {
+      "limit": null,
+      "used": 50000000,
+      "available": null,
+      "percentage": 0.0,
+      "resets_at": null
+    },
+    "connections": {
+      "limit": 1000,
+      "active": 250,
+      "available": 750,
+      "percentage": 25.0
+    }
+  },
+  "restrictions": {
+    "max_ttl_seconds": 31536000,
+    "max_payload_bytes": 104857600,
+    "max_batch_size": 10000
+  }
+}
+```
+
+**Error Responses**:
+
+**401 Unauthorized** - Invalid access key:
+```json
+{
+  "error": "Unauthorized",
+  "message": "Invalid or missing access key",
+  "code": "INVALID_ACCESS_KEY"
+}
+```
+
+**500 Internal Server Error** - Hub API failure:
+```json
+{
+  "error": "InternalServerError",
+  "message": "Failed to fetch quota from Hub API: Connection timeout",
+  "code": "HUB_API_ERROR"
+}
+```
+
+**Plan Comparison**:
+
+| Feature                  | Free         | Pro           | Enterprise    |
+|--------------------------|--------------|---------------|---------------|
+| Storage Limit            | 100 MB       | 10 GB         | 1 TB          |
+| Operations/Month         | 100,000      | 10,000,000    | Unlimited     |
+| Concurrent Connections   | 10           | 100           | 1,000         |
+| Max TTL                  | 24 hours     | 30 days       | 365 days      |
+| Max Payload Size         | 1 MB         | 10 MB         | 100 MB        |
+| Max Batch Size           | 100          | 1,000         | 10,000        |
+| Rate Limit               | 10 req/s     | 100 req/s     | 1,000 req/s   |
+
+**Notes**:
+
+- Quota data is cached for 60 seconds for performance
+- `operations.limit` is `null` for Enterprise plan (unlimited)
+- `operations.percentage` is always 0.0 for Enterprise plan
+- Storage includes all data: queues, streams, KV store, data structures
+- Operations count includes all read/write operations
+- Connections count active persistent HTTP/2 connections
+- Quota exceeded results in `429 Too Many Requests` responses
+
+**Related Documentation**:
+
+- [HUB_INTEGRATION.md](../specs/HUB_INTEGRATION.md) - Complete Hub integration specification
+- [QUOTA_MANAGEMENT.md](../specs/QUOTA_MANAGEMENT.md) - Detailed quota system documentation
+- [ACCESS_KEYS.md](../specs/ACCESS_KEYS.md) - Access key authentication guide
+- [HUB_CONFIGURATION.md](../guides/HUB_CONFIGURATION.md) - Setup guide
+
 ## See Also
 
 - [STREAMABLE_HTTP.md](../protocol/STREAMABLE_HTTP.md) - Protocol specification

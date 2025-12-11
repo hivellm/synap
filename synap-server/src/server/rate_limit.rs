@@ -1,7 +1,8 @@
 //! Rate Limiting Middleware for Synap
 //!
-//! Simple token bucket rate limiting with:
-//! - Per-IP rate limiting
+//! Token bucket rate limiting with:
+//! - Per-user rate limiting (Hub mode) - uses Plan-based limits
+//! - Per-IP rate limiting (standalone mode or fallback)
 //! - Configurable requests per second
 //! - Burst capacity
 
@@ -13,6 +14,25 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::config::RateLimitConfig;
+
+#[cfg(feature = "hub-integration")]
+use crate::hub::{
+    HubUserContext,
+    restrictions::{HubSaaSRestrictions, Plan},
+};
+
+/// Rate limit check result with metadata for response headers
+#[derive(Debug, Clone)]
+pub struct RateLimitResult {
+    /// Whether the request is allowed
+    pub allowed: bool,
+    /// Rate limit (requests per second)
+    pub limit: u64,
+    /// Remaining tokens in bucket
+    pub remaining: u64,
+    /// Time until bucket refills
+    pub reset_in: Duration,
+}
 
 /// Token bucket for rate limiting
 #[derive(Debug, Clone)]
@@ -54,6 +74,7 @@ impl TokenBucket {
 
 /// Rate limiter state
 pub struct RateLimiter {
+    /// Buckets keyed by: "user:{user_id}" or "ip:{ip_address}"
     buckets: Arc<RwLock<HashMap<String, TokenBucket>>>,
     config: RateLimitConfig,
 }
@@ -66,14 +87,43 @@ impl RateLimiter {
         }
     }
 
+    /// Check rate limit for IP address (standalone mode or fallback)
     pub fn check_rate_limit(&self, ip: &str) -> bool {
         let mut buckets = self.buckets.write();
 
-        let bucket = buckets.entry(ip.to_string()).or_insert_with(|| {
+        let key = format!("ip:{}", ip);
+        let bucket = buckets.entry(key).or_insert_with(|| {
             TokenBucket::new(self.config.burst_size, self.config.requests_per_second)
         });
 
         bucket.try_consume(1.0)
+    }
+
+    /// Check rate limit for authenticated user (Hub mode)
+    ///
+    /// Uses Plan-based limits from HubSaaSRestrictions
+    #[cfg(feature = "hub-integration")]
+    pub fn check_user_rate_limit(&self, user_id: &str, plan: Plan) -> RateLimitResult {
+        let mut buckets = self.buckets.write();
+
+        let key = format!("user:{}", user_id);
+
+        // Get plan-specific limits
+        let requests_per_second = HubSaaSRestrictions::max_requests_per_second(plan) as u64;
+        let burst_size = requests_per_second * 2; // Burst = 2x rate limit
+
+        let bucket = buckets
+            .entry(key)
+            .or_insert_with(|| TokenBucket::new(burst_size, requests_per_second));
+
+        let allowed = bucket.try_consume(1.0);
+
+        RateLimitResult {
+            allowed,
+            limit: requests_per_second,
+            remaining: bucket.tokens.floor() as u64,
+            reset_in: Duration::from_secs(1), // Tokens refill every second
+        }
     }
 
     /// Cleanup old entries periodically
@@ -96,12 +146,45 @@ impl Clone for RateLimiter {
 }
 
 /// Rate limit middleware
+///
+/// Uses per-user rate limiting in Hub mode (with Plan-based limits)
+/// Falls back to IP-based rate limiting in standalone mode
 pub async fn rate_limit_middleware(
     limiter: Arc<RateLimiter>,
-    request: axum::extract::Request,
+    mut request: axum::extract::Request,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    // Extract IP from request
+    #[cfg(feature = "hub-integration")]
+    {
+        // Try to get Hub user context
+        if let Some(hub_ctx) = request.extensions().get::<HubUserContext>().cloned() {
+            // Use per-user rate limiting with Plan-based limits
+            let user_id = hub_ctx.user_id.to_string();
+            let result = limiter.check_user_rate_limit(&user_id, hub_ctx.plan);
+
+            if !result.allowed {
+                tracing::warn!(
+                    "Rate limit exceeded for user {}: {} req/s limit ({:?} plan)",
+                    hub_ctx.user_id,
+                    result.limit,
+                    hub_ctx.plan
+                );
+                return Err(StatusCode::TOO_MANY_REQUESTS);
+            }
+
+            // Store rate limit info in request extensions for response headers
+            request.extensions_mut().insert(result);
+
+            let mut response = next.run(request).await;
+
+            // Add rate limit headers to response (Task 5.4)
+            add_rate_limit_headers(&mut response, &limiter, Some(&user_id), Some(hub_ctx.plan));
+
+            return Ok(response);
+        }
+    }
+
+    // Fallback to IP-based rate limiting (standalone mode or no Hub context)
     let ip = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
@@ -113,7 +196,85 @@ pub async fn rate_limit_middleware(
         return Err(StatusCode::TOO_MANY_REQUESTS);
     }
 
-    Ok(next.run(request).await)
+    let mut response = next.run(request).await;
+
+    // Add basic rate limit headers for IP-based limiting
+    add_rate_limit_headers(&mut response, &limiter, None, None);
+
+    Ok(response)
+}
+
+/// Add rate limit headers to response (Task 5.4)
+///
+/// Headers follow standard conventions:
+/// - X-RateLimit-Limit: Requests per second allowed
+/// - X-RateLimit-Remaining: Remaining requests in current window
+/// - X-RateLimit-Reset: Seconds until rate limit resets
+#[cfg(feature = "hub-integration")]
+fn add_rate_limit_headers(
+    response: &mut Response,
+    limiter: &RateLimiter,
+    user_id: Option<&str>,
+    plan: Option<Plan>,
+) {
+    if let (Some(uid), Some(p)) = (user_id, plan) {
+        // Get plan-specific limits
+        let requests_per_second = HubSaaSRestrictions::max_requests_per_second(p) as u64;
+
+        // Get current bucket state
+        let buckets = limiter.buckets.read();
+        let key = format!("user:{}", uid);
+
+        if let Some(bucket) = buckets.get(&key) {
+            let remaining = bucket.tokens.floor() as u64;
+
+            response.headers_mut().insert(
+                "X-RateLimit-Limit",
+                requests_per_second.to_string().parse().unwrap(),
+            );
+            response.headers_mut().insert(
+                "X-RateLimit-Remaining",
+                remaining.to_string().parse().unwrap(),
+            );
+            response.headers_mut().insert(
+                "X-RateLimit-Reset",
+                "1".parse().unwrap(), // Refills every 1 second
+            );
+
+            return;
+        }
+    }
+
+    // Fallback: Add global config-based headers
+    response.headers_mut().insert(
+        "X-RateLimit-Limit",
+        limiter
+            .config
+            .requests_per_second
+            .to_string()
+            .parse()
+            .unwrap(),
+    );
+}
+
+/// Add rate limit headers to response (non-Hub version)
+#[cfg(not(feature = "hub-integration"))]
+fn add_rate_limit_headers(
+    response: &mut Response,
+    limiter: &RateLimiter,
+    _user_id: Option<&str>,
+    _plan: Option<()>,
+) {
+    // Add global config-based headers
+    response.headers_mut().insert(
+        "X-RateLimit-Limit",
+        limiter
+            .config
+            .requests_per_second
+            .to_string()
+            .parse()
+            .unwrap(),
+    );
 }
 
 #[cfg(test)]
@@ -176,5 +337,57 @@ mod tests {
         limiter.cleanup();
 
         assert_eq!(limiter.buckets.read().len(), 2);
+    }
+
+    #[cfg(feature = "hub-integration")]
+    #[test]
+    fn test_user_rate_limiting() {
+        let config = RateLimitConfig {
+            enabled: true,
+            requests_per_second: 100,
+            burst_size: 10,
+        };
+
+        let limiter = RateLimiter::new(config);
+
+        let user_id = "user-123";
+
+        // Free plan: 10 req/s, burst of 20
+        for i in 0..20 {
+            let result = limiter.check_user_rate_limit(user_id, Plan::Free);
+            assert!(result.allowed, "Request {} should be allowed (burst)", i);
+            assert_eq!(result.limit, 10); // Free plan limit
+        }
+
+        // Should deny after burst
+        let result = limiter.check_user_rate_limit(user_id, Plan::Free);
+        assert!(!result.allowed, "Request should be denied after burst");
+
+        // Different user should have own bucket
+        let user_id2 = "user-456";
+        let result = limiter.check_user_rate_limit(user_id2, Plan::Free);
+        assert!(result.allowed, "Different user should have own bucket");
+    }
+
+    #[cfg(feature = "hub-integration")]
+    #[test]
+    fn test_plan_based_limits() {
+        let config = RateLimitConfig {
+            enabled: true,
+            requests_per_second: 100,
+            burst_size: 10,
+        };
+
+        let limiter = RateLimiter::new(config);
+
+        // Test different plans have different limits
+        let result_free = limiter.check_user_rate_limit("free-user", Plan::Free);
+        assert_eq!(result_free.limit, 10); // Free: 10 req/s
+
+        let result_pro = limiter.check_user_rate_limit("pro-user", Plan::Pro);
+        assert_eq!(result_pro.limit, 100); // Pro: 100 req/s
+
+        let result_enterprise = limiter.check_user_rate_limit("ent-user", Plan::Enterprise);
+        assert_eq!(result_enterprise.limit, 1000); // Enterprise: 1000 req/s
     }
 }

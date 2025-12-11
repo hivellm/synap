@@ -464,17 +464,226 @@ fn test_authentication_flow() {
 
 ---
 
+## HiveHub.Cloud Authentication (SaaS Mode)
+
+Synap can integrate with **HiveHub.Cloud** for multi-tenant SaaS authentication with Plan-based quotas and restrictions.
+
+### Operating Modes
+
+#### 1. **Standalone Mode** (Default)
+- Local authentication (users, API keys, ACLs)
+- No external dependencies
+- Full control over security
+- Suitable for self-hosted deployments
+
+#### 2. **Hub Mode** (SaaS)
+- HiveHub.Cloud access key authentication
+- Multi-tenant resource isolation
+- Plan-based quotas and rate limits
+- Managed user accounts via Hub
+
+#### 3. **Hybrid Mode**
+- Hub authentication primary
+- Local authentication fallback
+- Best of both worlds for migration
+
+### Hub Access Keys
+
+**Format**: `sk_live_<64_hex_chars>` (71 characters total)
+
+**Authentication Methods**:
+```bash
+# Option 1: Bearer Token (Recommended)
+curl -H "Authorization: Bearer sk_live_..." \
+  https://synap.example.com/queue/list
+
+# Option 2: Custom Header
+curl -H "X-Hub-Access-Key: sk_live_..." \
+  https://synap.example.com/queue/list
+```
+
+**Key Features**:
+- 256-bit cryptographic security
+- 60-second validation cache
+- Plan-based permissions (Free/Pro/Enterprise)
+- Automatic user context propagation
+- Key rotation support
+
+### Configuration
+
+```yaml
+# Enable Hub integration
+hub:
+  enabled: true
+  service_api_key: "${HIVEHUB_SERVICE_API_KEY}"
+  base_url: "https://api.hivehub.cloud"
+
+  # Access key validation
+  access_key:
+    cache_ttl_seconds: 60
+    cache_max_entries: 10000
+
+  # Authentication
+  auth:
+    require_hub_auth: true
+    allow_local_auth_fallback: false  # true for hybrid mode
+```
+
+### Plan-Based Restrictions
+
+| Feature              | Free        | Pro          | Enterprise   |
+|----------------------|-------------|--------------|--------------|
+| Rate Limit           | 10 req/s    | 100 req/s    | 1,000 req/s  |
+| Storage              | 100 MB      | 10 GB        | 1 TB         |
+| Operations/Month     | 100,000     | 10,000,000   | Unlimited    |
+| Max TTL              | 24 hours    | 30 days      | 365 days     |
+| Max Payload          | 1 MB        | 10 MB        | 100 MB       |
+| Connections          | 10          | 100          | 1,000        |
+
+### Multi-Tenant Isolation
+
+In Hub mode, resources are automatically scoped by user:
+
+**Resource Naming**: `user_{user_id}:{resource_name}`
+
+**Example**:
+```
+User Input:    "my-queue"
+User ID:       550e8400-e29b-41d4-a716-446655440000
+Scoped Name:   user_550e8400e29b41d4a716446655440000:my-queue
+```
+
+**Automatic Scoping**:
+- ✅ Queues: `user_{user_id}:{queue_name}`
+- ✅ Streams: `user_{user_id}:{stream_name}`
+- ✅ KV Keys: `user_{user_id}:{key}`
+- ✅ Pub/Sub Topics: `user_{user_id}:{topic}`
+- ✅ All data structures (Hash, List, Set, etc.)
+
+### Authentication Flow (Hub Mode)
+
+```
+1. Client sends request with access key
+   └─> Header: Authorization: Bearer sk_live_...
+
+2. Hub Auth Middleware
+   ├─> Extract access key from headers
+   ├─> Check validation cache (60s TTL)
+   │   ├─> CACHE HIT: Use cached user context
+   │   └─> CACHE MISS: Validate via Hub API
+   ├─> Create HubUserContext (user_id, plan)
+   └─> Insert into request extensions
+
+3. Rate Limit Middleware
+   └─> Apply Plan-based rate limits
+
+4. Quota Middleware
+   └─> Check storage/operation quotas
+
+5. Handler Execution
+   └─> Apply multi-tenant scoping
+```
+
+### Security Differences
+
+**Standalone Mode**:
+- Local user database
+- API keys stored locally
+- No quotas or rate limits by default
+- Full access to dangerous commands (FLUSHALL, etc.)
+
+**Hub Mode**:
+- HiveHub.Cloud manages users
+- Access keys validated via Hub API
+- Automatic Plan-based quotas and rate limits
+- Dangerous commands blocked (FLUSHALL, SCRIPT FLUSH, etc.)
+- Multi-tenant isolation enforced
+
+### Error Responses
+
+**401 Unauthorized**: Invalid or missing access key
+```json
+{
+  "error": "Unauthorized",
+  "message": "Invalid or missing access key"
+}
+```
+
+**403 Forbidden**: Valid key but operation not allowed for plan
+```json
+{
+  "error": "Forbidden",
+  "message": "TTL of 86400s exceeds Free plan limit of 3600s",
+  "plan": "Free"
+}
+```
+
+**429 Too Many Requests**: Quota or rate limit exceeded
+```json
+{
+  "error": "QuotaExceeded",
+  "message": "Monthly operation quota exceeded",
+  "limit": 100000,
+  "current_usage": 100000
+}
+```
+
+### Migration: Standalone → Hub Mode
+
+**Step 1**: Configure Hub integration
+```yaml
+hub:
+  enabled: true
+  service_api_key: "${HIVEHUB_SERVICE_API_KEY}"
+  auth:
+    allow_local_auth_fallback: true  # Enable hybrid mode
+```
+
+**Step 2**: Gradually migrate clients to access keys
+- Existing clients: Continue using local API keys
+- New clients: Use Hub access keys
+
+**Step 3**: Disable local auth fallback when ready
+```yaml
+hub:
+  auth:
+    allow_local_auth_fallback: false  # Hub-only mode
+```
+
+### Best Practices (Hub Mode)
+
+✅ **Store access keys securely** (environment variables, secrets managers)
+✅ **Use HTTPS** for all API communication
+✅ **Rotate keys every 90 days** via Hub dashboard
+✅ **Monitor quota usage** via `/hub/quota` endpoint
+✅ **One key per application** for isolation
+✅ **Separate keys per environment** (dev/test/prod)
+✅ **Never log access keys** in application logs
+✅ **Revoke compromised keys immediately** via Hub API
+
+### Additional Documentation
+
+For detailed Hub integration documentation, see:
+
+- **[HUB_INTEGRATION.md](./specs/HUB_INTEGRATION.md)** - Complete integration specification
+- **[QUOTA_MANAGEMENT.md](./specs/QUOTA_MANAGEMENT.md)** - Quota and usage tracking details
+- **[ACCESS_KEYS.md](./specs/ACCESS_KEYS.md)** - Access key authentication specification
+
+---
+
 ## Conclusion
 
 Synap's authentication system provides **enterprise-grade security** with:
 
-✅ Flexible permission model  
-✅ Multiple authentication methods  
-✅ IP-based access control  
-✅ API key expiration  
-✅ Role-based access  
-✅ Production-ready security  
+✅ Flexible permission model
+✅ Multiple authentication methods
+✅ IP-based access control
+✅ API key expiration
+✅ Role-based access
+✅ Production-ready security
+✅ **HiveHub.Cloud SaaS integration** (multi-tenant, quotas, rate limits)
 
-**Status**: 🟢 Core implementation complete  
-**Next Steps**: CLI commands for user management (planned)
+**Status**: 🟢 Core implementation complete
+**Hub Integration**: 🟢 Phases 1-6, 9-10 complete (Testing 6/9, Documentation in progress)
+**Next Steps**: Phase 11 - Documentation, Phase 7 - Cluster support, Phase 8 - Migration tool
 

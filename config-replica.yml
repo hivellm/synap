@@ -80,11 +80,43 @@ replication:
   replica_timeout_secs: 30
 
 # ============================================================================
+# CLUSTER MODE
+# ============================================================================
+# Optional: Enable cluster mode for distributed deployments
+# Note: Cluster mode is separate from replication mode
+cluster:
+  enabled: false  # Disabled by default for replica nodes
+
+  # Uncomment to enable cluster mode alongside replication
+  # node_id: "replica-node"
+  # seeds: []
+  # port: 15502
+  # bind_address: "0.0.0.0"
+  # heartbeat_interval_ms: 1000
+  # node_timeout_secs: 5
+  # gossip_interval_ms: 500
+  # max_nodes: 100
+
+# ============================================================================
+# HIVEHUB.CLOUD INTEGRATION
+# ============================================================================
+# Optional: Enable for SaaS multi-tenancy
+hub:
+  enabled: false  # Disabled by default
+
+  # Uncomment to enable HiveHub integration
+  # api_base_url: "https://api.hivehub.cloud"
+  # service_api_key: ""  # Set via SYNAP_HUB_SERVICE_API_KEY env var
+  # cache_ttl_secs: 60
+  # usage_report_interval_secs: 300
+  # verbose_logging: false
+
+# ============================================================================
 # PERSISTENCE
 # ============================================================================
 persistence:
   enabled: true
-  
+
   # Write-Ahead Log
   wal:
     enabled: true
@@ -93,7 +125,7 @@ persistence:
     fsync_mode: "periodic"
     fsync_interval_ms: 1000
     max_size_mb: 1024
-  
+
   # Snapshots
   snapshot:
     enabled: true

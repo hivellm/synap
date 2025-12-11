@@ -6,6 +6,9 @@ use crate::core::{EvictionPolicy, KVConfig, QueueConfig};
 use crate::persistence::PersistenceConfig;
 use crate::replication::ReplicationConfig;
 
+#[cfg(feature = "hub-integration")]
+use crate::hub::HubConfig;
+
 /// Main server configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfig {
@@ -23,6 +26,9 @@ pub struct ServerConfig {
     pub mcp: McpConfig,
     #[serde(default)]
     pub auth: AuthConfig,
+    #[cfg(feature = "hub-integration")]
+    #[serde(default)]
+    pub hub: HubConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -239,6 +245,8 @@ impl Default for ServerConfig {
             replication: ReplicationConfig::default(),
             mcp: McpConfig::default(),
             auth: AuthConfig::default(),
+            #[cfg(feature = "hub-integration")]
+            hub: crate::hub::HubConfig::default(),
         }
     }
 }

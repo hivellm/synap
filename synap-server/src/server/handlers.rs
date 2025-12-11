@@ -50,6 +50,9 @@ pub struct AppState {
     pub cluster_topology: Option<Arc<crate::cluster::topology::ClusterTopology>>,
     /// Optional cluster migration manager (cluster mode)
     pub cluster_migration: Option<Arc<crate::cluster::migration::SlotMigrationManager>>,
+    /// Optional Hub client (Hub integration mode)
+    #[cfg(feature = "hub-integration")]
+    pub hub_client: Option<Arc<crate::hub::HubClient>>,
 }
 
 // Request/Response types for REST API
@@ -227,6 +230,8 @@ pub struct StreamConsumeResponse {
 pub async fn kv_set(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Json(req): Json<SetRequest>,
 ) -> Result<Json<SetResponse>, SynapError> {
     debug!("REST SET key={}", req.key);
@@ -234,19 +239,26 @@ pub async fn kv_set(
     // Check permission
     require_permission(&ctx, &format!("kv:{}", req.key), Action::Write)?;
 
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &req.key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = req.key.clone();
+
     let value_bytes = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
     // Set in KV store
     state
         .kv_store
-        .set(&req.key, value_bytes.clone(), req.ttl)
+        .set(&scoped_key, value_bytes.clone(), req.ttl)
         .await?;
 
     // Log to WAL (async, non-blocking)
     if let Some(ref persistence) = state.persistence {
         if let Err(e) = persistence
-            .log_kv_set(req.key.clone(), value_bytes, req.ttl)
+            .log_kv_set(scoped_key, value_bytes, req.ttl)
             .await
         {
             error!("Failed to log KV SET to WAL: {}", e);
@@ -264,6 +276,8 @@ pub async fn kv_set(
 pub async fn kv_get(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Result<Json<GetResponse>, SynapError> {
@@ -273,7 +287,14 @@ pub async fn kv_get(
     // Check permission
     require_permission(&ctx, &format!("kv:{}", key), Action::Read)?;
 
-    let value_bytes = state.kv_store.get(&key).await?;
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let value_bytes = state.kv_store.get(&scoped_key).await?;
 
     if let Some(bytes) = value_bytes {
         match return_type {
@@ -298,6 +319,8 @@ pub async fn kv_get(
 pub async fn kv_delete(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<DeleteResponse>, SynapError> {
     debug!("REST DELETE key={}", key);
@@ -305,12 +328,19 @@ pub async fn kv_delete(
     // Check permission
     require_permission(&ctx, &format!("kv:{}", key), Action::Delete)?;
 
-    let deleted = state.kv_store.delete(&key).await?;
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let deleted = state.kv_store.delete(&scoped_key).await?;
 
     // Log to WAL if persistence is enabled
     if deleted {
         if let Some(ref persistence) = state.persistence {
-            if let Err(e) = persistence.log_kv_del(vec![key.clone()]).await {
+            if let Err(e) = persistence.log_kv_del(vec![scoped_key]).await {
                 error!("Failed to log KV DELETE to WAL: {}", e);
             }
         }
@@ -441,20 +471,33 @@ pub struct MSetNxResponse {
 /// APPEND endpoint - append bytes to existing value or create new key
 pub async fn kv_append(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<AppendRequest>,
 ) -> Result<Json<AppendResponse>, SynapError> {
     debug!("REST APPEND key={}", key);
 
+    // Check permission
+    require_permission(&ctx, &format!("kv:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let value_bytes = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
-    let length = state.kv_store.append(&key, value_bytes).await?;
+    let length = state.kv_store.append(&scoped_key, value_bytes).await?;
 
     // Log to WAL (async, non-blocking)
     if let Some(ref persistence) = state.persistence {
         // APPEND is logged as SET since we reconstruct full value
-        if let Err(e) = persistence.log_kv_set(key.clone(), vec![], None).await {
+        if let Err(e) = persistence.log_kv_set(scoped_key, vec![], None).await {
             error!("Failed to log KV APPEND to WAL: {}", e);
         }
     }
@@ -465,6 +508,9 @@ pub async fn kv_append(
 /// GETRANGE endpoint - get substring by range with negative indices
 pub async fn kv_getrange(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Result<Json<GetResponse>, SynapError> {
@@ -479,7 +525,17 @@ pub async fn kv_getrange(
 
     debug!("REST GETRANGE key={}, start={}, end={}", key, start, end);
 
-    let range_bytes = state.kv_store.getrange(&key, start, end).await?;
+    // Check permission
+    require_permission(&ctx, &format!("kv:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let range_bytes = state.kv_store.getrange(&scoped_key, start, end).await?;
 
     if range_bytes.is_empty() {
         Ok(Json(GetResponse::NotFound(
@@ -495,23 +551,36 @@ pub async fn kv_getrange(
 /// SETRANGE endpoint - overwrite substring at offset
 pub async fn kv_setrange(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<SetRangeRequest>,
 ) -> Result<Json<SetRangeResponse>, SynapError> {
     debug!("REST SETRANGE key={}, offset={}", key, req.offset);
+
+    // Check permission
+    require_permission(&ctx, &format!("kv:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
 
     let value_bytes = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
     let length = state
         .kv_store
-        .setrange(&key, req.offset, value_bytes)
+        .setrange(&scoped_key, req.offset, value_bytes)
         .await?;
 
     // Log to WAL (async, non-blocking)
     if let Some(ref persistence) = state.persistence {
         // SETRANGE is logged as SET since we reconstruct full value
-        if let Err(e) = persistence.log_kv_set(key.clone(), vec![], None).await {
+        if let Err(e) = persistence.log_kv_set(scoped_key, vec![], None).await {
             error!("Failed to log KV SETRANGE to WAL: {}", e);
         }
     }
@@ -522,11 +591,24 @@ pub async fn kv_setrange(
 /// STRLEN endpoint - get length of string value in bytes
 pub async fn kv_strlen(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<StrlenResponse>, SynapError> {
     debug!("REST STRLEN key={}", key);
 
-    let length = state.kv_store.strlen(&key).await?;
+    // Check permission
+    require_permission(&ctx, &format!("kv:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let length = state.kv_store.strlen(&scoped_key).await?;
 
     Ok(Json(StrlenResponse { length }))
 }
@@ -534,19 +616,35 @@ pub async fn kv_strlen(
 /// GETSET endpoint - atomically get current value and set new one
 pub async fn kv_getset(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<GetSetRequest>,
 ) -> Result<Json<GetSetResponse>, SynapError> {
     debug!("REST GETSET key={}", key);
 
+    // Check permission
+    require_permission(&ctx, &format!("kv:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let value_bytes = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
-    let old_value = state.kv_store.getset(&key, value_bytes.clone()).await?;
+    let old_value = state
+        .kv_store
+        .getset(&scoped_key, value_bytes.clone())
+        .await?;
 
     // Log to WAL (async, non-blocking)
     if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence.log_kv_set(key.clone(), value_bytes, None).await {
+        if let Err(e) = persistence.log_kv_set(scoped_key, value_bytes, None).await {
             error!("Failed to log KV GETSET to WAL: {}", e);
         }
     }
@@ -563,6 +661,9 @@ pub async fn kv_getset(
 /// MSETNX endpoint - multi-set only if ALL keys don't exist (atomic)
 pub async fn kv_msetnx(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Json(req): Json<MSetNxRequest>,
 ) -> Result<Json<MSetNxResponse>, SynapError> {
     debug!("REST MSETNX count={}", req.pairs.len());
@@ -575,18 +676,33 @@ pub async fn kv_msetnx(
                 MSetNxPair::Tuple((k, v)) => (k, v),
                 MSetNxPair::Object { key: k, value: v } => (k, v),
             };
+            // Check permission
+            require_permission(&ctx, &format!("kv:{}", key), Action::Write)?;
             let value_bytes = serde_json::to_vec(&value)
                 .map_err(|e| SynapError::SerializationError(e.to_string()))?;
             Ok((key, value_bytes))
         })
         .collect::<Result<Vec<_>, SynapError>>()?;
 
-    let success = state.kv_store.msetnx(pairs.clone()).await?;
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_pairs: Vec<(String, Vec<u8>)> = pairs
+        .iter()
+        .map(|(key, value)| {
+            let scoped_key =
+                crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), key);
+            (scoped_key, value.clone())
+        })
+        .collect();
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_pairs = pairs.clone();
+
+    let success = state.kv_store.msetnx(scoped_pairs.clone()).await?;
 
     // Log to WAL if all keys were set
     if success {
         if let Some(ref persistence) = state.persistence {
-            for (key, value_bytes) in pairs {
+            for (key, value_bytes) in scoped_pairs {
                 if let Err(e) = persistence.log_kv_set(key, value_bytes, None).await {
                     error!("Failed to log KV MSETNX to WAL: {}", e);
                 }
@@ -649,12 +765,25 @@ pub struct RandomKeyResponse {
 /// TYPE endpoint - get the type of a key
 pub async fn key_type(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<TypeResponse>, SynapError> {
     debug!("REST TYPE key={}", key);
 
+    // Check permission
+    require_permission(&ctx, &format!("kv:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let manager = create_key_manager(&state);
-    let key_type = manager.key_type(&key).await?;
+    let key_type = manager.key_type(&scoped_key).await?;
 
     Ok(Json(TypeResponse {
         key,
@@ -665,12 +794,25 @@ pub async fn key_type(
 /// EXISTS endpoint - check if key exists (cross-store)
 pub async fn key_exists(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST EXISTS key={}", key);
 
+    // Check permission
+    require_permission(&ctx, &format!("kv:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let manager = create_key_manager(&state);
-    let exists = manager.exists(&key).await?;
+    let exists = manager.exists(&scoped_key).await?;
 
     Ok(Json(serde_json::json!({
         "key": key,
@@ -681,6 +823,9 @@ pub async fn key_exists(
 /// RENAME endpoint - rename a key atomically
 pub async fn key_rename(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(source): Path<String>,
     Json(req): Json<RenameRequest>,
 ) -> Result<Json<RenameResponse>, SynapError> {
@@ -689,15 +834,28 @@ pub async fn key_rename(
         source, req.destination
     );
 
+    // Check permissions for both source and destination
+    require_permission(&ctx, &format!("kv:{}", source), Action::Delete)?;
+    require_permission(&ctx, &format!("kv:{}", req.destination), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let (scoped_source, scoped_dest) = {
+        let user_id = hub_ctx.as_ref().map(|c| c.user_id());
+        (
+            crate::hub::MultiTenant::scope_kv_key(user_id, &source),
+            crate::hub::MultiTenant::scope_kv_key(user_id, &req.destination),
+        )
+    };
+    #[cfg(not(feature = "hub-integration"))]
+    let (scoped_source, scoped_dest) = (source.clone(), req.destination.clone());
+
     let manager = create_key_manager(&state);
-    manager.rename(&source, &req.destination).await?;
+    manager.rename(&scoped_source, &scoped_dest).await?;
 
     // Log to WAL if persistence is enabled
     if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence
-            .log_kv_rename(source.clone(), req.destination.clone())
-            .await
-        {
+        if let Err(e) = persistence.log_kv_rename(scoped_source, scoped_dest).await {
             error!("Failed to log RENAME to WAL: {}", e);
             // Don't fail the request, just log the error
         }
@@ -713,6 +871,9 @@ pub async fn key_rename(
 /// RENAMENX endpoint - rename key only if destination doesn't exist
 pub async fn key_renamenx(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(source): Path<String>,
     Json(req): Json<RenameRequest>,
 ) -> Result<Json<RenameResponse>, SynapError> {
@@ -721,8 +882,24 @@ pub async fn key_renamenx(
         source, req.destination
     );
 
+    // Check permissions for both source and destination
+    require_permission(&ctx, &format!("kv:{}", source), Action::Delete)?;
+    require_permission(&ctx, &format!("kv:{}", req.destination), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let (scoped_source, scoped_dest) = {
+        let user_id = hub_ctx.as_ref().map(|c| c.user_id());
+        (
+            crate::hub::MultiTenant::scope_kv_key(user_id, &source),
+            crate::hub::MultiTenant::scope_kv_key(user_id, &req.destination),
+        )
+    };
+    #[cfg(not(feature = "hub-integration"))]
+    let (scoped_source, scoped_dest) = (source.clone(), req.destination.clone());
+
     let manager = create_key_manager(&state);
-    let success = manager.renamenx(&source, &req.destination).await?;
+    let success = manager.renamenx(&scoped_source, &scoped_dest).await?;
 
     if !success {
         return Err(SynapError::InvalidRequest(
@@ -740,6 +917,9 @@ pub async fn key_renamenx(
 /// COPY endpoint - copy key to destination
 pub async fn key_copy(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(source): Path<String>,
     Json(req): Json<CopyRequest>,
 ) -> Result<Json<CopyResponse>, SynapError> {
@@ -748,9 +928,25 @@ pub async fn key_copy(
         source, req.destination, req.replace
     );
 
+    // Check permissions for both source and destination
+    require_permission(&ctx, &format!("kv:{}", source), Action::Read)?;
+    require_permission(&ctx, &format!("kv:{}", req.destination), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let (scoped_source, scoped_dest) = {
+        let user_id = hub_ctx.as_ref().map(|c| c.user_id());
+        (
+            crate::hub::MultiTenant::scope_kv_key(user_id, &source),
+            crate::hub::MultiTenant::scope_kv_key(user_id, &req.destination),
+        )
+    };
+    #[cfg(not(feature = "hub-integration"))]
+    let (scoped_source, scoped_dest) = (source.clone(), req.destination.clone());
+
     let manager = create_key_manager(&state);
     let replace = req.replace.unwrap_or(false);
-    let success = manager.copy(&source, &req.destination, replace).await?;
+    let success = manager.copy(&scoped_source, &scoped_dest, replace).await?;
 
     if !success {
         // Destination exists and replace=false - return 409 Conflict instead of error
@@ -771,13 +967,53 @@ pub async fn key_copy(
 /// RANDOMKEY endpoint - get a random key
 pub async fn key_randomkey(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
 ) -> Result<Json<RandomKeyResponse>, SynapError> {
     debug!("REST RANDOMKEY");
 
+    // Check permission
+    require_permission(&ctx, "kv:*", Action::Read)?;
+
     let manager = create_key_manager(&state);
+
+    // In Hub mode, try to find a random key owned by the user
+    #[cfg(feature = "hub-integration")]
+    let random_key = {
+        if let Some(ref hub_ctx) = hub_ctx {
+            // Try up to 10 times to find a key owned by this user
+            let mut found_key: Option<String> = None;
+            for _ in 0..10 {
+                if let Some(key) = manager.randomkey().await? {
+                    if crate::hub::MultiTenant::check_ownership(&key, hub_ctx.user_id()) {
+                        found_key = Some(key);
+                        break;
+                    }
+                } else {
+                    // No keys at all
+                    break;
+                }
+            }
+            found_key
+        } else {
+            manager.randomkey().await?
+        }
+    };
+    #[cfg(not(feature = "hub-integration"))]
     let random_key = manager.randomkey().await?;
 
-    Ok(Json(RandomKeyResponse { key: random_key }))
+    // Unscope the key before returning
+    #[cfg(feature = "hub-integration")]
+    let unscoped_key = random_key.and_then(|k| {
+        crate::hub::MultiTenant::parse_scoped_name(&k)
+            .map(|(_, name)| name)
+            .or(Some(k))
+    });
+    #[cfg(not(feature = "hub-integration"))]
+    let unscoped_key = random_key;
+
+    Ok(Json(RandomKeyResponse { key: unscoped_key }))
 }
 
 // ==================== Monitoring REST Endpoints ====================
@@ -892,7 +1128,13 @@ pub async fn memory_usage(
 /// CLIENT LIST endpoint - get active connections
 pub async fn client_list(
     State(state): State<AppState>,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    // Block in Hub mode - would expose all users' connections
+    #[cfg(feature = "hub-integration")]
+    crate::hub::require_standalone_mode(&hub_ctx)?;
+
     let clients = state.client_list_manager.list().await;
     let count = clients.len();
 
@@ -1106,6 +1348,8 @@ pub struct HashOperationStats {
 pub async fn hash_set(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<HashSetRequest>,
 ) -> Result<Json<HashSetResponse>, SynapError> {
@@ -1114,10 +1358,17 @@ pub async fn hash_set(
     // Check permission
     require_permission(&ctx, &format!("hash:{}", key), Action::Write)?;
 
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let value = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize value: {}", e)))?;
 
-    let created = state.hash_store.hset(&key, &req.field, value)?;
+    let created = state.hash_store.hset(&scoped_key, &req.field, value)?;
 
     Ok(Json(HashSetResponse {
         created,
@@ -1130,6 +1381,8 @@ pub async fn hash_set(
 pub async fn hash_get(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((key, field)): Path<(String, String)>,
 ) -> Result<Json<HashGetResponse>, SynapError> {
     debug!("REST HGET key={} field={}", key, field);
@@ -1137,7 +1390,14 @@ pub async fn hash_get(
     // Check permission
     require_permission(&ctx, &format!("hash:{}", key), Action::Read)?;
 
-    match state.hash_store.hget(&key, &field)? {
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    match state.hash_store.hget(&scoped_key, &field)? {
         Some(value) => {
             let json_value: serde_json::Value =
                 serde_json::from_slice(&value).unwrap_or_else(|_| {
@@ -1153,6 +1413,8 @@ pub async fn hash_get(
 pub async fn hash_getall(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<HashMap<String, serde_json::Value>>, SynapError> {
     debug!("REST HGETALL key={}", key);
@@ -1160,7 +1422,14 @@ pub async fn hash_getall(
     // Check permission
     require_permission(&ctx, &format!("hash:{}", key), Action::Read)?;
 
-    let all = state.hash_store.hgetall(&key)?;
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let all = state.hash_store.hgetall(&scoped_key)?;
 
     let result: HashMap<String, serde_json::Value> = all
         .into_iter()
@@ -1178,21 +1447,48 @@ pub async fn hash_getall(
 /// GET /hash/:key/keys - Get all field names from hash
 pub async fn hash_keys(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<Vec<String>>, SynapError> {
     debug!("REST HKEYS key={}", key);
-    let keys = state.hash_store.hkeys(&key)?;
+
+    // Check permission
+    require_permission(&ctx, &format!("hash:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let keys = state.hash_store.hkeys(&scoped_key)?;
     Ok(Json(keys))
 }
 
 /// GET /hash/:key/vals - Get all values from hash
 pub async fn hash_vals(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<Vec<serde_json::Value>>, SynapError> {
     debug!("REST HVALS key={}", key);
 
-    let values = state.hash_store.hvals(&key)?;
+    // Check permission
+    require_permission(&ctx, &format!("hash:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let values = state.hash_store.hvals(&scoped_key)?;
     let result: Vec<serde_json::Value> = values
         .into_iter()
         .map(|v| {
@@ -1208,19 +1504,46 @@ pub async fn hash_vals(
 /// GET /hash/:key/len - Get number of fields in hash
 pub async fn hash_len(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST HLEN key={}", key);
-    let len = state.hash_store.hlen(&key)?;
+
+    // Check permission
+    require_permission(&ctx, &format!("hash:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let len = state.hash_store.hlen(&scoped_key)?;
     Ok(Json(json!({ "length": len })))
 }
 
 /// POST /hash/:key/mset - Set multiple fields
 pub async fn hash_mset(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<HashMSetRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    // Check permission
+    require_permission(&ctx, &format!("hash:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let fields_map: HashMap<String, Vec<u8>> = match req {
         HashMSetRequest::Object { fields } => {
             debug!(
@@ -1265,7 +1588,7 @@ pub async fn hash_mset(
         }
     };
 
-    state.hash_store.hmset(&key, fields_map)?;
+    state.hash_store.hmset(&scoped_key, fields_map)?;
 
     Ok(Json(json!({ "success": true, "key": key })))
 }
@@ -1273,12 +1596,25 @@ pub async fn hash_mset(
 /// POST /hash/:key/mget - Get multiple fields
 pub async fn hash_mget(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<HashMGetRequest>,
 ) -> Result<Json<Vec<Option<serde_json::Value>>>, SynapError> {
     debug!("REST HMGET key={} fields={:?}", key, req.fields);
 
-    let values = state.hash_store.hmget(&key, &req.fields)?;
+    // Check permission
+    require_permission(&ctx, &format!("hash:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let values = state.hash_store.hmget(&scoped_key, &req.fields)?;
 
     let result: Vec<Option<serde_json::Value>> = values
         .into_iter()
@@ -1298,6 +1634,8 @@ pub async fn hash_mget(
 pub async fn hash_del(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<HashDelRequest>,
 ) -> Result<Json<HashDelResponse>, SynapError> {
@@ -1306,7 +1644,14 @@ pub async fn hash_del(
     // Check permission
     require_permission(&ctx, &format!("hash:{}", key), Action::Delete)?;
 
-    let deleted = state.hash_store.hdel(&key, &req.fields)?;
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let deleted = state.hash_store.hdel(&scoped_key, &req.fields)?;
 
     Ok(Json(HashDelResponse { deleted, key }))
 }
@@ -1314,11 +1659,24 @@ pub async fn hash_del(
 /// GET /hash/:key/:field/exists - Check if field exists
 pub async fn hash_exists(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((key, field)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST HEXISTS key={} field={}", key, field);
 
-    let exists = state.hash_store.hexists(&key, &field)?;
+    // Check permission
+    require_permission(&ctx, &format!("hash:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let exists = state.hash_store.hexists(&scoped_key, &field)?;
 
     Ok(Json(json!({ "exists": exists })))
 }
@@ -1326,6 +1684,9 @@ pub async fn hash_exists(
 /// POST /hash/:key/incrby - Increment field by integer
 pub async fn hash_incrby(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<HashIncrByRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
@@ -1334,7 +1695,19 @@ pub async fn hash_incrby(
         key, req.field, req.increment
     );
 
-    let new_value = state.hash_store.hincrby(&key, &req.field, req.increment)?;
+    // Check permission
+    require_permission(&ctx, &format!("hash:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let new_value = state
+        .hash_store
+        .hincrby(&scoped_key, &req.field, req.increment)?;
 
     Ok(Json(json!({ "value": new_value })))
 }
@@ -1342,6 +1715,9 @@ pub async fn hash_incrby(
 /// POST /hash/:key/incrbyfloat - Increment field by float
 pub async fn hash_incrbyfloat(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<HashIncrByFloatRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
@@ -1350,9 +1726,19 @@ pub async fn hash_incrbyfloat(
         key, req.field, req.increment
     );
 
+    // Check permission
+    require_permission(&ctx, &format!("hash:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let new_value = state
         .hash_store
-        .hincrbyfloat(&key, &req.field, req.increment)?;
+        .hincrbyfloat(&scoped_key, &req.field, req.increment)?;
 
     Ok(Json(json!({ "value": new_value })))
 }
@@ -1360,15 +1746,28 @@ pub async fn hash_incrbyfloat(
 /// POST /hash/:key/setnx - Set field only if it doesn't exist
 pub async fn hash_setnx(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<HashSetRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST HSETNX key={} field={}", key, req.field);
 
+    // Check permission
+    require_permission(&ctx, &format!("hash:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let value = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize value: {}", e)))?;
 
-    let created = state.hash_store.hsetnx(&key, &req.field, value)?;
+    let created = state.hash_store.hsetnx(&scoped_key, &req.field, value)?;
 
     Ok(Json(
         json!({ "created": created, "key": key, "field": req.field }),
@@ -1404,6 +1803,8 @@ pub async fn hash_stats(
 pub async fn stream_create_room(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(room_name): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST CREATE STREAM ROOM: {}", room_name);
@@ -1416,8 +1817,17 @@ pub async fn stream_create_room(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
 
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_name = crate::hub::MultiTenant::scope_stream_name(
+        hub_ctx.as_ref().map(|c| c.user_id()),
+        &room_name,
+    );
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_name = room_name.clone();
+
     stream_manager
-        .create_room(&room_name)
+        .create_room(&scoped_name)
         .await
         .map_err(SynapError::InvalidRequest)?;
 
@@ -1431,6 +1841,8 @@ pub async fn stream_create_room(
 pub async fn stream_publish(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(room_name): Path<String>,
     Json(req): Json<StreamPublishRequest>,
 ) -> Result<Json<StreamPublishResponse>, SynapError> {
@@ -1444,11 +1856,20 @@ pub async fn stream_publish(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
 
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_name = crate::hub::MultiTenant::scope_stream_name(
+        hub_ctx.as_ref().map(|c| c.user_id()),
+        &room_name,
+    );
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_name = room_name.clone();
+
     let data_bytes =
         serde_json::to_vec(&req.data).map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
     let offset = stream_manager
-        .publish(&room_name, &req.event, data_bytes)
+        .publish(&scoped_name, &req.event, data_bytes)
         .await
         .map_err(SynapError::InvalidRequest)?;
 
@@ -1462,6 +1883,8 @@ pub async fn stream_publish(
 pub async fn stream_consume(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((room_name, subscriber_id)): Path<(String, String)>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
 ) -> Result<Json<StreamConsumeResponse>, SynapError> {
@@ -1478,6 +1901,15 @@ pub async fn stream_consume(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
 
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_name = crate::hub::MultiTenant::scope_stream_name(
+        hub_ctx.as_ref().map(|c| c.user_id()),
+        &room_name,
+    );
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_name = room_name.clone();
+
     let from_offset = params
         .get("from_offset")
         .and_then(|s| s.parse::<u64>().ok())
@@ -1489,7 +1921,7 @@ pub async fn stream_consume(
         .unwrap_or(100);
 
     let events = stream_manager
-        .consume(&room_name, &subscriber_id, from_offset, limit)
+        .consume(&scoped_name, &subscriber_id, from_offset, limit)
         .await
         .map_err(SynapError::InvalidRequest)?;
 
@@ -1505,6 +1937,8 @@ pub async fn stream_consume(
 pub async fn stream_room_stats(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(room_name): Path<String>,
 ) -> Result<Json<crate::core::RoomStats>, SynapError> {
     debug!("REST STREAM STATS for room: {}", room_name);
@@ -1517,8 +1951,17 @@ pub async fn stream_room_stats(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
 
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_name = crate::hub::MultiTenant::scope_stream_name(
+        hub_ctx.as_ref().map(|c| c.user_id()),
+        &room_name,
+    );
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_name = room_name.clone();
+
     let stats = stream_manager
-        .room_stats(&room_name)
+        .room_stats(&scoped_name)
         .await
         .map_err(SynapError::InvalidRequest)?;
 
@@ -1529,6 +1972,8 @@ pub async fn stream_room_stats(
 pub async fn stream_list_rooms(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST STREAM LIST ROOMS");
 
@@ -1540,7 +1985,17 @@ pub async fn stream_list_rooms(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
 
-    let rooms = stream_manager.list_rooms().await;
+    let all_rooms = stream_manager.list_rooms().await;
+
+    // Filter rooms by user in Hub mode
+    #[cfg(feature = "hub-integration")]
+    let rooms =
+        crate::hub::MultiTenant::unscope_names(crate::hub::MultiTenant::filter_user_resources(
+            all_rooms,
+            hub_ctx.as_ref().map(|c| c.user_id()),
+        ));
+    #[cfg(not(feature = "hub-integration"))]
+    let rooms = all_rooms;
 
     Ok(Json(serde_json::json!({
         "rooms": rooms,
@@ -1552,6 +2007,8 @@ pub async fn stream_list_rooms(
 pub async fn stream_delete_room(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(room_name): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST DELETE STREAM ROOM: {}", room_name);
@@ -1564,8 +2021,17 @@ pub async fn stream_delete_room(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
 
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_name = crate::hub::MultiTenant::scope_stream_name(
+        hub_ctx.as_ref().map(|c| c.user_id()),
+        &room_name,
+    );
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_name = room_name.clone();
+
     stream_manager
-        .delete_room(&room_name)
+        .delete_room(&scoped_name)
         .await
         .map_err(SynapError::InvalidRequest)?;
 
@@ -1581,6 +2047,8 @@ pub async fn stream_delete_room(
 pub async fn queue_create(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(queue_name): Path<String>,
     Json(req): Json<CreateQueueRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
@@ -1594,6 +2062,15 @@ pub async fn queue_create(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
 
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_name = crate::hub::MultiTenant::scope_queue_name(
+        hub_ctx.as_ref().map(|c| c.user_id()),
+        &queue_name,
+    );
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_name = queue_name.clone();
+
     let config = if req.max_depth.is_some() || req.ack_deadline_secs.is_some() {
         Some(crate::core::QueueConfig {
             max_depth: req.max_depth.unwrap_or(100_000),
@@ -1605,7 +2082,7 @@ pub async fn queue_create(
         None
     };
 
-    queue_manager.create_queue(&queue_name, config).await?;
+    queue_manager.create_queue(&scoped_name, config).await?;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -1617,6 +2094,8 @@ pub async fn queue_create(
 pub async fn queue_publish(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(queue_name): Path<String>,
     Json(req): Json<PublishRequest>,
 ) -> Result<Json<PublishResponse>, SynapError> {
@@ -1630,8 +2109,17 @@ pub async fn queue_publish(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
 
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_name = crate::hub::MultiTenant::scope_queue_name(
+        hub_ctx.as_ref().map(|c| c.user_id()),
+        &queue_name,
+    );
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_name = queue_name.clone();
+
     let message = queue_manager
-        .publish_with_message(&queue_name, req.payload, req.priority, req.max_retries)
+        .publish_with_message(&scoped_name, req.payload, req.priority, req.max_retries)
         .await?;
 
     let message_id = message.id.clone();
@@ -1639,7 +2127,7 @@ pub async fn queue_publish(
     // Log to WAL if persistence is enabled
     if let Some(ref persistence) = state.persistence {
         if let Err(e) = persistence
-            .log_queue_publish(queue_name.clone(), message)
+            .log_queue_publish(scoped_name.clone(), message)
             .await
         {
             error!("Failed to log queue publish to WAL: {}", e);
@@ -1654,6 +2142,8 @@ pub async fn queue_publish(
 pub async fn queue_consume(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((queue_name, consumer_id)): Path<(String, String)>,
 ) -> Result<Json<ConsumeResponse>, SynapError> {
     debug!("REST CONSUME from queue: {} by {}", queue_name, consumer_id);
@@ -1666,7 +2156,16 @@ pub async fn queue_consume(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
 
-    let message = queue_manager.consume(&queue_name, &consumer_id).await?;
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_name = crate::hub::MultiTenant::scope_queue_name(
+        hub_ctx.as_ref().map(|c| c.user_id()),
+        &queue_name,
+    );
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_name = queue_name.clone();
+
+    let message = queue_manager.consume(&scoped_name, &consumer_id).await?;
 
     if let Some(msg) = message {
         Ok(Json(ConsumeResponse {
@@ -1690,6 +2189,8 @@ pub async fn queue_consume(
 /// ACK message endpoint
 pub async fn queue_ack(
     State(state): State<AppState>,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(queue_name): Path<String>,
     Json(req): Json<AckRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
@@ -1703,12 +2204,21 @@ pub async fn queue_ack(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
 
-    queue_manager.ack(&queue_name, &req.message_id).await?;
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_name = crate::hub::MultiTenant::scope_queue_name(
+        hub_ctx.as_ref().map(|c| c.user_id()),
+        &queue_name,
+    );
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_name = queue_name.clone();
+
+    queue_manager.ack(&scoped_name, &req.message_id).await?;
 
     // Log to WAL if persistence is enabled
     if let Some(ref persistence) = state.persistence {
         if let Err(e) = persistence
-            .log_queue_ack(queue_name.clone(), req.message_id.clone())
+            .log_queue_ack(scoped_name.clone(), req.message_id.clone())
             .await
         {
             error!("Failed to log queue ACK to WAL: {}", e);
@@ -1722,6 +2232,8 @@ pub async fn queue_ack(
 /// NACK message endpoint
 pub async fn queue_nack(
     State(state): State<AppState>,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(queue_name): Path<String>,
     Json(req): Json<NackRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
@@ -1735,14 +2247,23 @@ pub async fn queue_nack(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
 
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_name = crate::hub::MultiTenant::scope_queue_name(
+        hub_ctx.as_ref().map(|c| c.user_id()),
+        &queue_name,
+    );
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_name = queue_name.clone();
+
     queue_manager
-        .nack(&queue_name, &req.message_id, req.requeue)
+        .nack(&scoped_name, &req.message_id, req.requeue)
         .await?;
 
     // Log to WAL if persistence is enabled
     if let Some(ref persistence) = state.persistence {
         if let Err(e) = persistence
-            .log_queue_nack(queue_name.clone(), req.message_id.clone(), req.requeue)
+            .log_queue_nack(scoped_name.clone(), req.message_id.clone(), req.requeue)
             .await
         {
             error!("Failed to log queue NACK to WAL: {}", e);
@@ -1780,6 +2301,8 @@ pub async fn queue_stats(
 pub async fn queue_list(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST LIST QUEUES");
 
@@ -1793,13 +2316,30 @@ pub async fn queue_list(
 
     let queues = queue_manager.list_queues().await?;
 
-    Ok(Json(serde_json::json!({ "queues": queues })))
+    // Apply multi-tenant filtering if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let filtered_queues = crate::hub::MultiTenant::filter_user_resources(
+        queues,
+        hub_ctx.as_ref().map(|c| c.user_id()),
+    );
+    #[cfg(not(feature = "hub-integration"))]
+    let filtered_queues = queues;
+
+    // Remove user prefixes from queue names in response
+    #[cfg(feature = "hub-integration")]
+    let clean_names = crate::hub::MultiTenant::unscope_names(filtered_queues);
+    #[cfg(not(feature = "hub-integration"))]
+    let clean_names = filtered_queues;
+
+    Ok(Json(serde_json::json!({ "queues": clean_names })))
 }
 
 /// Purge queue endpoint
 pub async fn queue_purge(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(queue_name): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST PURGE QUEUE: {}", queue_name);
@@ -1812,7 +2352,16 @@ pub async fn queue_purge(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
 
-    let count = queue_manager.purge(&queue_name).await?;
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_name = crate::hub::MultiTenant::scope_queue_name(
+        hub_ctx.as_ref().map(|c| c.user_id()),
+        &queue_name,
+    );
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_name = queue_name.clone();
+
+    let count = queue_manager.purge(&scoped_name).await?;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -1824,6 +2373,8 @@ pub async fn queue_purge(
 pub async fn queue_delete(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(queue_name): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST DELETE QUEUE: {}", queue_name);
@@ -1836,7 +2387,16 @@ pub async fn queue_delete(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
 
-    let deleted = queue_manager.delete_queue(&queue_name).await?;
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_name = crate::hub::MultiTenant::scope_queue_name(
+        hub_ctx.as_ref().map(|c| c.user_id()),
+        &queue_name,
+    );
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_name = queue_name.clone();
+
+    let deleted = queue_manager.delete_queue(&scoped_name).await?;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -5334,14 +5894,26 @@ pub async fn script_exists(
 
 pub async fn script_flush(
     State(state): State<AppState>,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
 ) -> Result<Json<ScriptFlushResponse>, SynapError> {
+    // Block in Hub mode - this would flush ALL users' scripts
+    #[cfg(feature = "hub-integration")]
+    crate::hub::require_standalone_mode(&hub_ctx)?;
+
     let cleared = state.script_manager.flush();
     Ok(Json(ScriptFlushResponse { cleared }))
 }
 
 pub async fn script_kill(
     State(state): State<AppState>,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
 ) -> Result<Json<ScriptKillResponse>, SynapError> {
+    // Block in Hub mode - could kill other users' scripts
+    #[cfg(feature = "hub-integration")]
+    crate::hub::require_standalone_mode(&hub_ctx)?;
+
     let terminated = state.script_manager.kill_running();
     Ok(Json(ScriptKillResponse { terminated }))
 }
@@ -6089,6 +6661,8 @@ pub struct UnsubscribeRequest {
 pub async fn pubsub_subscribe(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Json(req): Json<SubscribeRequest>,
 ) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
     debug!("POST /pubsub/subscribe - topics: {:?}", req.topics);
@@ -6108,12 +6682,32 @@ pub async fn pubsub_subscribe(
         }))
     })?;
 
-    match pubsub_router.subscribe(req.topics) {
-        Ok(result) => Ok(Json(serde_json::json!({
-            "subscriber_id": result.subscriber_id,
-            "topics": result.topics,
-            "subscription_count": result.subscription_count,
-        }))),
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_topics: Vec<String> = req
+        .topics
+        .iter()
+        .map(|topic| {
+            crate::hub::MultiTenant::scope_topic(hub_ctx.as_ref().map(|c| c.user_id()), topic)
+        })
+        .collect();
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_topics = req.topics.clone();
+
+    match pubsub_router.subscribe(scoped_topics) {
+        Ok(result) => {
+            // Unscope topics in response
+            #[cfg(feature = "hub-integration")]
+            let response_topics = crate::hub::MultiTenant::unscope_names(result.topics);
+            #[cfg(not(feature = "hub-integration"))]
+            let response_topics = result.topics;
+
+            Ok(Json(serde_json::json!({
+                "subscriber_id": result.subscriber_id,
+                "topics": response_topics,
+                "subscription_count": result.subscription_count,
+            })))
+        }
         Err(e) => {
             error!("Subscribe error: {}", e);
             Err(Json(serde_json::json!({
@@ -6127,6 +6721,8 @@ pub async fn pubsub_subscribe(
 pub async fn pubsub_publish(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(topic): Path<String>,
     Json(req): Json<PublishMessageRequest>,
 ) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
@@ -6145,12 +6741,29 @@ pub async fn pubsub_publish(
         }))
     })?;
 
-    match pubsub_router.publish(&topic, req.payload, req.metadata) {
-        Ok(result) => Ok(Json(serde_json::json!({
-            "message_id": result.message_id,
-            "topic": result.topic,
-            "subscribers_matched": result.subscribers_matched,
-        }))),
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_topic =
+        crate::hub::MultiTenant::scope_topic(hub_ctx.as_ref().map(|c| c.user_id()), &topic);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_topic = topic.clone();
+
+    match pubsub_router.publish(&scoped_topic, req.payload, req.metadata) {
+        Ok(result) => {
+            // Unscope topic in response
+            #[cfg(feature = "hub-integration")]
+            let response_topic = crate::hub::MultiTenant::parse_scoped_name(&result.topic)
+                .map(|(_, name)| name)
+                .unwrap_or(result.topic.clone());
+            #[cfg(not(feature = "hub-integration"))]
+            let response_topic = result.topic;
+
+            Ok(Json(serde_json::json!({
+                "message_id": result.message_id,
+                "topic": response_topic,
+                "subscribers_matched": result.subscribers_matched,
+            })))
+        }
         Err(e) => {
             error!("Publish error: {}", e);
             Err(Json(serde_json::json!({
@@ -6163,6 +6776,8 @@ pub async fn pubsub_publish(
 /// POST /pubsub/unsubscribe - Unsubscribe from topics
 pub async fn pubsub_unsubscribe(
     State(state): State<AppState>,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Json(req): Json<UnsubscribeRequest>,
 ) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
     debug!(
@@ -6176,7 +6791,20 @@ pub async fn pubsub_unsubscribe(
         }))
     })?;
 
-    match pubsub_router.unsubscribe(&req.subscriber_id, req.topics) {
+    // Apply multi-tenant scoping if Hub mode is active and topics are provided
+    #[cfg(feature = "hub-integration")]
+    let scoped_topics = req.topics.map(|topics| {
+        topics
+            .iter()
+            .map(|topic| {
+                crate::hub::MultiTenant::scope_topic(hub_ctx.as_ref().map(|c| c.user_id()), topic)
+            })
+            .collect()
+    });
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_topics = req.topics;
+
+    match pubsub_router.unsubscribe(&req.subscriber_id, scoped_topics) {
         Ok(count) => Ok(Json(serde_json::json!({
             "unsubscribed": count
         }))),
@@ -6217,6 +6845,8 @@ pub async fn pubsub_stats(
 pub async fn pubsub_list_topics(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
 ) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
     debug!("GET /pubsub/topics");
 
@@ -6233,7 +6863,18 @@ pub async fn pubsub_list_topics(
         }))
     })?;
 
-    let topics = pubsub_router.list_topics();
+    let all_topics = pubsub_router.list_topics();
+
+    // Filter topics by user in Hub mode
+    #[cfg(feature = "hub-integration")]
+    let topics =
+        crate::hub::MultiTenant::unscope_names(crate::hub::MultiTenant::filter_user_resources(
+            all_topics,
+            hub_ctx.as_ref().map(|c| c.user_id()),
+        ));
+    #[cfg(not(feature = "hub-integration"))]
+    let topics = all_topics;
+
     Ok(Json(serde_json::json!({
         "topics": topics,
         "count": topics.len()
@@ -6244,6 +6885,8 @@ pub async fn pubsub_list_topics(
 pub async fn pubsub_topic_info(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(topic): Path<String>,
 ) -> Result<Json<serde_json::Value>, Json<serde_json::Value>> {
     debug!("GET /pubsub/{}/info", topic);
@@ -6261,7 +6904,14 @@ pub async fn pubsub_topic_info(
         }))
     })?;
 
-    match pubsub_router.get_topic_info(&topic) {
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_topic =
+        crate::hub::MultiTenant::scope_topic(hub_ctx.as_ref().map(|c| c.user_id()), &topic);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_topic = topic.clone();
+
+    match pubsub_router.get_topic_info(&scoped_topic) {
         Some(info) => Ok(Json(serde_json::to_value(info).unwrap())),
         None => Err(Json(serde_json::json!({
             "error": "Topic not found"
@@ -7417,6 +8067,8 @@ pub struct SetOperationStats {
 pub async fn set_add(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<SetAddRequest>,
 ) -> Result<Json<SetAddResponse>, SynapError> {
@@ -7425,13 +8077,20 @@ pub async fn set_add(
     // Check permission
     require_permission(&ctx, &format!("set:{}", key), Action::Write)?;
 
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let members: Result<Vec<Vec<u8>>, _> = req
         .members
         .into_iter()
         .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
         .collect();
 
-    let added = state.set_store.sadd(&key, members?)?;
+    let added = state.set_store.sadd(&scoped_key, members?)?;
 
     Ok(Json(SetAddResponse { added, key }))
 }
@@ -7440,6 +8099,8 @@ pub async fn set_add(
 pub async fn set_rem(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<SetRemRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
@@ -7448,13 +8109,20 @@ pub async fn set_rem(
     // Check permission
     require_permission(&ctx, &format!("set:{}", key), Action::Delete)?;
 
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let members: Result<Vec<Vec<u8>>, _> = req
         .members
         .into_iter()
         .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
         .collect();
 
-    let removed = state.set_store.srem(&key, members?)?;
+    let removed = state.set_store.srem(&scoped_key, members?)?;
 
     Ok(Json(json!({ "removed": removed, "key": key })))
 }
@@ -7462,15 +8130,28 @@ pub async fn set_rem(
 /// POST /set/:key/ismember - Check if member exists
 pub async fn set_ismember(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<SetMemberRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST SISMEMBER key={}", key);
 
+    // Check permission
+    require_permission(&ctx, &format!("set:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let member = serde_json::to_vec(&req.member)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize member: {}", e)))?;
 
-    let is_member = state.set_store.sismember(&key, member)?;
+    let is_member = state.set_store.sismember(&scoped_key, member)?;
 
     Ok(Json(json!({ "is_member": is_member, "key": key })))
 }
@@ -7479,6 +8160,8 @@ pub async fn set_ismember(
 pub async fn set_members(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST SMEMBERS key={}", key);
@@ -7486,7 +8169,14 @@ pub async fn set_members(
     // Check permission
     require_permission(&ctx, &format!("set:{}", key), Action::Read)?;
 
-    let members = state.set_store.smembers(&key)?;
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let members = state.set_store.smembers(&scoped_key)?;
 
     let json_members: Vec<serde_json::Value> = members
         .into_iter()
@@ -7503,11 +8193,24 @@ pub async fn set_members(
 /// GET /set/:key/card - Get set cardinality
 pub async fn set_card(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST SCARD key={}", key);
 
-    let count = state.set_store.scard(&key)?;
+    // Check permission
+    require_permission(&ctx, &format!("set:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let count = state.set_store.scard(&scoped_key)?;
 
     Ok(Json(json!({ "count": count, "key": key })))
 }
@@ -7515,6 +8218,9 @@ pub async fn set_card(
 /// POST /set/:key/pop - Remove and return random member(s)
 pub async fn set_pop(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
@@ -7522,7 +8228,17 @@ pub async fn set_pop(
 
     debug!("REST SPOP key={} count={:?}", key, count);
 
-    let members = state.set_store.spop(&key, count)?;
+    // Check permission
+    require_permission(&ctx, &format!("set:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let members = state.set_store.spop(&scoped_key, count)?;
 
     let json_members: Vec<serde_json::Value> = members
         .into_iter()
@@ -7539,6 +8255,9 @@ pub async fn set_pop(
 /// GET /set/:key/randmember - Get random member(s) without removing
 pub async fn set_randmember(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
@@ -7546,7 +8265,17 @@ pub async fn set_randmember(
 
     debug!("REST SRANDMEMBER key={} count={:?}", key, count);
 
-    let members = state.set_store.srandmember(&key, count)?;
+    // Check permission
+    require_permission(&ctx, &format!("set:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let members = state.set_store.srandmember(&scoped_key, count)?;
 
     let json_members: Vec<serde_json::Value> = members
         .into_iter()
@@ -7563,15 +8292,37 @@ pub async fn set_randmember(
 /// POST /set/:source/move/:destination - Move member between sets
 pub async fn set_move(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((source, destination)): Path<(String, String)>,
     Json(req): Json<SetMemberRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST SMOVE source={} destination={}", source, destination);
 
+    // Check permissions for both keys
+    require_permission(&ctx, &format!("set:{}", source), Action::Write)?;
+    require_permission(&ctx, &format!("set:{}", destination), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_source =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &source);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_source = source.clone();
+
+    #[cfg(feature = "hub-integration")]
+    let scoped_destination =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &destination);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_destination = destination.clone();
+
     let member = serde_json::to_vec(&req.member)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize member: {}", e)))?;
 
-    let moved = state.set_store.smove(&source, &destination, member)?;
+    let moved = state
+        .set_store
+        .smove(&scoped_source, &scoped_destination, member)?;
 
     Ok(Json(
         json!({ "moved": moved, "source": source, "destination": destination }),
@@ -7581,6 +8332,9 @@ pub async fn set_move(
 /// POST /set/inter - Intersection of multiple sets
 pub async fn set_inter(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     let keys: Vec<String> = req
@@ -7593,7 +8347,23 @@ pub async fn set_inter(
 
     debug!("REST SINTER keys={:?}", keys);
 
-    let members = state.set_store.sinter(&keys)?;
+    // Check permissions for all keys
+    for key in &keys {
+        require_permission(&ctx, &format!("set:{}", key), Action::Read)?;
+    }
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_keys: Vec<String> = keys
+        .iter()
+        .map(|key| {
+            crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), key)
+        })
+        .collect();
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_keys = keys.clone();
+
+    let members = state.set_store.sinter(&scoped_keys)?;
 
     let json_members: Vec<serde_json::Value> = members
         .into_iter()
@@ -7610,6 +8380,9 @@ pub async fn set_inter(
 /// POST /set/union - Union of multiple sets
 pub async fn set_union(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     let keys: Vec<String> = req
@@ -7622,7 +8395,23 @@ pub async fn set_union(
 
     debug!("REST SUNION keys={:?}", keys);
 
-    let members = state.set_store.sunion(&keys)?;
+    // Check permissions for all keys
+    for key in &keys {
+        require_permission(&ctx, &format!("set:{}", key), Action::Read)?;
+    }
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_keys: Vec<String> = keys
+        .iter()
+        .map(|key| {
+            crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), key)
+        })
+        .collect();
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_keys = keys.clone();
+
+    let members = state.set_store.sunion(&scoped_keys)?;
 
     let json_members: Vec<serde_json::Value> = members
         .into_iter()
@@ -7639,6 +8428,9 @@ pub async fn set_union(
 /// POST /set/diff - Difference of sets
 pub async fn set_diff(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Json(req): Json<serde_json::Value>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     let keys: Vec<String> = req
@@ -7651,7 +8443,23 @@ pub async fn set_diff(
 
     debug!("REST SDIFF keys={:?}", keys);
 
-    let members = state.set_store.sdiff(&keys)?;
+    // Check permissions for all keys
+    for key in &keys {
+        require_permission(&ctx, &format!("set:{}", key), Action::Read)?;
+    }
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_keys: Vec<String> = keys
+        .iter()
+        .map(|key| {
+            crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), key)
+        })
+        .collect();
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_keys = keys.clone();
+
+    let members = state.set_store.sdiff(&scoped_keys)?;
 
     let json_members: Vec<serde_json::Value> = members
         .into_iter()
@@ -7805,6 +8613,8 @@ pub struct HyperLogLogMergeResponse {
 pub async fn list_lpush(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ListPushRequest>,
 ) -> Result<Json<ListPushResponse>, SynapError> {
@@ -7813,13 +8623,20 @@ pub async fn list_lpush(
     // Check permission
     require_permission(&ctx, &format!("list:{}", key), Action::Write)?;
 
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let values: Result<Vec<Vec<u8>>, _> = req
         .values
         .into_iter()
         .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
         .collect();
 
-    let length = state.list_store.lpush(&key, values?, false)?;
+    let length = state.list_store.lpush(&scoped_key, values?, false)?;
 
     Ok(Json(ListPushResponse { length, key }))
 }
@@ -7827,10 +8644,23 @@ pub async fn list_lpush(
 /// POST /list/:key/lpushx - Push element(s) to left only if key exists
 pub async fn list_lpushx(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ListPushRequest>,
 ) -> Result<Json<ListPushResponse>, SynapError> {
     debug!("REST LPUSHX key={} count={}", key, req.values.len());
+
+    // Check permission
+    require_permission(&ctx, &format!("list:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
 
     let values: Result<Vec<Vec<u8>>, _> = req
         .values
@@ -7838,7 +8668,7 @@ pub async fn list_lpushx(
         .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
         .collect();
 
-    let length = state.list_store.lpush(&key, values?, true)?;
+    let length = state.list_store.lpush(&scoped_key, values?, true)?;
 
     Ok(Json(ListPushResponse { length, key }))
 }
@@ -7846,10 +8676,23 @@ pub async fn list_lpushx(
 /// POST /list/:key/rpush - Push element(s) to right (back)
 pub async fn list_rpush(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ListPushRequest>,
 ) -> Result<Json<ListPushResponse>, SynapError> {
     debug!("REST RPUSH key={} count={}", key, req.values.len());
+
+    // Check permission
+    require_permission(&ctx, &format!("list:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
 
     let values: Result<Vec<Vec<u8>>, _> = req
         .values
@@ -7857,7 +8700,7 @@ pub async fn list_rpush(
         .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
         .collect();
 
-    let length = state.list_store.rpush(&key, values?, false)?;
+    let length = state.list_store.rpush(&scoped_key, values?, false)?;
 
     Ok(Json(ListPushResponse { length, key }))
 }
@@ -7865,10 +8708,23 @@ pub async fn list_rpush(
 /// POST /list/:key/rpushx - Push element(s) to right only if key exists
 pub async fn list_rpushx(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ListPushRequest>,
 ) -> Result<Json<ListPushResponse>, SynapError> {
     debug!("REST RPUSHX key={} count={}", key, req.values.len());
+
+    // Check permission
+    require_permission(&ctx, &format!("list:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
 
     let values: Result<Vec<Vec<u8>>, _> = req
         .values
@@ -7876,7 +8732,7 @@ pub async fn list_rpushx(
         .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
         .collect();
 
-    let length = state.list_store.rpush(&key, values?, true)?;
+    let length = state.list_store.rpush(&scoped_key, values?, true)?;
 
     Ok(Json(ListPushResponse { length, key }))
 }
@@ -7884,13 +8740,26 @@ pub async fn list_rpushx(
 /// POST /list/:key/lpop - Pop element(s) from left (front)
 pub async fn list_lpop(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ListPopRequest>,
 ) -> Result<Json<ListPopResponse>, SynapError> {
     let count = req.count.unwrap_or(1);
     debug!("REST LPOP key={} count={}", key, count);
 
-    let values = state.list_store.lpop(&key, Some(count))?;
+    // Check permission
+    require_permission(&ctx, &format!("list:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let values = state.list_store.lpop(&scoped_key, Some(count))?;
 
     let json_values: Result<Vec<serde_json::Value>, _> = values
         .into_iter()
@@ -7911,13 +8780,26 @@ pub async fn list_lpop(
 /// POST /list/:key/rpop - Pop element(s) from right (back)
 pub async fn list_rpop(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ListPopRequest>,
 ) -> Result<Json<ListPopResponse>, SynapError> {
     let count = req.count.unwrap_or(1);
     debug!("REST RPOP key={} count={}", key, count);
 
-    let values = state.list_store.rpop(&key, Some(count))?;
+    // Check permission
+    require_permission(&ctx, &format!("list:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let values = state.list_store.rpop(&scoped_key, Some(count))?;
 
     let json_values: Vec<serde_json::Value> = values
         .into_iter()
@@ -7938,11 +8820,21 @@ pub async fn list_rpop(
 pub async fn list_range(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<ListRangeResponse>, SynapError> {
     // Check permission
     require_permission(&ctx, &format!("list:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let start: i64 = params
         .get("start")
         .and_then(|s| s.parse::<i64>().ok())
@@ -7954,7 +8846,7 @@ pub async fn list_range(
 
     debug!("REST LRANGE key={} start={} stop={}", key, start, stop);
 
-    let values = state.list_store.lrange(&key, start, stop)?;
+    let values = state.list_store.lrange(&scoped_key, start, stop)?;
 
     let json_values: Vec<serde_json::Value> = values
         .into_iter()
@@ -7974,11 +8866,24 @@ pub async fn list_range(
 /// GET /list/:key/len - Get list length
 pub async fn list_len(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST LLEN key={}", key);
 
-    let length = state.list_store.llen(&key)?;
+    // Check permission
+    require_permission(&ctx, &format!("list:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let length = state.list_store.llen(&scoped_key)?;
 
     Ok(Json(json!({ "length": length, "key": key })))
 }
@@ -7986,11 +8891,24 @@ pub async fn list_len(
 /// GET /list/:key/index/:index - Get element at index
 pub async fn list_index(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((key, index)): Path<(String, i64)>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST LINDEX key={} index={}", key, index);
 
-    let value = state.list_store.lindex(&key, index)?;
+    // Check permission
+    require_permission(&ctx, &format!("list:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let value = state.list_store.lindex(&scoped_key, index)?;
 
     let json_value: serde_json::Value = serde_json::from_slice(&value)
         .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&value).to_string()));
@@ -8003,15 +8921,28 @@ pub async fn list_index(
 /// POST /list/:key/set - Set element at index
 pub async fn list_set(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ListSetRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST LSET key={} index={}", key, req.index);
 
+    // Check permission
+    require_permission(&ctx, &format!("list:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let value = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize value: {}", e)))?;
 
-    state.list_store.lset(&key, req.index, value)?;
+    state.list_store.lset(&scoped_key, req.index, value)?;
 
     Ok(Json(
         json!({ "success": true, "key": key, "index": req.index }),
@@ -8021,9 +8952,22 @@ pub async fn list_set(
 /// POST /list/:key/trim - Trim list to range
 pub async fn list_trim(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    // Check permission
+    require_permission(&ctx, &format!("list:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let start: i64 = params
         .get("start")
         .and_then(|s| s.parse::<i64>().ok())
@@ -8035,7 +8979,7 @@ pub async fn list_trim(
 
     debug!("REST LTRIM key={} start={} stop={}", key, start, stop);
 
-    state.list_store.ltrim(&key, start, stop)?;
+    state.list_store.ltrim(&scoped_key, start, stop)?;
 
     Ok(Json(json!({ "success": true, "key": key })))
 }
@@ -8043,15 +8987,28 @@ pub async fn list_trim(
 /// POST /list/:key/rem - Remove occurrences of value
 pub async fn list_rem(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ListRemRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST LREM key={} count={}", key, req.count);
 
+    // Check permission
+    require_permission(&ctx, &format!("list:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let value = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize value: {}", e)))?;
 
-    let removed = state.list_store.lrem(&key, req.count, value)?;
+    let removed = state.list_store.lrem(&scoped_key, req.count, value)?;
 
     Ok(Json(json!({ "removed": removed, "key": key })))
 }
@@ -8059,10 +9016,23 @@ pub async fn list_rem(
 /// POST /list/:key/insert - Insert value before/after pivot
 pub async fn list_insert(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ListInsertRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST LINSERT key={} before={}", key, req.before);
+
+    // Check permission
+    require_permission(&ctx, &format!("list:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
 
     let pivot = serde_json::to_vec(&req.pivot)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize pivot: {}", e)))?;
@@ -8070,7 +9040,9 @@ pub async fn list_insert(
     let value = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize value: {}", e)))?;
 
-    let length = state.list_store.linsert(&key, req.before, pivot, value)?;
+    let length = state
+        .list_store
+        .linsert(&scoped_key, req.before, pivot, value)?;
 
     Ok(Json(json!({ "length": length, "key": key })))
 }
@@ -8078,6 +9050,9 @@ pub async fn list_insert(
 /// POST /list/:source/rpoplpush/:destination - Atomically pop from source and push to destination
 pub async fn list_rpoplpush(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((source, destination)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!(
@@ -8085,7 +9060,26 @@ pub async fn list_rpoplpush(
         source, destination
     );
 
-    let value = state.list_store.rpoplpush(&source, &destination)?;
+    // Check permissions for both keys
+    require_permission(&ctx, &format!("list:{}", source), Action::Write)?;
+    require_permission(&ctx, &format!("list:{}", destination), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_source =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &source);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_source = source.clone();
+
+    #[cfg(feature = "hub-integration")]
+    let scoped_destination =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &destination);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_destination = destination.clone();
+
+    let value = state
+        .list_store
+        .rpoplpush(&scoped_source, &scoped_destination)?;
 
     let json_value: serde_json::Value = serde_json::from_slice(&value)
         .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&value).to_string()));
@@ -8133,6 +9127,9 @@ pub async fn list_stats(
 /// POST /hyperloglog/:key/pfadd - Add elements to HyperLogLog structure
 pub async fn hyperloglog_pfadd(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<HyperLogLogAddRequest>,
 ) -> Result<Json<HyperLogLogAddResponse>, SynapError> {
@@ -8143,9 +9140,19 @@ pub async fn hyperloglog_pfadd(
         req.ttl_secs
     );
 
+    // Check permission
+    require_permission(&ctx, &format!("hyperloglog:{}", key), Action::Write)?;
+
     if req.elements.is_empty() {
         return Ok(Json(HyperLogLogAddResponse { key, added: 0 }));
     }
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
 
     let elements: Vec<Vec<u8>> = req
         .elements
@@ -8155,7 +9162,7 @@ pub async fn hyperloglog_pfadd(
 
     let added = state
         .hyperloglog_store
-        .pfadd(&key, elements, req.ttl_secs)?;
+        .pfadd(&scoped_key, elements, req.ttl_secs)?;
 
     Ok(Json(HyperLogLogAddResponse { key, added }))
 }
@@ -8163,11 +9170,24 @@ pub async fn hyperloglog_pfadd(
 /// GET /hyperloglog/:key/pfcount - Estimate cardinality of HyperLogLog structure
 pub async fn hyperloglog_pfcount(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<HyperLogLogCountResponse>, SynapError> {
     debug!("REST PFCOUNT key={}", key);
 
-    let count = state.hyperloglog_store.pfcount(&key)?;
+    // Check permission
+    require_permission(&ctx, &format!("hyperloglog:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let count = state.hyperloglog_store.pfcount(&scoped_key)?;
 
     Ok(Json(HyperLogLogCountResponse { key, count }))
 }
@@ -8175,6 +9195,9 @@ pub async fn hyperloglog_pfcount(
 /// POST /hyperloglog/:destination/pfmerge - Merge multiple HyperLogLog structures
 pub async fn hyperloglog_pfmerge(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(destination): Path<String>,
     Json(req): Json<HyperLogLogMergeRequest>,
 ) -> Result<Json<HyperLogLogMergeResponse>, SynapError> {
@@ -8189,9 +9212,33 @@ pub async fn hyperloglog_pfmerge(
         ));
     }
 
-    let sources = req.sources;
+    // Check permissions for destination and all source keys
+    require_permission(&ctx, &format!("hyperloglog:{}", destination), Action::Write)?;
+    for source in &req.sources {
+        require_permission(&ctx, &format!("hyperloglog:{}", source), Action::Read)?;
+    }
 
-    let count = state.hyperloglog_store.pfmerge(&destination, sources)?;
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_destination =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &destination);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_destination = destination.clone();
+
+    #[cfg(feature = "hub-integration")]
+    let scoped_sources: Vec<String> = req
+        .sources
+        .iter()
+        .map(|key| {
+            crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), key)
+        })
+        .collect();
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_sources = req.sources.clone();
+
+    let count = state
+        .hyperloglog_store
+        .pfmerge(&scoped_destination, scoped_sources)?;
 
     Ok(Json(HyperLogLogMergeResponse { destination, count }))
 }
@@ -8199,8 +9246,12 @@ pub async fn hyperloglog_pfmerge(
 /// GET /hyperloglog/stats - Retrieve HyperLogLog statistics
 pub async fn hyperloglog_stats(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<crate::core::HyperLogLogStats>, SynapError> {
     debug!("REST HYPERLOGLOG STATS");
+
+    // Check permission (read access to any hyperloglog)
+    require_permission(&ctx, "hyperloglog:*", Action::Read)?;
 
     let stats = state.hyperloglog_store.stats();
 
@@ -8287,6 +9338,9 @@ pub struct BitmapFieldResponse {
 /// POST /bitmap/:key/setbit - Set bit at offset to value (0 or 1)
 pub async fn bitmap_setbit(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<BitmapSetBitRequest>,
 ) -> Result<Json<BitmapSetBitResponse>, SynapError> {
@@ -8295,7 +9349,19 @@ pub async fn bitmap_setbit(
         key, req.offset, req.value
     );
 
-    let old_value = state.bitmap_store.setbit(&key, req.offset, req.value)?;
+    // Check permission
+    require_permission(&ctx, &format!("bitmap:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let old_value = state
+        .bitmap_store
+        .setbit(&scoped_key, req.offset, req.value)?;
 
     Ok(Json(BitmapSetBitResponse { key, old_value }))
 }
@@ -8303,11 +9369,24 @@ pub async fn bitmap_setbit(
 /// GET /bitmap/:key/getbit/:offset - Get bit at offset
 pub async fn bitmap_getbit(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((key, offset)): Path<(String, usize)>,
 ) -> Result<Json<BitmapGetBitResponse>, SynapError> {
     debug!("REST GETBIT key={} offset={}", key, offset);
 
-    let value = state.bitmap_store.getbit(&key, offset)?;
+    // Check permission
+    require_permission(&ctx, &format!("bitmap:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let value = state.bitmap_store.getbit(&scoped_key, offset)?;
 
     Ok(Json(BitmapGetBitResponse { key, offset, value }))
 }
@@ -8315,6 +9394,9 @@ pub async fn bitmap_getbit(
 /// GET /bitmap/:key/bitcount - Count set bits in bitmap
 pub async fn bitmap_bitcount(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<BitmapCountRequest>,
 ) -> Result<Json<BitmapCountResponse>, SynapError> {
@@ -8323,9 +9405,19 @@ pub async fn bitmap_bitcount(
         key, params.start, params.end
     );
 
+    // Check permission
+    require_permission(&ctx, &format!("bitmap:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
     let count = state
         .bitmap_store
-        .bitcount(&key, params.start, params.end)?;
+        .bitcount(&scoped_key, params.start, params.end)?;
 
     Ok(Json(BitmapCountResponse { key, count }))
 }
@@ -8333,6 +9425,9 @@ pub async fn bitmap_bitcount(
 /// GET /bitmap/:key/bitpos - Find first bit set to value
 pub async fn bitmap_bitpos(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<BitmapPosRequest>,
 ) -> Result<Json<BitmapPosResponse>, SynapError> {
@@ -8341,9 +9436,20 @@ pub async fn bitmap_bitpos(
         key, params.value, params.start, params.end
     );
 
-    let position = state
-        .bitmap_store
-        .bitpos(&key, params.value, params.start, params.end)?;
+    // Check permission
+    require_permission(&ctx, &format!("bitmap:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
+
+    let position =
+        state
+            .bitmap_store
+            .bitpos(&scoped_key, params.value, params.start, params.end)?;
 
     Ok(Json(BitmapPosResponse { key, position }))
 }
@@ -8351,6 +9457,9 @@ pub async fn bitmap_bitpos(
 /// POST /bitmap/:destination/bitop - Perform bitwise operation
 pub async fn bitmap_bitop(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(destination): Path<String>,
     Json(req): Json<BitmapOpRequest>,
 ) -> Result<Json<BitmapOpResponse>, SynapError> {
@@ -8359,10 +9468,34 @@ pub async fn bitmap_bitop(
         destination, req.operation, req.source_keys
     );
 
+    // Check permissions for destination and all source keys
+    require_permission(&ctx, &format!("bitmap:{}", destination), Action::Write)?;
+    for source in &req.source_keys {
+        require_permission(&ctx, &format!("bitmap:{}", source), Action::Read)?;
+    }
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_destination =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &destination);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_destination = destination.clone();
+
+    #[cfg(feature = "hub-integration")]
+    let scoped_sources: Vec<String> = req
+        .source_keys
+        .iter()
+        .map(|key| {
+            crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), key)
+        })
+        .collect();
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_sources = req.source_keys.clone();
+
     let operation = req.operation.parse::<crate::core::BitmapOperation>()?;
     let length = state
         .bitmap_store
-        .bitop(operation, &destination, &req.source_keys)?;
+        .bitop(operation, &scoped_destination, &scoped_sources)?;
 
     Ok(Json(BitmapOpResponse {
         destination,
@@ -8373,10 +9506,23 @@ pub async fn bitmap_bitop(
 /// POST /bitmap/:key/bitfield - Execute bitfield operations
 pub async fn bitmap_bitfield(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    #[cfg(feature = "hub-integration")]
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<Vec<BitmapFieldOperation>>,
 ) -> Result<Json<BitmapFieldResponse>, SynapError> {
     debug!("REST BITFIELD key={} operations={}", key, req.len());
+
+    // Check permission (write for any modifying operations)
+    require_permission(&ctx, &format!("bitmap:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    #[cfg(feature = "hub-integration")]
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+    #[cfg(not(feature = "hub-integration"))]
+    let scoped_key = key.clone();
 
     use crate::core::{BitfieldOperation as CoreOp, BitfieldOverflow};
 
@@ -8430,7 +9576,7 @@ pub async fn bitmap_bitfield(
         operations.push(core_op);
     }
 
-    let results = state.bitmap_store.bitfield(&key, &operations)?;
+    let results = state.bitmap_store.bitfield(&scoped_key, &operations)?;
     let values: Vec<i64> = results.iter().map(|r| r.value).collect();
 
     Ok(Json(BitmapFieldResponse {
@@ -8442,8 +9588,12 @@ pub async fn bitmap_bitfield(
 /// GET /bitmap/stats - Retrieve bitmap statistics
 pub async fn bitmap_stats(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<crate::core::BitmapStats>, SynapError> {
     debug!("REST BITMAP STATS");
+
+    // Check permission (read access to any bitmap)
+    require_permission(&ctx, "bitmap:*", Action::Read)?;
 
     let stats = state.bitmap_store.stats();
 
@@ -10561,4 +11711,69 @@ pub async fn cluster_migration_status(
             "message": "No migration in progress for this slot"
         })))
     }
+}
+
+// ============================================================================
+// HiveHub Integration - Quota Stats Handler
+// ============================================================================
+
+/// GET /hub/quota - Get user quota statistics
+///
+/// Returns quota information for the authenticated Hub user.
+/// Only available when HiveHub integration is enabled.
+#[cfg(feature = "hub-integration")]
+pub async fn hub_quota_stats(
+    State(state): State<AppState>,
+    crate::hub::HubContextExtractor(hub_context_opt): crate::hub::HubContextExtractor,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    // Get Hub context (user_id from Hub access key)
+    let hub_context = hub_context_opt.ok_or_else(|| {
+        SynapError::Unauthorized(
+            "Hub integration enabled but no Hub authentication found".to_string(),
+        )
+    })?;
+
+    // Get HubClient from app state
+    let hub_client = state
+        .hub_client
+        .as_ref()
+        .ok_or_else(|| SynapError::InternalError("HubClient not initialized".to_string()))?;
+
+    // Get quota from cache or fetch from Hub
+    let quota = hub_client
+        .quota_manager()
+        .get_quota(&hub_context.user_id)
+        .ok_or_else(|| {
+            SynapError::InternalError(format!(
+                "Quota not found for user {}. Try authenticating again.",
+                hub_context.user_id
+            ))
+        })?;
+
+    // Return quota statistics
+    Ok(Json(json!({
+        "user_id": hub_context.user_id,
+        "plan": format!("{:?}", quota.plan),
+        "storage": {
+            "used_bytes": quota.storage_used,
+            "limit_bytes": quota.storage_limit,
+            "remaining_bytes": quota.remaining_storage(),
+            "usage_percent": if quota.storage_limit > 0 {
+                (quota.storage_used as f64 / quota.storage_limit as f64 * 100.0).round()
+            } else {
+                0.0
+            }
+        },
+        "operations": {
+            "monthly_count": quota.monthly_operations,
+            "monthly_limit": quota.monthly_operations_limit,
+            "remaining": quota.remaining_operations(),
+            "usage_percent": if quota.monthly_operations_limit > 0 {
+                (quota.monthly_operations as f64 / quota.monthly_operations_limit as f64 * 100.0).round()
+            } else {
+                0.0
+            }
+        },
+        "updated_at": format!("{:?}", quota.updated_at)
+    })))
 }

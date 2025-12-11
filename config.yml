@@ -244,6 +244,122 @@ replication:
   replica_timeout_secs: 30 # Replica timeout (seconds)
 
 # ----------------------------------------------------------------------------
+# Cluster Mode
+# ----------------------------------------------------------------------------
+# Multi-node cluster configuration for distributed deployments
+# NOTE: Cluster mode is designed for HiveHub.Cloud SaaS integration
+# - Multi-tenant data isolation required (hub.enabled = true recommended)
+# - Dangerous commands automatically blocked (FLUSH, SCAN, CLIENT LIST)
+# - Mandatory TTL enforcement for shared resources
+# - User-scoped resource naming (user_{user_id}:{resource})
+
+cluster:
+  # Enable cluster mode
+  # When enabled:
+  #   - Node joins cluster mesh for coordination
+  #   - Distributed state synchronization active
+  #   - Cross-node message routing enabled
+  enabled: false
+
+  # Node ID (must be unique across cluster)
+  # Auto-generated if not specified
+  # Format: UUID or descriptive name (e.g., "node-1", "us-east-1a")
+  node_id: ""
+
+  # Cluster seed nodes for discovery
+  # List of initial nodes to connect to on startup
+  # Format: "host:port"
+  # Example:
+  #   - "node1.example.com:15502"
+  #   - "node2.example.com:15502"
+  #   - "127.0.0.1:15502"
+  seeds: []
+
+  # Cluster communication port
+  # Different from HTTP API port (server.port)
+  # Used for node-to-node mesh communication
+  port: 15502
+
+  # Cluster bind address
+  # Address to bind cluster protocol listener
+  # Examples:
+  #   "0.0.0.0"    -> Listen on all interfaces (recommended)
+  #   "127.0.0.1"  -> Localhost only (testing)
+  bind_address: "0.0.0.0"
+
+  # Heartbeat interval (milliseconds)
+  # How often nodes send health checks to peers
+  # Lower = faster failure detection, higher network usage
+  heartbeat_interval_ms: 1000
+
+  # Node timeout (seconds)
+  # Time before considering a peer node dead
+  # Should be > 2x heartbeat_interval_ms
+  node_timeout_secs: 5
+
+  # Gossip interval (milliseconds)
+  # How often cluster state is gossiped to random peers
+  # Used for eventual consistency of cluster membership
+  gossip_interval_ms: 500
+
+  # Maximum cluster size
+  # Reject new nodes if cluster exceeds this size
+  # 0 = unlimited
+  max_nodes: 100
+
+# ----------------------------------------------------------------------------
+# HiveHub.Cloud Integration
+# ----------------------------------------------------------------------------
+# SaaS multi-tenancy integration for managed cloud deployments
+# When enabled, provides:
+# - User authentication via Hub access keys
+# - Per-user resource isolation (queues, streams, KV, pub/sub)
+# - Quota management and enforcement
+# - Usage tracking and reporting
+# - Automatic SaaS restrictions (TTL, payload size, rate limits)
+
+hub:
+  # Enable HiveHub integration
+  # When enabled:
+  #   - Authentication becomes mandatory (hub access keys)
+  #   - All resources are user-scoped (user_{user_id}:{name})
+  #   - Quotas enforced before operations
+  #   - Usage reported to HiveHub API
+  #   - Dangerous commands blocked (FLUSH, SCAN, CLIENT LIST)
+  #   - TTL becomes mandatory (default: 24h)
+  enabled: false
+
+  # HiveHub API base URL
+  # Production: https://api.hivehub.cloud
+  # Development: http://localhost:8080
+  api_base_url: "https://api.hivehub.cloud"
+
+  # Service API key (for server-to-Hub authentication)
+  # This key identifies the Synap service instance to HiveHub
+  # REQUIRED when hub.enabled = true
+  # Keep this secret - do not expose in client applications
+  # Can also be set via environment variable: SYNAP_HUB_SERVICE_API_KEY
+  service_api_key: ""
+
+  # Cache TTL for Hub API responses (seconds)
+  # Caches: user info, quotas, rate limits
+  # Lower = more real-time, higher API usage
+  # Higher = better performance, less real-time
+  # Recommended: 60-300 seconds
+  cache_ttl_secs: 60
+
+  # Usage reporting interval (seconds)
+  # How often to send usage metrics to HiveHub API
+  # Metrics: operations, storage, bandwidth per user
+  # Recommended: 300 seconds (5 minutes)
+  usage_report_interval_secs: 300
+
+  # Enable verbose Hub logging
+  # Logs authentication, quota checks, usage reporting
+  # Useful for debugging Hub integration issues
+  verbose_logging: false
+
+# ----------------------------------------------------------------------------
 # Persistence
 # ----------------------------------------------------------------------------
 # Optional persistence using Write-Ahead Log and Snapshots

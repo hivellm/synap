@@ -15,24 +15,24 @@
 #
 # Docker Commands:
 #   Build image (AMD64):
-#     docker build -t synap:0.8.0 -t synap:latest .
-#     docker build -t hivehub/synap:0.8.0 -t hivehub/synap:latest .
+#     docker build -t synap:0.9.0 -t synap:latest .
+#     docker build -t hivehub/synap:0.9.0 -t hivehub/synap:latest .
 #
 #   Build for ARM64:
-#     docker buildx build --platform linux/arm64 -t synap:0.8.0-arm64 .
+#     docker buildx build --platform linux/arm64 -t synap:0.9.0-arm64 .
 #
 #   Build multi-arch (AMD64 + ARM64):
 #     docker buildx build --platform linux/amd64,linux/arm64 \
-#       -t hivehub/synap:0.8.0 -t hivehub/synap:latest --push .
+#       -t hivehub/synap:0.9.0 -t hivehub/synap:latest --push .
 #
 #   Build for pre-release testing:
-#     docker build -t synap:0.8.0-rc -t synap:latest .
+#     docker build -t synap:0.9.0-rc -t synap:latest .
 #
 #   Run container:
-#     docker run -d --name synap-server-0.8.0 \
+#     docker run -d --name synap-server-0.9.0 \
 #       -p 15500:15500 -p 15501:15501 \
 #       -v synap-data:/data \
-#       synap:0.8.0
+#       synap:0.9.0
 #
 #   Run with authentication enabled:
 #     docker run -d --name synap-server \
@@ -64,19 +64,19 @@
 #       synap:latest
 #
 #   View logs:
-#     docker logs -f synap-server-0.8.0
+#     docker logs -f synap-server-0.9.0
 #
 #   Check status:
-#     docker ps --filter name=synap-server-0.8.0
+#     docker ps --filter name=synap-server-0.9.0
 #
 #   Stop container:
-#     docker stop synap-server-0.8.0
+#     docker stop synap-server-0.9.0
 #
 #   Remove container:
-#     docker rm synap-server-0.8.0
+#     docker rm synap-server-0.9.0
 #
 #   Remove image:
-#     docker rmi synap:0.8.0
+#     docker rmi synap:0.9.0
 # ============================================================================
 
 # ============================================================================
@@ -117,17 +117,22 @@ COPY .cargo/config.toml ./.cargo/config.toml
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
 COPY synap-server/Cargo.toml ./synap-server/
 COPY synap-cli/Cargo.toml ./synap-cli/
+COPY synap-migrate/Cargo.toml ./synap-migrate/
 COPY sdks/rust/Cargo.toml ./sdks/rust/
 
 # Copy source code (needed for cargo to validate workspace)
 COPY synap-server/src ./synap-server/src
 COPY synap-cli/src ./synap-cli/src
+COPY synap-migrate/src ./synap-migrate/src
 COPY sdks/rust/src ./sdks/rust/src
 
-# Remove benchmark declarations from Cargo.toml for Docker build
-# (benchmarks are not needed for production image)
+# Remove benchmark declarations and external dependencies from Cargo.toml for Docker build
+# (benchmarks are not needed for production image, HiveHub SDK requires external path)
 RUN sed -i '/^# Configure benchmarks to use Criterion/,/^$/d' synap-server/Cargo.toml && \
-    sed -i '/^\[\[bench\]\]/,/^$/d' synap-server/Cargo.toml
+    sed -i '/^\[\[bench\]\]/,/^$/d' synap-server/Cargo.toml && \
+    sed -i '/^# HiveHub Cloud Integration$/d' synap-server/Cargo.toml && \
+    sed -i '/^hivehub-internal-sdk/d' synap-server/Cargo.toml && \
+    sed -i 's/hub-integration = \["dep:hivehub-internal-sdk"\]/hub-integration = []/g' synap-server/Cargo.toml
 
 # Build release binary with optimizations
 # - Static linking for portability

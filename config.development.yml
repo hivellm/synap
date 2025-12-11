@@ -19,8 +19,22 @@ protocols:
   streamable_http:
     enabled: true
     path: "/api/v1/command"
-  
+
   rest:
     enabled: true
     prefix: "/kv"
+
+# Cluster mode disabled for local development
+cluster:
+  enabled: false
+
+# Hub integration disabled for local development
+# Uncomment and configure to test Hub integration locally
+hub:
+  enabled: false
+  # api_base_url: "http://localhost:8080"  # Local HiveHub instance
+  # service_api_key: "dev_key"
+  # cache_ttl_secs: 10  # Shorter cache for development
+  # usage_report_interval_secs: 60
+  # verbose_logging: true
 

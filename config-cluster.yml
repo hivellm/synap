@@ -1,0 +1,239 @@
+# ============================================================================
+# Synap Cluster Node Configuration
+# ============================================================================
+# Configuration template for Synap nodes running in cluster mode
+# Designed for multi-node distributed deployments with HiveHub.Cloud integration
+#
+# IMPORTANT: Cluster mode requires:
+# - Unique node_id for each node
+# - At least one seed node for discovery
+# - Hub integration enabled (recommended for multi-tenancy)
+# ============================================================================
+
+# ----------------------------------------------------------------------------
+# Network Configuration
+# ----------------------------------------------------------------------------
+server:
+  # Bind to all interfaces for cluster communication
+  host: "0.0.0.0"
+
+  # HTTP API port
+  port: 15500
+
+  # WebSocket support for real-time subscriptions
+  websocket_enabled: false
+
+# ----------------------------------------------------------------------------
+# Memory Management
+# ----------------------------------------------------------------------------
+kv_store:
+  # Maximum memory usage in MB per node
+  # Adjust based on total cluster capacity and node count
+  max_memory_mb: 4096
+
+  # Eviction policy when memory limit is reached
+  eviction_policy: "lru"
+
+  # TTL cleanup interval
+  ttl_cleanup_interval_ms: 100
+
+  # Dangerous commands are automatically blocked in cluster mode
+  allow_flush_commands: false
+
+# ----------------------------------------------------------------------------
+# Queue System
+# ----------------------------------------------------------------------------
+queue:
+  enabled: true
+  max_depth: 100000
+  ack_deadline_secs: 30
+  default_max_retries: 3
+  default_priority: 5
+
+# ----------------------------------------------------------------------------
+# Authentication & Security
+# ----------------------------------------------------------------------------
+# IMPORTANT: Authentication is REQUIRED in cluster mode when hub.enabled = true
+auth:
+  enabled: true
+  require_auth: true
+
+  # Root user for initial setup only
+  # Disable after creating regular users via HiveHub
+  root:
+    username: "root"
+    password: "CHANGE_ME_IN_PRODUCTION"
+    enabled: false  # Disabled when using Hub authentication
+
+  default_key_ttl: 3600
+
+# ----------------------------------------------------------------------------
+# Rate Limiting
+# ----------------------------------------------------------------------------
+rate_limit:
+  enabled: true
+  requests_per_second: 1000
+  burst_size: 100
+
+# ----------------------------------------------------------------------------
+# Logging
+# ----------------------------------------------------------------------------
+logging:
+  level: "info"
+  format: "json"
+
+# ----------------------------------------------------------------------------
+# Protocols
+# ----------------------------------------------------------------------------
+protocols:
+  streamable_http:
+    enabled: true
+    path: "/api/v1/command"
+  rest:
+    enabled: true
+    prefix: "/kv"
+
+# ----------------------------------------------------------------------------
+# MCP Tools
+# ----------------------------------------------------------------------------
+mcp:
+  enable_kv_tools: true
+  enable_hash_tools: false
+  enable_list_tools: false
+  enable_set_tools: false
+  enable_queue_tools: true
+  enable_sortedset_tools: false
+
+# ----------------------------------------------------------------------------
+# CLUSTER MODE (ENABLED)
+# ----------------------------------------------------------------------------
+cluster:
+  # Enable cluster mode
+  enabled: true
+
+  # Unique node ID - MUST be different for each node in cluster
+  # Examples: "node-1", "us-east-1a", "prod-cluster-node-01"
+  # Leave empty to auto-generate UUID
+  node_id: "cluster-node-1"
+
+  # Seed nodes for cluster discovery
+  # List at least 2-3 seed nodes for redundancy
+  # Example for 3-node cluster:
+  seeds:
+    - "cluster-node-1.example.com:15502"
+    - "cluster-node-2.example.com:15502"
+    - "cluster-node-3.example.com:15502"
+
+  # Cluster communication port (different from HTTP API port)
+  port: 15502
+
+  # Bind address for cluster protocol
+  bind_address: "0.0.0.0"
+
+  # Heartbeat interval (milliseconds)
+  # Lower = faster failure detection, higher network overhead
+  heartbeat_interval_ms: 1000
+
+  # Node timeout (seconds)
+  # Time before considering a peer node dead
+  node_timeout_secs: 5
+
+  # Gossip interval (milliseconds)
+  # State propagation frequency
+  gossip_interval_ms: 500
+
+  # Maximum cluster size (0 = unlimited)
+  max_nodes: 100
+
+# ----------------------------------------------------------------------------
+# HIVEHUB.CLOUD INTEGRATION (RECOMMENDED FOR CLUSTER MODE)
+# ----------------------------------------------------------------------------
+hub:
+  # Enable HiveHub integration for multi-tenancy
+  # STRONGLY RECOMMENDED when cluster.enabled = true
+  enabled: true
+
+  # HiveHub API base URL
+  # Production: https://api.hivehub.cloud
+  # Development: http://localhost:8080
+  api_base_url: "https://api.hivehub.cloud"
+
+  # Service API key (identifies this Synap cluster to HiveHub)
+  # REQUIRED when hub.enabled = true
+  # Set via environment variable: SYNAP_HUB_SERVICE_API_KEY
+  service_api_key: ""
+
+  # Cache TTL for Hub API responses (seconds)
+  # Balances real-time accuracy vs API load
+  cache_ttl_secs: 60
+
+  # Usage reporting interval (seconds)
+  # Send metrics to HiveHub every N seconds
+  usage_report_interval_secs: 300
+
+  # Verbose Hub logging for debugging
+  verbose_logging: false
+
+# ----------------------------------------------------------------------------
+# Persistence
+# ----------------------------------------------------------------------------
+persistence:
+  enabled: true
+
+  # Write-Ahead Log
+  wal:
+    enabled: true
+    path: "./data/wal/synap.wal"
+    buffer_size_kb: 64
+    fsync_mode: "periodic"  # periodic = good balance for cluster
+    fsync_interval_ms: 1000
+    max_size_mb: 1024
+
+  # Snapshots
+  snapshot:
+    enabled: true
+    directory: "./data/snapshots"
+    interval_secs: 300      # Snapshot every 5 minutes
+    operation_threshold: 10000
+    max_snapshots: 10
+    compression: false
+
+# ----------------------------------------------------------------------------
+# Environment Variables Support
+# ----------------------------------------------------------------------------
+# You can override any setting using environment variables:
+#
+# Cluster:
+#   SYNAP_CLUSTER_ENABLED=true
+#   SYNAP_CLUSTER_NODE_ID=node-1
+#   SYNAP_CLUSTER_PORT=15502
+#   SYNAP_CLUSTER_SEEDS=node1:15502,node2:15502,node3:15502
+#
+# Hub:
+#   SYNAP_HUB_ENABLED=true
+#   SYNAP_HUB_API_BASE_URL=https://api.hivehub.cloud
+#   SYNAP_HUB_SERVICE_API_KEY=your_secret_key_here
+#   SYNAP_HUB_CACHE_TTL_SECS=60
+#   SYNAP_HUB_USAGE_REPORT_INTERVAL_SECS=300
+#
+# ----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------
+# Cluster Deployment Example (3 nodes)
+# ----------------------------------------------------------------------------
+#
+# Node 1 (cluster-node-1):
+#   cluster.node_id: "cluster-node-1"
+#   cluster.seeds: ["cluster-node-1:15502", "cluster-node-2:15502", "cluster-node-3:15502"]
+#
+# Node 2 (cluster-node-2):
+#   cluster.node_id: "cluster-node-2"
+#   cluster.seeds: ["cluster-node-1:15502", "cluster-node-2:15502", "cluster-node-3:15502"]
+#
+# Node 3 (cluster-node-3):
+#   cluster.node_id: "cluster-node-3"
+#   cluster.seeds: ["cluster-node-1:15502", "cluster-node-2:15502", "cluster-node-3:15502"]
+#
+# All nodes share the same HiveHub service_api_key
+# Each user's data is automatically isolated via user_{user_id}:{resource} scoping
+#

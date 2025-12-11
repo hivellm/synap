@@ -121,3 +121,94 @@ auth:
 #   SYNAP_AUTH_ROOT_ENABLED=true
 #   SYNAP_AUTH_DEFAULT_KEY_TTL=3600
 
+
+# ============================================================================
+# CLUSTER MODE
+# ============================================================================
+
+# Multi-node cluster configuration for distributed deployments
+# Note: Cluster mode is designed for HiveHub.Cloud SaaS integration
+
+cluster:
+  # Enable cluster mode
+  enabled: false
+
+  # Unique node ID (auto-generated if not specified)
+  # Examples: "node-1", "us-east-1a", "prod-cluster-node-01"
+  node_id: ""
+
+  # Cluster seed nodes for discovery
+  # List at least 2-3 seed nodes for redundancy
+  seeds: []
+  # Example:
+  #   - "node1.example.com:15502"
+  #   - "node2.example.com:15502"
+  #   - "node3.example.com:15502"
+
+  # Cluster communication port (different from HTTP API port)
+  port: 15502
+
+  # Cluster bind address
+  bind_address: "0.0.0.0"
+
+  # Heartbeat interval (milliseconds)
+  heartbeat_interval_ms: 1000
+
+  # Node timeout (seconds)
+  node_timeout_secs: 5
+
+  # Gossip interval (milliseconds)
+  gossip_interval_ms: 500
+
+  # Maximum cluster size (0 = unlimited)
+  max_nodes: 100
+
+# Environment Variables (Docker):
+#   SYNAP_CLUSTER_ENABLED=true
+#   SYNAP_CLUSTER_NODE_ID=node-1
+#   SYNAP_CLUSTER_PORT=15502
+#   SYNAP_CLUSTER_SEEDS=node1:15502,node2:15502,node3:15502
+
+# ============================================================================
+# HIVEHUB.CLOUD INTEGRATION
+# ============================================================================
+
+# SaaS multi-tenancy integration for managed cloud deployments
+# When enabled, provides:
+# - User authentication via Hub access keys
+# - Per-user resource isolation (queues, streams, KV, pub/sub)
+# - Quota management and enforcement
+# - Usage tracking and reporting
+
+hub:
+  # Enable HiveHub integration
+  enabled: false
+
+  # HiveHub API base URL
+  # Production: https://api.hivehub.cloud
+  # Development: http://localhost:8080
+  api_base_url: "https://api.hivehub.cloud"
+
+  # Service API key (identifies this Synap instance to HiveHub)
+  # REQUIRED when hub.enabled = true
+  # IMPORTANT: Keep this secret - do not expose in client applications
+  service_api_key: ""
+
+  # Cache TTL for Hub API responses (seconds)
+  # Caches: user info, quotas, rate limits
+  cache_ttl_secs: 60
+
+  # Usage reporting interval (seconds)
+  # How often to send usage metrics to HiveHub API
+  usage_report_interval_secs: 300
+
+  # Enable verbose Hub logging
+  # Logs authentication, quota checks, usage reporting
+  verbose_logging: false
+
+# Environment Variables (Docker):
+#   SYNAP_HUB_ENABLED=true
+#   SYNAP_HUB_API_BASE_URL=https://api.hivehub.cloud
+#   SYNAP_HUB_SERVICE_API_KEY=your_secret_key_here
+#   SYNAP_HUB_CACHE_TTL_SECS=60
+#   SYNAP_HUB_USAGE_REPORT_INTERVAL_SECS=300

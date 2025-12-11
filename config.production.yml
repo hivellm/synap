@@ -19,12 +19,46 @@ protocols:
   streamable_http:
     enabled: true
     path: "/api/v1/command"
-  
+
   rest:
     enabled: true
     prefix: "/kv"
 
+# ----------------------------------------------------------------------------
+# Cluster Mode (Production SaaS Deployment)
+# ----------------------------------------------------------------------------
+# Enable for distributed multi-node deployment
+cluster:
+  enabled: false  # Set to true for cluster deployment
+
+  # node_id: ""  # Auto-generate or set via SYNAP_CLUSTER_NODE_ID
+  # seeds:
+  #   - "node1.production.example.com:15502"
+  #   - "node2.production.example.com:15502"
+  #   - "node3.production.example.com:15502"
+  # port: 15502
+  # bind_address: "0.0.0.0"
+  # heartbeat_interval_ms: 1000
+  # node_timeout_secs: 5
+  # gossip_interval_ms: 500
+  # max_nodes: 100
+
+# ----------------------------------------------------------------------------
+# HiveHub.Cloud Integration (Production SaaS)
+# ----------------------------------------------------------------------------
+# Enable for multi-tenant SaaS deployment
+hub:
+  enabled: false  # Set to true for SaaS deployment
+
+  # api_base_url: "https://api.hivehub.cloud"
+  # service_api_key: ""  # REQUIRED: Set via SYNAP_HUB_SERVICE_API_KEY env var
+  # cache_ttl_secs: 60
+  # usage_report_interval_secs: 300
+  # verbose_logging: false
+
+# ----------------------------------------------------------------------------
 # Future production settings (Phase 2+)
+# ----------------------------------------------------------------------------
 # persistence:
 #   enabled: true
 #   wal:

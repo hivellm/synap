@@ -11,9 +11,9 @@
 #
 # Examples:
 #   ./scripts/docker-publish.sh           # Build and push latest
-#   ./scripts/docker-publish.sh 0.8.1      # Build and push specific version
-#   ./scripts/docker-publish.sh 0.8.1 --no-build  # Only push (skip build)
-#   ./scripts/docker-publish.sh 0.8.1 --no-push   # Only build (skip push)
+#   ./scripts/docker-publish.sh 0.9.0      # Build and push specific version
+#   ./scripts/docker-publish.sh 0.9.0 --no-build  # Only push (skip build)
+#   ./scripts/docker-publish.sh 0.9.0 --no-push   # Only build (skip push)
 #
 # Requirements:
 #   - Docker with buildx enabled

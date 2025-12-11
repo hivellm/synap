@@ -61,6 +61,8 @@ async fn spawn_test_server() -> String {
         client_list_manager: Arc::new(ClientListManager::new()),
         cluster_topology: None,
         cluster_migration: None,
+        #[cfg(feature = "hub-integration")]
+        hub_client: None,
     };
     let user_manager = Arc::new(UserManager::new());
     let api_key_manager = Arc::new(ApiKeyManager::new());

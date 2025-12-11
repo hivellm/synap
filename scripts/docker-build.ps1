@@ -9,7 +9,7 @@
 #
 # Examples:
 #   .\scripts\docker-build.ps1           # Build with 'latest' tag
-#   .\scripts\docker-build.ps1 0.3.0     # Build with specific version
+#   .\scripts\docker-build.ps1 0.9.0     # Build with specific version
 #
 # ============================================================================
 

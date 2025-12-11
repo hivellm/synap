@@ -90,6 +90,36 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Override HiveHub config from environment variables (Docker/Cloud support)
+    // Task 9.7: Add environment variable support for HiveHub service API key
+    #[cfg(feature = "hub-integration")]
+    {
+        if let Ok(enabled) = std::env::var("SYNAP_HUB_ENABLED") {
+            config.hub.enabled = enabled.parse().unwrap_or(false);
+        }
+        if let Ok(api_url) = std::env::var("SYNAP_HUB_API_URL") {
+            config.hub.api_url = api_url;
+        }
+        if let Ok(service_api_key) = std::env::var("SYNAP_HUB_SERVICE_API_KEY") {
+            config.hub.service_api_key = service_api_key;
+        }
+        if let Ok(usage_interval) = std::env::var("SYNAP_HUB_USAGE_REPORT_INTERVAL") {
+            if let Ok(interval) = usage_interval.parse::<u64>() {
+                config.hub.usage_report_interval = interval;
+            }
+        }
+        if let Ok(cache_ttl) = std::env::var("SYNAP_HUB_CACHE_TTL") {
+            if let Ok(ttl) = cache_ttl.parse::<u64>() {
+                config.hub.cache_ttl = ttl;
+            }
+        }
+        if let Ok(timeout) = std::env::var("SYNAP_HUB_TIMEOUT") {
+            if let Ok(t) = timeout.parse::<u64>() {
+                config.hub.timeout = t;
+            }
+        }
+    }
+
     // Configure replication from CLI args
     if let Some(role_str) = &args.role {
         config.replication.enabled = role_str != "standalone";
@@ -379,6 +409,84 @@ async fn main() -> Result<()> {
         info!("Authentication disabled (development mode)");
     }
 
+    // Task 9.4: Validate cluster mode configuration with Hub integration
+    #[cfg(feature = "hub-integration")]
+    if config.hub.enabled && config.replication.enabled {
+        warn!("⚠️  Hub integration + Cluster mode detected - ensure proper configuration");
+        info!(
+            "Cluster mode: {:?}, Replication role: {:?}",
+            config.replication.enabled, config.replication.role
+        );
+
+        // Future: Add more validation here as cluster support is implemented (Phase 7)
+        // For now, just log a warning as cluster support for Hub is not yet complete
+        if matches!(
+            config.replication.role,
+            NodeRole::Master | NodeRole::Replica
+        ) {
+            warn!(
+                "Hub integration with cluster mode is experimental. \
+                 User isolation in cluster replication is pending (Phase 7)"
+            );
+        }
+    }
+
+    // Initialize HubClient if Hub integration is enabled
+    #[cfg(feature = "hub-integration")]
+    let hub_client = if config.hub.enabled {
+        info!("HiveHub integration enabled");
+
+        // Validate Hub configuration
+        config.hub.validate().unwrap_or_else(|e| {
+            panic!("Invalid Hub configuration: {}", e);
+        });
+
+        // Initialize HubClient
+        use synap_server::hub::HubClient;
+        match HubClient::new(config.hub.clone()) {
+            Ok(client) => {
+                let client = Arc::new(client);
+
+                info!(
+                    "HubClient initialized - API: {}, cache TTL: {}s",
+                    config.hub.api_url, config.hub.cache_ttl
+                );
+
+                // Start background tasks
+                let quota_sync_interval = Duration::from_secs(config.hub.cache_ttl * 2);
+                tokio::spawn({
+                    let client = client.clone();
+                    async move {
+                        client
+                            .quota_manager()
+                            .start_quota_sync_task(client.clone(), quota_sync_interval)
+                            .await;
+                    }
+                });
+
+                tokio::spawn({
+                    let client = client.clone();
+                    async move {
+                        client
+                            .usage_reporter()
+                            .start_reporting_task(client.clone())
+                            .await;
+                    }
+                });
+
+                info!("Hub background tasks started (quota sync, usage reporting)");
+
+                Some(client)
+            }
+            Err(e) => {
+                panic!("Failed to initialize HubClient: {}", e);
+            }
+        }
+    } else {
+        info!("HiveHub integration disabled (standalone mode)");
+        None
+    };
+
     // Create application state with persistence and streams
     let app_state = AppState {
         kv_store,
@@ -401,6 +509,8 @@ async fn main() -> Result<()> {
         client_list_manager,
         cluster_topology: None, // TODO: Initialize cluster topology from config
         cluster_migration: None, // TODO: Initialize cluster migration from config
+        #[cfg(feature = "hub-integration")]
+        hub_client,
     };
 
     // Initialize Prometheus metrics

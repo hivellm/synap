@@ -54,9 +54,6 @@ pub enum SynapError {
     #[error("IO error: {0}")]
     IoError(String),
 
-    #[error("Not found")]
-    NotFound,
-
     #[error("Index out of range")]
     IndexOutOfRange,
 
@@ -71,6 +68,21 @@ pub enum SynapError {
 
     #[error("Forbidden: {0}")]
     Forbidden(String),
+
+    #[error("Quota exceeded: {0}")]
+    QuotaExceeded(String),
+
+    #[error("Bad request: {0}")]
+    BadRequest(String),
+
+    #[error("Not found")]
+    NotFound,
+
+    #[error("Resource not found: {0}")]
+    ResourceNotFound(String),
+
+    #[error("Internal server error: {0}")]
+    InternalServerError(String),
 
     /// Cluster error: Key belongs to different node (MOVED redirect)
     #[error("MOVED {slot} {node_address}")]
@@ -105,12 +117,16 @@ impl SynapError {
             }
             Self::QueueFull(_) => StatusCode::INSUFFICIENT_STORAGE,
             Self::IoError(_) => StatusCode::INTERNAL_SERVER_ERROR,
-            Self::NotFound => StatusCode::NOT_FOUND,
             Self::IndexOutOfRange => StatusCode::BAD_REQUEST,
             Self::KeyExpired => StatusCode::GONE,
             Self::Timeout => StatusCode::REQUEST_TIMEOUT,
             Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
+            Self::QuotaExceeded(_) => StatusCode::TOO_MANY_REQUESTS,
+            Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::NotFound => StatusCode::NOT_FOUND,
+            Self::ResourceNotFound(_) => StatusCode::NOT_FOUND,
+            Self::InternalServerError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::ClusterMoved { .. } | Self::ClusterAsk { .. } => StatusCode::MOVED_PERMANENTLY,
             Self::ClusterSlotNotAssigned { .. } => StatusCode::SERVICE_UNAVAILABLE,
         }

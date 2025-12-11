@@ -10,7 +10,7 @@
 #
 # Examples:
 #   ./scripts/docker-build.sh           # Build with 'latest' tag
-#   ./scripts/docker-build.sh 0.3.0     # Build with specific version
+#   ./scripts/docker-build.sh 0.9.0     # Build with specific version
 #
 # ============================================================================
 

@@ -426,9 +426,14 @@ pub fn create_router(
         .route(
             "/cluster/migration/{slot}",
             get(handlers::cluster_migration_status),
-        )
-        // Add state
-        .with_state(state);
+        );
+
+    // HiveHub Integration endpoints (conditionally compiled)
+    #[cfg(feature = "hub-integration")]
+    let api_router = api_router.route("/hub/quota", get(handlers::hub_quota_stats));
+
+    // Add state to API router
+    let api_router = api_router.with_state(state);
 
     // Merge all routers: Auth + MCP + UMICP + API
     let mut router = mcp_router
