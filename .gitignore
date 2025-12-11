@@ -46,3 +46,7 @@ SHA256SUMS
 /dist/
 /build/
 *.AppImage
+
+# Claude local settings
+.claude/settings.local.json
+**/settings.local.json
