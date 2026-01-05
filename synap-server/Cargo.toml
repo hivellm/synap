@@ -68,7 +68,7 @@ bench = []
 
 [dev-dependencies]
 criterion = { version = "0.7", features = ["async_tokio"] }
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
 tokio-test = "0.4"
 tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
 
