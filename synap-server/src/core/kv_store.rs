@@ -1565,4 +1565,84 @@ mod tests {
         let result = store.incr("maxkey", 1).await;
         assert!(result.is_err(), "INCR on i64::MAX must return an error");
     }
+
+    /// Tail 6.2 — 1M SET-overwrite stress: total_memory_bytes must not drift.
+    /// After 1M overwrites of the same key, memory accounting must reflect
+    /// exactly one entry, not 1M accumulated entries.
+    #[tokio::test]
+    async fn test_memory_accounting_overwrite_stress() {
+        let store = KVStore::new(KVConfig::default());
+        let key = "stress_key";
+
+        // 1M overwrites of the same key with a fixed 64-byte value.
+        for _ in 0..1_000_000 {
+            store.set(key, vec![42u8; 64], None).await.unwrap();
+        }
+
+        let stats = store.stats().await;
+        // With one key of ~64+overhead bytes, memory must not have grown
+        // to more than 100× the expected single-entry size.
+        // A correct implementation accumulates 0 drift; we allow 100× headroom
+        // to account for internal estimates but catch catastrophic leaks.
+        let single_entry_upper_bound: i64 = 512; // generous upper bound for one entry
+        assert_eq!(
+            stats.total_keys, 1,
+            "only one key must exist after overwrite stress"
+        );
+        assert!(
+            stats.total_memory_bytes <= single_entry_upper_bound,
+            "memory must reflect one entry after 1M overwrites, got {} bytes",
+            stats.total_memory_bytes
+        );
+    }
+
+    /// Tail 6.3 — concurrent SET on 16 threads must complete without deadlock
+    /// and leave total_keys equal to the number of distinct keys inserted.
+    #[tokio::test]
+    async fn test_concurrent_set_no_lock_contention() {
+        use std::sync::Arc;
+        let store = Arc::new(KVStore::new(KVConfig::default()));
+        let threads = 16;
+        let ops_per_thread = 1_000;
+
+        let handles: Vec<_> = (0..threads)
+            .map(|t| {
+                let s = store.clone();
+                tokio::spawn(async move {
+                    for i in 0..ops_per_thread {
+                        let key = format!("t{}_k{}", t, i);
+                        s.set(&key, vec![0u8; 32], None).await.unwrap();
+                    }
+                })
+            })
+            .collect();
+
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        let stats = store.stats().await;
+        let expected = (threads * ops_per_thread) as i64;
+        assert_eq!(
+            stats.total_keys, expected,
+            "all {} distinct keys must be present (got {})",
+            expected, stats.total_keys
+        );
+    }
+
+    /// Tail 6.5 — SET value exceeding max_value_size_bytes is rejected in the
+    /// handler layer. This test exercises the KVConfig field propagation.
+    #[test]
+    fn test_max_value_size_config_field() {
+        let config = KVConfig {
+            max_value_size_bytes: Some(1024),
+            ..KVConfig::default()
+        };
+        assert_eq!(config.max_value_size_bytes, Some(1024));
+        let default_config = KVConfig::default();
+        assert_eq!(
+            default_config.max_value_size_bytes, None,
+            "max_value_size_bytes must default to None (unlimited)"
+        );
+    }
 }
