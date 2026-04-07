@@ -381,8 +381,8 @@ pub async fn kv_stats(
     let stats = state.kv_store.stats().await;
 
     Ok(Json(StatsResponse {
-        total_keys: stats.total_keys,
-        total_memory_bytes: stats.total_memory_bytes,
+        total_keys: stats.total_keys.max(0) as usize,
+        total_memory_bytes: stats.total_memory_bytes.max(0) as usize,
         operations: OperationStats {
             gets: stats.gets,
             sets: stats.sets,

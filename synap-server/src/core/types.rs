@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Stored value in the KV store with compact metadata
@@ -153,13 +154,13 @@ impl Default for KVConfig {
     }
 }
 
-/// Statistics for KV store
+/// Statistics for KV store (snapshot — returned by `KVStore::stats()`)
 #[derive(Debug, Default, Clone, Serialize)]
 pub struct KVStats {
     /// Total number of keys
-    pub total_keys: usize,
+    pub total_keys: i64,
     /// Estimated memory usage in bytes
-    pub total_memory_bytes: usize,
+    pub total_memory_bytes: i64,
     /// Number of GET operations
     pub gets: u64,
     /// Number of SET operations
@@ -180,6 +181,40 @@ impl KVStats {
             0.0
         } else {
             self.hits as f64 / total as f64
+        }
+    }
+}
+
+/// Lock-free atomic stats for KV store.
+///
+/// Replaces `Arc<RwLock<KVStats>>` — every SET/GET/DEL now updates counters
+/// with `fetch_add(Relaxed)` without acquiring any global lock.
+///
+/// `total_memory_bytes` and `total_keys` are `AtomicI64` (signed) so that
+/// subtraction on overwrite/delete never wraps into a huge positive value;
+/// they should never go negative in correct code, but signed saturating reads
+/// make bugs visible instead of hiding them.
+#[derive(Debug, Default)]
+pub struct AtomicKVStats {
+    pub total_keys: AtomicI64,
+    pub total_memory_bytes: AtomicI64,
+    pub gets: AtomicU64,
+    pub sets: AtomicU64,
+    pub dels: AtomicU64,
+    pub hits: AtomicU64,
+    pub misses: AtomicU64,
+}
+
+impl AtomicKVStats {
+    pub fn snapshot(&self) -> KVStats {
+        KVStats {
+            total_keys: self.total_keys.load(Ordering::Relaxed),
+            total_memory_bytes: self.total_memory_bytes.load(Ordering::Relaxed),
+            gets: self.gets.load(Ordering::Relaxed),
+            sets: self.sets.load(Ordering::Relaxed),
+            dels: self.dels.load(Ordering::Relaxed),
+            hits: self.hits.load(Ordering::Relaxed),
+            misses: self.misses.load(Ordering::Relaxed),
         }
     }
 }

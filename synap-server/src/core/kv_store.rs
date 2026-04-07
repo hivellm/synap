@@ -1,10 +1,11 @@
 use super::error::{Result, SynapError};
-use super::types::{KVConfig, KVStats, StoredValue};
+use super::types::{AtomicKVStats, KVConfig, KVStats, StoredValue};
 use parking_lot::RwLock;
 use radix_trie::{Trie, TrieCommon};
 use std::collections::{HashMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info, warn};
 
@@ -144,7 +145,7 @@ impl KVShard {
 #[derive(Clone)]
 pub struct KVStore {
     shards: Arc<[Arc<KVShard>; SHARD_COUNT]>,
-    stats: Arc<RwLock<KVStats>>,
+    stats: Arc<AtomicKVStats>,
     config: KVConfig,
     /// Optional L1/L2 cache layer
     cache: Option<Arc<crate::core::CacheLayer>>,
@@ -178,7 +179,7 @@ impl KVStore {
 
         Self {
             shards: Arc::new(shards),
-            stats: Arc::new(RwLock::new(KVStats::default())),
+            stats: Arc::new(AtomicKVStats::default()),
             config,
             cache,
             cluster_topology: None,
@@ -209,7 +210,7 @@ impl KVStore {
 
         Self {
             shards: Arc::new(shards),
-            stats: Arc::new(RwLock::new(KVStats::default())),
+            stats: Arc::new(AtomicKVStats::default()),
             config,
             cache,
             cluster_topology: Some(topology),
@@ -309,13 +310,10 @@ impl KVStore {
 
         // Check memory limits
         {
-            let stats = self.stats.read();
-            let max_bytes = self.config.max_memory_mb * 1024 * 1024;
-            if stats.total_memory_bytes + entry_size > max_bytes {
-                warn!(
-                    "Memory limit exceeded: {}/{}",
-                    stats.total_memory_bytes, max_bytes
-                );
+            let current_bytes = self.stats.total_memory_bytes.load(Ordering::Relaxed);
+            let max_bytes = (self.config.max_memory_mb * 1024 * 1024) as i64;
+            if current_bytes + entry_size as i64 > max_bytes {
+                warn!("Memory limit exceeded: {}/{}", current_bytes, max_bytes);
                 return Err(SynapError::MemoryLimitExceeded);
             }
         }
@@ -323,14 +321,22 @@ impl KVStore {
         // Insert value in the appropriate shard
         let shard = self.get_shard(key);
         let mut data = shard.data.write();
-        let is_new = data.insert(key.to_string(), stored).is_none();
+        let old = data.insert(key.to_string(), stored);
+        let is_new = old.is_none();
 
-        // Update stats
-        let mut stats = self.stats.write();
-        stats.sets += 1;
+        // Update stats atomically — no global lock
+        self.stats.sets.fetch_add(1, Ordering::Relaxed);
         if is_new {
-            stats.total_keys += 1;
-            stats.total_memory_bytes += entry_size;
+            self.stats.total_keys.fetch_add(1, Ordering::Relaxed);
+            self.stats
+                .total_memory_bytes
+                .fetch_add(entry_size as i64, Ordering::Relaxed);
+        } else if let Some(ref old_val) = old {
+            // Overwrite: subtract old size, add new size
+            let old_size = self.estimate_entry_size(key, old_val);
+            self.stats
+                .total_memory_bytes
+                .fetch_add(entry_size as i64 - old_size as i64, Ordering::Relaxed);
         }
 
         // Update cache
@@ -359,45 +365,53 @@ impl KVStore {
         if let Some(ref cache) = self.cache {
             if let Some(cached_value) = cache.get(key) {
                 debug!("L1 Cache HIT: {}", key);
-                let mut stats = self.stats.write();
-                stats.gets += 1;
-                stats.hits += 1;
+                self.stats.gets.fetch_add(1, Ordering::Relaxed);
+                self.stats.hits.fetch_add(1, Ordering::Relaxed);
                 return Ok(Some(cached_value));
             }
         }
 
         // Cache miss - get from storage
         let shard = self.get_shard(key);
+        // Write lock is still needed here because we may remove an expired key
+        // and call update_access(). The AtomicU32 for last_access (task
+        // phase1_fix-get-write-lock) will downgrade this to a read lock.
         let mut data = shard.data.write();
 
-        let mut stats = self.stats.write();
-        stats.gets += 1;
+        self.stats.gets.fetch_add(1, Ordering::Relaxed);
 
         if let Some(value) = data.get_mut(key) {
             // Check if expired
             if value.is_expired() {
                 debug!("Key expired: {}", key);
-                data.remove(key);
-                stats.misses += 1;
-                stats.total_keys = stats.total_keys.saturating_sub(1);
+                if let Some(expired_val) = data.remove(key) {
+                    let removed_size = self.estimate_entry_size(key, &expired_val);
+                    self.stats.total_keys.fetch_sub(1, Ordering::Relaxed);
+                    self.stats
+                        .total_memory_bytes
+                        .fetch_sub(removed_size as i64, Ordering::Relaxed);
+                }
+                self.stats.misses.fetch_add(1, Ordering::Relaxed);
                 return Ok(None);
             }
 
             // Update access time for LRU
             value.update_access();
-            stats.hits += 1;
+            self.stats.hits.fetch_add(1, Ordering::Relaxed);
 
             let value_data = value.data().to_vec();
+            let ttl = value.ttl_remaining();
+
+            drop(data);
 
             // Populate cache
             if let Some(ref cache) = self.cache {
-                let ttl = value.ttl_remaining();
                 cache.put(key.to_string(), value_data.clone(), ttl);
             }
 
             Ok(Some(value_data))
         } else {
-            stats.misses += 1;
+            self.stats.misses.fetch_add(1, Ordering::Relaxed);
             Ok(None)
         }
     }
@@ -418,10 +432,13 @@ impl KVStore {
         let mut data = shard.data.write();
         let removed = data.remove(key);
 
-        if removed.is_some() {
-            let mut stats = self.stats.write();
-            stats.dels += 1;
-            stats.total_keys = stats.total_keys.saturating_sub(1);
+        if let Some(removed_val) = removed {
+            let removed_size = self.estimate_entry_size(key, &removed_val);
+            self.stats.dels.fetch_add(1, Ordering::Relaxed);
+            self.stats.total_keys.fetch_sub(1, Ordering::Relaxed);
+            self.stats
+                .total_memory_bytes
+                .fetch_sub(removed_size as i64, Ordering::Relaxed);
             Ok(true)
         } else {
             Ok(false)
@@ -439,9 +456,9 @@ impl KVStore {
         }
     }
 
-    /// Get statistics
+    /// Get statistics snapshot
     pub async fn stats(&self) -> KVStats {
-        self.stats.read().clone()
+        self.stats.snapshot()
     }
 
     /// Get remaining TTL for a key
@@ -486,8 +503,7 @@ impl KVStore {
 
         data.insert(key.to_string(), StoredValue::new(new_data, None));
 
-        let mut stats = self.stats.write();
-        stats.sets += 1;
+        self.stats.sets.fetch_add(1, Ordering::Relaxed);
 
         Ok(new_value)
     }
@@ -593,13 +609,18 @@ impl KVStore {
                     }
                 }
 
-                // Remove expired keys
+                // Remove expired keys and account for memory freed
                 if !expired_keys.is_empty() {
                     let mut data = shard.data.write();
                     for key in &expired_keys {
-                        data.remove(key);
+                        if let Some(removed_val) = data.remove(key) {
+                            let removed_size = self.estimate_entry_size(key, &removed_val);
+                            self.stats
+                                .total_memory_bytes
+                                .fetch_sub(removed_size as i64, Ordering::Relaxed);
+                            total_expired += 1;
+                        }
                     }
-                    total_expired += expired_keys.len();
                 }
 
                 // If less than 25% were expired, stop sampling this shard
@@ -614,8 +635,9 @@ impl KVStore {
                 "Adaptive TTL cleanup: {} expired keys removed",
                 total_expired
             );
-            let mut stats = self.stats.write();
-            stats.total_keys = stats.total_keys.saturating_sub(total_expired);
+            self.stats
+                .total_keys
+                .fetch_sub(total_expired as i64, Ordering::Relaxed);
         }
     }
 
@@ -639,7 +661,7 @@ impl KVStore {
 
     /// Get number of keys
     pub async fn dbsize(&self) -> Result<usize> {
-        Ok(self.stats.read().total_keys)
+        Ok(self.stats.total_keys.load(Ordering::Relaxed).max(0) as usize)
     }
 
     /// Flush all keys from database
@@ -653,7 +675,7 @@ impl KVStore {
             ));
         }
 
-        let count = self.stats.read().total_keys;
+        let count = self.stats.total_keys.load(Ordering::Relaxed).max(0) as usize;
 
         // Invalidate cache
         if let Some(ref cache) = self.cache {
@@ -666,9 +688,8 @@ impl KVStore {
             data.clear();
         }
 
-        let mut stats = self.stats.write();
-        stats.total_keys = 0;
-        stats.total_memory_bytes = 0;
+        self.stats.total_keys.store(0, Ordering::Relaxed);
+        self.stats.total_memory_bytes.store(0, Ordering::Relaxed);
 
         Ok(count)
     }
@@ -768,8 +789,7 @@ impl KVStore {
             value.len()
         };
 
-        let mut stats = self.stats.write();
-        stats.sets += 1;
+        self.stats.sets.fetch_add(1, Ordering::Relaxed);
 
         // Invalidate cache
         if let Some(ref cache) = self.cache {
@@ -813,15 +833,13 @@ impl KVStore {
                 return Ok(Vec::new());
             }
 
-            let mut stats = self.stats.write();
-            stats.gets += 1;
-            stats.hits += 1;
+            self.stats.gets.fetch_add(1, Ordering::Relaxed);
+            self.stats.hits.fetch_add(1, Ordering::Relaxed);
 
             Ok(bytes[start_idx..end_idx.min(bytes.len())].to_vec())
         } else {
-            let mut stats = self.stats.write();
-            stats.gets += 1;
-            stats.misses += 1;
+            self.stats.gets.fetch_add(1, Ordering::Relaxed);
+            self.stats.misses.fetch_add(1, Ordering::Relaxed);
             Ok(Vec::new())
         }
     }
@@ -870,8 +888,7 @@ impl KVStore {
             new_data.len()
         };
 
-        let mut stats = self.stats.write();
-        stats.sets += 1;
+        self.stats.sets.fetch_add(1, Ordering::Relaxed);
 
         // Invalidate cache
         if let Some(ref cache) = self.cache {
@@ -890,21 +907,18 @@ impl KVStore {
 
         if let Some(value) = data.get(key) {
             if value.is_expired() {
-                let mut stats = self.stats.write();
-                stats.gets += 1;
-                stats.misses += 1;
+                self.stats.gets.fetch_add(1, Ordering::Relaxed);
+                self.stats.misses.fetch_add(1, Ordering::Relaxed);
                 return Ok(0);
             }
 
-            let mut stats = self.stats.write();
-            stats.gets += 1;
-            stats.hits += 1;
+            self.stats.gets.fetch_add(1, Ordering::Relaxed);
+            self.stats.hits.fetch_add(1, Ordering::Relaxed);
 
             Ok(value.data().len())
         } else {
-            let mut stats = self.stats.write();
-            stats.gets += 1;
-            stats.misses += 1;
+            self.stats.gets.fetch_add(1, Ordering::Relaxed);
+            self.stats.misses.fetch_add(1, Ordering::Relaxed);
             Ok(0)
         }
     }
@@ -929,14 +943,13 @@ impl KVStore {
         let new_value = StoredValue::new(value.clone(), None);
         data.insert(key.to_string(), new_value);
 
-        let mut stats = self.stats.write();
-        stats.gets += 1;
-        stats.sets += 1;
+        self.stats.gets.fetch_add(1, Ordering::Relaxed);
+        self.stats.sets.fetch_add(1, Ordering::Relaxed);
         if old_value.is_some() {
-            stats.hits += 1;
+            self.stats.hits.fetch_add(1, Ordering::Relaxed);
         } else {
-            stats.misses += 1;
-            stats.total_keys += 1;
+            self.stats.misses.fetch_add(1, Ordering::Relaxed);
+            self.stats.total_keys.fetch_add(1, Ordering::Relaxed);
         }
 
         // Invalidate cache
@@ -981,8 +994,9 @@ impl KVStore {
             }
         }
 
-        let mut stats = self.stats.write();
-        stats.sets += pairs.len() as u64;
+        self.stats
+            .sets
+            .fetch_add(pairs.len() as u64, Ordering::Relaxed);
 
         Ok(true)
     }
