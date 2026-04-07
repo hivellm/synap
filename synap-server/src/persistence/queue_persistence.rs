@@ -96,35 +96,32 @@ impl QueuePersistence {
         // Second pass: replay operations
         for entry in entries {
             match entry.operation {
-                Operation::QueuePublish { queue, message } => {
-                    // Only recover if not ACKed
-                    if !acked_messages.contains_key(&message.id) {
-                        // Recreate queue if doesn't exist
-                        let _ = queue_manager.create_queue(&queue, None).await;
+                Operation::QueuePublish { queue, message }
+                    if !acked_messages.contains_key(&message.id) =>
+                {
+                    // Recreate queue if doesn't exist
+                    let _ = queue_manager.create_queue(&queue, None).await;
 
-                        // Republish message
-                        queue_manager
-                            .publish(
-                                &queue,
-                                message.payload.to_vec(),
-                                Some(message.priority),
-                                Some(message.max_retries),
-                            )
-                            .await
-                            .ok();
+                    // Republish message
+                    queue_manager
+                        .publish(
+                            &queue,
+                            message.payload.to_vec(),
+                            Some(message.priority),
+                            Some(message.max_retries),
+                        )
+                        .await
+                        .ok();
 
-                        recovered_count += 1;
-                    }
+                    recovered_count += 1;
                 }
                 Operation::QueueNack {
                     queue,
                     message_id,
                     requeue,
-                } => {
-                    if requeue {
-                        debug!("NACK requeue for message {} in queue {}", message_id, queue);
-                        // Message will be redelivered via retry logic
-                    }
+                } if requeue => {
+                    debug!("NACK requeue for message {} in queue {}", message_id, queue);
+                    // Message will be redelivered via retry logic
                 }
                 _ => {} // Ignore non-queue operations
             }

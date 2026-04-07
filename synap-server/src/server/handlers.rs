@@ -9786,7 +9786,7 @@ pub async fn sortedset_zadd(
                 ));
             }
             let mut total_added = 0;
-            for (member, score) in members.into_iter().zip(scores.into_iter()) {
+            for (member, score) in members.into_iter().zip(scores) {
                 let member_bytes = serde_json::to_vec(&member).map_err(|e| {
                     SynapError::InvalidValue(format!("Failed to serialize member: {}", e))
                 })?;

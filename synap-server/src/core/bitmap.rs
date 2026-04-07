@@ -186,7 +186,7 @@ impl BitmapValue {
             }
         }
 
-        count.max(0) // Ensure non-negative
+        count
     }
 
     /// BITPOS - Find first bit set to value (0 or 1) starting from offset
