@@ -99,6 +99,7 @@ async fn test_crash_recovery() {
         eviction_policy: crate::core::EvictionPolicy::Lru,
         ttl_cleanup_interval_ms: 100,
         allow_flush_commands: false,
+        max_value_size_bytes: None,
     };
 
     let queue_config = QueueConfig::default();

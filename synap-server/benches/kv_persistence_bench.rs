@@ -51,6 +51,7 @@ fn bench_kv_with_persistence(c: &mut Criterion) {
             eviction_policy: EvictionPolicy::Lru,
             ttl_cleanup_interval_ms: 1000,
             allow_flush_commands: false,
+            max_value_size_bytes: None,
         }));
 
         let persist = Arc::new(PersistenceLayer::new(persist_config.clone()).await.unwrap());

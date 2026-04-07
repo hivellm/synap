@@ -141,6 +141,9 @@ pub struct KVConfig {
     pub ttl_cleanup_interval_ms: u64,
     /// Allow dangerous FLUSH commands (disabled by default like Redis)
     pub allow_flush_commands: bool,
+    /// Maximum allowed value size in bytes. SET requests exceeding this limit
+    /// are rejected before any allocation. None means no limit (default).
+    pub max_value_size_bytes: Option<usize>,
 }
 
 impl Default for KVConfig {
@@ -149,7 +152,8 @@ impl Default for KVConfig {
             max_memory_mb: 4096,
             eviction_policy: EvictionPolicy::Lru,
             ttl_cleanup_interval_ms: 100,
-            allow_flush_commands: false, // Disabled by default for safety
+            allow_flush_commands: false,
+            max_value_size_bytes: None,
         }
     }
 }

@@ -44,6 +44,9 @@ pub struct KVStoreConfig {
     pub ttl_cleanup_interval_ms: u64,
     #[serde(default)]
     pub allow_flush_commands: bool,
+    /// Maximum allowed value size in bytes. None means no limit.
+    #[serde(default)]
+    pub max_value_size_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,6 +216,7 @@ impl Default for ServerConfig {
                 eviction_policy: EvictionPolicy::Lru,
                 ttl_cleanup_interval_ms: 100,
                 allow_flush_commands: false,
+                max_value_size_bytes: None,
             },
             queue: QueueSystemConfig {
                 enabled: true,
@@ -265,6 +269,7 @@ impl ServerConfig {
             eviction_policy: self.kv_store.eviction_policy,
             ttl_cleanup_interval_ms: self.kv_store.ttl_cleanup_interval_ms,
             allow_flush_commands: self.kv_store.allow_flush_commands,
+            max_value_size_bytes: self.kv_store.max_value_size_bytes,
         }
     }
 

@@ -461,6 +461,11 @@ impl KVStore {
         self.stats.snapshot()
     }
 
+    /// Get the KV store configuration
+    pub fn config(&self) -> &KVConfig {
+        &self.config
+    }
+
     /// Get remaining TTL for a key
     pub async fn ttl(&self, key: &str) -> Result<Option<u64>> {
         let shard = self.get_shard(key);
@@ -477,31 +482,45 @@ impl KVStore {
     }
 
     /// Atomic increment
+    ///
+    /// Preserves the TTL of the existing entry (S-16 fix). Uses `checked_add`
+    /// and returns an error on overflow rather than wrapping.
     pub async fn incr(&self, key: &str, amount: i64) -> Result<i64> {
         debug!("INCR key={}, amount={}", key, amount);
 
         let shard = self.get_shard(key);
         let mut data = shard.data.write();
 
-        let current_value = if let Some(value) = data.get(key) {
+        // Read current value AND preserve its TTL (expires_at)
+        let (current_value, existing_ttl_secs) = if let Some(value) = data.get(key) {
             if value.is_expired() {
-                0
+                (0i64, None)
             } else {
-                String::from_utf8(value.data().to_vec())
+                let int_val = String::from_utf8(value.data().to_vec())
                     .ok()
                     .and_then(|s| s.parse::<i64>().ok())
                     .ok_or_else(|| {
                         SynapError::InvalidValue("Value is not a valid integer".to_string())
-                    })?
+                    })?;
+                // Capture remaining TTL to restore it after the write
+                let ttl = value.remaining_ttl_secs();
+                (int_val, ttl)
             }
         } else {
-            0
+            (0i64, None)
         };
 
-        let new_value = current_value + amount;
+        let new_value = current_value
+            .checked_add(amount)
+            .ok_or_else(|| SynapError::InvalidValue("Integer overflow on INCR/DECR".to_string()))?;
         let new_data = new_value.to_string().into_bytes();
 
-        data.insert(key.to_string(), StoredValue::new(new_data, None));
+        // Preserve TTL: if the key had a TTL, write the new value as Expiring
+        // with the same remaining time rather than as Persistent.
+        data.insert(
+            key.to_string(),
+            StoredValue::new(new_data, existing_ttl_secs),
+        );
 
         self.stats.sets.fetch_add(1, Ordering::Relaxed);
 
@@ -1458,5 +1477,92 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(2)).await;
         let length = store.strlen("key3").await.unwrap();
         assert_eq!(length, 0);
+    }
+
+    // --- Phase 1 correctness tests (phase1_fix-kv-set-correctness) ---
+
+    #[tokio::test]
+    async fn test_memory_accounting_on_overwrite() {
+        let store = KVStore::new(KVConfig::default());
+
+        // Insert initial value (100 bytes)
+        let v1 = vec![0u8; 100];
+        store.set("key", v1, None).await.unwrap();
+        let after_insert = store.stats().await.total_memory_bytes;
+
+        // Overwrite with larger value (200 bytes)
+        let v2 = vec![0u8; 200];
+        store.set("key", v2, None).await.unwrap();
+        let after_overwrite = store.stats().await.total_memory_bytes;
+
+        // Memory should have grown by ~100 bytes, not 200+
+        // (exact delta depends on estimate_entry_size overhead)
+        assert!(
+            after_overwrite > after_insert,
+            "memory should increase for larger overwrite"
+        );
+        assert!(
+            after_overwrite < after_insert + 200,
+            "memory must not count both old and new value (got insert={}, overwrite={})",
+            after_insert,
+            after_overwrite
+        );
+    }
+
+    #[tokio::test]
+    async fn test_memory_accounting_on_delete() {
+        let store = KVStore::new(KVConfig::default());
+
+        store.set("key", vec![0u8; 100], None).await.unwrap();
+        let before_delete = store.stats().await.total_memory_bytes;
+        assert!(before_delete > 0);
+
+        store.delete("key").await.unwrap();
+        let after_delete = store.stats().await.total_memory_bytes;
+
+        assert!(
+            after_delete < before_delete,
+            "memory must decrease after delete (before={}, after={})",
+            before_delete,
+            after_delete
+        );
+    }
+
+    #[tokio::test]
+    async fn test_incr_preserves_ttl() {
+        let store = KVStore::new(KVConfig::default());
+
+        // Set a key with a 60-second TTL and value "42"
+        store
+            .set("counter", b"42".to_vec(), Some(60))
+            .await
+            .unwrap();
+
+        // INCR should produce 43 and keep the TTL
+        let new_val = store.incr("counter", 1).await.unwrap();
+        assert_eq!(new_val, 43);
+
+        // TTL must still be present and reasonable (≥50s, since the test runs fast)
+        let ttl = store.ttl("counter").await.unwrap();
+        assert!(ttl.is_some(), "TTL must be preserved after INCR (got None)");
+        let remaining = ttl.unwrap();
+        assert!(
+            remaining >= 50,
+            "TTL must remain close to original after INCR (got {}s)",
+            remaining
+        );
+    }
+
+    #[tokio::test]
+    async fn test_incr_overflow_returns_error() {
+        let store = KVStore::new(KVConfig::default());
+
+        store
+            .set("maxkey", i64::MAX.to_string().into_bytes(), None)
+            .await
+            .unwrap();
+
+        let result = store.incr("maxkey", 1).await;
+        assert!(result.is_err(), "INCR on i64::MAX must return an error");
     }
 }

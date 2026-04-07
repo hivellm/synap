@@ -246,6 +246,17 @@ pub async fn kv_set(
     let value_bytes = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
+    // Reject oversized values before any allocation in the store
+    if let Some(max_bytes) = state.kv_store.config().max_value_size_bytes {
+        if value_bytes.len() > max_bytes {
+            return Err(SynapError::InvalidRequest(format!(
+                "Value size {} bytes exceeds max_value_size_bytes {}",
+                value_bytes.len(),
+                max_bytes
+            )));
+        }
+    }
+
     // Set in KV store
     state
         .kv_store
