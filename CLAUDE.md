@@ -1,138 +1,71 @@
+<!-- RULEBOOK:START v5.3.0 — DO NOT EDIT BY HAND. Regenerated on `rulebook update`.
+     Put project-specific content in AGENTS.override.md or CLAUDE.local.md.
+     Anything outside the RULEBOOK:START/END sentinels is preserved across updates. -->
+
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This project is managed by [@hivehub/rulebook](https://github.com/hivellm/rulebook).
+The authoritative rules come from the imports below. Claude Code loads all of them
+automatically at session start (see [Anthropic memory docs](https://code.claude.com/docs/en/memory#claude-md-imports)).
 
-## Build Commands
+## Project identity & live state
+<!-- @.rulebook/STATE.md (skipped — target file not present) -->
 
-```bash
-# Build (requires Rust nightly 1.85+)
-cargo build --release
+## Core standards (team-shared, versioned)
+@AGENTS.md
 
-# Run tests (528+ tests)
-cargo test
+## Project-specific overrides (user-owned, survives `rulebook update`)
+@AGENTS.override.md
 
-# Run single test
-cargo test test_name
-cargo test --package synap-server test_name
+## Session scratchpad (human notes)
+<!-- @.rulebook/PLANS.md (skipped — target file not present) -->
 
-# Lint
-cargo fmt
-cargo clippy -- -D warnings
+## Critical rules (highest precedence — apply on every turn)
 
-# Run server
-./target/release/synap-server --config config.yml
+1. **Read `AGENTS.md` and `AGENTS.override.md`** before making changes. These contain project-specific conventions that override generic guidance.
+2. **Never revert or discard uncommitted work** — fix forward. Treat the working tree as sacred; investigate before destructive operations.
+3. **Edit files sequentially**, not in parallel. When a task touches 3+ files, decompose into 1–2 file sub-tasks.
+4. **Run `check`/type-check before `test`** — diagnostic-first. Cheap diagnostics catch issues that expensive test suites miss or take longer to surface.
+5. **If a fix fails twice, escalate** — stop, research, or open a team. Do not retry the same approach a third time.
+6. **Prefer MCP tools** (`mcp__rulebook__*` and project-specific MCP servers) over shell commands when the equivalent tool exists.
+7. **Capture learnings**: at the end of significant work, save patterns and anti-patterns to `.rulebook/knowledge/` and insights to `.rulebook/learnings/`.
+8. **Never archive a task** without docs updated, tests written, and tests passing — the task tail enforces this structurally.
 
-# Run benchmarks
-cargo bench --bench kv_bench
-```
+## Persistent memory
 
-## Docker
+This project uses the Rulebook MCP server for persistent memory across sessions.
 
-```bash
-# Build image
-docker build -t synap:latest .
+- **Start of session**: `rulebook_memory_search` for relevant prior context.
+- **During work**: `rulebook_memory_save` for decisions, bugs, discoveries, user preferences.
+- **End of session**: `rulebook_session_end` to write a session summary.
 
-# Run container
-docker run -d -p 15500:15500 -p 15501:15501 -v synap-data:/data synap:latest
+Memory is auto-captured for tool interactions (task create/update/archive, skill enable/disable). Manual saves are required for everything else worth remembering.
 
-# Push to Docker Hub
-docker push hivehub/synap:latest
-```
+## Knowledge base
 
-## Architecture Overview
+Before implementing anything non-trivial:
 
-Synap is a high-performance in-memory key-value store and message broker built in Rust Edition 2024.
+- `rulebook_knowledge_list` — check existing patterns and anti-patterns.
+- `rulebook_learn_list` — review past learnings.
+- `rulebook_decision_list` — review architectural decisions.
 
-### Workspace Structure
+After implementing, capture at least one entry per task:
 
-```
-synap/
-├── synap-server/     # Main server binary and library
-├── synap-cli/        # Command-line client
-├── synap-migrate/    # Migration utilities
-├── sdks/             # Client SDKs (rust, typescript, python, php, csharp)
-└── gui/              # Electron-based dashboard
-```
+- `rulebook_knowledge_add` for reusable patterns or anti-patterns to avoid.
+- `rulebook_learn_capture` for implementation insights that don't belong in code comments.
+- `rulebook_decision_create` for significant architectural choices.
 
-### synap-server Module Layers
+## Task workflow
 
-```
-server/          HTTP/WebSocket handlers, MCP/UMICP protocol servers
-    └── router.rs      Main Axum router with all endpoints
-    └── handlers.rs    Request handlers (11K+ lines)
-    └── mcp_*.rs       Model Context Protocol implementation
+**MANDATORY: ALWAYS use the Rulebook MCP tools for task management.** Never create task directories or files manually — use `rulebook_task_create`, `rulebook_task_update`, `rulebook_task_archive`, `rulebook_task_list`, `rulebook_task_show`, `rulebook_task_validate`. These tools enforce naming conventions, mandatory tail items, phase structure, and metadata that manual file creation skips.
 
-core/            Data structures and business logic
-    └── kv_store.rs    Radix-trie key-value store
-    └── queue.rs       ACK-based message queues
-    └── stream.rs      Kafka-style event streams
-    └── pubsub.rs      Topic-based pub/sub
-    └── hash.rs, list.rs, set.rs, sorted_set.rs  Redis-compatible structures
-    └── bitmap.rs, hyperloglog.rs, geospatial.rs
+1. `rulebook_task_list` to see pending work.
+2. `rulebook_task_create` to create new tasks — **never `mkdir` + `Write` manually**.
+3. Pick the **first unchecked item from the lowest-numbered phase** — never reorder.
+4. Read the task's `proposal.md` and `tasks.md` before touching code.
+5. Implement step by step. Run lint + type-check after each significant change.
+6. `rulebook_task_update` to change task status as you progress.
+7. Mark items `[x]` in `tasks.md` as you finish them.
+8. The mandatory tail (docs + tests + verify) is **not optional** — `rulebook_task_archive` will refuse to close the task otherwise.
 
-persistence/     WAL + Snapshots for durability
-    └── wal_async.rs   Async WAL with group commit
-    └── snapshot.rs    Point-in-time snapshots
-
-replication/     Master-slave replication
-    └── master.rs      Accepts replica connections
-    └── replica.rs     Connects to master
-
-auth/            Authentication and authorization
-    └── user.rs        User management (SHA512 passwords)
-    └── api_key.rs     API key management
-    └── acl.rs         Access control lists
-
-hub/             HiveHub.Cloud integration (multi-tenant SaaS)
-    └── client.rs      Hub API client
-    └── multi_tenant.rs  Resource scoping
-    └── quota.rs       Quota enforcement
-```
-
-### Key Patterns
-
-**State Management**: All shared state uses `Arc<RwLock<T>>` or `Arc<parking_lot::RwLock<T>>` for concurrent access.
-
-**Error Handling**: Use `Result<T, SynapError>` consistently. The `SynapError` type in `core/error.rs` covers all error cases.
-
-**Handler Pattern**:
-```rust
-pub async fn handler(
-    State(state): State<AppState>,
-    Json(req): Json<Request>,
-) -> Result<Json<Response>, SynapError> {
-    let result = state.kv_store.operation(&req.key).await?;
-    Ok(Json(Response { success: true, data: result }))
-}
-```
-
-**Hub Integration**: When `hub.enabled=true`, all resources are scoped per-user via `MultiTenant::scope_*()` functions. Hub authentication uses access keys validated against HiveHub.Cloud API.
-
-### Configuration
-
-Server configuration is in `config.yml`. Key sections:
-- `server`: Host, port settings
-- `auth`: User/API key authentication
-- `persistence`: WAL and snapshot settings
-- `replication`: Master-slave configuration
-- `hub`: HiveHub.Cloud integration (multi-tenant mode)
-
-Environment variables override config: `SYNAP_AUTH_ENABLED=true`
-
-### Testing
-
-- Unit tests: `#[cfg(test)]` modules in same file
-- Integration tests: `synap-server/tests/`
-- S2S tests (require running server): `cargo test --features s2s-tests`
-- Benchmarks: `synap-server/benches/`
-
-### Protocols
-
-- **REST API**: Standard HTTP endpoints at port 15500
-- **MCP**: Model Context Protocol at `/mcp` for AI assistants
-- **UMICP**: Universal Matrix Inter-Communication Protocol
-- **WebSocket**: Real-time subscriptions
-
-### SDKs
-
-Client libraries in `sdks/` for TypeScript, Python, Rust, PHP, and C#. Each has its own README with usage examples.
+<!-- RULEBOOK:END -->
