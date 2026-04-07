@@ -257,20 +257,49 @@ pub async fn kv_set(
         }
     }
 
+    // WAL write-ahead: when durability mode is Sync (fsync_mode=Always),
+    // log to WAL BEFORE writing to memory. If WAL fails the request fails
+    // and no data is written — true write-ahead semantics.
+    // Otherwise WAL is written after the memory write (Async/Periodic mode).
+    let is_sync = state
+        .persistence
+        .as_ref()
+        .map(|p| p.is_sync_durability())
+        .unwrap_or(false);
+
+    if is_sync {
+        if let Some(ref persistence) = state.persistence {
+            persistence
+                .log_kv_set(scoped_key.clone(), value_bytes.clone(), req.ttl)
+                .await
+                .map_err(|e| {
+                    error!("WAL write failed (sync mode), aborting SET: {}", e);
+                    SynapError::InternalError(format!("WAL write failed: {e}"))
+                })?;
+        }
+    }
+
     // Set in KV store
     state
         .kv_store
         .set(&scoped_key, value_bytes.clone(), req.ttl)
         .await?;
 
-    // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence
-            .log_kv_set(scoped_key, value_bytes, req.ttl)
-            .await
-        {
-            error!("Failed to log KV SET to WAL: {}", e);
-            // Don't fail the request, data is already in memory
+    // Async WAL: log after memory write (default, Periodic/Never modes)
+    if !is_sync {
+        if let Some(ref persistence) = state.persistence {
+            if let Err(e) = persistence
+                .log_kv_set(scoped_key, value_bytes, req.ttl)
+                .await
+            {
+                // Async mode: memory write succeeded; WAL failure is logged
+                // but does not fail the request. Durability is not guaranteed
+                // in this mode — clients must be aware.
+                error!(
+                    "Failed to log KV SET to WAL (async mode, data in memory): {}",
+                    e
+                );
+            }
         }
     }
 
