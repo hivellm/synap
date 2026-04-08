@@ -2,6 +2,61 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Expiry specification for SET operations.
+///
+/// Converted to an absolute millisecond timestamp before storage, enabling
+/// sub-second precision (Redis PX/PXAT compatibility).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "type", content = "value")]
+pub enum Expiry {
+    /// Expire after N seconds (EX)
+    Seconds(u64),
+    /// Expire after N milliseconds (PX)
+    Milliseconds(u64),
+    /// Expire at absolute Unix timestamp in seconds (EXAT)
+    UnixSeconds(u64),
+    /// Expire at absolute Unix timestamp in milliseconds (PXAT)
+    UnixMilliseconds(u64),
+}
+
+impl Expiry {
+    /// Convert to an absolute Unix timestamp in milliseconds.
+    pub fn to_unix_ms(self) -> u64 {
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        match self {
+            Expiry::Seconds(s) => now_ms.saturating_add(s.saturating_mul(1_000)),
+            Expiry::Milliseconds(ms) => now_ms.saturating_add(ms),
+            Expiry::UnixSeconds(s) => s.saturating_mul(1_000),
+            Expiry::UnixMilliseconds(ms) => ms,
+        }
+    }
+}
+
+/// Options for SET operations (NX / XX / GET / KEEPTTL).
+#[derive(Debug, Clone, Default)]
+pub struct SetOptions {
+    /// Only set if key does NOT exist (NX)
+    pub if_absent: bool,
+    /// Only set if key DOES exist (XX)
+    pub if_present: bool,
+    /// Preserve the existing TTL of the key (KEEPTTL)
+    pub keep_ttl: bool,
+    /// Return the old value before overwriting (GET)
+    pub return_old: bool,
+}
+
+/// Result returned by `KVStore::set_with_opts()`.
+#[derive(Debug)]
+pub struct SetResult {
+    /// Whether the SET actually wrote a value (false = NX/XX condition not met)
+    pub written: bool,
+    /// Previous value, populated only when `SetOptions::return_old = true`
+    pub old_value: Option<Vec<u8>>,
+}
+
 /// Stored value in the KV store with compact metadata
 /// Memory-optimized: eliminates 48 bytes overhead vs old struct
 #[derive(Debug, Clone)]
@@ -9,63 +64,87 @@ pub enum StoredValue {
     /// Persistent value without TTL (24 bytes overhead only)
     Persistent(Vec<u8>),
 
-    /// Expiring value with TTL and LRU tracking (32 bytes overhead)
+    /// Expiring value with TTL and LRU tracking.
+    ///
+    /// `expires_at` is a Unix timestamp in **milliseconds** (u64) to support
+    /// millisecond-precision expiry (Redis PX / PXAT compatibility).
+    /// `last_access` remains a seconds-granularity u32 for LRU (sufficient).
     Expiring {
         data: Vec<u8>,
-        expires_at: u32,  // Unix timestamp (valid until year 2106)
-        last_access: u32, // Unix timestamp for LRU
+        expires_at: u64,  // Unix timestamp in milliseconds
+        last_access: u32, // Unix timestamp in seconds for LRU
     },
 }
 
 impl StoredValue {
-    /// Create a new stored value
+    /// Create a new stored value using a seconds-based TTL (backward-compatible).
     pub fn new(data: Vec<u8>, ttl_secs: Option<u64>) -> Self {
         match ttl_secs {
             None => Self::Persistent(data),
-            Some(secs) => {
-                let now = Self::current_timestamp();
-                Self::Expiring {
-                    data,
-                    expires_at: now.saturating_add(secs as u32),
-                    last_access: now,
-                }
-            }
+            Some(secs) => Self::with_expiry(data, Expiry::Seconds(secs)),
         }
     }
 
-    /// Get current Unix timestamp as u32
+    /// Create a new stored value using the rich `Expiry` enum.
+    pub fn with_expiry(data: Vec<u8>, expiry: Expiry) -> Self {
+        Self::Expiring {
+            data,
+            expires_at: expiry.to_unix_ms(),
+            last_access: Self::current_timestamp_secs(),
+        }
+    }
+
+    /// Create a new stored value that expires at a specific absolute millisecond timestamp.
+    pub fn with_expires_at_ms(data: Vec<u8>, expires_at_ms: u64) -> Self {
+        Self::Expiring {
+            data,
+            expires_at: expires_at_ms,
+            last_access: Self::current_timestamp_secs(),
+        }
+    }
+
+    /// Get current Unix timestamp in seconds (u32 — sufficient for LRU).
     #[inline]
-    fn current_timestamp() -> u32 {
+    fn current_timestamp_secs() -> u32 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_secs() as u32)
             .unwrap_or(0)
     }
 
-    /// Check if the value has expired
+    /// Get current Unix timestamp in milliseconds.
+    #[inline]
+    fn current_timestamp_ms() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+
+    /// Check if the value has expired.
     #[inline]
     pub fn is_expired(&self) -> bool {
         match self {
             Self::Persistent(_) => false,
-            Self::Expiring { expires_at, .. } => Self::current_timestamp() >= *expires_at,
+            Self::Expiring { expires_at, .. } => Self::current_timestamp_ms() >= *expires_at,
         }
     }
 
-    /// Update access time for LRU
+    /// Update access time for LRU.
     pub fn update_access(&mut self) {
         if let Self::Expiring { last_access, .. } = self {
-            *last_access = Self::current_timestamp();
+            *last_access = Self::current_timestamp_secs();
         }
     }
 
-    /// Get remaining TTL in seconds (for cache)
+    /// Get remaining TTL in seconds, rounded down (for cache layer).
     pub fn ttl_remaining(&self) -> Option<u64> {
         match self {
             Self::Persistent(_) => None,
             Self::Expiring { expires_at, .. } => {
-                let now = Self::current_timestamp();
-                if *expires_at > now {
-                    Some((*expires_at - now) as u64)
+                let now_ms = Self::current_timestamp_ms();
+                if *expires_at > now_ms {
+                    Some((*expires_at - now_ms) / 1_000)
                 } else {
                     Some(0)
                 }
@@ -73,22 +152,45 @@ impl StoredValue {
         }
     }
 
-    /// Get remaining TTL in seconds
+    /// Get remaining TTL in seconds.
     pub fn remaining_ttl_secs(&self) -> Option<u64> {
         match self {
             Self::Persistent(_) => None,
             Self::Expiring { expires_at, .. } => {
-                let now = Self::current_timestamp();
-                if now >= *expires_at {
+                let now_ms = Self::current_timestamp_ms();
+                if now_ms >= *expires_at {
                     Some(0)
                 } else {
-                    Some((*expires_at - now) as u64)
+                    Some((*expires_at - now_ms) / 1_000)
                 }
             }
         }
     }
 
-    /// Get reference to data regardless of variant
+    /// Get remaining TTL in milliseconds (new — for PX/PTTL support).
+    pub fn remaining_ttl_ms(&self) -> Option<u64> {
+        match self {
+            Self::Persistent(_) => None,
+            Self::Expiring { expires_at, .. } => {
+                let now_ms = Self::current_timestamp_ms();
+                if now_ms >= *expires_at {
+                    Some(0)
+                } else {
+                    Some(*expires_at - now_ms)
+                }
+            }
+        }
+    }
+
+    /// Get absolute expiry in milliseconds (for KEEPTTL on overwrite).
+    pub fn expires_at_ms(&self) -> Option<u64> {
+        match self {
+            Self::Persistent(_) => None,
+            Self::Expiring { expires_at, .. } => Some(*expires_at),
+        }
+    }
+
+    /// Get reference to data regardless of variant.
     #[inline]
     pub fn data(&self) -> &[u8] {
         match self {
@@ -97,7 +199,7 @@ impl StoredValue {
         }
     }
 
-    /// Get mutable reference to data regardless of variant
+    /// Get mutable reference to data regardless of variant.
     #[inline]
     pub fn data_mut(&mut self) -> &mut Vec<u8> {
         match self {
@@ -106,7 +208,7 @@ impl StoredValue {
         }
     }
 
-    /// Get last access timestamp (for LRU eviction)
+    /// Get last access timestamp in seconds (for LRU eviction).
     pub fn last_access(&self) -> u32 {
         match self {
             Self::Persistent(_) => 0,

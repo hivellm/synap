@@ -1,4 +1,5 @@
 use crate::auth::{Action, AuthContextExtractor, require_permission};
+use crate::core::types::{Expiry, SetOptions};
 use crate::core::{
     GeospatialStore, HashStore, HyperLogLogStore, KVStore, KeyManager, Message, QueueManager,
     SortedSetStore, SynapError, TransactionManager,
@@ -59,13 +60,35 @@ pub struct AppState {
 pub struct SetRequest {
     pub key: String,
     pub value: serde_json::Value,
+    /// Legacy TTL in seconds. Superseded by `expiry` for new callers.
     pub ttl: Option<u64>,
+    /// Rich expiry specification (EX / PX / EXAT / PXAT). Takes precedence
+    /// over `ttl` when both are present.
+    #[serde(default)]
+    pub expiry: Option<Expiry>,
+    /// Only set if the key does NOT exist (NX). Mutually exclusive with `xx`.
+    #[serde(default)]
+    pub nx: bool,
+    /// Only set if the key DOES exist (XX). Mutually exclusive with `nx`.
+    #[serde(default)]
+    pub xx: bool,
+    /// Retain the existing TTL of the key (KEEPTTL). Ignores `ttl`/`expiry`.
+    #[serde(default)]
+    pub keepttl: bool,
+    /// Return the previous value in the response (GET).
+    #[serde(default)]
+    pub get: bool,
 }
 
 #[derive(Debug, Serialize)]
 pub struct SetResponse {
     pub success: bool,
     pub key: String,
+    /// `false` when an NX/XX condition was not satisfied.
+    pub written: bool,
+    /// Previous value (populated only when `get: true` was requested).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_value: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize)]
@@ -267,10 +290,19 @@ pub async fn kv_set(
         .map(|p| p.is_sync_durability())
         .unwrap_or(false);
 
+    // Resolve expiry: `expiry` field takes precedence over legacy `ttl`
+    let expiry = req.expiry.or_else(|| req.ttl.map(Expiry::Seconds));
+
+    // WAL write-ahead (sync mode): log BEFORE writing to memory
     if is_sync {
         if let Some(ref persistence) = state.persistence {
+            let ttl_secs = expiry.and_then(|e| match e {
+                Expiry::Seconds(s) => Some(s),
+                Expiry::Milliseconds(ms) => Some(ms / 1_000),
+                _ => None,
+            });
             persistence
-                .log_kv_set(scoped_key.clone(), value_bytes.clone(), req.ttl)
+                .log_kv_set(scoped_key.clone(), value_bytes.clone(), ttl_secs)
                 .await
                 .map_err(|e| {
                     error!("WAL write failed (sync mode), aborting SET: {}", e);
@@ -279,22 +311,32 @@ pub async fn kv_set(
         }
     }
 
-    // Set in KV store
-    state
+    let opts = SetOptions {
+        if_absent: req.nx,
+        if_present: req.xx,
+        keep_ttl: req.keepttl,
+        return_old: req.get,
+    };
+
+    // Set in KV store (with full NX/XX/GET/KEEPTTL support)
+    let result = state
         .kv_store
-        .set(&scoped_key, value_bytes.clone(), req.ttl)
+        .set_with_opts(&scoped_key, value_bytes.clone(), expiry, opts)
         .await?;
 
     // Async WAL: log after memory write (default, Periodic/Never modes)
-    if !is_sync {
+    // Only log when the write actually happened (NX/XX condition was met).
+    if result.written && !is_sync {
         if let Some(ref persistence) = state.persistence {
+            let ttl_secs = expiry.and_then(|e| match e {
+                Expiry::Seconds(s) => Some(s),
+                Expiry::Milliseconds(ms) => Some(ms / 1_000),
+                _ => None,
+            });
             if let Err(e) = persistence
-                .log_kv_set(scoped_key, value_bytes, req.ttl)
+                .log_kv_set(scoped_key, value_bytes, ttl_secs)
                 .await
             {
-                // Async mode: memory write succeeded; WAL failure is logged
-                // but does not fail the request. Durability is not guaranteed
-                // in this mode — clients must be aware.
                 error!(
                     "Failed to log KV SET to WAL (async mode, data in memory): {}",
                     e
@@ -303,9 +345,16 @@ pub async fn kv_set(
         }
     }
 
+    // Convert old_value bytes → JSON for the response
+    let old_value_json = result
+        .old_value
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+
     Ok(Json(SetResponse {
         success: true,
         key: req.key,
+        written: result.written,
+        old_value: old_value_json,
     }))
 }
 

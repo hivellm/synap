@@ -47,4 +47,4 @@ pub use sorted_set::{
 };
 pub use stream::{RoomStats, StreamConfig, StreamEvent, StreamManager};
 pub use transaction::{Transaction, TransactionCommand, TransactionManager};
-pub use types::{EvictionPolicy, KVConfig, KVStats, StoredValue};
+pub use types::{EvictionPolicy, Expiry, KVConfig, KVStats, SetOptions, SetResult, StoredValue};

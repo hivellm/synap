@@ -1,5 +1,5 @@
 use super::error::{Result, SynapError};
-use super::types::{AtomicKVStats, KVConfig, KVStats, StoredValue};
+use super::types::{AtomicKVStats, Expiry, KVConfig, KVStats, SetOptions, SetResult, StoredValue};
 use parking_lot::RwLock;
 use radix_trie::{Trie, TrieCommon};
 use std::collections::{HashMap, hash_map::DefaultHasher};
@@ -352,6 +352,139 @@ impl KVStore {
         }
 
         Ok(())
+    }
+
+    /// Set a value with full Redis-compatible options (NX / XX / GET / KEEPTTL / PX / PXAT).
+    ///
+    /// Returns [`SetResult`] indicating whether the write happened and the
+    /// previous value (when `opts.return_old = true`).
+    ///
+    /// All NX/XX checks are performed under the shard write lock — no TOCTOU.
+    pub async fn set_with_opts(
+        &self,
+        key: &str,
+        value: Vec<u8>,
+        expiry: Option<Expiry>,
+        opts: SetOptions,
+    ) -> Result<SetResult> {
+        debug!(
+            "SET key={} size={} expiry={:?} nx={} xx={} keepttl={} get={}",
+            key,
+            value.len(),
+            expiry,
+            opts.if_absent,
+            opts.if_present,
+            opts.keep_ttl,
+            opts.return_old,
+        );
+
+        self.check_cluster_routing(key)?;
+
+        let shard = self.get_shard(key);
+        let mut data = shard.data.write();
+
+        // --- NX / XX guard (under write lock — no TOCTOU) ---
+        let existing = data.get(key);
+        let key_exists = existing.is_some_and(|v| !v.is_expired());
+
+        if opts.if_absent && key_exists {
+            // NX: key exists → do NOT set, return old value if requested
+            let old_value = if opts.return_old {
+                existing.map(|v| v.data().to_vec())
+            } else {
+                None
+            };
+            return Ok(SetResult {
+                written: false,
+                old_value,
+            });
+        }
+        if opts.if_present && !key_exists {
+            // XX: key does not exist → do NOT set
+            return Ok(SetResult {
+                written: false,
+                old_value: None,
+            });
+        }
+
+        // --- Capture old value for GET option ---
+        let old_value = if opts.return_old {
+            existing
+                .filter(|v| !v.is_expired())
+                .map(|v| v.data().to_vec())
+        } else {
+            None
+        };
+
+        // --- Compute the new StoredValue ---
+        let stored = if opts.keep_ttl {
+            // KEEPTTL: carry forward existing expiry timestamp, ignore new expiry
+            let existing_expires_at_ms = data
+                .get(key)
+                .filter(|v| !v.is_expired())
+                .and_then(|v| v.expires_at_ms());
+            match existing_expires_at_ms {
+                Some(ms) => StoredValue::with_expires_at_ms(value.clone(), ms),
+                None => StoredValue::Persistent(value.clone()),
+            }
+        } else {
+            match expiry {
+                Some(exp) => StoredValue::with_expiry(value.clone(), exp),
+                None => StoredValue::Persistent(value.clone()),
+            }
+        };
+
+        // --- Memory limit check ---
+        let entry_size = self.estimate_entry_size(key, &stored);
+        {
+            let current_bytes = self.stats.total_memory_bytes.load(Ordering::Relaxed);
+            let max_bytes = (self.config.max_memory_mb * 1024 * 1024) as i64;
+            if current_bytes + entry_size as i64 > max_bytes {
+                warn!("Memory limit exceeded: {}/{}", current_bytes, max_bytes);
+                return Err(SynapError::MemoryLimitExceeded);
+            }
+        }
+
+        // --- Insert ---
+        let old_entry = data.insert(key.to_string(), stored);
+        let is_new = old_entry.is_none() || old_entry.as_ref().is_some_and(|v| v.is_expired());
+
+        self.stats.sets.fetch_add(1, Ordering::Relaxed);
+        if is_new {
+            self.stats.total_keys.fetch_add(1, Ordering::Relaxed);
+            self.stats
+                .total_memory_bytes
+                .fetch_add(entry_size as i64, Ordering::Relaxed);
+        } else if let Some(ref old_val) = old_entry {
+            let old_size = self.estimate_entry_size(key, old_val);
+            self.stats
+                .total_memory_bytes
+                .fetch_add(entry_size as i64 - old_size as i64, Ordering::Relaxed);
+        }
+
+        // --- Cache invalidation ---
+        if let Some(ref cache) = self.cache {
+            let cache_expiry_secs = expiry.map(|e| {
+                use std::time::{SystemTime, UNIX_EPOCH};
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                // Convert expiry to absolute seconds for L1 cache
+                match e {
+                    Expiry::Seconds(s) => now + s,
+                    Expiry::Milliseconds(ms) => now + ms / 1_000,
+                    Expiry::UnixSeconds(s) => s,
+                    Expiry::UnixMilliseconds(ms) => ms / 1_000,
+                }
+            });
+            cache.put(key.to_string(), value, cache_expiry_secs);
+        }
+
+        Ok(SetResult {
+            written: true,
+            old_value,
+        })
     }
 
     /// Get a value by key
@@ -1643,6 +1776,231 @@ mod tests {
         assert_eq!(
             default_config.max_value_size_bytes, None,
             "max_value_size_bytes must default to None (unlimited)"
+        );
+    }
+
+    // ── phase1_add-kv-set-options tail tests ───────────────────────────────
+
+    /// Tail 5.2 — NX: only set when key is absent
+    #[tokio::test]
+    async fn test_set_nx_only_when_absent() {
+        use crate::core::types::{Expiry, SetOptions};
+        let store = KVStore::new(KVConfig::default());
+
+        // First SET NX should succeed
+        let r = store
+            .set_with_opts(
+                "nx_key",
+                b"first".to_vec(),
+                None,
+                SetOptions {
+                    if_absent: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(r.written, "NX on absent key must write");
+
+        // Second SET NX must NOT overwrite
+        let r2 = store
+            .set_with_opts(
+                "nx_key",
+                b"second".to_vec(),
+                None,
+                SetOptions {
+                    if_absent: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!r2.written, "NX on existing key must NOT write");
+
+        // Value must still be "first"
+        let val = store.get("nx_key").await.unwrap().unwrap();
+        assert_eq!(val, b"first");
+
+        // 100-concurrent NX test: only 1 out of 100 must succeed
+        let store = std::sync::Arc::new(KVStore::new(KVConfig::default()));
+        let wins = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let mut handles = Vec::with_capacity(100);
+        for _ in 0..100 {
+            let s = store.clone();
+            let w = wins.clone();
+            handles.push(tokio::spawn(async move {
+                let r = s
+                    .set_with_opts(
+                        "lock",
+                        b"owner".to_vec(),
+                        Some(Expiry::Seconds(30)),
+                        SetOptions {
+                            if_absent: true,
+                            ..Default::default()
+                        },
+                    )
+                    .await
+                    .unwrap();
+                if r.written {
+                    w.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+        assert_eq!(
+            wins.load(std::sync::atomic::Ordering::Relaxed),
+            1,
+            "exactly 1 out of 100 concurrent SET NX must succeed"
+        );
+    }
+
+    /// Tail 5.2 — XX: only set when key already exists
+    #[tokio::test]
+    async fn test_set_xx_only_when_present() {
+        use crate::core::types::SetOptions;
+        let store = KVStore::new(KVConfig::default());
+
+        // XX on absent key must fail
+        let r = store
+            .set_with_opts(
+                "xx_key",
+                b"value".to_vec(),
+                None,
+                SetOptions {
+                    if_present: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!r.written, "XX on absent key must NOT write");
+
+        // Insert, then XX should succeed
+        store.set("xx_key", b"orig".to_vec(), None).await.unwrap();
+        let r2 = store
+            .set_with_opts(
+                "xx_key",
+                b"updated".to_vec(),
+                None,
+                SetOptions {
+                    if_present: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(r2.written, "XX on existing key must write");
+        let val = store.get("xx_key").await.unwrap().unwrap();
+        assert_eq!(val, b"updated");
+    }
+
+    /// Tail 5.2 — GET: return old value on overwrite
+    #[tokio::test]
+    async fn test_set_get_returns_old_value() {
+        use crate::core::types::SetOptions;
+        let store = KVStore::new(KVConfig::default());
+
+        store.set("gkey", b"old".to_vec(), None).await.unwrap();
+
+        let r = store
+            .set_with_opts(
+                "gkey",
+                b"new".to_vec(),
+                None,
+                SetOptions {
+                    return_old: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(r.written);
+        assert_eq!(r.old_value.as_deref(), Some(b"old".as_slice()));
+
+        // Current value is "new"
+        let val = store.get("gkey").await.unwrap().unwrap();
+        assert_eq!(val, b"new");
+    }
+
+    /// Tail 5.2 — KEEPTTL: preserve TTL on overwrite
+    #[tokio::test]
+    async fn test_set_keepttl_preserves_expiry() {
+        use crate::core::types::{Expiry, SetOptions};
+        let store = KVStore::new(KVConfig::default());
+
+        // Set key with 60s TTL
+        store
+            .set_with_opts(
+                "kttl_key",
+                b"v1".to_vec(),
+                Some(Expiry::Seconds(60)),
+                SetOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        let ttl_before = store.ttl("kttl_key").await.unwrap();
+        assert!(ttl_before.is_some(), "key must have TTL");
+
+        // Overwrite with KEEPTTL and no expiry — TTL must be preserved
+        store
+            .set_with_opts(
+                "kttl_key",
+                b"v2".to_vec(),
+                None,
+                SetOptions {
+                    keep_ttl: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let ttl_after = store.ttl("kttl_key").await.unwrap();
+        assert!(
+            ttl_after.is_some(),
+            "TTL must be preserved after KEEPTTL overwrite"
+        );
+        let remaining = ttl_after.unwrap();
+        assert!(
+            remaining >= 50,
+            "TTL must still be near original (got {remaining}s)"
+        );
+
+        // Value must have changed
+        let val = store.get("kttl_key").await.unwrap().unwrap();
+        assert_eq!(val, b"v2");
+    }
+
+    /// Tail 5.4 — PX expiry: millisecond-precision TTL is stored correctly
+    #[tokio::test]
+    async fn test_set_px_millisecond_expiry() {
+        use crate::core::types::{Expiry, SetOptions};
+        let store = KVStore::new(KVConfig::default());
+
+        // Set with 5000ms TTL
+        store
+            .set_with_opts(
+                "px_key",
+                b"value".to_vec(),
+                Some(Expiry::Milliseconds(5_000)),
+                SetOptions::default(),
+            )
+            .await
+            .unwrap();
+
+        // remaining_ttl_ms should be ≤ 5000 and > 4000 (test runs fast)
+        let shard = store.get_shard("px_key");
+        let data = shard.data.read();
+        let stored = data.get("px_key").unwrap();
+        let ms = stored.remaining_ttl_ms().unwrap();
+        assert!(ms <= 5_000, "TTL in ms must not exceed 5000 (got {ms})");
+        assert!(
+            ms > 4_000,
+            "TTL in ms must be > 4000 right after set (got {ms})"
         );
     }
 }
