@@ -213,7 +213,7 @@ impl Default for ServerConfig {
             },
             kv_store: KVStoreConfig {
                 max_memory_mb: 4096,
-                eviction_policy: EvictionPolicy::Lru,
+                eviction_policy: EvictionPolicy::NoEviction,
                 ttl_cleanup_interval_ms: 100,
                 allow_flush_commands: false,
                 max_value_size_bytes: None,
@@ -270,6 +270,7 @@ impl ServerConfig {
             ttl_cleanup_interval_ms: self.kv_store.ttl_cleanup_interval_ms,
             allow_flush_commands: self.kv_store.allow_flush_commands,
             max_value_size_bytes: self.kv_store.max_value_size_bytes,
+            eviction_sample_size: 5,
         }
     }
 

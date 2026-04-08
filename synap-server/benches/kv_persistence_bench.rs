@@ -48,10 +48,11 @@ fn bench_kv_with_persistence(c: &mut Criterion) {
     let (kv_store, persistence) = rt.block_on(async {
         let kv = Arc::new(KVStore::new(KVConfig {
             max_memory_mb: 1024,
-            eviction_policy: EvictionPolicy::Lru,
+            eviction_policy: EvictionPolicy::NoEviction,
             ttl_cleanup_interval_ms: 1000,
             allow_flush_commands: false,
             max_value_size_bytes: None,
+            eviction_sample_size: 5,
         }));
 
         let persist = Arc::new(PersistenceLayer::new(persist_config.clone()).await.unwrap());

@@ -237,19 +237,28 @@ impl StoredValue {
     }
 }
 
-/// Eviction policy for memory management
+/// Eviction policy for memory management (Redis-compatible naming).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
-#[serde(rename_all = "lowercase")]
 pub enum EvictionPolicy {
-    /// No eviction, return error when full
-    None,
-    /// Least Recently Used
+    /// No eviction — return error when memory limit is reached (default, preserves v0.9.x behavior).
     #[default]
-    Lru,
-    /// Least Frequently Used
-    Lfu,
-    /// Evict keys with shortest TTL first
-    Ttl,
+    #[serde(rename = "noeviction")]
+    NoEviction,
+    /// Evict any key using approximated LRU.
+    #[serde(rename = "allkeys-lru")]
+    AllKeysLru,
+    /// Evict only keys with a TTL set, using approximated LRU.
+    #[serde(rename = "volatile-lru")]
+    VolatileLru,
+    /// Evict any key at random.
+    #[serde(rename = "allkeys-random")]
+    AllKeysRandom,
+    /// Evict only keys with a TTL set, chosen at random.
+    #[serde(rename = "volatile-random")]
+    VolatileRandom,
+    /// Evict only keys with a TTL set, prioritising those expiring soonest.
+    #[serde(rename = "volatile-ttl")]
+    VolatileTtl,
 }
 
 /// Configuration for KV store
@@ -266,16 +275,19 @@ pub struct KVConfig {
     /// Maximum allowed value size in bytes. SET requests exceeding this limit
     /// are rejected before any allocation. None means no limit (default).
     pub max_value_size_bytes: Option<usize>,
+    /// Number of random keys sampled per shard during eviction (Redis default: 5).
+    pub eviction_sample_size: usize,
 }
 
 impl Default for KVConfig {
     fn default() -> Self {
         Self {
             max_memory_mb: 4096,
-            eviction_policy: EvictionPolicy::Lru,
+            eviction_policy: EvictionPolicy::NoEviction,
             ttl_cleanup_interval_ms: 100,
             allow_flush_commands: false,
             max_value_size_bytes: None,
+            eviction_sample_size: 5,
         }
     }
 }
@@ -425,24 +437,34 @@ mod tests {
     #[test]
     fn test_eviction_policy_default() {
         let policy = EvictionPolicy::default();
-        assert_eq!(policy, EvictionPolicy::Lru);
+        assert_eq!(policy, EvictionPolicy::NoEviction);
     }
 
     #[test]
     fn test_eviction_policy_serialization() {
-        let policy = EvictionPolicy::Lru;
-        let serialized = serde_json::to_string(&policy).unwrap();
-        assert_eq!(serialized, r#""lru""#);
-
-        let deserialized: EvictionPolicy = serde_json::from_str(&serialized).unwrap();
-        assert_eq!(deserialized, policy);
+        // Each variant round-trips with its Redis-compatible name.
+        let cases = [
+            (EvictionPolicy::NoEviction, "\"noeviction\""),
+            (EvictionPolicy::AllKeysLru, "\"allkeys-lru\""),
+            (EvictionPolicy::VolatileLru, "\"volatile-lru\""),
+            (EvictionPolicy::AllKeysRandom, "\"allkeys-random\""),
+            (EvictionPolicy::VolatileRandom, "\"volatile-random\""),
+            (EvictionPolicy::VolatileTtl, "\"volatile-ttl\""),
+        ];
+        for (policy, expected) in cases {
+            let serialized = serde_json::to_string(&policy).unwrap();
+            assert_eq!(serialized, expected, "serialize {policy:?}");
+            let deserialized: EvictionPolicy = serde_json::from_str(&serialized).unwrap();
+            assert_eq!(deserialized, policy, "round-trip {policy:?}");
+        }
     }
 
     #[test]
     fn test_kv_config_default() {
         let config = KVConfig::default();
         assert_eq!(config.max_memory_mb, 4096);
-        assert_eq!(config.eviction_policy, EvictionPolicy::Lru);
+        assert_eq!(config.eviction_policy, EvictionPolicy::NoEviction);
+        assert_eq!(config.eviction_sample_size, 5);
         assert!(!config.allow_flush_commands);
     }
 
