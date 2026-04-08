@@ -171,6 +171,10 @@ async fn main() -> Result<()> {
     }
 
     info!("Starting Synap Server v{}", env!("CARGO_PKG_VERSION"));
+    info!(
+        "SIMD backend: {} (runtime-detected)",
+        synap_server::simd::backend().label()
+    );
     info!("Configuration loaded from: {}", args.config);
     info!(
         "Log format: {}, level: {}",

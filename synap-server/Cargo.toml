@@ -44,6 +44,7 @@ mlua = { version = "0.11.5", features = ["lua54", "async", "send", "serialize", 
 sha1 = "0.10"
 hex = "0.4"
 geohash = "0.13"
+memchr = "2.7"
 
 # HiveHub Cloud Integration
 hivehub-internal-sdk = "1.0"
@@ -152,5 +153,9 @@ harness = false
 
 [[bench]]
 name = "protocol_bench"
+harness = false
+
+[[bench]]
+name = "simd_bench"
 harness = false
 

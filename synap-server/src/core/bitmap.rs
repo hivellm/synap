@@ -146,12 +146,9 @@ impl BitmapValue {
         }
 
         let actual_end_byte = end_byte.min(self.data.len().saturating_sub(1));
-        let mut count = 0;
-
-        // Count full bytes
-        for i in start_byte..=actual_end_byte {
-            count += self.data[i].count_ones() as usize;
-        }
+        // SIMD-accelerated popcount over the covered byte range.
+        let mut count =
+            crate::simd::popcount_slice(&self.data[start_byte..=actual_end_byte]) as usize;
 
         // Adjust for partial byte at start
         if let Some(start_bit) = start {
@@ -648,67 +645,69 @@ impl BitmapStore {
         Ok(result_len)
     }
 
-    /// Perform bitwise AND operation
+    /// Perform bitwise AND operation (SIMD-accelerated).
     fn bitop_and(&self, bitmaps: &[Vec<u8>], max_len: usize) -> Vec<u8> {
-        let mut result = vec![0xFF; max_len]; // Start with all 1s
-
+        let mut result = vec![0xFFu8; max_len]; // Start with all 1s
         for bitmap in bitmaps {
-            for (i, byte) in bitmap.iter().enumerate() {
-                if i < result.len() {
-                    result[i] &= byte;
+            let common = result.len().min(bitmap.len());
+            if common == 0 {
+                continue;
+            }
+            // SAFETY: slices are in-bounds; SIMD dispatch is runtime-checked.
+            let tmp = crate::simd::bitop_and(&result[..common], &bitmap[..common]);
+            result[..common].copy_from_slice(&tmp);
+            // BITOP AND semantics: any byte past the shortest source becomes 0.
+            if bitmap.len() < result.len() {
+                for byte in &mut result[common..] {
+                    *byte = 0;
                 }
             }
         }
-
         result
     }
 
-    /// Perform bitwise OR operation
+    /// Perform bitwise OR operation (SIMD-accelerated).
     fn bitop_or(&self, bitmaps: &[Vec<u8>], max_len: usize) -> Vec<u8> {
-        let mut result = vec![0; max_len];
-
+        let mut result = vec![0u8; max_len];
         for bitmap in bitmaps {
-            for (i, byte) in bitmap.iter().enumerate() {
-                if i < result.len() {
-                    result[i] |= byte;
-                }
+            let common = result.len().min(bitmap.len());
+            if common == 0 {
+                continue;
             }
+            let tmp = crate::simd::bitop_or(&result[..common], &bitmap[..common]);
+            result[..common].copy_from_slice(&tmp[..common]);
         }
-
         result
     }
 
-    /// Perform bitwise XOR operation
+    /// Perform bitwise XOR operation (SIMD-accelerated).
     fn bitop_xor(&self, bitmaps: &[Vec<u8>], max_len: usize) -> Vec<u8> {
         let mut result = if bitmaps.is_empty() {
-            vec![0; max_len]
+            vec![0u8; max_len]
         } else {
-            bitmaps[0].clone()
+            let mut first = bitmaps[0].clone();
+            first.resize(max_len, 0);
+            first
         };
-
         for bitmap in bitmaps.iter().skip(1) {
-            for (i, byte) in bitmap.iter().enumerate() {
-                if i < result.len() {
-                    result[i] ^= byte;
-                } else {
-                    result.push(*byte);
-                }
+            let common = result.len().min(bitmap.len());
+            if common == 0 {
+                continue;
             }
+            let tmp = crate::simd::bitop_xor(&result[..common], &bitmap[..common]);
+            result[..common].copy_from_slice(&tmp[..common]);
         }
-
         result
     }
 
-    /// Perform bitwise NOT operation
+    /// Perform bitwise NOT operation (SIMD-accelerated).
     fn bitop_not(&self, bitmap: &[u8], max_len: usize) -> Vec<u8> {
-        let mut result = vec![0; max_len];
-
-        for (i, byte) in bitmap.iter().enumerate() {
-            if i < result.len() {
-                result[i] = !byte;
-            }
+        let mut result = crate::simd::bitop_not(bitmap);
+        if result.len() < max_len {
+            result.resize(max_len, 0xFF);
+        } else {
+            result.truncate(max_len);
         }
-
         result
     }
 
