@@ -15,7 +15,7 @@ if (/\b(deferred|skip(ped)?|later|todo)\b/i.test(content)) { console.log('DENY')
 " "$input" 2>/dev/null || echo "ALLOW")"
 
 if [[ "$result" == "DENY" ]]; then
-  echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: tasks.md cannot contain deferred, skip, later, or TODO. Implement the item now or explain why impossible. See .claude/rules/no-deferred.md"}}'
+  echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: tasks.md cannot contain deferred, skip, later, or TODO. Implement the item now or explain why impossible. See AGENTS.md Tier 1 §6"}}'
 else
   echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}'
 fi
