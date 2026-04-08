@@ -504,46 +504,70 @@ impl KVStore {
             }
         }
 
-        // Cache miss - get from storage
+        // Cache miss - get from storage.
+        // Use a READ lock for the happy path: update_access() is atomic (AtomicU32)
+        // so it does not need a write lock. Only expired key removal requires a
+        // write lock, and that is the cold path.
         let shard = self.get_shard(key);
-        // Write lock is still needed here because we may remove an expired key
-        // and call update_access(). The AtomicU32 for last_access (task
-        // phase1_fix-get-write-lock) will downgrade this to a read lock.
-        let mut data = shard.data.write();
 
         self.stats.gets.fetch_add(1, Ordering::Relaxed);
 
-        if let Some(value) = data.get_mut(key) {
-            // Check if expired
-            if value.is_expired() {
-                debug!("Key expired: {}", key);
-                if let Some(expired_val) = data.remove(key) {
-                    let removed_size = self.estimate_entry_size(key, &expired_val);
-                    self.stats.total_keys.fetch_sub(1, Ordering::Relaxed);
-                    self.stats
-                        .total_memory_bytes
-                        .fetch_sub(removed_size as i64, Ordering::Relaxed);
+        // --- Hot path: read lock ---
+        {
+            let data = shard.data.read();
+            if let Some(value) = data.get(key) {
+                if !value.is_expired() {
+                    // Atomic LRU update — safe under read lock.
+                    value.update_access();
+                    self.stats.hits.fetch_add(1, Ordering::Relaxed);
+
+                    let value_data = value.data().to_vec();
+                    let ttl = value.ttl_remaining();
+                    drop(data);
+
+                    // Populate cache
+                    if let Some(ref cache) = self.cache {
+                        cache.put(key.to_string(), value_data.clone(), ttl);
+                    }
+
+                    return Ok(Some(value_data));
                 }
+                // Key exists but is expired — fall through to write lock path.
+            } else {
+                // Key not found.
                 self.stats.misses.fetch_add(1, Ordering::Relaxed);
                 return Ok(None);
             }
+        }
 
-            // Update access time for LRU
-            value.update_access();
-            self.stats.hits.fetch_add(1, Ordering::Relaxed);
-
-            let value_data = value.data().to_vec();
-            let ttl = value.ttl_remaining();
-
-            drop(data);
-
-            // Populate cache
-            if let Some(ref cache) = self.cache {
-                cache.put(key.to_string(), value_data.clone(), ttl);
+        // --- Cold path: write lock (expired key removal) ---
+        {
+            let mut data = shard.data.write();
+            // Re-check under write lock (another thread may have already removed it).
+            if let Some(value) = data.get(key) {
+                if value.is_expired() {
+                    debug!("Key expired: {}", key);
+                    if let Some(expired_val) = data.remove(key) {
+                        let removed_size = self.estimate_entry_size(key, &expired_val);
+                        self.stats.total_keys.fetch_sub(1, Ordering::Relaxed);
+                        self.stats
+                            .total_memory_bytes
+                            .fetch_sub(removed_size as i64, Ordering::Relaxed);
+                    }
+                } else {
+                    // Raced: another writer refreshed the key between locks.
+                    // Treat as a hit.
+                    value.update_access();
+                    self.stats.hits.fetch_add(1, Ordering::Relaxed);
+                    let value_data = value.data().to_vec();
+                    let ttl = value.ttl_remaining();
+                    drop(data);
+                    if let Some(ref cache) = self.cache {
+                        cache.put(key.to_string(), value_data.clone(), ttl);
+                    }
+                    return Ok(Some(value_data));
+                }
             }
-
-            Ok(Some(value_data))
-        } else {
             self.stats.misses.fetch_add(1, Ordering::Relaxed);
             Ok(None)
         }
@@ -2001,6 +2025,83 @@ mod tests {
         assert!(
             ms > 4_000,
             "TTL in ms must be > 4000 right after set (got {ms})"
+        );
+    }
+
+    /// 4.1 — Concurrent read benchmark: 16 threads reading the same key.
+    /// Asserts that concurrent reads complete without errors (read lock allows
+    /// parallelism — no deadlock, no serialisation bottleneck).
+    #[tokio::test]
+    async fn test_concurrent_reads_no_write_lock() {
+        let store = Arc::new(KVStore::new(KVConfig::default()));
+        store
+            .set("bench_key", b"value".to_vec(), None)
+            .await
+            .unwrap();
+
+        let store_ref = Arc::clone(&store);
+        let mut handles = vec![];
+
+        // 16 concurrent reader tasks all hitting the same key
+        for _ in 0..16 {
+            let s = Arc::clone(&store_ref);
+            handles.push(tokio::spawn(async move {
+                let mut count = 0u32;
+                for _ in 0..5_000 {
+                    let v = s.get("bench_key").await.unwrap();
+                    assert!(v.is_some());
+                    count += 1;
+                }
+                count
+            }));
+        }
+
+        let mut total = 0u32;
+        for h in handles {
+            total += h.await.unwrap();
+        }
+        // 16 threads × 5 000 reads = 80 000 successful reads
+        assert_eq!(total, 80_000, "all reads must succeed");
+    }
+
+    /// 4.2 — LRU correctness: GET updates last_access so that an older entry
+    /// (not accessed) has a lower last_access timestamp than a recently accessed one.
+    #[tokio::test]
+    async fn test_get_updates_last_access_for_lru() {
+        let store = KVStore::new(KVConfig::default());
+        store
+            .set("old_key", b"old".to_vec(), Some(60))
+            .await
+            .unwrap();
+
+        // Small sleep so timestamps differ by at least 1 second (u32 precision).
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
+        store
+            .set("new_key", b"new".to_vec(), Some(60))
+            .await
+            .unwrap();
+
+        // Access old_key via GET — this bumps its last_access to "now".
+        let _ = store.get("old_key").await.unwrap();
+
+        // Read last_access directly from shard data.
+        let old_last = {
+            let shard = store.get_shard("old_key");
+            let data = shard.data.read();
+            data.get("old_key").unwrap().last_access()
+        };
+        let new_last = {
+            let shard = store.get_shard("new_key");
+            let data = shard.data.read();
+            data.get("new_key").unwrap().last_access()
+        };
+
+        // old_key was just GETted, so it should have last_access ≥ new_key
+        // (new_key was set 1 s later but never GETted since).
+        assert!(
+            old_last >= new_last,
+            "old_key (GETted) last_access {old_last} should be ≥ new_key (not GETted) {new_last}"
         );
     }
 }

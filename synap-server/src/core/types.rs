@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Expiry specification for SET operations.
@@ -57,9 +57,11 @@ pub struct SetResult {
     pub old_value: Option<Vec<u8>>,
 }
 
-/// Stored value in the KV store with compact metadata
-/// Memory-optimized: eliminates 48 bytes overhead vs old struct
-#[derive(Debug, Clone)]
+/// Stored value in the KV store with compact metadata.
+///
+/// `last_access` is `AtomicU32` so GET operations can update it under a
+/// **read** lock instead of a write lock — enabling fully concurrent reads.
+#[derive(Debug)]
 pub enum StoredValue {
     /// Persistent value without TTL (24 bytes overhead only)
     Persistent(Vec<u8>),
@@ -68,12 +70,30 @@ pub enum StoredValue {
     ///
     /// `expires_at` is a Unix timestamp in **milliseconds** (u64) to support
     /// millisecond-precision expiry (Redis PX / PXAT compatibility).
-    /// `last_access` remains a seconds-granularity u32 for LRU (sufficient).
+    /// `last_access` is `AtomicU32` (seconds) so GET can write it without a
+    /// write lock.
     Expiring {
         data: Vec<u8>,
-        expires_at: u64,  // Unix timestamp in milliseconds
-        last_access: u32, // Unix timestamp in seconds for LRU
+        expires_at: u64,        // Unix timestamp in milliseconds
+        last_access: AtomicU32, // Unix timestamp in seconds for LRU
     },
+}
+
+impl Clone for StoredValue {
+    fn clone(&self) -> Self {
+        match self {
+            Self::Persistent(data) => Self::Persistent(data.clone()),
+            Self::Expiring {
+                data,
+                expires_at,
+                last_access,
+            } => Self::Expiring {
+                data: data.clone(),
+                expires_at: *expires_at,
+                last_access: AtomicU32::new(last_access.load(Ordering::Relaxed)),
+            },
+        }
+    }
 }
 
 impl StoredValue {
@@ -90,7 +110,7 @@ impl StoredValue {
         Self::Expiring {
             data,
             expires_at: expiry.to_unix_ms(),
-            last_access: Self::current_timestamp_secs(),
+            last_access: AtomicU32::new(Self::current_timestamp_secs()),
         }
     }
 
@@ -99,7 +119,7 @@ impl StoredValue {
         Self::Expiring {
             data,
             expires_at: expires_at_ms,
-            last_access: Self::current_timestamp_secs(),
+            last_access: AtomicU32::new(Self::current_timestamp_secs()),
         }
     }
 
@@ -130,10 +150,10 @@ impl StoredValue {
         }
     }
 
-    /// Update access time for LRU.
-    pub fn update_access(&mut self) {
+    /// Update access time for LRU (takes `&self` — AtomicU32 allows interior mutability).
+    pub fn update_access(&self) {
         if let Self::Expiring { last_access, .. } = self {
-            *last_access = Self::current_timestamp_secs();
+            last_access.store(Self::current_timestamp_secs(), Ordering::Relaxed);
         }
     }
 
@@ -212,7 +232,7 @@ impl StoredValue {
     pub fn last_access(&self) -> u32 {
         match self {
             Self::Persistent(_) => 0,
-            Self::Expiring { last_access, .. } => *last_access,
+            Self::Expiring { last_access, .. } => last_access.load(Ordering::Relaxed),
         }
     }
 }
@@ -365,7 +385,7 @@ mod tests {
         let value = StoredValue::Expiring {
             data: data.clone(),
             expires_at: 0, // Already expired
-            last_access: 0,
+            last_access: AtomicU32::new(0),
         };
 
         assert!(value.is_expired());
@@ -374,18 +394,18 @@ mod tests {
 
     #[test]
     fn test_stored_value_update_access() {
-        let mut value = StoredValue::new(vec![1, 2, 3], Some(60));
+        let value = StoredValue::new(vec![1, 2, 3], Some(60));
 
-        let before = match value {
-            StoredValue::Expiring { last_access, .. } => last_access,
+        let before = match &value {
+            StoredValue::Expiring { last_access, .. } => last_access.load(Ordering::Relaxed),
             _ => panic!("Expected Expiring variant"),
         };
 
         std::thread::sleep(std::time::Duration::from_millis(10));
         value.update_access();
 
-        let after = match value {
-            StoredValue::Expiring { last_access, .. } => last_access,
+        let after = match &value {
+            StoredValue::Expiring { last_access, .. } => last_access.load(Ordering::Relaxed),
             _ => panic!("Expected Expiring variant"),
         };
 
