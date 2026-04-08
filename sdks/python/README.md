@@ -65,6 +65,51 @@ async def main():
 asyncio.run(main())
 ```
 
+## Transports
+
+Since v0.10.0 the SDK speaks three wire protocols, selectable via the
+`transport` argument on `SynapConfig`:
+
+| Transport    | Default addr       | When to use                                               |
+|--------------|--------------------|-----------------------------------------------------------|
+| **SynapRPC** | `127.0.0.1:15501`  | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency, preserves int/float/bool/bytes. |
+| **RESP3**    | `127.0.0.1:6379`   | Redis-compatible text protocol — interop with existing Redis tooling. |
+| **HTTP**     | from `base_url`    | Original REST transport. Always required as the fallback channel. |
+
+> **Why `base_url` is always required.** SynapRPC and RESP3 only map KV,
+> Hash, List, Set, Sorted Set and Bitmap commands. Queues, streams, pub/sub,
+> scripting, transactions and anything unmapped fall back to HTTP REST
+> automatically — so the HTTP `base_url` must always point at a reachable
+> listener even when you pick a binary transport.
+
+```python
+from synap_sdk import SynapClient, SynapConfig
+
+# SynapRPC (default, recommended)
+config = SynapConfig("http://127.0.0.1:15500")  # transport="synaprpc" by default
+client = SynapClient(config)
+
+# Explicit SynapRPC with a custom RPC endpoint (e.g. HTTP behind a TLS
+# load balancer, RPC exposed directly on the internal network).
+config = SynapConfig(
+    "https://synap.example.com",
+    transport="synaprpc",
+    rpc_host="10.0.0.42",
+    rpc_port=15501,
+)
+
+# RESP3 (Redis-compatible)
+config = SynapConfig(
+    "http://127.0.0.1:15500",
+    transport="resp3",
+    resp3_host="127.0.0.1",
+    resp3_port=6379,
+)
+
+# Pure HTTP (no binary transport)
+config = SynapConfig("http://127.0.0.1:15500", transport="http")
+```
+
 ## API Reference
 
 ### Configuration

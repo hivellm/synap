@@ -120,6 +120,57 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Transports
+
+Since v0.10.0 the SDK speaks three wire protocols, selectable per-client:
+
+| Transport    | Default addr       | When to use                                               |
+|--------------|--------------------|-----------------------------------------------------------|
+| **SynapRPC** | `127.0.0.1:15501`  | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency, preserves `int`/`float`/`bool`/`bytes` on the wire. |
+| **RESP3**    | `127.0.0.1:6379`   | Redis-compatible text protocol. Use when integrating alongside existing Redis tooling. |
+| **HTTP**     | from `base_url`    | Original REST transport. Always required as the fallback channel. |
+
+> **Why HTTP is always required.** SynapRPC and RESP3 only map KV, Hash,
+> List, Set, Sorted Set and Bitmap commands. Queues, streams, pub/sub,
+> scripting, transactions and any unmapped command automatically fall back
+> to HTTP REST — so `base_url` must always point at a reachable HTTP
+> listener even when you use a binary transport.
+
+```rust
+use std::time::Duration;
+use synap_sdk::{SynapClient, SynapConfig};
+
+// SynapRPC (default, recommended)
+let cfg = SynapConfig::new("http://127.0.0.1:15500"); // transport = SynapRpc
+let client = SynapClient::new(cfg)?;
+
+// Explicit SynapRPC with custom RPC endpoint (e.g. RPC on a different host
+// than the HTTP gateway — common when HTTP is behind a TLS load balancer
+// and the RPC port is exposed directly on the internal network).
+let cfg = SynapConfig::new("https://synap.example.com")
+    .with_synap_rpc_transport()
+    .with_rpc_addr("10.0.0.42", 15501)
+    .with_timeout(Duration::from_secs(5));
+
+// RESP3 (Redis-compatible)
+let cfg = SynapConfig::new("http://127.0.0.1:15500")
+    .with_resp3_transport()
+    .with_resp3_addr("127.0.0.1", 6379);
+
+// Pure HTTP (no binary transport)
+let cfg = SynapConfig::new("http://127.0.0.1:15500").with_http_transport();
+```
+
+### End-to-end test suite
+
+A real-server E2E suite covers all three transports plus cross-transport
+consistency (write via one, read via the others):
+
+```bash
+cargo build --release                              # build the server binary first
+cargo test --features e2e --test e2e_test -- --nocapture
+```
+
 ## API Reference
 
 ### Key-Value Store

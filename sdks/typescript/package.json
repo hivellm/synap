@@ -1,6 +1,6 @@
 {
   "name": "@hivehub/synap",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "description": "Official TypeScript/JavaScript SDK for Synap - High-Performance In-Memory Key-Value Store & Message Broker",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

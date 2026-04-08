@@ -69,6 +69,43 @@ var delivered = await client.PubSub.PublishAsync("notifications.email", new
 client.Dispose();
 ```
 
+## Transports
+
+Since v0.10.0 the SDK speaks three wire protocols, selectable via
+`SynapConfig` builder methods:
+
+| Transport    | Default addr       | When to use                                               |
+|--------------|--------------------|-----------------------------------------------------------|
+| **SynapRPC** | `127.0.0.1:15501`  | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency. |
+| **RESP3**    | `127.0.0.1:6379`   | Redis-compatible text protocol — interop with existing Redis tooling. |
+| **HTTP**     | from `baseUrl`     | Original REST transport. Always required as the fallback channel. |
+
+> **Why `baseUrl` is always required.** SynapRPC and RESP3 only map KV,
+> Hash, List, Set, Sorted Set and Bitmap commands. Queues, streams, pub/sub,
+> scripting, transactions and anything unmapped fall back to HTTP REST
+> automatically.
+
+```csharp
+using Synap.SDK;
+
+// SynapRPC (default, recommended)
+var config = SynapConfig.Create("http://127.0.0.1:15500");
+var client = new SynapClient(config);
+
+// Explicit SynapRPC with custom RPC endpoint
+var cfg = SynapConfig.Create("https://synap.example.com")
+    .WithSynapRpcTransport()
+    .WithRpcAddr("10.0.0.42", 15501);
+
+// RESP3 (Redis-compatible)
+var resp3 = SynapConfig.Create("http://127.0.0.1:15500")
+    .WithResp3Transport()
+    .WithResp3Addr("127.0.0.1", 6379);
+
+// Pure HTTP (no binary transport)
+var http = SynapConfig.Create("http://127.0.0.1:15500").WithHttpTransport();
+```
+
 ## API Reference
 
 ### Configuration

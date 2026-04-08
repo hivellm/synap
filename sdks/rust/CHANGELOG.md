@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-04-08
+
+### Added
+
+- **Multi-transport support**: the client now speaks three wire protocols:
+  - **SynapRPC** (default) — MessagePack over persistent TCP on `127.0.0.1:15501`
+  - **RESP3** — Redis-compatible text protocol on `127.0.0.1:6379`
+  - **HTTP** — original REST transport, always used as fallback for unmapped commands
+  Switch at config time via `with_synap_rpc_transport()`,
+  `with_resp3_transport()`, `with_http_transport()`, and override endpoints
+  with `with_rpc_addr(host, port)` / `with_resp3_addr(host, port)`.
+- **E2E test suite** (`tests/e2e_test.rs`, `--features e2e`): spawns the
+  release binary and exercises all three transports plus cross-transport
+  consistency (write via one, read via the others).
+
+### Changed
+
+- `SynapConfig::new(base_url)` now defaults to `TransportMode::SynapRpc`.
+  HTTP remains the fallback channel and must always be reachable —
+  queues, streams, pub/sub, scripting and transactions still go over REST.
+
+## [0.9.x] Previously under Unreleased
+
 ### Added - Sorted Set Support 🎉 (October 25, 2025)
 
 **New Module: sorted_set.rs with 18 operations**

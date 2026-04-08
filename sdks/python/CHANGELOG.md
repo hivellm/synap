@@ -2,6 +2,24 @@
 
 All notable changes to the Synap Python SDK will be documented in this file.
 
+## [0.10.0] - 2026-04-08
+
+### Added
+
+- **Multi-transport support**: `SynapConfig` now accepts a `transport`
+  argument of `"synaprpc"` (default), `"resp3"` or `"http"`. SynapRPC
+  opens a persistent TCP connection and frames requests with MessagePack,
+  preserving numeric/bool/bytes types. RESP3 speaks the Redis wire
+  protocol. Unmapped commands (queues, streams, pub/sub, scripting,
+  transactions…) fall back to HTTP automatically.
+- **New config options**: `rpc_host`, `rpc_port`, `resp3_host`,
+  `resp3_port` for overriding binary listener endpoints (defaults
+  `127.0.0.1:15501` and `127.0.0.1:6379`).
+
+### Changed
+
+- SDK version aligned with the server and sibling SDKs (`0.2.0 → 0.10.0`).
+
 ## [0.2.0] - 2025-10-25
 
 ### Added - Redis Data Structures 🎉

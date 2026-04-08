@@ -104,6 +104,59 @@ console.log(exec);
 
 ---
 
+## Transports
+
+Since v0.10.0 the SDK speaks three wire protocols, selectable per-client:
+
+| Transport    | Default addr       | When to use                                               |
+|--------------|--------------------|-----------------------------------------------------------|
+| **SynapRPC** | `127.0.0.1:15501`  | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency, preserves numeric/bool/bytes types on the wire. |
+| **RESP3**    | `127.0.0.1:6379`   | Redis-compatible text protocol — interop with existing Redis tooling. |
+| **HTTP**     | from `url`         | Original REST transport. Always required as the fallback channel. |
+
+> **Why `url` is always required.** SynapRPC and RESP3 only map KV, Hash,
+> List, Set, Sorted Set and Bitmap commands. Queues, streams, pub/sub,
+> scripting, transactions and anything unmapped fall back to HTTP REST
+> automatically — so the HTTP `url` must always point at a reachable
+> listener even when you pick a binary transport.
+
+```typescript
+import { Synap } from '@hivehub/synap';
+
+// SynapRPC (default, recommended)
+const synap = new Synap({
+  url: 'http://127.0.0.1:15500',
+  transport: 'synaprpc',        // optional — this is the default
+  rpcHost: '127.0.0.1',         // optional
+  rpcPort: 15501,               // optional
+});
+
+// RESP3 (Redis-compatible)
+const redisCompat = new Synap({
+  url: 'http://127.0.0.1:15500',
+  transport: 'resp3',
+  resp3Host: '127.0.0.1',
+  resp3Port: 6379,
+});
+
+// Pure HTTP (no binary transport)
+const httpOnly = new Synap({
+  url: 'http://127.0.0.1:15500',
+  transport: 'http',
+});
+```
+
+### End-to-end tests
+
+A real-server E2E suite covers all three transports and cross-transport
+consistency. Build the server first, then:
+
+```bash
+RUN_E2E=true npx vitest run src/__tests__/e2e.test.ts
+```
+
+---
+
 ## Transactions Helper
 
 ```typescript

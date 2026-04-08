@@ -46,7 +46,17 @@ function fromWireValue(wire: unknown): unknown {
     if ('Int' in w) return w.Int;
     if ('Float' in w) return w.Float;
     if ('Bool' in w) return w.Bool;
-    if ('Bytes' in w) return w.Bytes;
+    if ('Bytes' in w) {
+      // Stored KV values are UTF-8 strings on the wire; decode for SDK consumers.
+      const b = w.Bytes;
+      if (b instanceof Uint8Array || Buffer.isBuffer(b)) {
+        return Buffer.from(b as Uint8Array).toString('utf8');
+      }
+      if (Array.isArray(b)) {
+        return Buffer.from(b as number[]).toString('utf8');
+      }
+      return b;
+    }
     if ('Array' in w) {
       return (w.Array as unknown[]).map(fromWireValue);
     }
@@ -211,11 +221,8 @@ export class Resp3Transport {
   private readonly port: number;
   private readonly timeoutMs: number;
   private socket: net.Socket | null = null;
-  private lineBuffer = '';
-  private binBuffer = Buffer.alloc(0);
-  private resolveNext: ((line: string) => void) | null = null;
-  private resolveBin: ((buf: Buffer) => void) | null = null;
-  private binExpected = 0;
+  private buffer: Buffer = Buffer.alloc(0);
+  private waiter: (() => void) | null = null;
   private readonly queue: Array<() => void> = [];
   private busy = false;
 
@@ -232,33 +239,16 @@ export class Resp3Transport {
 
       sock.once('connect', () => {
         this.socket = sock;
-        this.lineBuffer = '';
-        this.binBuffer = Buffer.alloc(0);
+        this.buffer = Buffer.alloc(0);
         resolve();
       });
 
       sock.on('data', (chunk: Buffer) => {
-        // Fan out data to whoever is waiting.
-        if (this.resolveBin !== null) {
-          this.binBuffer = Buffer.concat([this.binBuffer, chunk]);
-          if (this.binBuffer.length >= this.binExpected + 2) {
-            const data = this.binBuffer.slice(0, this.binExpected);
-            this.binBuffer = this.binBuffer.slice(this.binExpected + 2);
-            const cb = this.resolveBin;
-            this.resolveBin = null;
-            this.binExpected = 0;
-            cb(data);
-          }
-        } else {
-          this.lineBuffer += chunk.toString('utf8');
-          const nl = this.lineBuffer.indexOf('\n');
-          if (nl !== -1 && this.resolveNext !== null) {
-            const line = this.lineBuffer.slice(0, nl + 1);
-            this.lineBuffer = this.lineBuffer.slice(nl + 1);
-            const cb = this.resolveNext;
-            this.resolveNext = null;
-            cb(line);
-          }
+        this.buffer = Buffer.concat([this.buffer, chunk]);
+        const cb = this.waiter;
+        if (cb !== null) {
+          this.waiter = null;
+          cb();
         }
       });
 
@@ -274,25 +264,30 @@ export class Resp3Transport {
     });
   }
 
-  private readLine(): Promise<string> {
-    // If there's already a full line in the buffer, return it immediately.
-    const nl = this.lineBuffer.indexOf('\n');
-    if (nl !== -1) {
-      const line = this.lineBuffer.slice(0, nl + 1);
-      this.lineBuffer = this.lineBuffer.slice(nl + 1);
-      return Promise.resolve(line);
-    }
-    return new Promise((resolve) => { this.resolveNext = resolve; });
+  private waitForData(): Promise<void> {
+    return new Promise((resolve) => { this.waiter = resolve; });
   }
 
-  private readExact(n: number): Promise<Buffer> {
-    if (this.binBuffer.length >= n + 2) {
-      const data = this.binBuffer.slice(0, n);
-      this.binBuffer = this.binBuffer.slice(n + 2);
-      return Promise.resolve(data);
+  private async readLine(): Promise<string> {
+    while (true) {
+      const nl = this.buffer.indexOf(0x0a); // '\n'
+      if (nl !== -1) {
+        const line = this.buffer.slice(0, nl + 1).toString('utf8');
+        this.buffer = this.buffer.slice(nl + 1);
+        return line;
+      }
+      await this.waitForData();
     }
-    this.binExpected = n;
-    return new Promise((resolve) => { this.resolveBin = resolve; });
+  }
+
+  private async readExact(n: number): Promise<Buffer> {
+    // Bulk payloads are followed by CRLF; consume n + 2 bytes total.
+    while (this.buffer.length < n + 2) {
+      await this.waitForData();
+    }
+    const data = Buffer.from(this.buffer.slice(0, n));
+    this.buffer = this.buffer.slice(n + 2);
+    return data;
   }
 
   private async parseValue(): Promise<unknown> {
@@ -618,7 +613,11 @@ export function mapCommand(
  * The raw value comes from RESP3 (JS primitives / arrays) or SynapRPC (fromWireValue).
  */
 export function mapResponse(cmd: string, raw: unknown): unknown {
-  const asInt = (v: unknown, def = 0): number => typeof v === 'number' ? v : parseInt(String(v ?? def), 10);
+  const asInt = (v: unknown, def = 0): number => {
+    if (typeof v === 'number') return v;
+    if (typeof v === 'boolean') return v ? 1 : 0;
+    return parseInt(String(v ?? def), 10);
+  };
   const asFloat = (v: unknown, def = 0.0): number => typeof v === 'number' ? v : parseFloat(String(v ?? def));
   const asArr = (v: unknown): unknown[] => Array.isArray(v) ? v : v == null ? [] : [v];
 

@@ -66,6 +66,44 @@ $delivered = $client->pubsub()->publish('notifications.email', [
 ]);
 ```
 
+## Transports
+
+Since v0.10.0 the SDK speaks three wire protocols, selectable via
+`SynapConfig` builder methods:
+
+| Transport    | Default addr       | When to use                                               |
+|--------------|--------------------|-----------------------------------------------------------|
+| **SynapRPC** | `127.0.0.1:15501`  | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency. |
+| **RESP3**    | `127.0.0.1:6379`   | Redis-compatible text protocol — interop with existing Redis tooling. |
+| **HTTP**     | from `base_url`    | Original REST transport. Always required as the fallback channel. |
+
+> **Why `base_url` is always required.** SynapRPC and RESP3 only map KV,
+> Hash, List, Set, Sorted Set and Bitmap commands. Queues, streams, pub/sub,
+> scripting, transactions and anything unmapped fall back to HTTP REST
+> automatically.
+
+```php
+use Synap\SDK\SynapConfig;
+use Synap\SDK\SynapClient;
+
+// SynapRPC (default, recommended)
+$config = new SynapConfig('http://127.0.0.1:15500'); // SynapRPC is the default
+$client = new SynapClient($config);
+
+// Explicit SynapRPC with custom RPC endpoint
+$config = (new SynapConfig('https://synap.example.com'))
+    ->withSynapRpcTransport()
+    ->withRpcAddr('10.0.0.42', 15501);
+
+// RESP3 (Redis-compatible)
+$config = (new SynapConfig('http://127.0.0.1:15500'))
+    ->withResp3Transport()
+    ->withResp3Addr('127.0.0.1', 6379);
+
+// Pure HTTP (no binary transport)
+$config = (new SynapConfig('http://127.0.0.1:15500'))->withHttpTransport();
+```
+
 ## API Reference
 
 ### Configuration

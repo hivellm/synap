@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-04-08
+
+### Added
+
+- **Multi-transport support**: `SynapConfig` now supports SynapRPC
+  (default), RESP3 and HTTP transports via `WithSynapRpcTransport()`,
+  `WithResp3Transport()`, `WithHttpTransport()`. Override endpoints with
+  `WithRpcAddr(host, port)` / `WithResp3Addr(host, port)`. Unmapped
+  commands fall back to HTTP automatically.
+- SynapRPC uses MessagePack framing over persistent TCP; RESP3 speaks
+  the Redis wire protocol.
+
+### Changed
+
+- SDK version aligned with server and sibling SDKs (`0.2.0 → 0.10.0`).
+
 ## [0.2.0] - 2025-10-25
 
 ### Added - Redis Data Structures 🎉

@@ -4,7 +4,7 @@
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.85%2B)-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/tests-528%2B%20(100%25)-brightgreen.svg)](#testing--quality)
 [![Coverage](https://img.shields.io/badge/coverage-99.30%25-brightgreen.svg)](docs/TESTING.md)
-[![Version](https://img.shields.io/badge/version-0.9.1-blue.svg)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.10.0-blue.svg)](#project-status)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
 
@@ -84,10 +84,46 @@ Synap provides multiple core capabilities in a single, cohesive system:
 - **📖 Rich Examples**: Chat, event broadcasting, task queues, authentication examples, and more
 
 ### 🔗 Protocol Support
-- **🤖 MCP (Model Context Protocol)**: ✅ **PRODUCTION READY** - Configurable tools (KV, Hash, List, Set, Queue, Sorted Set) at `/mcp` endpoint with authentication support
-- **🌐 UMICP (Universal Matrix Inter-Communication Protocol)**: ✅ **PRODUCTION READY** - 13 operations via MCP bridge with TLS support
-- **📡 REST API**: Standard HTTP endpoints for all operations
-- **🔌 WebSocket API**: Real-time bidirectional communication
+
+Synap speaks **four wire protocols** on three separate ports. All SDKs
+(Rust, TypeScript, Python, PHP, C#) support all three data-plane transports
+and can switch between them per-client.
+
+| Protocol     | Port    | Framing                       | When to use                                             |
+|--------------|---------|-------------------------------|---------------------------------------------------------|
+| **SynapRPC** | `15501` | MessagePack over TCP          | **✅ Recommended default** — lowest latency, binary, persistent connection, native type fidelity |
+| **RESP3**    | `6379`  | Redis text protocol over TCP  | Redis-compatible tooling, `redis-cli`, existing Redis client libraries |
+| **HTTP/REST**| `15500` | JSON over HTTP                | Ad-hoc `curl`, webhooks, browsers, commands not yet mapped to binary transports |
+| **WebSocket**| `15500` | HTTP upgrade                  | Real-time subscriptions, reactive pub/sub, streaming consumers |
+
+> **💡 Recommendation — use SynapRPC.**
+> SynapRPC is the preferred transport for production workloads: it keeps a
+> persistent multiplexed TCP connection, avoids HTTP framing overhead, and
+> preserves integer/float/bool/bytes types on the wire (no stringification).
+> In benchmarks it consistently beats HTTP by a wide margin on small-value
+> KV workloads. Enable it with:
+>
+> ```ts
+> // TypeScript
+> const synap = new Synap({ transport: 'synaprpc', rpcHost: '127.0.0.1', rpcPort: 15501 });
+> ```
+> ```rust
+> // Rust — SynapRPC is the default transport.
+> // The HTTP base_url is still required: commands not mapped to the binary
+> // transport (queues, streams, pub/sub, scripting…) fall back to REST.
+> // RPC defaults to 127.0.0.1:15501; override with `.with_rpc_addr(host, port)`
+> // if RPC listens on a different host/port than HTTP.
+> let cfg = SynapConfig::new("http://127.0.0.1:15500");
+> ```
+>
+> Commands not yet mapped to a native transport (queues, streams, pub/sub,
+> scripting, …) transparently fall back to HTTP, so switching transports is
+> a drop-in change.
+
+Additional integration protocols:
+
+- **🤖 MCP (Model Context Protocol)**: ✅ **PRODUCTION READY** — Configurable tools (KV, Hash, List, Set, Queue, Sorted Set) at `/mcp` endpoint with authentication support
+- **🌐 UMICP (Universal Matrix Inter-Communication Protocol)**: ✅ **PRODUCTION READY** — 13 operations via MCP bridge with TLS support
 
 ### 📊 Scalability
 - **📖 Read Scaling**: Multiple replica nodes for distributed reads
