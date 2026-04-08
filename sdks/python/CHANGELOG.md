@@ -119,6 +119,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Linting**: ruff for fast Python linting
 - **Documentation**: Complete docstrings with examples
 
-[unreleased]: https://github.com/hivellm/hivellm/compare/synap-python-v0.1.0...HEAD
-[0.1.0]: https://github.com/hivellm/hivellm/releases/tag/synap-python-v0.1.0
+[unreleased]: https://github.com/hivellm/synap/compare/synap-python-v0.1.0...HEAD
+[0.1.0]: https://github.com/hivellm/synap/releases/tag/synap-python-v0.1.0
 

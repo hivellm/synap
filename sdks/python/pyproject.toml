@@ -27,6 +27,7 @@ classifiers = [
 
 dependencies = [
     "httpx>=0.28.0",
+    "msgpack>=1.1.0",
 ]
 
 [project.optional-dependencies]
@@ -39,10 +40,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/hivellm/hivellm"
-Documentation = "https://github.com/hivellm/hivellm/blob/main/synap/README.md"
-Repository = "https://github.com/hivellm/hivellm"
-Issues = "https://github.com/hivellm/hivellm/issues"
+Homepage = "https://github.com/hivellm/synap"
+Documentation = "https://github.com/hivellm/synap/blob/main/README.md"
+Repository = "https://github.com/hivellm/synap"
+Issues = "https://github.com/hivellm/synap/issues"
 
 [tool.hatch.build.targets.sdist]
 include = [

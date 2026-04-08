@@ -105,6 +105,6 @@ var isMember = await client.Set.IsMemberAsync("tags", "csharp");
 - **Testing**: xUnit with Moq
 - **Documentation**: XML comments for all public APIs
 
-[unreleased]: https://github.com/hivellm/hivellm/compare/synap-csharp-v0.1.0...HEAD
-[0.1.0]: https://github.com/hivellm/hivellm/releases/tag/synap-csharp-v0.1.0
+[unreleased]: https://github.com/hivellm/synap/compare/synap-csharp-v0.1.0...HEAD
+[0.1.0]: https://github.com/hivellm/synap/releases/tag/synap-csharp-v0.1.0
 
