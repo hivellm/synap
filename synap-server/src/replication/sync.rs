@@ -145,7 +145,7 @@ pub async fn apply_snapshot_with_streams(
     for op in operations {
         match op {
             Operation::KVSet { key, value, ttl } => {
-                let _ = kv_store.set(&key, value, ttl).await;
+                let _ = kv_store.set(key, value, ttl).await; // S-12: move owned key
             }
             Operation::StreamPublish {
                 room,

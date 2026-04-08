@@ -1,4 +1,4 @@
-use crate::auth::{Action, AuthContextExtractor, require_permission};
+use crate::auth::{Action, AuthContextExtractor, require_permission, require_resource_permission};
 use crate::core::types::{Expiry, SetOptions};
 use crate::core::{
     GeospatialStore, HashStore, HyperLogLogStore, KVStore, KeyManager, Message, QueueManager,
@@ -258,8 +258,8 @@ pub async fn kv_set(
 ) -> Result<Json<SetResponse>, SynapError> {
     debug!("REST SET key={}", req.key);
 
-    // Check permission
-    require_permission(&ctx, &format!("kv:{}", req.key), Action::Write)?;
+    // Check permission (S-10: zero-alloc when auth is disabled)
+    require_resource_permission(&ctx, "kv:", &req.key, Action::Write)?;
 
     // Apply multi-tenant scoping if Hub mode is active
 
@@ -290,8 +290,33 @@ pub async fn kv_set(
         .map(|p| p.is_sync_durability())
         .unwrap_or(false);
 
-    // Resolve expiry: `expiry` field takes precedence over legacy `ttl`
-    let expiry = req.expiry.or_else(|| req.ttl.map(Expiry::Seconds));
+    // Read the clock ONCE here (S-07) and convert relative expiries to absolute ms.
+    // Expiry::to_unix_ms() inside set_with_opts will see UnixMilliseconds and skip
+    // an additional clock read, giving us a single SystemTime::now() call per SET.
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+
+    // Resolve expiry: `expiry` field takes precedence over legacy `ttl`.
+    // Convert to absolute-ms form using the pre-read clock.
+    let expiry = req
+        .expiry
+        .or_else(|| req.ttl.map(Expiry::Seconds))
+        .map(|e| match e {
+            Expiry::Seconds(s) => {
+                Expiry::UnixMilliseconds(now_ms.saturating_add(s.saturating_mul(1_000)))
+            }
+            Expiry::Milliseconds(ms) => Expiry::UnixMilliseconds(now_ms.saturating_add(ms)),
+            already_absolute => already_absolute,
+        });
+
+    // Clone value only when WAL persistence is active; move the original into set_with_opts.
+    let wal_value = if state.persistence.is_some() {
+        Some(value_bytes.clone())
+    } else {
+        None
+    };
 
     // WAL write-ahead (sync mode): log BEFORE writing to memory
     if is_sync {
@@ -302,7 +327,11 @@ pub async fn kv_set(
                 _ => None,
             });
             persistence
-                .log_kv_set(scoped_key.clone(), value_bytes.clone(), ttl_secs)
+                .log_kv_set(
+                    scoped_key.clone().into_owned(),
+                    value_bytes.clone(),
+                    ttl_secs,
+                )
                 .await
                 .map_err(|e| {
                     error!("WAL write failed (sync mode), aborting SET: {}", e);
@@ -318,10 +347,10 @@ pub async fn kv_set(
         return_old: req.get,
     };
 
-    // Set in KV store (with full NX/XX/GET/KEEPTTL support)
+    // Set in KV store — move value_bytes (no extra clone when WAL is disabled).
     let result = state
         .kv_store
-        .set_with_opts(&scoped_key, value_bytes.clone(), expiry, opts)
+        .set_with_opts(&scoped_key, value_bytes, expiry, opts)
         .await?;
 
     // Async WAL: log after memory write (default, Periodic/Never modes)
@@ -333,14 +362,17 @@ pub async fn kv_set(
                 Expiry::Milliseconds(ms) => Some(ms / 1_000),
                 _ => None,
             });
-            if let Err(e) = persistence
-                .log_kv_set(scoped_key, value_bytes, ttl_secs)
-                .await
-            {
-                error!(
-                    "Failed to log KV SET to WAL (async mode, data in memory): {}",
-                    e
-                );
+            // wal_value is Some when persistence is active (cloned above).
+            if let Some(wv) = wal_value {
+                if let Err(e) = persistence
+                    .log_kv_set(scoped_key.into_owned(), wv, ttl_secs)
+                    .await
+                {
+                    error!(
+                        "Failed to log KV SET to WAL (async mode, data in memory): {}",
+                        e
+                    );
+                }
             }
         }
     }
@@ -371,7 +403,7 @@ pub async fn kv_get(
     debug!("REST GET key={}, type={}", key, return_type);
 
     // Check permission
-    require_permission(&ctx, &format!("kv:{}", key), Action::Read)?;
+    require_resource_permission(&ctx, "kv:", &key, Action::Read)?;
 
     // Apply multi-tenant scoping if Hub mode is active
 
@@ -410,7 +442,7 @@ pub async fn kv_delete(
     debug!("REST DELETE key={}", key);
 
     // Check permission
-    require_permission(&ctx, &format!("kv:{}", key), Action::Delete)?;
+    require_resource_permission(&ctx, "kv:", &key, Action::Delete)?;
 
     // Apply multi-tenant scoping if Hub mode is active
 
@@ -422,7 +454,7 @@ pub async fn kv_delete(
     // Log to WAL if persistence is enabled
     if deleted {
         if let Some(ref persistence) = state.persistence {
-            if let Err(e) = persistence.log_kv_del(vec![scoped_key]).await {
+            if let Err(e) = persistence.log_kv_del(vec![scoped_key.into_owned()]).await {
                 error!("Failed to log KV DELETE to WAL: {}", e);
             }
         }
@@ -562,7 +594,7 @@ pub async fn kv_append(
     debug!("REST APPEND key={}", key);
 
     // Check permission
-    require_permission(&ctx, &format!("kv:{}", key), Action::Write)?;
+    require_resource_permission(&ctx, "kv:", &key, Action::Write)?;
 
     // Apply multi-tenant scoping if Hub mode is active
 
@@ -577,7 +609,10 @@ pub async fn kv_append(
     // Log to WAL (async, non-blocking)
     if let Some(ref persistence) = state.persistence {
         // APPEND is logged as SET since we reconstruct full value
-        if let Err(e) = persistence.log_kv_set(scoped_key, vec![], None).await {
+        if let Err(e) = persistence
+            .log_kv_set(scoped_key.into_owned(), vec![], None)
+            .await
+        {
             error!("Failed to log KV APPEND to WAL: {}", e);
         }
     }
@@ -606,7 +641,7 @@ pub async fn kv_getrange(
     debug!("REST GETRANGE key={}, start={}, end={}", key, start, end);
 
     // Check permission
-    require_permission(&ctx, &format!("kv:{}", key), Action::Read)?;
+    require_resource_permission(&ctx, "kv:", &key, Action::Read)?;
 
     // Apply multi-tenant scoping if Hub mode is active
 
@@ -638,7 +673,7 @@ pub async fn kv_setrange(
     debug!("REST SETRANGE key={}, offset={}", key, req.offset);
 
     // Check permission
-    require_permission(&ctx, &format!("kv:{}", key), Action::Write)?;
+    require_resource_permission(&ctx, "kv:", &key, Action::Write)?;
 
     // Apply multi-tenant scoping if Hub mode is active
 
@@ -656,7 +691,10 @@ pub async fn kv_setrange(
     // Log to WAL (async, non-blocking)
     if let Some(ref persistence) = state.persistence {
         // SETRANGE is logged as SET since we reconstruct full value
-        if let Err(e) = persistence.log_kv_set(scoped_key, vec![], None).await {
+        if let Err(e) = persistence
+            .log_kv_set(scoped_key.into_owned(), vec![], None)
+            .await
+        {
             error!("Failed to log KV SETRANGE to WAL: {}", e);
         }
     }
@@ -675,7 +713,7 @@ pub async fn kv_strlen(
     debug!("REST STRLEN key={}", key);
 
     // Check permission
-    require_permission(&ctx, &format!("kv:{}", key), Action::Read)?;
+    require_resource_permission(&ctx, "kv:", &key, Action::Read)?;
 
     // Apply multi-tenant scoping if Hub mode is active
 
@@ -699,7 +737,7 @@ pub async fn kv_getset(
     debug!("REST GETSET key={}", key);
 
     // Check permission
-    require_permission(&ctx, &format!("kv:{}", key), Action::Write)?;
+    require_resource_permission(&ctx, "kv:", &key, Action::Write)?;
 
     // Apply multi-tenant scoping if Hub mode is active
 
@@ -716,7 +754,10 @@ pub async fn kv_getset(
 
     // Log to WAL (async, non-blocking)
     if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence.log_kv_set(scoped_key, value_bytes, None).await {
+        if let Err(e) = persistence
+            .log_kv_set(scoped_key.into_owned(), value_bytes, None)
+            .await
+        {
             error!("Failed to log KV GETSET to WAL: {}", e);
         }
     }
@@ -749,7 +790,7 @@ pub async fn kv_msetnx(
                 MSetNxPair::Object { key: k, value: v } => (k, v),
             };
             // Check permission
-            require_permission(&ctx, &format!("kv:{}", key), Action::Write)?;
+            require_resource_permission(&ctx, "kv:", &key, Action::Write)?;
             let value_bytes = serde_json::to_vec(&value)
                 .map_err(|e| SynapError::SerializationError(e.to_string()))?;
             Ok((key, value_bytes))
@@ -763,7 +804,7 @@ pub async fn kv_msetnx(
         .map(|(key, value)| {
             let scoped_key =
                 crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), key);
-            (scoped_key, value.clone())
+            (scoped_key.into_owned(), value.clone())
         })
         .collect();
 
@@ -843,7 +884,7 @@ pub async fn key_type(
     debug!("REST TYPE key={}", key);
 
     // Check permission
-    require_permission(&ctx, &format!("kv:{}", key), Action::Read)?;
+    require_resource_permission(&ctx, "kv:", &key, Action::Read)?;
 
     // Apply multi-tenant scoping if Hub mode is active
 
@@ -870,7 +911,7 @@ pub async fn key_exists(
     debug!("REST EXISTS key={}", key);
 
     // Check permission
-    require_permission(&ctx, &format!("kv:{}", key), Action::Read)?;
+    require_resource_permission(&ctx, "kv:", &key, Action::Read)?;
 
     // Apply multi-tenant scoping if Hub mode is active
 
@@ -901,8 +942,8 @@ pub async fn key_rename(
     );
 
     // Check permissions for both source and destination
-    require_permission(&ctx, &format!("kv:{}", source), Action::Delete)?;
-    require_permission(&ctx, &format!("kv:{}", req.destination), Action::Write)?;
+    require_resource_permission(&ctx, "kv:", &source, Action::Delete)?;
+    require_resource_permission(&ctx, "kv:", &req.destination, Action::Write)?;
 
     // Apply multi-tenant scoping if Hub mode is active
 
@@ -919,7 +960,10 @@ pub async fn key_rename(
 
     // Log to WAL if persistence is enabled
     if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence.log_kv_rename(scoped_source, scoped_dest).await {
+        if let Err(e) = persistence
+            .log_kv_rename(scoped_source.into_owned(), scoped_dest.into_owned())
+            .await
+        {
             error!("Failed to log RENAME to WAL: {}", e);
             // Don't fail the request, just log the error
         }
@@ -947,8 +991,8 @@ pub async fn key_renamenx(
     );
 
     // Check permissions for both source and destination
-    require_permission(&ctx, &format!("kv:{}", source), Action::Delete)?;
-    require_permission(&ctx, &format!("kv:{}", req.destination), Action::Write)?;
+    require_resource_permission(&ctx, "kv:", &source, Action::Delete)?;
+    require_resource_permission(&ctx, "kv:", &req.destination, Action::Write)?;
 
     // Apply multi-tenant scoping if Hub mode is active
 
@@ -991,8 +1035,8 @@ pub async fn key_copy(
     );
 
     // Check permissions for both source and destination
-    require_permission(&ctx, &format!("kv:{}", source), Action::Read)?;
-    require_permission(&ctx, &format!("kv:{}", req.destination), Action::Write)?;
+    require_resource_permission(&ctx, "kv:", &source, Action::Read)?;
+    require_resource_permission(&ctx, "kv:", &req.destination, Action::Write)?;
 
     // Apply multi-tenant scoping if Hub mode is active
 
@@ -8325,6 +8369,7 @@ pub async fn set_inter(
         .iter()
         .map(|key| {
             crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), key)
+                .into_owned()
         })
         .collect();
 
@@ -8371,6 +8416,7 @@ pub async fn set_union(
         .iter()
         .map(|key| {
             crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), key)
+                .into_owned()
         })
         .collect();
 
@@ -8417,6 +8463,7 @@ pub async fn set_diff(
         .iter()
         .map(|key| {
             crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), key)
+                .into_owned()
         })
         .collect();
 
@@ -9154,6 +9201,7 @@ pub async fn hyperloglog_pfmerge(
         .iter()
         .map(|key| {
             crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), key)
+                .into_owned()
         })
         .collect();
 
@@ -9397,6 +9445,7 @@ pub async fn bitmap_bitop(
         .iter()
         .map(|key| {
             crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), key)
+                .into_owned()
         })
         .collect();
 

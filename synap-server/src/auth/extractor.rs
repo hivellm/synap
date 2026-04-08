@@ -60,6 +60,29 @@ pub fn require_permission(
     }
 }
 
+/// Zero-allocation permission check for namespaced resources (S-10).
+///
+/// When `is_admin = true` (auth disabled or admin user), returns `Ok(())` immediately
+/// without constructing the `"prefix:key"` resource string — eliminating a heap
+/// allocation on every handler invocation in the common (auth-disabled) case.
+/// Only builds the resource string when ACL actually needs to be evaluated.
+pub fn require_resource_permission(
+    ctx: &AuthContext,
+    prefix: &str,
+    key: impl AsRef<str>,
+    action: super::Action,
+) -> Result<(), crate::core::SynapError> {
+    // Fast path: admin/auth-disabled — no ACL string needed.
+    if ctx.is_admin {
+        return Ok(());
+    }
+    let key = key.as_ref();
+    let mut resource = String::with_capacity(prefix.len() + key.len());
+    resource.push_str(prefix);
+    resource.push_str(key);
+    require_permission(ctx, &resource, action)
+}
+
 /// Helper function to require authentication
 ///
 /// Returns a SynapError::Unauthorized with 401 Unauthorized status

@@ -752,7 +752,7 @@ async fn test_kv_keys_list_replication() {
 
     // Add keys
     let expected_keys = vec!["alpha", "beta", "gamma", "delta", "epsilon"];
-    for key in &expected_keys {
+    for &key in &expected_keys {
         master_kv.set(key, b"value".to_vec(), None).await.unwrap();
     }
 

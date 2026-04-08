@@ -132,7 +132,7 @@ pub async fn recover(
     for entry in entries {
         match entry.operation {
             Operation::KVSet { key, value, ttl } => {
-                kv_store.set(&key, value, ttl).await?;
+                kv_store.set(key, value, ttl).await?; // S-12: move owned key, no extra alloc
                 replayed += 1;
             }
             Operation::KVDel { keys } => {
@@ -151,8 +151,8 @@ pub async fn recover(
                     // Get TTL from source key
                     let ttl = kv_store.ttl(&source).await?;
 
-                    // Set destination with same value and TTL
-                    kv_store.set(&destination, data, ttl).await?;
+                    // Set destination with same value and TTL — move destination (S-12).
+                    kv_store.set(destination, data, ttl).await?;
 
                     // Delete source
                     kv_store.delete(&source).await?;

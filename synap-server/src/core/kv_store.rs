@@ -300,15 +300,25 @@ impl KVStore {
         })
     }
 
-    /// Set a key-value pair
-    pub async fn set(&self, key: &str, value: Vec<u8>, ttl_secs: Option<u64>) -> Result<()> {
+    /// Set a key-value pair.
+    ///
+    /// S-12: accepts `impl Into<String>` so callers that already hold an owned `String`
+    /// (recovery, replication, transactions) avoid the internal `to_string()` allocation.
+    /// Callers with `&str` / string literals still work without any change.
+    pub async fn set(
+        &self,
+        key: impl Into<String>,
+        value: Vec<u8>,
+        ttl_secs: Option<u64>,
+    ) -> Result<()> {
+        let key: String = key.into();
         debug!("SET key={}, size={}, ttl={:?}", key, value.len(), ttl_secs);
 
         // Check cluster routing (returns error if key doesn't belong to this node)
-        self.check_cluster_routing(key)?;
+        self.check_cluster_routing(&key)?;
 
         let stored = StoredValue::new(value.clone(), ttl_secs);
-        let entry_size = self.estimate_entry_size(key, &stored);
+        let entry_size = self.estimate_entry_size(&key, &stored);
 
         // Check memory limits — evict if policy allows, error on noeviction.
         {
@@ -335,10 +345,16 @@ impl KVStore {
             }
         }
 
-        // Insert value in the appropriate shard
-        let shard = self.get_shard(key);
+        // Insert value in the appropriate shard — key moved directly, no extra allocation.
+        let shard = self.get_shard(&key);
         let mut data = shard.data.write();
-        let old = data.insert(key.to_string(), stored);
+
+        // Save key length before moving key into the HashMap (needed for overwrite accounting).
+        let key_len = key.len();
+        // Clone key for cache before moving it into the HashMap.
+        let cache_key = self.cache.as_ref().map(|_| key.clone());
+
+        let old = data.insert(key, stored);
         let is_new = old.is_none();
 
         // Update stats atomically — no global lock
@@ -349,15 +365,15 @@ impl KVStore {
                 .total_memory_bytes
                 .fetch_add(entry_size as i64, Ordering::Relaxed);
         } else if let Some(ref old_val) = old {
-            // Overwrite: subtract old size, add new size
-            let old_size = self.estimate_entry_size(key, old_val);
+            // Overwrite: subtract old size, add new size (key length unchanged).
+            let old_size = key_len + old_val.data().len() + std::mem::size_of::<StoredValue>();
             self.stats
                 .total_memory_bytes
                 .fetch_add(entry_size as i64 - old_size as i64, Ordering::Relaxed);
         }
 
         // Update cache
-        if let Some(ref cache) = self.cache {
+        if let (Some(cache), Some(k)) = (&self.cache, cache_key) {
             let cache_ttl = ttl_secs.map(|secs| {
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -365,7 +381,7 @@ impl KVStore {
                     .as_secs()
                     + secs
             });
-            cache.put(key.to_string(), value, cache_ttl);
+            cache.put(k, value, cache_ttl);
         }
 
         Ok(())
@@ -728,8 +744,55 @@ impl KVStore {
     pub async fn mset(&self, pairs: Vec<(String, Vec<u8>)>) -> Result<()> {
         debug!("MSET count={}", pairs.len());
 
+        // Group pairs by shard so we acquire each shard's write lock only once.
+        let mut by_shard: Vec<Vec<(String, Vec<u8>)>> = (0..SHARD_COUNT).map(|_| vec![]).collect();
         for (key, value) in pairs {
-            self.set(&key, value, None).await?;
+            self.check_cluster_routing(&key)?;
+            let idx = self.shard_for_key(&key);
+            by_shard[idx].push((key, value));
+        }
+
+        for (idx, group) in by_shard.into_iter().enumerate() {
+            if group.is_empty() {
+                continue;
+            }
+
+            // Memory limit check before the write lock (rough estimate per group).
+            let group_size: usize = group
+                .iter()
+                .map(|(k, v)| k.len() + v.len() + std::mem::size_of::<StoredValue>())
+                .sum();
+            {
+                let current = self.stats.total_memory_bytes.load(Ordering::Relaxed);
+                let max_bytes = (self.config.max_memory_mb * 1024 * 1024) as i64;
+                if current + group_size as i64 > max_bytes {
+                    if self.config.eviction_policy == EvictionPolicy::NoEviction {
+                        return Err(SynapError::MemoryLimitExceeded);
+                    }
+                    self.evict_until_free(group_size);
+                }
+            }
+
+            let shard = &self.shards[idx];
+            let mut data = shard.data.write();
+            for (key, value) in group {
+                let stored = StoredValue::Persistent(value);
+                let entry_size =
+                    key.len() + stored.data().len() + std::mem::size_of::<StoredValue>();
+                let old = data.insert(key, stored);
+                self.stats.sets.fetch_add(1, Ordering::Relaxed);
+                if old.is_none() {
+                    self.stats.total_keys.fetch_add(1, Ordering::Relaxed);
+                    self.stats
+                        .total_memory_bytes
+                        .fetch_add(entry_size as i64, Ordering::Relaxed);
+                } else if let Some(ref old_val) = old {
+                    let old_size = old_val.data().len() + std::mem::size_of::<StoredValue>();
+                    self.stats
+                        .total_memory_bytes
+                        .fetch_add(entry_size as i64 - old_size as i64, Ordering::Relaxed);
+                }
+            }
         }
 
         Ok(())

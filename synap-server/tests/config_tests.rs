@@ -82,7 +82,7 @@ server:
 
 kv_store:
   max_memory_mb: 2048
-  eviction_policy: "lru"
+  eviction_policy: "allkeys-lru"
   ttl_cleanup_interval_ms: 200
 
 queue:
