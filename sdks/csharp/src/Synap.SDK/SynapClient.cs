@@ -13,6 +13,8 @@ public sealed class SynapClient : IDisposable
     private readonly HttpClient _httpClient;
     private readonly SynapConfig _config;
     private readonly bool _disposeHttpClient;
+    private readonly SynapRpcTransport? _rpcTransport;
+    private readonly Resp3Transport? _resp3Transport;
 
     private KVStore? _kv;
     private HashManager? _hash;
@@ -38,13 +40,17 @@ public sealed class SynapClient : IDisposable
     /// Initializes a new instance of the <see cref="SynapClient"/> class.
     /// </summary>
     /// <param name="config">The client configuration.</param>
-    /// <param name="httpClient">Optional custom HTTP client. If null, a new one will be created.</param>
+    /// <param name="httpClient">
+    /// Optional custom HTTP client. When provided, native transports are disabled so that
+    /// tests can inject a mocked HttpClient without opening TCP connections.
+    /// </param>
     public SynapClient(SynapConfig config, HttpClient? httpClient)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
 
         if (httpClient is not null)
         {
+            // Custom client supplied (usually for testing) — use HTTP only.
             _httpClient = httpClient;
             _disposeHttpClient = false;
         }
@@ -53,14 +59,23 @@ public sealed class SynapClient : IDisposable
             _httpClient = new HttpClient
             {
                 BaseAddress = new Uri(config.BaseUrl),
-                Timeout = TimeSpan.FromSeconds(config.Timeout)
+                Timeout = TimeSpan.FromSeconds(config.Timeout),
             };
             _disposeHttpClient = true;
+
+            // Instantiate native transport based on configured mode.
+            if (config.Transport == TransportMode.SynapRpc)
+            {
+                _rpcTransport = new SynapRpcTransport(config.RpcHost, config.RpcPort, config.Timeout);
+            }
+            else if (config.Transport == TransportMode.Resp3)
+            {
+                _resp3Transport = new Resp3Transport(config.Resp3Host, config.Resp3Port, config.Timeout);
+            }
         }
 
         _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
 
-        // Add authentication headers
         if (!string.IsNullOrWhiteSpace(config.AuthToken))
         {
             _httpClient.DefaultRequestHeaders.Authorization =
@@ -69,78 +84,55 @@ public sealed class SynapClient : IDisposable
         else if (!string.IsNullOrWhiteSpace(config.Username) && !string.IsNullOrWhiteSpace(config.Password))
         {
             var credentials = Convert.ToBase64String(
-                System.Text.Encoding.UTF8.GetBytes($"{config.Username}:{config.Password}")
-            );
+                System.Text.Encoding.UTF8.GetBytes($"{config.Username}:{config.Password}"));
             _httpClient.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Basic", credentials);
         }
     }
 
-    /// <summary>
-    /// Gets the Key-Value Store operations.
-    /// </summary>
+    /// <summary>Gets the Key-Value Store operations.</summary>
     public KVStore KV => _kv ??= new KVStore(this);
 
-    /// <summary>
-    /// Gets the Hash data structure operations.
-    /// </summary>
+    /// <summary>Gets the Hash data structure operations.</summary>
     public HashManager Hash => _hash ??= new HashManager(this);
 
-    /// <summary>
-    /// Gets the List data structure operations.
-    /// </summary>
+    /// <summary>Gets the List data structure operations.</summary>
     public ListManager List => _list ??= new ListManager(this);
 
-    /// <summary>
-    /// Gets the Set data structure operations.
-    /// </summary>
+    /// <summary>Gets the Set data structure operations.</summary>
     public SetManager Set => _set ??= new SetManager(this);
 
-    /// <summary>
-    /// Gets the Queue operations.
-    /// </summary>
+    /// <summary>Gets the Queue operations.</summary>
     public QueueManager Queue => _queue ??= new QueueManager(this);
 
-    /// <summary>
-    /// Gets the Stream operations.
-    /// </summary>
+    /// <summary>Gets the Stream operations.</summary>
     public StreamManager Stream => _stream ??= new StreamManager(this);
 
-    /// <summary>
-    /// Gets the Pub/Sub operations.
-    /// </summary>
+    /// <summary>Gets the Pub/Sub operations.</summary>
     public PubSubManager PubSub => _pubsub ??= new PubSubManager(this);
 
-    /// <summary>
-    /// Gets the Bitmap operations.
-    /// </summary>
+    /// <summary>Gets the Bitmap operations.</summary>
     public BitmapManager Bitmap => _bitmap ??= new BitmapManager(this);
 
-    /// <summary>
-    /// Gets the HyperLogLog operations.
-    /// </summary>
+    /// <summary>Gets the HyperLogLog operations.</summary>
     public HyperLogLogManager HyperLogLog => _hyperloglog ??= new HyperLogLogManager(this);
 
-    /// <summary>
-    /// Gets the Geospatial operations.
-    /// </summary>
+    /// <summary>Gets the Geospatial operations.</summary>
     public GeospatialManager Geospatial => _geospatial ??= new GeospatialManager(this);
 
-    /// <summary>
-    /// Gets the Transaction operations.
-    /// </summary>
+    /// <summary>Gets the Transaction operations.</summary>
     public TransactionManager Transaction => _transaction ??= new TransactionManager(this);
 
-    /// <summary>
-    /// Gets the client configuration.
-    /// </summary>
+    /// <summary>Gets the client configuration.</summary>
     public SynapConfig Config => _config;
 
     /// <summary>
-    /// Executes a StreamableHTTP operation on the Synap server.
+    /// Executes a Synap operation, routing through native transport when available.
+    /// Falls back to HTTP for operations that are not mapped to native commands
+    /// (e.g. queues, streams, pub/sub).
     /// </summary>
     /// <param name="operation">The operation type (e.g., 'kv.set', 'queue.publish').</param>
-    /// <param name="target">The target resource (e.g., key name, queue name).</param>
+    /// <param name="target">The target resource (key name, queue name, etc.).</param>
     /// <param name="data">The operation data.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>The response as a JSON document.</returns>
@@ -151,21 +143,88 @@ public sealed class SynapClient : IDisposable
         Dictionary<string, object?>? data = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        // Assemble payload (merge target into the data dict as "key" or "destination").
+        var payloadData = data is not null
+            ? new Dictionary<string, object?>(data)
+            : new Dictionary<string, object?>();
+
+        if (!string.IsNullOrEmpty(target))
+        {
+            if (operation.StartsWith("bitmap.bitop", StringComparison.Ordinal) ||
+                operation.StartsWith("hyperloglog.pfmerge", StringComparison.Ordinal))
+            {
+                payloadData["destination"] = target;
+            }
+            else
+            {
+                payloadData["key"] = target;
+            }
+        }
+
+        // Try native transport for mapped commands.
+        if (_rpcTransport is not null)
+        {
+            var mapped = CommandMapper.MapCommand(operation, payloadData);
+            if (mapped.HasValue)
+            {
+                var (cmd, args) = mapped.Value;
+                try
+                {
+                    var raw = await _rpcTransport.ExecuteAsync(cmd, args, cancellationToken).ConfigureAwait(false);
+                    var responseDict = CommandMapper.MapResponse(operation, raw);
+                    return DictToJsonDocument(responseDict);
+                }
+                catch (SynapException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    throw SynapException.NetworkError($"SynapRPC error: {ex.Message}");
+                }
+            }
+        }
+        else if (_resp3Transport is not null)
+        {
+            var mapped = CommandMapper.MapCommand(operation, payloadData);
+            if (mapped.HasValue)
+            {
+                var (cmd, args) = mapped.Value;
+                try
+                {
+                    var raw = await _resp3Transport.ExecuteAsync(cmd, args, cancellationToken).ConfigureAwait(false);
+                    var responseDict = CommandMapper.MapResponse(operation, raw);
+                    return DictToJsonDocument(responseDict);
+                }
+                catch (SynapException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    throw SynapException.NetworkError($"RESP3 error: {ex.Message}");
+                }
+            }
+        }
+
+        // HTTP fallback (always available, also used for queue/stream/pubsub/transaction).
+        return await ExecuteHttpAsync(operation, payloadData, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<JsonDocument> ExecuteHttpAsync(
+        string operation,
+        Dictionary<string, object?> payloadData,
+        CancellationToken cancellationToken)
+    {
         try
         {
-            // Convert to StreamableHTTP format: { "command": "...", "payload": {...}, "request_id": "..." }
-            var requestPayload = data != null 
-                ? new Dictionary<string, object?>(data) 
-                : new Dictionary<string, object?>();
-            
-            // Don't include target in payload - it's not used by the server
-            // The key/parameters should be in the payload data dictionary
-            
             var payload = new Dictionary<string, object?>
             {
                 ["command"] = operation,
-                ["payload"] = requestPayload,
-                ["request_id"] = Guid.NewGuid().ToString()
+                ["payload"] = payloadData,
+                ["request_id"] = Guid.NewGuid().ToString(),
             };
 
             var response = await _httpClient.PostAsJsonAsync(
@@ -197,17 +256,16 @@ public sealed class SynapClient : IDisposable
                     (int)response.StatusCode);
             }
 
-            // Check StreamableHTTP envelope for success/error
             if (result.RootElement.TryGetProperty("success", out var successElement))
             {
-                var success = successElement.GetBoolean();
-                if (!success)
+                if (!successElement.GetBoolean())
                 {
                     var errorMessage = "Unknown error";
                     if (result.RootElement.TryGetProperty("error", out var errorElement))
                     {
                         errorMessage = errorElement.GetString() ?? errorMessage;
                     }
+
                     throw SynapException.ServerError(errorMessage);
                 }
             }
@@ -220,7 +278,7 @@ public sealed class SynapClient : IDisposable
         }
         catch (TaskCanceledException ex) when (ex.CancellationToken == cancellationToken)
         {
-            throw; // Rethrow if it was our cancellation token
+            throw;
         }
         catch (TaskCanceledException ex)
         {
@@ -228,15 +286,21 @@ public sealed class SynapClient : IDisposable
         }
     }
 
-    /// <summary>
-    /// Disposes the client and releases resources.
-    /// </summary>
+    private static JsonDocument DictToJsonDocument(Dictionary<string, object?> dict)
+    {
+        var json = JsonSerializer.Serialize(dict);
+        return JsonDocument.Parse(json);
+    }
+
+    /// <summary>Disposes the client and releases resources.</summary>
     public void Dispose()
     {
+        _rpcTransport?.Dispose();
+        _resp3Transport?.Dispose();
+
         if (_disposeHttpClient)
         {
             _httpClient.Dispose();
         }
     }
 }
-

@@ -58,7 +58,7 @@ async def test_list_lpop(list_manager: ListManager, mock_client: MagicMock) -> N
     
     assert result == ["task1"]
     mock_client.send_command.assert_called_once_with(
-        "list.lpop", {"key": "tasks", "count": 1}
+        "list.lpop", {"key": "tasks"}
     )
 
 

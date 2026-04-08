@@ -13,7 +13,10 @@ pub async fn create_mock_server() -> ServerGuard {
 #[allow(dead_code)] // Used by other test modules
 pub async fn setup_test_client() -> (SynapClient, ServerGuard) {
     let server = create_mock_server().await;
-    let config = SynapConfig::new(server.url()).with_timeout(std::time::Duration::from_secs(5)); // Timeout adequado para testes
+    // Use HTTP transport for mock-server tests (mockito intercepts HTTP only).
+    let config = SynapConfig::new(server.url())
+        .with_http_transport()
+        .with_timeout(std::time::Duration::from_secs(5));
     let client = SynapClient::new(config).unwrap();
     (client, server)
 }

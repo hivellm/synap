@@ -22,6 +22,7 @@ async-trait = "0.1"
 url = "2.5"
 uuid = { version = "1.11", features = ["v4"] }
 base64 = "0.22"
+rmp-serde = "1"
 
 # RxJS-style reactive programming
 futures = "0.3"
@@ -30,10 +31,14 @@ async-stream = "0.3"
 pin-project = "1.1"
 tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
 
+[features]
+e2e = []
+
 [dev-dependencies]
 tokio-test = "0.4"
 mockito = "1.6"
 tracing-subscriber = "0.3"
+tempfile = "3"
 
 [lib]
 name = "synap_sdk"

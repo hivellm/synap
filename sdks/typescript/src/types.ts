@@ -35,6 +35,14 @@ export interface SynapResponse<T = any> {
 // ==================== CLIENT CONFIGURATION ====================
 
 /**
+ * Transport protocol selection.
+ * - `'synaprpc'` (default): MessagePack-framed binary protocol over TCP (port 15501)
+ * - `'resp3'`: Redis-compatible text protocol over TCP (port 6379)
+ * - `'http'`: JSON REST over HTTP (port 15500)
+ */
+export type TransportMode = 'synaprpc' | 'resp3' | 'http';
+
+/**
  * Synap client configuration options
  */
 export interface SynapClientOptions {
@@ -48,6 +56,19 @@ export interface SynapClientOptions {
   auth?: AuthOptions;
   /** Retry configuration */
   retry?: RetryOptions;
+  /**
+   * Transport protocol (default: 'synaprpc').
+   * Mapped commands use the native transport; unmapped commands fall back to HTTP.
+   */
+  transport?: TransportMode;
+  /** SynapRPC host (default: '127.0.0.1') */
+  rpcHost?: string;
+  /** SynapRPC port (default: 15501) */
+  rpcPort?: number;
+  /** RESP3 host (default: '127.0.0.1') */
+  resp3Host?: string;
+  /** RESP3 port (default: 6379) */
+  resp3Port?: number;
 }
 
 /**

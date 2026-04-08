@@ -879,83 +879,62 @@
             Initializes a new instance of the <see cref="T:Synap.SDK.SynapClient"/> class.
             </summary>
             <param name="config">The client configuration.</param>
-            <param name="httpClient">Optional custom HTTP client. If null, a new one will be created.</param>
+            <param name="httpClient">
+            Optional custom HTTP client. When provided, native transports are disabled so that
+            tests can inject a mocked HttpClient without opening TCP connections.
+            </param>
         </member>
         <member name="P:Synap.SDK.SynapClient.KV">
-            <summary>
-            Gets the Key-Value Store operations.
-            </summary>
+            <summary>Gets the Key-Value Store operations.</summary>
         </member>
         <member name="P:Synap.SDK.SynapClient.Hash">
-            <summary>
-            Gets the Hash data structure operations.
-            </summary>
+            <summary>Gets the Hash data structure operations.</summary>
         </member>
         <member name="P:Synap.SDK.SynapClient.List">
-            <summary>
-            Gets the List data structure operations.
-            </summary>
+            <summary>Gets the List data structure operations.</summary>
         </member>
         <member name="P:Synap.SDK.SynapClient.Set">
-            <summary>
-            Gets the Set data structure operations.
-            </summary>
+            <summary>Gets the Set data structure operations.</summary>
         </member>
         <member name="P:Synap.SDK.SynapClient.Queue">
-            <summary>
-            Gets the Queue operations.
-            </summary>
+            <summary>Gets the Queue operations.</summary>
         </member>
         <member name="P:Synap.SDK.SynapClient.Stream">
-            <summary>
-            Gets the Stream operations.
-            </summary>
+            <summary>Gets the Stream operations.</summary>
         </member>
         <member name="P:Synap.SDK.SynapClient.PubSub">
-            <summary>
-            Gets the Pub/Sub operations.
-            </summary>
+            <summary>Gets the Pub/Sub operations.</summary>
         </member>
         <member name="P:Synap.SDK.SynapClient.Bitmap">
-            <summary>
-            Gets the Bitmap operations.
-            </summary>
+            <summary>Gets the Bitmap operations.</summary>
         </member>
         <member name="P:Synap.SDK.SynapClient.HyperLogLog">
-            <summary>
-            Gets the HyperLogLog operations.
-            </summary>
+            <summary>Gets the HyperLogLog operations.</summary>
         </member>
         <member name="P:Synap.SDK.SynapClient.Geospatial">
-            <summary>
-            Gets the Geospatial operations.
-            </summary>
+            <summary>Gets the Geospatial operations.</summary>
         </member>
         <member name="P:Synap.SDK.SynapClient.Transaction">
-            <summary>
-            Gets the Transaction operations.
-            </summary>
+            <summary>Gets the Transaction operations.</summary>
         </member>
         <member name="P:Synap.SDK.SynapClient.Config">
-            <summary>
-            Gets the client configuration.
-            </summary>
+            <summary>Gets the client configuration.</summary>
         </member>
         <member name="M:Synap.SDK.SynapClient.ExecuteAsync(System.String,System.String,System.Collections.Generic.Dictionary{System.String,System.Object},System.Threading.CancellationToken)">
             <summary>
-            Executes a StreamableHTTP operation on the Synap server.
+            Executes a Synap operation, routing through native transport when available.
+            Falls back to HTTP for operations that are not mapped to native commands
+            (e.g. queues, streams, pub/sub).
             </summary>
             <param name="operation">The operation type (e.g., 'kv.set', 'queue.publish').</param>
-            <param name="target">The target resource (e.g., key name, queue name).</param>
+            <param name="target">The target resource (key name, queue name, etc.).</param>
             <param name="data">The operation data.</param>
             <param name="cancellationToken">Cancellation token.</param>
             <returns>The response as a JSON document.</returns>
             <exception cref="T:Synap.SDK.Exceptions.SynapException">Thrown when the operation fails.</exception>
         </member>
         <member name="M:Synap.SDK.SynapClient.Dispose">
-            <summary>
-            Disposes the client and releases resources.
-            </summary>
+            <summary>Disposes the client and releases resources.</summary>
         </member>
         <member name="T:Synap.SDK.SynapConfig">
             <summary>
@@ -963,24 +942,37 @@
             </summary>
         </member>
         <member name="P:Synap.SDK.SynapConfig.BaseUrl">
-            <summary>
-            Gets the base URL of the Synap server.
-            </summary>
+            <summary>Gets the base URL of the Synap server (used for HTTP transport).</summary>
         </member>
         <member name="P:Synap.SDK.SynapConfig.Timeout">
-            <summary>
-            Gets the request timeout in seconds.
-            </summary>
+            <summary>Gets the request timeout in seconds.</summary>
         </member>
         <member name="P:Synap.SDK.SynapConfig.AuthToken">
-            <summary>
-            Gets the authentication token for requests.
-            </summary>
+            <summary>Gets the authentication token (API key) for requests.</summary>
+        </member>
+        <member name="P:Synap.SDK.SynapConfig.Username">
+            <summary>Gets the username for Basic Auth.</summary>
+        </member>
+        <member name="P:Synap.SDK.SynapConfig.Password">
+            <summary>Gets the password for Basic Auth.</summary>
         </member>
         <member name="P:Synap.SDK.SynapConfig.MaxRetries">
-            <summary>
-            Gets the maximum number of retries for failed requests.
-            </summary>
+            <summary>Gets the maximum number of retries for failed requests.</summary>
+        </member>
+        <member name="P:Synap.SDK.SynapConfig.Transport">
+            <summary>Gets the transport mode (default: SynapRpc).</summary>
+        </member>
+        <member name="P:Synap.SDK.SynapConfig.RpcHost">
+            <summary>Gets the host for SynapRPC transport.</summary>
+        </member>
+        <member name="P:Synap.SDK.SynapConfig.RpcPort">
+            <summary>Gets the port for SynapRPC transport.</summary>
+        </member>
+        <member name="P:Synap.SDK.SynapConfig.Resp3Host">
+            <summary>Gets the host for RESP3 transport.</summary>
+        </member>
+        <member name="P:Synap.SDK.SynapConfig.Resp3Port">
+            <summary>Gets the port for RESP3 transport.</summary>
         </member>
         <member name="M:Synap.SDK.SynapConfig.#ctor(System.String)">
             <summary>
@@ -990,32 +982,67 @@
             <exception cref="T:Synap.SDK.Exceptions.SynapException">Thrown when the base URL is null or empty.</exception>
         </member>
         <member name="M:Synap.SDK.SynapConfig.Create(System.String)">
-            <summary>
-            Creates a new configuration with the specified base URL.
-            </summary>
-            <param name="baseUrl">The base URL of the Synap server.</param>
-            <returns>A new <see cref="T:Synap.SDK.SynapConfig"/> instance.</returns>
+            <summary>Creates a new configuration with the specified base URL.</summary>
         </member>
         <member name="M:Synap.SDK.SynapConfig.WithTimeout(System.Int32)">
-            <summary>
-            Creates a copy of this configuration with the specified timeout.
-            </summary>
-            <param name="timeout">The timeout in seconds.</param>
-            <returns>A new <see cref="T:Synap.SDK.SynapConfig"/> instance with the updated timeout.</returns>
+            <summary>Returns a copy of this configuration with the specified timeout.</summary>
         </member>
         <member name="M:Synap.SDK.SynapConfig.WithAuthToken(System.String)">
-            <summary>
-            Creates a copy of this configuration with the specified authentication token.
-            </summary>
-            <param name="token">The authentication token.</param>
-            <returns>A new <see cref="T:Synap.SDK.SynapConfig"/> instance with the updated token.</returns>
+            <summary>Returns a copy of this configuration with the specified auth token.</summary>
+        </member>
+        <member name="M:Synap.SDK.SynapConfig.WithBasicAuth(System.String,System.String)">
+            <summary>Returns a copy of this configuration with Basic Auth credentials.</summary>
         </member>
         <member name="M:Synap.SDK.SynapConfig.WithMaxRetries(System.Int32)">
+            <summary>Returns a copy of this configuration with the specified maximum retries.</summary>
+        </member>
+        <member name="M:Synap.SDK.SynapConfig.WithHttpTransport">
+            <summary>Returns a copy of this configuration using HTTP transport.</summary>
+        </member>
+        <member name="M:Synap.SDK.SynapConfig.WithSynapRpcTransport">
+            <summary>Returns a copy of this configuration using SynapRPC transport (default).</summary>
+        </member>
+        <member name="M:Synap.SDK.SynapConfig.WithResp3Transport">
+            <summary>Returns a copy of this configuration using RESP3 transport.</summary>
+        </member>
+        <member name="M:Synap.SDK.SynapConfig.WithRpcAddr(System.String,System.Int32)">
+            <summary>Returns a copy of this configuration with the specified SynapRPC address.</summary>
+        </member>
+        <member name="M:Synap.SDK.SynapConfig.WithResp3Addr(System.String,System.Int32)">
+            <summary>Returns a copy of this configuration with the specified RESP3 address.</summary>
+        </member>
+        <member name="T:Synap.SDK.TransportMode">
+            <summary>Transport mode for the Synap client.</summary>
+        </member>
+        <member name="F:Synap.SDK.TransportMode.SynapRpc">
+            <summary>SynapRPC native protocol over TCP with MessagePack (default, port 15501).</summary>
+        </member>
+        <member name="F:Synap.SDK.TransportMode.Resp3">
+            <summary>RESP3 Redis-compatible protocol over TCP (port 6379).</summary>
+        </member>
+        <member name="F:Synap.SDK.TransportMode.Http">
+            <summary>HTTP/StreamableHTTP protocol (port 15500).</summary>
+        </member>
+        <member name="M:Synap.SDK.WireValue.ToWire(System.Object)">
+            <summary>Wraps a plain value into externally-tagged WireValue for SynapRPC.</summary>
+        </member>
+        <member name="M:Synap.SDK.WireValue.FromWire(System.Object)">
+            <summary>Unwraps an externally-tagged WireValue decoded from MessagePack.</summary>
+        </member>
+        <member name="M:Synap.SDK.CommandMapper.MapCommand(System.String,System.Collections.Generic.Dictionary{System.String,System.Object})">
             <summary>
-            Creates a copy of this configuration with the specified maximum retries.
+            Maps a Synap operation + payload to a native command + args.
+            Returns null for operations that must fall back to HTTP.
             </summary>
-            <param name="retries">The maximum number of retries.</param>
-            <returns>A new <see cref="T:Synap.SDK.SynapConfig"/> instance with the updated max retries.</returns>
+        </member>
+        <member name="M:Synap.SDK.CommandMapper.MapResponse(System.String,System.Object)">
+            <summary>Maps the raw native response back to the Synap response shape.</summary>
+        </member>
+        <member name="M:Synap.SDK.SynapRpcTransport.ExecuteAsync(System.String,System.Object[],System.Threading.CancellationToken)">
+            <summary>Executes a command over SynapRPC and returns the plain (unwrapped) result.</summary>
+        </member>
+        <member name="M:Synap.SDK.Resp3Transport.ExecuteAsync(System.String,System.Object[],System.Threading.CancellationToken)">
+            <summary>Executes a RESP3 command and returns the decoded result.</summary>
         </member>
         <member name="T:Synap.SDK.Types.QueueMessage">
             <summary>

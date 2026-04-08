@@ -1,7 +1,13 @@
 /**
  * Synap TypeScript SDK - Base Client
- * 
- * Core HTTP client for StreamableHTTP protocol communication.
+ *
+ * Core client supporting three transports:
+ *  - SynapRPC (default): MessagePack-framed binary TCP
+ *  - RESP3: Redis-compatible text TCP
+ *  - HTTP: original StreamableHTTP REST
+ *
+ * Mapped commands route through the native transport; anything unmapped
+ * (queues, streams, pub/sub, scripting, …) falls back to HTTP.
  */
 
 import { v4 as uuidv4 } from 'uuid';
@@ -12,29 +18,158 @@ import type {
   AuthOptions,
 } from './types';
 import { NetworkError, ServerError, TimeoutError } from './types';
+import {
+  SynapRpcTransport,
+  Resp3Transport,
+  mapCommand,
+  mapResponse,
+} from './transport';
+import type { TransportMode } from './transport';
+
+// ── Internal sealed transport discriminant ────────────────────────────────────
+
+type InternalTransport =
+  | { kind: 'http' }
+  | { kind: 'synaprpc'; impl: SynapRpcTransport }
+  | { kind: 'resp3'; impl: Resp3Transport };
+
+// ── SynapClient ────────────────────────────────────────────────────────────────
 
 /**
- * Base HTTP client for Synap server communication
+ * Base client for Synap server communication.
  */
 export class SynapClient {
   private readonly baseUrl: string;
   private readonly timeout: number;
   private readonly debug: boolean;
   private readonly auth?: AuthOptions;
+  private readonly transport: InternalTransport;
 
   constructor(options: SynapClientOptions = {}) {
-    this.baseUrl = options.url || 'http://localhost:15500';
-    this.timeout = options.timeout || 30000;
-    this.debug = options.debug || false;
+    this.baseUrl = options.url ?? 'http://localhost:15500';
+    this.timeout = options.timeout ?? 30_000;
+    this.debug = options.debug ?? false;
     this.auth = options.auth;
+
+    const mode: TransportMode = options.transport ?? 'synaprpc';
+
+    switch (mode) {
+      case 'synaprpc':
+        this.transport = {
+          kind: 'synaprpc',
+          impl: new SynapRpcTransport(
+            options.rpcHost ?? '127.0.0.1',
+            options.rpcPort ?? 15_501,
+            this.timeout,
+          ),
+        };
+        break;
+      case 'resp3':
+        this.transport = {
+          kind: 'resp3',
+          impl: new Resp3Transport(
+            options.resp3Host ?? '127.0.0.1',
+            options.resp3Port ?? 6_379,
+            this.timeout,
+          ),
+        };
+        break;
+      default:
+        this.transport = { kind: 'http' };
+    }
   }
 
+  // ── Public API ──────────────────────────────────────────────────────────────
+
   /**
-   * Send a command to the Synap server using StreamableHTTP protocol
+   * Send a command to the Synap server.
+   *
+   * If the active transport is native (SynapRPC or RESP3) and the command has
+   * a mapping, the native protocol is used. Otherwise falls through to HTTP.
    */
   async sendCommand<T = any>(
     command: string,
-    payload: Record<string, any> = {}
+    payload: Record<string, unknown> = {},
+  ): Promise<T> {
+    if (this.transport.kind !== 'http') {
+      const mapped = mapCommand(command, payload);
+      if (mapped) {
+        if (this.debug) {
+          console.log('[Synap] Native transport:', command, mapped.rawCmd, mapped.args);
+        }
+        try {
+          const raw =
+            this.transport.kind === 'synaprpc'
+              ? await this.transport.impl.execute(mapped.rawCmd, mapped.args)
+              : await (this.transport as { kind: 'resp3'; impl: Resp3Transport }).impl.execute(
+                  mapped.rawCmd,
+                  mapped.args,
+                );
+          const result = mapResponse(command, raw) as T;
+          if (this.debug) {
+            console.log('[Synap] Native response:', result);
+          }
+          return result;
+        } catch (err) {
+          // Surface errors from native transport as NetworkError so callers can
+          // catch them consistently.
+          if (err instanceof Error) {
+            throw new NetworkError(`SynapRPC error: ${err.message}`, err);
+          }
+          throw new NetworkError('SynapRPC unknown error');
+        }
+      }
+      // Unmapped command → fall through to HTTP.
+    }
+
+    return this.sendHttp<T>(command, payload);
+  }
+
+  /**
+   * Ping the server to check connectivity.
+   */
+  async ping(): Promise<boolean> {
+    try {
+      const response = await fetch(`${this.baseUrl}/health`, {
+        signal: AbortSignal.timeout(this.timeout),
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Get server health status.
+   */
+  async health(): Promise<{ status: string; service: string; version: string }> {
+    const response = await fetch(`${this.baseUrl}/health`, {
+      signal: AbortSignal.timeout(this.timeout),
+    });
+
+    if (!response.ok) {
+      throw new NetworkError('Health check failed');
+    }
+
+    return response.json() as Promise<{ status: string; service: string; version: string }>;
+  }
+
+  /**
+   * Close persistent TCP connections (SynapRPC / RESP3).
+   */
+  close(): void {
+    if (this.transport.kind === 'synaprpc') {
+      this.transport.impl.close();
+    } else if (this.transport.kind === 'resp3') {
+      this.transport.impl.close();
+    }
+  }
+
+  // ── Private HTTP implementation ─────────────────────────────────────────────
+
+  private async sendHttp<T = any>(
+    command: string,
+    payload: Record<string, unknown>,
   ): Promise<T> {
     const request: SynapRequest = {
       command,
@@ -43,7 +178,7 @@ export class SynapClient {
     };
 
     if (this.debug) {
-      console.log('[Synap] Request:', JSON.stringify(request, null, 2));
+      console.log('[Synap] HTTP Request:', JSON.stringify(request, null, 2));
     }
 
     try {
@@ -52,11 +187,10 @@ export class SynapClient {
 
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
-        'Accept': 'application/json',
+        Accept: 'application/json',
         'Accept-Encoding': 'gzip',
       };
 
-      // Add authentication headers
       if (this.auth) {
         if (this.auth.type === 'basic' && this.auth.username && this.auth.password) {
           const credentials = btoa(`${this.auth.username}:${this.auth.password}`);
@@ -79,83 +213,36 @@ export class SynapClient {
         throw new ServerError(
           `HTTP ${response.status}: ${response.statusText}`,
           response.status,
-          request.request_id
+          request.request_id,
         );
       }
 
-      const data = await response.json() as SynapResponse<T>;
+      const data = (await response.json()) as SynapResponse<T>;
 
       if (this.debug) {
-        console.log('[Synap] Response:', JSON.stringify(data, null, 2));
+        console.log('[Synap] HTTP Response:', JSON.stringify(data, null, 2));
       }
 
-      // Check StreamableHTTP envelope
       if (!data.success) {
         throw new ServerError(
-          data.error || 'Unknown server error',
+          data.error ?? 'Unknown server error',
           undefined,
-          data.request_id
+          data.request_id,
         );
       }
 
       return data.payload as T;
     } catch (error) {
-      if (error instanceof ServerError) {
-        throw error;
-      }
+      if (error instanceof ServerError) throw error;
 
       if (error instanceof Error) {
         if (error.name === 'AbortError') {
-          throw new TimeoutError(
-            `Request timed out after ${this.timeout}ms`,
-            this.timeout
-          );
+          throw new TimeoutError(`Request timed out after ${this.timeout}ms`, this.timeout);
         }
-
-        throw new NetworkError(
-          `Network error: ${error.message}`,
-          error
-        );
+        throw new NetworkError(`Network error: ${error.message}`, error);
       }
 
       throw new NetworkError('Unknown network error');
     }
   }
-
-  /**
-   * Ping the server to check connectivity
-   */
-  async ping(): Promise<boolean> {
-    try {
-      const response = await fetch(`${this.baseUrl}/health`, {
-        signal: AbortSignal.timeout(this.timeout),
-      });
-      return response.ok;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Get server health status
-   */
-  async health(): Promise<{ status: string; service: string; version: string }> {
-    const response = await fetch(`${this.baseUrl}/health`, {
-      signal: AbortSignal.timeout(this.timeout),
-    });
-
-    if (!response.ok) {
-      throw new NetworkError('Health check failed');
-    }
-
-    return response.json() as Promise<{ status: string; service: string; version: string }>;
-  }
-
-  /**
-   * Close the client (cleanup)
-   */
-  close(): void {
-    // Future: cleanup any persistent connections
-  }
 }
-

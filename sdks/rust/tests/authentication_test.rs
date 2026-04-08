@@ -80,8 +80,10 @@ mod tests {
             .create_async()
             .await;
 
-        // Create config with Basic Auth
-        let config = SynapConfig::new(server.url()).with_basic_auth(TEST_USERNAME, TEST_PASSWORD);
+        // Create config with Basic Auth (HTTP transport so the mock server is hit).
+        let config = SynapConfig::new(server.url())
+            .with_http_transport()
+            .with_basic_auth(TEST_USERNAME, TEST_PASSWORD);
         let auth_client = SynapClient::new(config).expect("Failed to create client");
 
         // Test that client sends Basic Auth header
@@ -110,8 +112,10 @@ mod tests {
             .create_async()
             .await;
 
-        // Create config with API Key
-        let config = SynapConfig::new(server.url()).with_auth_token("sk_test123");
+        // Create config with API Key (HTTP transport so the mock server is hit).
+        let config = SynapConfig::new(server.url())
+            .with_http_transport()
+            .with_auth_token("sk_test123");
         let auth_client = SynapClient::new(config).expect("Failed to create client");
 
         // Test that client sends Bearer Token header

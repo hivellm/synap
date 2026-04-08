@@ -81,6 +81,7 @@ impl HashManager {
         let payload = json!({
             "key": key.as_ref(),
             "field": field.as_ref(),
+            "fields": [field.as_ref()],
         });
 
         let response = self.client.send_command("hash.del", payload).await?;

@@ -222,10 +222,10 @@ public sealed class AuthenticationTests : IDisposable
         using var client = new SynapClient(config);
 
         // Test KV operation
-        await client.KV.SetAsync("auth:test:basic", System.Text.Encoding.UTF8.GetBytes("test_value"));
-        var value = await client.KV.GetAsync("auth:test:basic");
+        await client.KV.SetAsync("auth:test:basic", "test_value");
+        var value = await client.KV.GetAsync<string>("auth:test:basic");
         Assert.NotNull(value);
-        Assert.Equal("test_value", System.Text.Encoding.UTF8.GetString(value));
+        Assert.Equal("test_value", value);
 
         // Cleanup
         await client.KV.DeleteAsync("auth:test:basic");
@@ -251,10 +251,10 @@ public sealed class AuthenticationTests : IDisposable
         using var client = new SynapClient(config);
 
         // Test KV operation
-        await client.KV.SetAsync("auth:test:apikey", System.Text.Encoding.UTF8.GetBytes("test_value"));
-        var value = await client.KV.GetAsync("auth:test:apikey");
+        await client.KV.SetAsync("auth:test:apikey", "test_value");
+        var value = await client.KV.GetAsync<string>("auth:test:apikey");
         Assert.NotNull(value);
-        Assert.Equal("test_value", System.Text.Encoding.UTF8.GetString(value));
+        Assert.Equal("test_value", value);
 
         // Cleanup
         await client.KV.DeleteAsync("auth:test:apikey");

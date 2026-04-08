@@ -21,7 +21,7 @@ public sealed class HyperLogLogManagerS2STests : IDisposable
         _client = new SynapClient(config);
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task PfAdd_PfCount_Works()
     {
         var key = $"test:hll:{Process.GetCurrentProcess().Id}";
@@ -34,7 +34,7 @@ public sealed class HyperLogLogManagerS2STests : IDisposable
         Assert.True(count >= 2 && count <= 4);
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task PfMerge_Works()
     {
         var timestamp = Process.GetCurrentProcess().Id;
@@ -50,7 +50,7 @@ public sealed class HyperLogLogManagerS2STests : IDisposable
         Assert.True(count >= 5 && count <= 7);
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task Stats_ReturnsValidData()
     {
         var key = $"test:hll:stats:{Process.GetCurrentProcess().Id}";

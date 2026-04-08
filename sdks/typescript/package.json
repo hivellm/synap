@@ -58,6 +58,7 @@
   },
   "homepage": "https://github.com/hivellm/synap#readme",
   "dependencies": {
+    "msgpackr": "^1.11.9",
     "rxjs": "^7.8.1",
     "uuid": "^11.1.0"
   },

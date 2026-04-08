@@ -266,8 +266,13 @@ pub async fn kv_set(
     let scoped_key =
         crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &req.key);
 
-    let value_bytes = serde_json::to_vec(&req.value)
-        .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    // Store strings as raw UTF-8 so round-trips return the original string,
+    // not a JSON-encoded form. Non-string values are JSON-encoded as before.
+    let value_bytes = if let Some(s) = req.value.as_str() {
+        s.as_bytes().to_vec()
+    } else {
+        serde_json::to_vec(&req.value).map_err(|e| SynapError::SerializationError(e.to_string()))?
+    };
 
     // Reject oversized values before any allocation in the store
     if let Some(max_bytes) = state.kv_store.config().max_value_size_bytes {
@@ -2673,8 +2678,13 @@ async fn handle_kv_set_cmd(
 
     let ttl = request.payload.get("ttl").and_then(|v| v.as_u64());
 
-    let value_bytes =
-        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    // Store strings as raw UTF-8 so round-trips return the original string,
+    // not a JSON-encoded form. Non-string values are JSON-encoded as before.
+    let value_bytes = if let Some(s) = value.as_str() {
+        s.as_bytes().to_vec()
+    } else {
+        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?
+    };
 
     // Check if there's an active transaction for this client_id
     let client_id = request

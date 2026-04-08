@@ -44,6 +44,10 @@ pub enum SynapError {
     #[error("Operation timeout")]
     Timeout,
 
+    /// TCP transport or I/O error
+    #[error("Transport error: {0}")]
+    Transport(String),
+
     /// Generic error
     #[error("{0}")]
     Other(String),
