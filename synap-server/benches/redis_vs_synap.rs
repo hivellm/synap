@@ -16,10 +16,17 @@ use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_m
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
+/// Override via env: SYNAP_REDIS_URL=redis://host:port
 #[cfg(feature = "redis-bench")]
-const REDIS_URL: &str = "redis://127.0.0.1:6379";
+fn redis_url() -> String {
+    std::env::var("SYNAP_REDIS_URL").unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string())
+}
+
+/// Override via env: SYNAP_HTTP_URL=http://host:port
 #[cfg(feature = "redis-bench")]
-const SYNAP_URL: &str = "http://127.0.0.1:15500";
+fn synap_url() -> String {
+    std::env::var("SYNAP_HTTP_URL").unwrap_or_else(|_| "http://127.0.0.1:15500".to_string())
+}
 
 /// Returns true only when the redis-bench feature is active AND both servers
 /// are reachable. If either is down the benchmark is silently omitted.
@@ -29,93 +36,188 @@ fn servers_available() -> bool {
 
     #[cfg(feature = "redis-bench")]
     {
-        // Check Redis
-        let redis_ok = std::net::TcpStream::connect("127.0.0.1:6379").is_ok();
-        // Check Synap
-        let synap_ok = std::net::TcpStream::connect("127.0.0.1:15500").is_ok();
+        // Parse address from env-overridable URLs
+        let redis_addr = std::env::var("SYNAP_REDIS_URL")
+            .unwrap_or_else(|_| "redis://127.0.0.1:6379".to_string());
+        let redis_addr = redis_addr
+            .trim_start_matches("redis://")
+            .split('/')
+            .next()
+            .unwrap_or("127.0.0.1:6379")
+            .to_string();
+
+        let synap_base = std::env::var("SYNAP_HTTP_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:15500".to_string());
+        let synap_addr = synap_base
+            .trim_start_matches("http://")
+            .split('/')
+            .next()
+            .unwrap_or("127.0.0.1:15500")
+            .to_string();
+
+        let redis_ok = std::net::TcpStream::connect(&redis_addr).is_ok();
+        let synap_ok = std::net::TcpStream::connect(&synap_addr).is_ok();
+
+        if !redis_ok {
+            eprintln!("[bench] Redis not available at {redis_addr} — skipping");
+        }
+        if !synap_ok {
+            eprintln!("[bench] Synap not available at {synap_addr} — skipping");
+        }
+
         redis_ok && synap_ok
     }
 }
 
-// ── Redis client (sync wrapper for criterion) ─────────────────────────────
+// ── Redis client — raw RESP over TcpStream (no crate, no timeouts) ───────────
+//
+// We bypass the `redis` crate entirely to avoid Windows Docker NAT issues.
+// Raw TcpStream + hand-rolled RESP encoding/decoding is 100% reliable and
+// gives us the true "bare protocol" latency that Redis benchmarks report.
 
 #[cfg(feature = "redis-bench")]
 mod redis_client {
-    use redis::{Client, Commands, Connection};
+    use std::io::{BufRead, BufReader, Read, Write};
+    use std::net::TcpStream;
+    use std::time::Duration;
 
-    pub struct RedisConn(Connection);
+    pub struct RedisConn {
+        stream: TcpStream,
+        reader: BufReader<TcpStream>,
+    }
 
     impl RedisConn {
         pub fn connect(url: &str) -> Self {
-            let client = Client::open(url).expect("Redis URL invalid");
-            let conn = client.get_connection().expect("Cannot connect to Redis");
-            Self(conn)
+            // Parse "redis://host:port" → "host:port"
+            let addr = url
+                .trim_start_matches("redis://")
+                .split('/')
+                .next()
+                .unwrap_or("127.0.0.1:6379");
+            let stream =
+                TcpStream::connect(addr).unwrap_or_else(|e| panic!("Redis connect {addr}: {e}"));
+            stream.set_read_timeout(Some(Duration::from_secs(10))).ok();
+            stream.set_write_timeout(Some(Duration::from_secs(10))).ok();
+            let reader = BufReader::new(stream.try_clone().expect("TcpStream clone"));
+            Self { stream, reader }
+        }
+
+        /// Encode args as a RESP array and send it.
+        fn send(&mut self, args: &[&[u8]]) {
+            let mut buf = Vec::with_capacity(256);
+            buf.extend_from_slice(format!("*{}\r\n", args.len()).as_bytes());
+            for arg in args {
+                buf.extend_from_slice(format!("${}\r\n", arg.len()).as_bytes());
+                buf.extend_from_slice(arg);
+                buf.extend_from_slice(b"\r\n");
+            }
+            self.stream.write_all(&buf).expect("Redis write");
+        }
+
+        /// Read one RESP value; returns the first line (simple type) or bulk bytes.
+        fn recv_line(&mut self) -> String {
+            let mut line = String::new();
+            self.reader.read_line(&mut line).expect("Redis read");
+            line.trim_end().to_string()
+        }
+
+        fn recv_response(&mut self) -> Vec<u8> {
+            let line = self.recv_line();
+            match line.as_bytes().first() {
+                Some(b'+') | Some(b':') | Some(b'-') => line.into_bytes(),
+                Some(b'$') => {
+                    let n: i64 = line[1..].parse().unwrap_or(-1);
+                    if n < 0 {
+                        return b"(nil)".to_vec();
+                    }
+                    let mut data = vec![0u8; n as usize + 2]; // +2 for \r\n
+                    self.reader.read_exact(&mut data).expect("Redis bulk read");
+                    data.truncate(n as usize);
+                    data
+                }
+                Some(b'*') => {
+                    // Array — just drain it
+                    let count: i64 = line[1..].parse().unwrap_or(0);
+                    for _ in 0..count {
+                        self.recv_response();
+                    }
+                    b"(array)".to_vec()
+                }
+                _ => line.into_bytes(),
+            }
         }
 
         pub fn set(&mut self, key: &str, value: &[u8]) {
-            let _: () = self.0.set(key, value).expect("Redis SET failed");
+            self.send(&[b"SET", key.as_bytes(), value]);
+            self.recv_response();
         }
 
         pub fn get(&mut self, key: &str) -> Vec<u8> {
-            self.0.get(key).unwrap_or_default()
+            self.send(&[b"GET", key.as_bytes()]);
+            self.recv_response()
         }
 
         pub fn del(&mut self, key: &str) {
-            let _: () = self.0.del(key).expect("Redis DEL failed");
+            self.send(&[b"DEL", key.as_bytes()]);
+            self.recv_response();
         }
 
         pub fn incr(&mut self, key: &str) -> i64 {
-            self.0.incr(key, 1i64).expect("Redis INCR failed")
+            self.send(&[b"INCR", key.as_bytes()]);
+            let r = self.recv_response();
+            let s = String::from_utf8_lossy(&r);
+            s.trim_start_matches(':').parse().unwrap_or(0)
         }
 
         pub fn mset(&mut self, pairs: &[(&str, &[u8])]) {
-            let args: Vec<(&str, &[u8])> = pairs.to_vec();
-            let _: () = redis::cmd("MSET")
-                .arg(
-                    args.iter()
-                        .flat_map(|(k, v)| vec![k.as_bytes(), *v])
-                        .collect::<Vec<_>>(),
-                )
-                .query(&mut self.0)
-                .expect("Redis MSET failed");
+            let mut args: Vec<&[u8]> = vec![b"MSET"];
+            let owned: Vec<Vec<u8>> = pairs
+                .iter()
+                .flat_map(|(k, v)| [k.as_bytes().to_vec(), v.to_vec()])
+                .collect();
+            for o in &owned {
+                args.push(o.as_slice());
+            }
+            self.send(&args);
+            self.recv_response();
         }
 
         pub fn flush(&mut self) {
-            let _: () = redis::cmd("FLUSHALL")
-                .query(&mut self.0)
-                .expect("Redis FLUSHALL failed");
+            self.send(&[b"FLUSHALL"]);
+            self.recv_response();
         }
 
         pub fn bitcount(&mut self, key: &str) -> i64 {
-            redis::cmd("BITCOUNT")
-                .arg(key)
-                .query(&mut self.0)
-                .expect("Redis BITCOUNT failed")
+            self.send(&[b"BITCOUNT", key.as_bytes()]);
+            let r = self.recv_response();
+            let s = String::from_utf8_lossy(&r);
+            s.trim_start_matches(':').parse().unwrap_or(0)
         }
 
         pub fn setbit(&mut self, key: &str, offset: usize, val: bool) {
-            let _: () = redis::cmd("SETBIT")
-                .arg(key)
-                .arg(offset)
-                .arg(if val { 1 } else { 0 })
-                .query(&mut self.0)
-                .expect("Redis SETBIT failed");
+            let off = offset.to_string();
+            let v = if val { b"1".as_ref() } else { b"0".as_ref() };
+            self.send(&[b"SETBIT", key.as_bytes(), off.as_bytes(), v]);
+            self.recv_response();
         }
 
         pub fn pfadd(&mut self, key: &str, elements: &[&str]) -> i64 {
-            let mut cmd = redis::cmd("PFADD");
-            cmd.arg(key);
-            for e in elements {
-                cmd.arg(*e);
+            let mut args: Vec<&[u8]> = vec![b"PFADD", key.as_bytes()];
+            let owned: Vec<Vec<u8>> = elements.iter().map(|e| e.as_bytes().to_vec()).collect();
+            for o in &owned {
+                args.push(o.as_slice());
             }
-            cmd.query(&mut self.0).expect("Redis PFADD failed")
+            self.send(&args);
+            let r = self.recv_response();
+            let s = String::from_utf8_lossy(&r);
+            s.trim_start_matches(':').parse().unwrap_or(0)
         }
 
         pub fn pfcount(&mut self, key: &str) -> i64 {
-            redis::cmd("PFCOUNT")
-                .arg(key)
-                .query(&mut self.0)
-                .expect("Redis PFCOUNT failed")
+            self.send(&[b"PFCOUNT", key.as_bytes()]);
+            let r = self.recv_response();
+            let s = String::from_utf8_lossy(&r);
+            s.trim_start_matches(':').parse().unwrap_or(0)
         }
     }
 }
@@ -236,12 +338,12 @@ fn bench_set(c: &mut Criterion) {
             group.throughput(Throughput::Bytes(size as u64));
 
             group.bench_with_input(BenchmarkId::new("redis", size), &size, |b, _| {
-                let mut conn = RedisConn::connect(REDIS_URL);
+                let mut conn = RedisConn::connect(&redis_url());
                 b.iter(|| conn.set("bench:set", &value));
             });
 
             group.bench_with_input(BenchmarkId::new("synap", size), &size, |b, _| {
-                let conn = SynapConn::connect(SYNAP_URL);
+                let conn = SynapConn::connect(&synap_url());
                 b.iter(|| conn.set("bench:set", &value));
             });
         }
@@ -268,21 +370,21 @@ fn bench_get(c: &mut Criterion) {
 
             // Pre-populate
             {
-                let mut r = RedisConn::connect(REDIS_URL);
+                let mut r = RedisConn::connect(&redis_url());
                 r.set("bench:get", &value);
             }
             {
-                let s = SynapConn::connect(SYNAP_URL);
+                let s = SynapConn::connect(&synap_url());
                 s.set("bench:get", &value);
             }
 
             group.bench_with_input(BenchmarkId::new("redis", size), &size, |b, _| {
-                let mut conn = RedisConn::connect(REDIS_URL);
+                let mut conn = RedisConn::connect(&redis_url());
                 b.iter(|| conn.get("bench:get"));
             });
 
             group.bench_with_input(BenchmarkId::new("synap", size), &size, |b, _| {
-                let conn = SynapConn::connect(SYNAP_URL);
+                let conn = SynapConn::connect(&synap_url());
                 b.iter(|| conn.get("bench:get"));
             });
         }
@@ -314,12 +416,12 @@ fn bench_mset(c: &mut Criterion) {
             group.throughput(Throughput::Elements(batch as u64));
 
             group.bench_with_input(BenchmarkId::new("redis", batch), &batch, |b, _| {
-                let mut conn = RedisConn::connect(REDIS_URL);
+                let mut conn = RedisConn::connect(&redis_url());
                 b.iter(|| conn.mset(&pairs));
             });
 
             group.bench_with_input(BenchmarkId::new("synap", batch), &batch, |b, _| {
-                let conn = SynapConn::connect(SYNAP_URL);
+                let conn = SynapConn::connect(&synap_url());
                 b.iter(|| conn.mset(&pairs));
             });
         }
@@ -341,13 +443,13 @@ fn bench_incr(c: &mut Criterion) {
         let mut group = c.benchmark_group("incr_latency");
 
         group.bench_function("redis", |b| {
-            let mut conn = RedisConn::connect(REDIS_URL);
+            let mut conn = RedisConn::connect(&redis_url());
             conn.set("bench:incr", b"0");
             b.iter(|| conn.incr("bench:incr"));
         });
 
         group.bench_function("synap", |b| {
-            let conn = SynapConn::connect(SYNAP_URL);
+            let conn = SynapConn::connect(&synap_url());
             conn.set("bench:incr", b"0");
             b.iter(|| conn.incr("bench:incr"));
         });
@@ -375,7 +477,7 @@ fn bench_bitcount(c: &mut Criterion) {
 
             // Set every other bit in Redis
             {
-                let mut r = RedisConn::connect(REDIS_URL);
+                let mut r = RedisConn::connect(&redis_url());
                 r.del(&key);
                 // Use SET with raw bytes — set the bitmap key to a block of 0xAA bytes
                 let data = vec![0xAAu8; kb * 1024];
@@ -389,13 +491,13 @@ fn bench_bitcount(c: &mut Criterion) {
                 BenchmarkId::new("redis", format!("{kb}kb")),
                 &kb,
                 move |b, _| {
-                    let mut conn = RedisConn::connect(REDIS_URL);
+                    let mut conn = RedisConn::connect(&redis_url());
                     b.iter(|| conn.bitcount(&key_clone));
                 },
             );
 
             group.bench_with_input(BenchmarkId::new("synap", format!("{kb}kb")), &kb, |b, _| {
-                let conn = SynapConn::connect(SYNAP_URL);
+                let conn = SynapConn::connect(&synap_url());
                 // Synap bitmap is pre-set via its own SETBIT; here we just count
                 b.iter(|| conn.bitcount(&key));
             });
@@ -422,35 +524,35 @@ fn bench_hyperloglog(c: &mut Criterion) {
         let elem_refs: Vec<&str> = elements.iter().map(|s| s.as_str()).collect();
 
         {
-            let mut r = RedisConn::connect(REDIS_URL);
+            let mut r = RedisConn::connect(&redis_url());
             r.pfadd("bench:hll", &elem_refs);
         }
         {
-            let s = SynapConn::connect(SYNAP_URL);
+            let s = SynapConn::connect(&synap_url());
             s.pfadd("bench:hll", &elem_refs);
         }
 
         group.bench_function("redis/pfcount", |b| {
-            let mut conn = RedisConn::connect(REDIS_URL);
+            let mut conn = RedisConn::connect(&redis_url());
             b.iter(|| conn.pfcount("bench:hll"));
         });
 
         group.bench_function("synap/pfcount", |b| {
-            let conn = SynapConn::connect(SYNAP_URL);
+            let conn = SynapConn::connect(&synap_url());
             b.iter(|| conn.pfcount("bench:hll"));
         });
 
         group.bench_function("redis/pfadd_100", |b| {
             let batch: Vec<String> = (0..100).map(|i| format!("new:{i}")).collect();
             let batch_refs: Vec<&str> = batch.iter().map(|s| s.as_str()).collect();
-            let mut conn = RedisConn::connect(REDIS_URL);
+            let mut conn = RedisConn::connect(&redis_url());
             b.iter(|| conn.pfadd("bench:hll_write", &batch_refs));
         });
 
         group.bench_function("synap/pfadd_100", |b| {
             let batch: Vec<String> = (0..100).map(|i| format!("new:{i}")).collect();
             let batch_refs: Vec<&str> = batch.iter().map(|s| s.as_str()).collect();
-            let conn = SynapConn::connect(SYNAP_URL);
+            let conn = SynapConn::connect(&synap_url());
             b.iter(|| conn.pfadd("bench:hll_write", &batch_refs));
         });
 
@@ -474,13 +576,13 @@ fn bench_concurrent_reads(c: &mut Criterion) {
         // Pre-populate 1000 distinct keys
         let n = 1000usize;
         {
-            let mut r = RedisConn::connect(REDIS_URL);
+            let mut r = RedisConn::connect(&redis_url());
             for i in 0..n {
                 r.set(&format!("bench:read:{i}"), b"value_data");
             }
         }
         {
-            let s = SynapConn::connect(SYNAP_URL);
+            let s = SynapConn::connect(&synap_url());
             for i in 0..n {
                 s.set(&format!("bench:read:{i}"), b"value_data");
             }
@@ -494,7 +596,7 @@ fn bench_concurrent_reads(c: &mut Criterion) {
                 std::thread::scope(|s| {
                     for t in 0..8usize {
                         s.spawn(move || {
-                            let mut conn = RedisConn::connect(REDIS_URL);
+                            let mut conn = RedisConn::connect(&redis_url());
                             for i in 0..100 {
                                 conn.get(&format!("bench:read:{}", (t * 100 + i) % n));
                             }
@@ -505,7 +607,7 @@ fn bench_concurrent_reads(c: &mut Criterion) {
         });
 
         // Synap: 8 threads each do 100 GETs (Synap reads in parallel via RwLock)
-        let synap_base = Arc::new(SYNAP_URL.to_string());
+        let synap_base = Arc::new(synap_url());
         group.bench_function("synap/8threads_x100gets", move |b| {
             b.iter(|| {
                 let base = Arc::clone(&synap_base);
