@@ -48,6 +48,10 @@ geohash = "0.13"
 # HiveHub Cloud Integration
 hivehub-internal-sdk = "1.0"
 
+# SynapRPC binary protocol (MessagePack frames)
+rmp-serde = "1.3"
+bytes = "1.10"
+
 # UMICP (Universal Matrix Intelligent Communication Protocol)
 umicp-core = { version = "0.2.3", features = ["websocket", "http2"] }
 
@@ -74,6 +78,8 @@ reqwest = { version = "0.12", features = ["json", "blocking"] }
 tokio-test = "0.4"
 tokio-tungstenite = { version = "0.28", features = ["native-tls"] }
 redis = { version = "0.27", features = ["tokio-comp"] }
+ureq = { version = "2", features = ["json"] }
+rmpv = "1"
 
 # NOTE: Benchmark declarations removed to allow Docker builds without copying benchmark files
 # Cargo auto-detects benchmarks in benches/ directory, so they still work with `cargo bench`
@@ -142,5 +148,9 @@ harness = false
 
 [[bench]]
 name = "key_management_bench"
+harness = false
+
+[[bench]]
+name = "protocol_bench"
 harness = false
 

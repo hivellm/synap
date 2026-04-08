@@ -36,7 +36,7 @@ kv_store:
   #   lfu  -> Least Frequently Used
   #   ttl  -> Shortest Time-To-Live first
   #   none -> No eviction (returns errors on write)
-  eviction_policy: "lru"
+  eviction_policy: "allkeys-lru"
 
   # TTL cleanup interval in milliseconds
   # Lower = faster cleanup, higher CPU usage
@@ -175,6 +175,28 @@ protocols:
   rest:
     enabled: true
     prefix: "/kv"
+
+# ----------------------------------------------------------------------------
+# RESP3 TCP Listener (Redis-compatible protocol)
+# ----------------------------------------------------------------------------
+# Enables a raw TCP socket that speaks the Redis RESP3 wire protocol.
+# Any Redis client (redis-cli, redis-rs, ioredis, etc.) can connect directly.
+# Bind to 127.0.0.1 unless you intend to expose it on the network.
+resp3:
+  enabled: true
+  host: "127.0.0.1"
+  port: 6379
+
+# ----------------------------------------------------------------------------
+# SynapRPC TCP Listener (native binary protocol)
+# ----------------------------------------------------------------------------
+# Enables a raw TCP socket using the SynapRPC binary protocol:
+# 4-byte LE length prefix + MessagePack body.
+# Use the Synap SDK clients to connect; not compatible with Redis tooling.
+synap_rpc:
+  enabled: true
+  host: "0.0.0.0"
+  port: 15501
 
 # ----------------------------------------------------------------------------
 # MCP (Model Context Protocol) Tools

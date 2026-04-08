@@ -7,12 +7,30 @@
 //! - Pub/Sub operations
 //! - Replication metrics
 //! - System metrics
+//! - RESP3 TCP protocol
+//! - SynapRPC binary protocol
+
+use std::time::Instant;
 
 use lazy_static::lazy_static;
 use prometheus::{
     Encoder, HistogramVec, IntCounterVec, IntGaugeVec, TextEncoder, register_histogram_vec,
     register_int_counter_vec, register_int_gauge_vec,
 };
+
+// Sub-millisecond buckets for TCP protocol latency (µs–ms range).
+const PROTOCOL_LATENCY_BUCKETS: &[f64] = &[
+    0.000_025, // 25 µs
+    0.000_050, // 50 µs
+    0.000_100, // 100 µs
+    0.000_250, // 250 µs
+    0.000_500, // 500 µs
+    0.001_000, // 1 ms
+    0.002_500, // 2.5 ms
+    0.005_000, // 5 ms
+    0.010_000, // 10 ms
+    0.050_000, // 50 ms
+];
 
 lazy_static! {
     // ============================================================================
@@ -190,6 +208,88 @@ lazy_static! {
     ).unwrap();
 
     // ============================================================================
+    // RESP3 TCP Protocol Metrics
+    // ============================================================================
+
+    /// Total RESP3 commands processed, labelled by command name and status.
+    pub static ref RESP3_COMMANDS_TOTAL: IntCounterVec = register_int_counter_vec!(
+        "synap_resp3_commands_total",
+        "Total RESP3 commands processed",
+        &["command", "status"]  // status: ok | err
+    ).unwrap();
+
+    /// RESP3 command latency from parse-complete to response-sent.
+    pub static ref RESP3_COMMAND_DURATION: HistogramVec = register_histogram_vec!(
+        "synap_resp3_command_duration_seconds",
+        "RESP3 command dispatch latency in seconds",
+        &["command"],
+        PROTOCOL_LATENCY_BUCKETS.to_vec()
+    ).unwrap();
+
+    /// Currently open RESP3 TCP connections.
+    pub static ref RESP3_CONNECTIONS: IntGaugeVec = register_int_gauge_vec!(
+        "synap_resp3_connections",
+        "Active RESP3 TCP connections",
+        &["state"]  // state: active
+    ).unwrap();
+
+    /// Bytes received from RESP3 clients.
+    pub static ref RESP3_BYTES_READ: IntCounterVec = register_int_counter_vec!(
+        "synap_resp3_bytes_read_total",
+        "Total bytes read from RESP3 clients",
+        &[]
+    ).unwrap();
+
+    /// Bytes sent to RESP3 clients.
+    pub static ref RESP3_BYTES_WRITTEN: IntCounterVec = register_int_counter_vec!(
+        "synap_resp3_bytes_written_total",
+        "Total bytes written to RESP3 clients",
+        &[]
+    ).unwrap();
+
+    // ============================================================================
+    // SynapRPC Binary Protocol Metrics
+    // ============================================================================
+
+    /// Total SynapRPC requests processed, labelled by command and status.
+    pub static ref SYNAP_RPC_COMMANDS_TOTAL: IntCounterVec = register_int_counter_vec!(
+        "synap_rpc_commands_total",
+        "Total SynapRPC commands processed",
+        &["command", "status"]  // status: ok | err
+    ).unwrap();
+
+    /// SynapRPC command latency from frame-received to frame-sent.
+    pub static ref SYNAP_RPC_COMMAND_DURATION: HistogramVec = register_histogram_vec!(
+        "synap_rpc_command_duration_seconds",
+        "SynapRPC command dispatch latency in seconds",
+        &["command"],
+        PROTOCOL_LATENCY_BUCKETS.to_vec()
+    ).unwrap();
+
+    /// Currently open SynapRPC TCP connections.
+    pub static ref SYNAP_RPC_CONNECTIONS: IntGaugeVec = register_int_gauge_vec!(
+        "synap_rpc_connections",
+        "Active SynapRPC TCP connections",
+        &["state"]  // state: active
+    ).unwrap();
+
+    /// Incoming SynapRPC frame sizes in bytes.
+    pub static ref SYNAP_RPC_FRAME_SIZE_IN: HistogramVec = register_histogram_vec!(
+        "synap_rpc_frame_size_bytes_in",
+        "SynapRPC incoming frame sizes in bytes",
+        &[],
+        vec![64.0, 128.0, 256.0, 512.0, 1024.0, 4096.0, 16384.0, 65536.0]
+    ).unwrap();
+
+    /// Outgoing SynapRPC frame sizes in bytes.
+    pub static ref SYNAP_RPC_FRAME_SIZE_OUT: HistogramVec = register_histogram_vec!(
+        "synap_rpc_frame_size_bytes_out",
+        "SynapRPC outgoing frame sizes in bytes",
+        &[],
+        vec![64.0, 128.0, 256.0, 512.0, 1024.0, 4096.0, 16384.0, 65536.0]
+    ).unwrap();
+
+    // ============================================================================
     // System Metrics
     // ============================================================================
 
@@ -280,6 +380,139 @@ pub fn update_replication_lag(replica_id: &str, lag: i64) {
 pub fn record_replication_op(op_type: &str, status: &str, bytes: u64) {
     REPL_OPS_TOTAL.with_label_values(&[op_type, status]).inc();
     REPL_BYTES_TOTAL.with_label_values(&["sent"]).inc_by(bytes);
+}
+
+// ── RESP3 helpers ─────────────────────────────────────────────────────────────
+
+/// Record one RESP3 command completion.
+pub fn record_resp3_command(command: &str, ok: bool, duration_secs: f64) {
+    let status = if ok { "ok" } else { "err" };
+    RESP3_COMMANDS_TOTAL
+        .with_label_values(&[command, status])
+        .inc();
+    RESP3_COMMAND_DURATION
+        .with_label_values(&[command])
+        .observe(duration_secs);
+}
+
+/// Track an opened RESP3 connection (call on accept).
+pub fn resp3_connection_open() {
+    RESP3_CONNECTIONS.with_label_values(&["active"]).inc();
+}
+
+/// Track a closed RESP3 connection (call on disconnect).
+pub fn resp3_connection_close() {
+    RESP3_CONNECTIONS.with_label_values(&["active"]).dec();
+}
+
+/// Record bytes flowing through RESP3.
+pub fn resp3_bytes(read: usize, written: usize) {
+    if read > 0 {
+        RESP3_BYTES_READ
+            .with_label_values(&[] as &[&str; 0])
+            .inc_by(read as u64);
+    }
+    if written > 0 {
+        RESP3_BYTES_WRITTEN
+            .with_label_values(&[] as &[&str; 0])
+            .inc_by(written as u64);
+    }
+}
+
+// ── SynapRPC helpers ──────────────────────────────────────────────────────────
+
+/// Record one SynapRPC command completion.
+pub fn record_synap_rpc_command(command: &str, ok: bool, duration_secs: f64) {
+    let status = if ok { "ok" } else { "err" };
+    SYNAP_RPC_COMMANDS_TOTAL
+        .with_label_values(&[command, status])
+        .inc();
+    SYNAP_RPC_COMMAND_DURATION
+        .with_label_values(&[command])
+        .observe(duration_secs);
+}
+
+/// Track an opened SynapRPC connection.
+pub fn synap_rpc_connection_open() {
+    SYNAP_RPC_CONNECTIONS.with_label_values(&["active"]).inc();
+}
+
+/// Track a closed SynapRPC connection.
+pub fn synap_rpc_connection_close() {
+    SYNAP_RPC_CONNECTIONS.with_label_values(&["active"]).dec();
+}
+
+/// Record incoming + outgoing SynapRPC frame sizes.
+pub fn synap_rpc_frame_sizes(in_bytes: usize, out_bytes: usize) {
+    if in_bytes > 0 {
+        SYNAP_RPC_FRAME_SIZE_IN
+            .with_label_values(&[] as &[&str; 0])
+            .observe(in_bytes as f64);
+    }
+    if out_bytes > 0 {
+        SYNAP_RPC_FRAME_SIZE_OUT
+            .with_label_values(&[] as &[&str; 0])
+            .observe(out_bytes as f64);
+    }
+}
+
+// ── PerfTimer — drop-based latency recorder ───────────────────────────────────
+
+/// Zero-overhead RAII timer.  On drop it records elapsed time to a
+/// `HistogramVec` and optionally emits a WARN log when the threshold is exceeded.
+///
+/// # Example
+/// ```ignore
+/// let _t = PerfTimer::new(&RESP3_COMMAND_DURATION, &["GET"], 1.0);
+/// // … do work …
+/// // timer records on drop
+/// ```
+pub struct PerfTimer<'a> {
+    start: Instant,
+    histogram: &'a HistogramVec,
+    label: &'a str,
+    /// Emit a WARN log if elapsed > this many seconds.  `None` = never.
+    slow_threshold_secs: Option<f64>,
+}
+
+impl<'a> PerfTimer<'a> {
+    /// Create a new timer.  `slow_ms` — if >0, log a warning when elapsed exceeds it.
+    pub fn new(histogram: &'a HistogramVec, label: &'a str, slow_ms: f64) -> Self {
+        Self {
+            start: Instant::now(),
+            histogram,
+            label,
+            slow_threshold_secs: if slow_ms > 0.0 {
+                Some(slow_ms / 1_000.0)
+            } else {
+                None
+            },
+        }
+    }
+
+    /// Elapsed time so far (without recording).
+    pub fn elapsed_secs(&self) -> f64 {
+        self.start.elapsed().as_secs_f64()
+    }
+}
+
+impl Drop for PerfTimer<'_> {
+    fn drop(&mut self) {
+        let elapsed = self.start.elapsed().as_secs_f64();
+        self.histogram
+            .with_label_values(&[self.label])
+            .observe(elapsed);
+        if let Some(threshold) = self.slow_threshold_secs {
+            if elapsed > threshold {
+                tracing::warn!(
+                    command = self.label,
+                    elapsed_ms = elapsed * 1_000.0,
+                    threshold_ms = threshold * 1_000.0,
+                    "slow command detected"
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

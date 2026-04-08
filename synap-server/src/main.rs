@@ -516,6 +516,26 @@ async fn main() -> Result<()> {
     // Initialize Prometheus metrics
     init_metrics();
 
+    // Spawn optional RESP3 TCP listener (Redis-compatible protocol).
+    if config.resp3.enabled {
+        use synap_server::protocol::resp3::server::spawn_resp3_listener;
+        let resp3_addr: SocketAddr = format!("{}:{}", config.resp3.host, config.resp3.port)
+            .parse()
+            .expect("invalid resp3 bind address");
+        spawn_resp3_listener(app_state.clone(), resp3_addr).await?;
+        info!("RESP3 listener started on {resp3_addr}");
+    }
+
+    // Spawn optional SynapRPC binary TCP listener.
+    if config.synap_rpc.enabled {
+        use synap_server::protocol::synap_rpc::server::spawn_synap_rpc_listener;
+        let rpc_addr: SocketAddr = format!("{}:{}", config.synap_rpc.host, config.synap_rpc.port)
+            .parse()
+            .expect("invalid synap_rpc bind address");
+        spawn_synap_rpc_listener(app_state.clone(), rpc_addr).await?;
+        info!("SynapRPC listener started on {rpc_addr}");
+    }
+
     // Create router with rate limiting and authentication
     let app = create_router(
         app_state,
