@@ -266,7 +266,7 @@ async fn test_string_getset_returns_previous_and_sets_new_value() {
         .unwrap();
     assert_eq!(res.status(), 200);
     let value_str: String = res.json().await.unwrap();
-    assert_eq!(value_str, "\"first\"");
+    assert_eq!(value_str, "first");
 
     let res = client
         .post(format!("{}/kv/string:getset-new/getset", base_url))

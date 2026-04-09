@@ -693,7 +693,7 @@ async fn test_rest_streamablehttp_command_format() {
     let get_body: serde_json::Value = get_res.json().await.unwrap();
     assert_eq!(get_body["success"], true);
     let value_str = get_body["payload"].as_str().unwrap();
-    assert_eq!(value_str, "\"test_value\"");
+    assert_eq!(value_str, "test_value");
 }
 
 #[tokio::test]
