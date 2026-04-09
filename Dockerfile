@@ -28,26 +28,15 @@
 #   Build for pre-release testing:
 #     docker build -t synap:0.9.0-rc -t synap:latest .
 #
-#   Run container:
-#     docker run -d --name synap-server-0.9.0 \
-#       -p 15500:15500 -p 15501:15501 \
+#   Run container (all three protocols):
+#     docker run -d --name synap-server \
+#       -p 15500:15500 -p 15501:15501 -p 6379:6379 \
 #       -v synap-data:/data \
-#       synap:0.9.0
+#       synap:latest
 #
 #   Run with authentication enabled:
 #     docker run -d --name synap-server \
-#       -p 15500:15500 -p 15501:15501 \
-#       -v synap-data:/data \
-#       -e SYNAP_AUTH_ENABLED=true \
-#       -e SYNAP_AUTH_REQUIRE_AUTH=true \
-#       -e SYNAP_AUTH_ROOT_USERNAME=root \
-#       -e SYNAP_AUTH_ROOT_PASSWORD=your_secure_password \
-#       -e SYNAP_AUTH_ROOT_ENABLED=true \
-#       synap:latest
-#
-#   Run with authentication and audit logging:
-#     docker run -d --name synap-server \
-#       -p 15500:15500 -p 15501:15501 \
+#       -p 15500:15500 -p 15501:15501 -p 6379:6379 \
 #       -v synap-data:/data \
 #       -e SYNAP_AUTH_ENABLED=true \
 #       -e SYNAP_AUTH_REQUIRE_AUTH=true \
@@ -58,7 +47,7 @@
 #
 #   Run with custom config:
 #     docker run -d --name synap-server \
-#       -p 15500:15500 -p 15501:15501 \
+#       -p 15500:15500 -p 15501:15501 -p 6379:6379 \
 #       -v synap-data:/data \
 #       -v /path/to/config.yml:/app/config.yml:ro \
 #       synap:latest
@@ -204,9 +193,10 @@ RUN chown -R synap:synap /app
 USER synap
 
 # Expose ports
-# 15500: HTTP/REST API + StreamableHTTP
-# 15501: Replication TCP port
-EXPOSE 15500 15501
+# 15500: HTTP/REST API + StreamableHTTP + WebSocket
+# 15501: SynapRPC binary protocol (MessagePack/TCP)
+# 6379:  RESP3 protocol (Redis-compatible wire protocol)
+EXPOSE 15500 15501 6379
 
 # Health check
 # Check if server responds to health endpoint

@@ -184,7 +184,7 @@ protocols:
 # Bind to 127.0.0.1 unless you intend to expose it on the network.
 resp3:
   enabled: true
-  host: "127.0.0.1"
+  host: "0.0.0.0"
   port: 6379
 
 # ----------------------------------------------------------------------------

@@ -61,15 +61,31 @@ protocols:
     prefix: "/kv"
 
 # ============================================================================
+# RESP3 TCP Listener (Redis-compatible protocol)
+# ============================================================================
+resp3:
+  enabled: true
+  host: "0.0.0.0"
+  port: 6379
+
+# ============================================================================
+# SynapRPC TCP Listener (native binary protocol)
+# ============================================================================
+synap_rpc:
+  enabled: true
+  host: "0.0.0.0"
+  port: 15501
+
+# ============================================================================
 # REPLICATION (REPLICA)
 # ============================================================================
 replication:
   enabled: true
   role: "replica"
-  
-  # Master node address to sync from
+
+  # Master node address to sync from (port 15600 = replication, not SynapRPC)
   # This will be overridden by SYNAP_MASTER_ADDRESS env var in Docker
-  master_address: "master:15501"
+  master_address: "master:15600"
   
   # Performance tuning
   heartbeat_interval_ms: 1000

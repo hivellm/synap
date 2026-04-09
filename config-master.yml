@@ -61,14 +61,33 @@ protocols:
     prefix: "/kv"
 
 # ============================================================================
+# RESP3 TCP Listener (Redis-compatible protocol)
+# ============================================================================
+# Any Redis client (redis-cli, redis-rs, ioredis) can connect directly.
+resp3:
+  enabled: true
+  host: "0.0.0.0"
+  port: 6379
+
+# ============================================================================
+# SynapRPC TCP Listener (native binary protocol)
+# ============================================================================
+# 4-byte LE length prefix + MessagePack body.  Use Synap SDK clients.
+synap_rpc:
+  enabled: true
+  host: "0.0.0.0"
+  port: 15501
+
+# ============================================================================
 # REPLICATION (MASTER)
 # ============================================================================
 replication:
   enabled: true
   role: "master"
-  
+
   # Address where master listens for replica connections
-  replica_listen_address: "0.0.0.0:15501"
+  # Uses port 15600 to avoid conflict with SynapRPC on 15501
+  replica_listen_address: "0.0.0.0:15600"
   
   # Performance tuning
   heartbeat_interval_ms: 1000
