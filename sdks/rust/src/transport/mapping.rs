@@ -1082,14 +1082,33 @@ pub(crate) fn map_response(cmd: &str, wire: WireValue) -> Value {
             json!({"message_id": id})
         }
         "queue.consume" => {
-            // Server returns Map with id/payload/priority/retry_count or Null.
-            // On native transports the `payload` field arrives as a Str (bytes
-            // decoded as UTF-8); convert it to a JSON byte array so that
-            // `Message.payload` (Vec<u8>) deserialises correctly.
+            // SynapRPC returns a Map {id, payload, priority, retry_count, ...}.
+            // RESP3 returns a positional Array [id, payload, priority, retry_count].
+            // Normalise both into a JSON object that `Message` can deserialise.
             if wire.is_null() {
                 Value::Null
             } else {
-                let mut json = wire.to_json();
+                let mut json = match wire {
+                    WireValue::Array(ref arr) if arr.len() >= 4 => {
+                        let payload_bytes = match &arr[1] {
+                            WireValue::Bytes(b) => {
+                                Value::Array(b.iter().map(|&byte| json!(byte as u64)).collect())
+                            }
+                            WireValue::Str(s) => {
+                                Value::Array(s.bytes().map(|b| json!(b as u64)).collect())
+                            }
+                            other => other.to_json(),
+                        };
+                        json!({
+                            "id": arr[0].to_json(),
+                            "payload": payload_bytes,
+                            "priority": arr[2].to_json(),
+                            "retry_count": arr[3].to_json(),
+                        })
+                    }
+                    _ => wire.to_json(),
+                };
+                // For Map-based responses (SynapRPC): fix payload if it's a string
                 if let Some(s) = json.get("payload").and_then(|p| p.as_str()) {
                     let byte_arr: Vec<Value> = s.bytes().map(|b| json!(b as u64)).collect();
                     json["payload"] = Value::Array(byte_arr);
@@ -1098,7 +1117,24 @@ pub(crate) fn map_response(cmd: &str, wire: WireValue) -> Value {
             }
         }
         "queue.ack" | "queue.nack" => json!({}),
-        "queue.stats" => wire.to_json(),
+        "queue.stats" => {
+            // RESP3 returns a flat array [key, val, key, val, ...].
+            // SynapRPC returns a Map.  Normalise both to a JSON object.
+            match wire {
+                WireValue::Array(ref arr) => {
+                    let mut obj = serde_json::Map::new();
+                    for pair in arr.chunks(2) {
+                        if let [k, v] = pair {
+                            if let Some(key) = k.as_str() {
+                                obj.insert(key.to_string(), v.to_json());
+                            }
+                        }
+                    }
+                    Value::Object(obj)
+                }
+                _ => wire.to_json(),
+            }
+        }
 
         // ── Stream ────────────────────────────────────────────────────────────
         "stream.create" | "stream.delete" => json!({}),
@@ -1137,12 +1173,15 @@ pub(crate) fn map_response(cmd: &str, wire: WireValue) -> Value {
         }
         "pubsub.subscribe" => {
             let sub_id = match &wire {
+                // SynapRPC returns a Map with subscriber_id
                 WireValue::Map(pairs) => pairs
                     .iter()
                     .find(|(k, _)| k.as_str() == Some("subscriber_id"))
                     .and_then(|(_, v)| v.as_str().map(|s| s.to_string()))
                     .unwrap_or_default(),
-                _ => String::new(),
+                // RESP3 returns an Integer (subscription count) — no subscriber_id.
+                // Generate a synthetic one so the SDK API is consistent.
+                _ => format!("sub-{}", uuid::Uuid::new_v4()),
             };
             json!({"subscription_id": sub_id})
         }

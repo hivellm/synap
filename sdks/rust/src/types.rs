@@ -61,21 +61,30 @@ pub struct QueueStats {
 /// Stream event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
+    #[serde(default)]
     pub offset: u64,
-    #[serde(rename = "event_type")]
+    #[serde(alias = "event_type")]
     pub event: String,
     pub data: serde_json::Value,
+    #[serde(default)]
     pub timestamp: Option<u64>,
 }
 
 /// Stream statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StreamStats {
-    pub room: String,
+    #[serde(alias = "room", default)]
+    pub name: String,
+    #[serde(default)]
+    pub message_count: usize,
+    #[serde(default)]
     pub max_offset: u64,
-    pub total_events: u64,
-    pub created_at: u64,
-    pub last_activity: u64,
+    #[serde(default)]
+    pub total_published: u64,
+    #[serde(default)]
+    pub total_consumed: u64,
+    #[serde(default)]
+    pub subscriber_count: usize,
 }
 
 /// Pub/Sub message
