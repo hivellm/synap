@@ -14,19 +14,12 @@
 # - Volume mounts for persistence
 #
 # Docker Commands:
-#   Build image (AMD64):
-#     docker build -t synap:0.9.1 -t synap:latest .
-#     docker build -t hivehub/synap:0.9.1 -t hivehub/synap:latest .
-#
-#   Build for ARM64:
-#     docker buildx build --platform linux/arm64 -t synap:0.9.1-arm64 .
+#   Build image:
+#     docker build -t hivehub/synap:0.11.0 -t hivehub/synap:latest .
 #
 #   Build multi-arch (AMD64 + ARM64):
 #     docker buildx build --platform linux/amd64,linux/arm64 \
-#       -t hivehub/synap:0.9.0 -t hivehub/synap:latest --push .
-#
-#   Build for pre-release testing:
-#     docker build -t synap:0.9.0-rc -t synap:latest .
+#       -t hivehub/synap:0.11.0 -t hivehub/synap:latest --push .
 #
 #   Run container (all three protocols):
 #     docker run -d --name synap-server \
@@ -53,19 +46,10 @@
 #       synap:latest
 #
 #   View logs:
-#     docker logs -f synap-server-0.9.0
+#     docker logs -f synap-server
 #
-#   Check status:
-#     docker ps --filter name=synap-server-0.9.0
-#
-#   Stop container:
-#     docker stop synap-server-0.9.0
-#
-#   Remove container:
-#     docker rm synap-server-0.9.0
-#
-#   Remove image:
-#     docker rmi synap:0.9.0
+#   Stop/remove:
+#     docker stop synap-server && docker rm synap-server
 # ============================================================================
 
 # ============================================================================
