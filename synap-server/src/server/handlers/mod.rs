@@ -249,6 +249,7 @@ pub struct ConsumeResponse {
     pub payload: Option<Vec<u8>>,
     pub priority: Option<u8>,
     pub retry_count: Option<u32>,
+    pub max_retries: Option<u32>,
     pub headers: Option<HashMap<String, String>>,
 }
 

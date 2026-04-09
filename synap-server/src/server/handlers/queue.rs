@@ -126,6 +126,7 @@ pub async fn queue_consume(
             payload: Some((*msg.payload).clone()), // Convert Arc<Vec<u8>> to Vec<u8>
             priority: Some(msg.priority),
             retry_count: Some(msg.retry_count),
+            max_retries: Some(msg.max_retries),
             headers: Some(msg.headers),
         }))
     } else {
@@ -134,6 +135,7 @@ pub async fn queue_consume(
             payload: None,
             priority: None,
             retry_count: None,
+            max_retries: None,
             headers: None,
         }))
     }
@@ -504,6 +506,7 @@ pub(super) async fn handle_queue_consume_cmd(
                 "payload": (*msg.payload).clone(), // Convert Arc<Vec<u8>> to Vec<u8>
                 "priority": msg.priority,
                 "retry_count": msg.retry_count,
+                "max_retries": msg.max_retries,
                 "headers": msg.headers,
             }
         }))
