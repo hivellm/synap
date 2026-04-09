@@ -14,7 +14,8 @@ import { createConnection } from 'net';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { Synap } from '../index';
+import { randomUUID } from 'crypto';
+import { Synap, UnsupportedCommandError } from '../index';
 
 const RUN_E2E = process.env.RUN_E2E === 'true';
 const describeE2E = RUN_E2E ? describe : describe.skip;
@@ -127,31 +128,133 @@ async function stopServer(): Promise<void> {
 // ── Clients ───────────────────────────────────────────────────────────────────
 
 function httpClient(): Synap {
-  return new Synap({
-    url: `http://127.0.0.1:${HTTP_PORT}`,
-    transport: 'http',
-    timeout: 5000,
-  });
+  return new Synap({ url: `http://127.0.0.1:${HTTP_PORT}`, timeout: 5000 });
 }
 
 function rpcClient(): Synap {
-  return new Synap({
-    url: `http://127.0.0.1:${HTTP_PORT}`,
-    transport: 'synaprpc',
-    rpcHost: '127.0.0.1',
-    rpcPort: RPC_PORT,
-    timeout: 5000,
-  });
+  return new Synap({ url: `synap://127.0.0.1:${RPC_PORT}`, timeout: 5000 });
 }
 
 function resp3Client(): Synap {
-  return new Synap({
-    url: `http://127.0.0.1:${HTTP_PORT}`,
-    transport: 'resp3',
-    resp3Host: '127.0.0.1',
-    resp3Port: RESP3_PORT,
-    timeout: 5000,
-  });
+  return new Synap({ url: `resp3://127.0.0.1:${RESP3_PORT}`, timeout: 5000 });
+}
+
+// ── Queue suite ───────────────────────────────────────────────────────────────
+
+async function runQueueSuite(synap: Synap, prefix: string): Promise<void> {
+  const qName = `${prefix}:e2e:queue`;
+
+  await synap.queue.createQueue(qName);
+  const queues = await synap.queue.listQueues();
+  expect(queues).toContain(qName);
+
+  const msgId = await synap.queue.publishString(qName, 'hello-queue');
+  expect(typeof msgId).toBe('string');
+  expect(msgId.length).toBeGreaterThan(0);
+
+  const { message, text } = await synap.queue.consumeString(qName, `${prefix}-consumer`);
+  expect(message).not.toBeNull();
+  expect(text).toBe('hello-queue');
+
+  if (message) {
+    const acked = await synap.queue.ack(qName, message.id);
+    expect(acked).toBe(true);
+  }
+
+  const stats = await synap.queue.stats(qName);
+  expect(stats.consumed).toBeGreaterThanOrEqual(1);
+
+  await synap.queue.deleteQueue(qName);
+  const queuesAfter = await synap.queue.listQueues();
+  expect(queuesAfter).not.toContain(qName);
+}
+
+// ── Stream suite ──────────────────────────────────────────────────────────────
+
+async function runStreamSuite(synap: Synap, prefix: string): Promise<void> {
+  const room = `${prefix}:e2e:room`;
+
+  await synap.stream.createRoom(room);
+  const rooms = await synap.stream.listRooms();
+  expect(rooms).toContain(room);
+
+  const off1 = await synap.stream.publish(room, 'evt.a', { n: 1 });
+  const off2 = await synap.stream.publish(room, 'evt.b', { n: 2 });
+  expect(off1).toBeGreaterThanOrEqual(0);
+  expect(off2).toBeGreaterThan(off1);
+
+  const events = await synap.stream.consume(room, `${prefix}-sub`, 0);
+  expect(events.length).toBeGreaterThanOrEqual(2);
+  expect(events[0].event).toBe('evt.a');
+  expect(events[1].event).toBe('evt.b');
+
+  const stats = await synap.stream.stats(room);
+  expect(stats.total_events).toBeGreaterThanOrEqual(2);
+
+  await synap.stream.deleteRoom(room);
+  const roomsAfter = await synap.stream.listRooms();
+  expect(roomsAfter).not.toContain(room);
+}
+
+// ── PubSub suite ──────────────────────────────────────────────────────────────
+
+async function runPubSubSuite(synap: Synap, prefix: string): Promise<void> {
+  const topic = `${prefix}.e2e.topic`;
+
+  // Publish succeeds even with no active subscribers
+  const published = await synap.pubsub.publish(topic, { msg: 'hello' });
+  expect(typeof published).toBe('boolean');
+
+  const topics = await synap.pubsub.listTopics();
+  expect(Array.isArray(topics)).toBe(true);
+}
+
+// ── Transaction suite ─────────────────────────────────────────────────────────
+
+async function runTransactionSuite(synap: Synap, prefix: string): Promise<void> {
+  const key = `${prefix}:e2e:txn:key`;
+
+  // MULTI → DISCARD
+  const txDiscard = randomUUID();
+  const multiResp = await synap.transaction.multi({ clientId: txDiscard });
+  expect(multiResp.success).toBe(true);
+  const discardResp = await synap.transaction.discard({ clientId: txDiscard });
+  expect(discardResp.success).toBe(true);
+
+  // MULTI → scoped SET → EXEC
+  const txExec = randomUUID();
+  const scope = synap.transaction.scope(txExec);
+  await synap.transaction.multi({ clientId: txExec });
+  await scope.kv.set(key, 'txn-value');
+  const execResult = await synap.transaction.exec({ clientId: txExec });
+
+  // exec may succeed or abort depending on watch state — either is valid
+  if (execResult.success) {
+    const val = await synap.kv.get(key);
+    expect(val).toBe('txn-value');
+    await synap.kv.del(key);
+  } else {
+    expect(execResult.aborted).toBe(true);
+  }
+}
+
+// ── Script suite ──────────────────────────────────────────────────────────────
+
+async function runScriptSuite(synap: Synap, _prefix: string): Promise<void> {
+  // EVAL: return a constant
+  const evalResp = await synap.script.eval<string>('return "synap-ok"');
+  expect(evalResp.result).toBe('synap-ok');
+  expect(typeof evalResp.sha1).toBe('string');
+
+  // SCRIPT LOAD → EVALSHA
+  const sha1 = await synap.script.load('return ARGV[1]');
+  expect(typeof sha1).toBe('string');
+
+  const existsResp = await synap.script.exists([sha1]);
+  expect(existsResp.exists[0]).toBe(true);
+
+  const evalshaResp = await synap.script.evalsha<string>(sha1, { args: ['from-evalsha'] });
+  expect(evalshaResp.result).toBe('from-evalsha');
 }
 
 // ── KV suite ──────────────────────────────────────────────────────────────────
@@ -213,6 +316,127 @@ describeE2E('Synap SDK E2E (real server, all transports)', () => {
     const c = resp3Client();
     try {
       await runKvSuite(c, 'resp3');
+    } finally {
+      c.close();
+    }
+  });
+
+  // ── Queue tests ────────────────────────────────────────────────────────────
+
+  it('HTTP transport — Queue lifecycle', async () => {
+    const c = httpClient();
+    try { await runQueueSuite(c, 'http'); } finally { c.close(); }
+  });
+
+  it('SynapRPC transport — Queue lifecycle', async () => {
+    const c = rpcClient();
+    try { await runQueueSuite(c, 'rpc'); } finally { c.close(); }
+  });
+
+  it('RESP3 transport — Queue lifecycle', async () => {
+    const c = resp3Client();
+    try { await runQueueSuite(c, 'resp3'); } finally { c.close(); }
+  });
+
+  // ── Stream tests ───────────────────────────────────────────────────────────
+
+  it('HTTP transport — Stream lifecycle', async () => {
+    const c = httpClient();
+    try { await runStreamSuite(c, 'http'); } finally { c.close(); }
+  });
+
+  it('SynapRPC transport — Stream lifecycle', async () => {
+    const c = rpcClient();
+    try { await runStreamSuite(c, 'rpc'); } finally { c.close(); }
+  });
+
+  it('RESP3 transport — Stream lifecycle', async () => {
+    const c = resp3Client();
+    try { await runStreamSuite(c, 'resp3'); } finally { c.close(); }
+  });
+
+  // ── Pub/Sub tests ──────────────────────────────────────────────────────────
+
+  it('HTTP transport — Pub/Sub publish', async () => {
+    const c = httpClient();
+    try { await runPubSubSuite(c, 'http'); } finally { c.close(); }
+  });
+
+  it('SynapRPC transport — Pub/Sub publish', async () => {
+    const c = rpcClient();
+    try { await runPubSubSuite(c, 'rpc'); } finally { c.close(); }
+  });
+
+  it('RESP3 transport — Pub/Sub publish', async () => {
+    const c = resp3Client();
+    try { await runPubSubSuite(c, 'resp3'); } finally { c.close(); }
+  });
+
+  // ── Transaction tests ──────────────────────────────────────────────────────
+
+  it('HTTP transport — Transaction MULTI/EXEC', async () => {
+    const c = httpClient();
+    try { await runTransactionSuite(c, 'http'); } finally { c.close(); }
+  });
+
+  it('SynapRPC transport — Transaction MULTI/EXEC', async () => {
+    const c = rpcClient();
+    try { await runTransactionSuite(c, 'rpc'); } finally { c.close(); }
+  });
+
+  it('RESP3 transport — Transaction MULTI/EXEC', async () => {
+    const c = resp3Client();
+    try { await runTransactionSuite(c, 'resp3'); } finally { c.close(); }
+  });
+
+  // ── Script tests ───────────────────────────────────────────────────────────
+
+  it('HTTP transport — Lua scripting', async () => {
+    const c = httpClient();
+    try { await runScriptSuite(c, 'http'); } finally { c.close(); }
+  });
+
+  it('SynapRPC transport — Lua scripting', async () => {
+    const c = rpcClient();
+    try { await runScriptSuite(c, 'rpc'); } finally { c.close(); }
+  });
+
+  it('RESP3 transport — Lua scripting', async () => {
+    const c = resp3Client();
+    try { await runScriptSuite(c, 'resp3'); } finally { c.close(); }
+  });
+
+  // ── UnsupportedCommandError regression (8.2) ───────────────────────────────
+
+  it('SynapRPC — unmapped command raises UnsupportedCommandError', async () => {
+    const c = rpcClient();
+    try {
+      await expect(
+        c.bitmap.setbit('e2e:ts:rpc:bitmap', 0, 1),
+      ).rejects.toBeInstanceOf(UnsupportedCommandError);
+    } finally {
+      c.close();
+    }
+  });
+
+  it('RESP3 — unmapped command raises UnsupportedCommandError', async () => {
+    const c = resp3Client();
+    try {
+      await expect(
+        c.bitmap.setbit('e2e:ts:resp3:bitmap', 0, 1),
+      ).rejects.toBeInstanceOf(UnsupportedCommandError);
+    } finally {
+      c.close();
+    }
+  });
+
+  it('HTTP — unmapped command succeeds (no UnsupportedCommandError)', async () => {
+    const c = httpClient();
+    try {
+      const key = 'e2e:ts:http:bitmap';
+      const result = await c.bitmap.setbit(key, 0, 1);
+      expect(typeof result).toBe('number');
+      await c.kv.del(key);
     } finally {
       c.close();
     }

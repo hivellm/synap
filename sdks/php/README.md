@@ -68,40 +68,57 @@ $delivered = $client->pubsub()->publish('notifications.email', [
 
 ## Transports
 
-Since v0.10.0 the SDK speaks three wire protocols, selectable via
-`SynapConfig` builder methods:
+Since v0.11.0 the SDK selects the transport via **URL scheme** — no separate builder methods required:
 
-| Transport    | Default addr       | When to use                                               |
-|--------------|--------------------|-----------------------------------------------------------|
-| **SynapRPC** | `127.0.0.1:15501`  | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency. |
-| **RESP3**    | `127.0.0.1:6379`   | Redis-compatible text protocol — interop with existing Redis tooling. |
-| **HTTP**     | from `base_url`    | Original REST transport. Always required as the fallback channel. |
+| URL scheme    | Default port | When to use                                               |
+|---------------|--------------|-----------------------------------------------------------|
+| `synap://`    | `15501`      | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency. |
+| `resp3://`    | `6379`       | Redis-compatible text protocol — interop with existing Redis tooling. |
+| `http://` / `https://` | `15500` | Original REST transport — full command coverage. |
 
-> **Why `base_url` is always required.** SynapRPC and RESP3 only map KV,
-> Hash, List, Set, Sorted Set and Bitmap commands. Queues, streams, pub/sub,
-> scripting, transactions and anything unmapped fall back to HTTP REST
-> automatically.
+All commands (KV, Hash, List, Set, Sorted Set, Queue, Stream, Pub/Sub, Transactions, Scripts, Geo, HyperLogLog) are fully supported on every transport. Native transports throw `UnsupportedCommandException` instead of silently falling back to HTTP.
 
 ```php
 use Synap\SDK\SynapConfig;
 use Synap\SDK\SynapClient;
 
-// SynapRPC (default, recommended)
-$config = new SynapConfig('http://127.0.0.1:15500'); // SynapRPC is the default
+// SynapRPC — recommended default
+$config = new SynapConfig('synap://127.0.0.1:15501');
 $client = new SynapClient($config);
 
-// Explicit SynapRPC with custom RPC endpoint
-$config = (new SynapConfig('https://synap.example.com'))
-    ->withSynapRpcTransport()
-    ->withRpcAddr('10.0.0.42', 15501);
+// RESP3 — Redis-compatible
+$config = new SynapConfig('resp3://127.0.0.1:6379');
+$client = new SynapClient($config);
 
-// RESP3 (Redis-compatible)
-$config = (new SynapConfig('http://127.0.0.1:15500'))
-    ->withResp3Transport()
-    ->withResp3Addr('127.0.0.1', 6379);
+// HTTP — full REST access
+$config = new SynapConfig('http://127.0.0.1:15500');
+$client = new SynapClient($config);
+```
 
-// Pure HTTP (no binary transport)
-$config = (new SynapConfig('http://127.0.0.1:15500'))->withHttpTransport();
+**Queue, stream and pub/sub over `synap://`:**
+
+```php
+use Synap\SDK\SynapConfig;
+use Synap\SDK\SynapClient;
+
+$client = new SynapClient(new SynapConfig('synap://127.0.0.1:15501'));
+
+// Queue round-trip
+$client->queue()->createQueue('tasks', 1000, 60);
+$id = $client->queue()->publish('tasks', ['job' => 'resize'], priority: 5);
+$msg = $client->queue()->consume('tasks', 'worker-1');
+$client->queue()->ack('tasks', $msg->id);
+
+// Stream publish + read
+$client->stream()->createRoom('events');
+$client->stream()->publish('events', 'user.created', ['id' => 'u1']);
+$events = $client->stream()->read('events', offset: 0);
+
+// Reactive pub/sub (server-push, blocking loop on synap://)
+$client->pubsub()->observe(['news.*'], function (array $msg) {
+    echo 'got: ' . json_encode($msg) . PHP_EOL;
+    return false; // return false to stop listening
+});
 ```
 
 ## API Reference

@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-09
+
+### Added
+
+- **Full RPC + RESP3 command parity**: every command previously only available
+  over HTTP (queues, streams, pub/sub, transactions, scripts, geospatial,
+  HyperLogLog) is now served natively on SynapRPC and RESP3. See
+  `docs/transports.md` for the full command-parity matrix.
+- **URL-scheme transport selection**: all SDKs (Rust, TypeScript, Python, PHP,
+  C#) now accept a single connection URL whose scheme determines the transport:
+  - `synap://host:port` → SynapRPC (recommended default)
+  - `resp3://host:port` → RESP3
+  - `http://host:port` or `https://host:port` → HTTP/REST
+- **SynapRPC server-push frames**: pub/sub subscriptions, stream observation,
+  and reactive queue consumption now deliver messages over a dedicated TCP
+  connection. Push frames are identified by `id == 0xFFFFFFFF` (U32_MAX).
+- **`UnsupportedCommand` error**: native transports (`synap://`, `resp3://`)
+  raise a typed error for any command not mapped on that transport instead of
+  silently falling back to HTTP.
+- **`docs/transports.md`**: new reference document covering URL schemes, push
+  frame format, command-parity matrix, and deprecated builder methods.
+
+### Changed
+
+- **No silent HTTP fallback** (breaking for `synap://`/`resp3://` clients):
+  commands absent from the native transport's mapping now raise
+  `UnsupportedCommandError` / `UnsupportedCommandException` rather than
+  being forwarded to REST.
+- **Builder methods deprecated** across all five SDKs:
+  `with_synap_rpc_transport`, `with_rpc_addr`, `WithSynapRpcTransport`,
+  `withSynapRpcTransport`, etc. are marked deprecated and will be removed
+  in v0.12.0. Migrate to URL-scheme construction.
+
 ## [0.10.0] - 2026-04-08
 
 ### Added

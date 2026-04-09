@@ -106,44 +106,48 @@ console.log(exec);
 
 ## Transports
 
-Since v0.10.0 the SDK speaks three wire protocols, selectable per-client:
+Since v0.11.0 the SDK selects the transport via **URL scheme** — no separate options required:
 
-| Transport    | Default addr       | When to use                                               |
-|--------------|--------------------|-----------------------------------------------------------|
-| **SynapRPC** | `127.0.0.1:15501`  | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency, preserves numeric/bool/bytes types on the wire. |
-| **RESP3**    | `127.0.0.1:6379`   | Redis-compatible text protocol — interop with existing Redis tooling. |
-| **HTTP**     | from `url`         | Original REST transport. Always required as the fallback channel. |
+| URL scheme    | Default port | When to use                                               |
+|---------------|--------------|-----------------------------------------------------------|
+| `synap://`    | `15501`      | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency, preserves numeric/bool/bytes types. |
+| `resp3://`    | `6379`       | Redis-compatible text protocol — interop with existing Redis tooling. |
+| `http://` / `https://` | `15500` | Original REST transport — full command coverage. |
 
-> **Why `url` is always required.** SynapRPC and RESP3 only map KV, Hash,
-> List, Set, Sorted Set and Bitmap commands. Queues, streams, pub/sub,
-> scripting, transactions and anything unmapped fall back to HTTP REST
-> automatically — so the HTTP `url` must always point at a reachable
-> listener even when you pick a binary transport.
+All commands (KV, Hash, List, Set, Sorted Set, Queue, Stream, Pub/Sub, Transactions, Scripts, Geo, HyperLogLog) are fully supported on every transport. Native transports throw `UnsupportedCommandError` instead of silently falling back to HTTP.
 
 ```typescript
-import { Synap } from '@hivehub/synap';
+import { SynapClient } from '@hivehub/synap';
 
-// SynapRPC (default, recommended)
-const synap = new Synap({
-  url: 'http://127.0.0.1:15500',
-  transport: 'synaprpc',        // optional — this is the default
-  rpcHost: '127.0.0.1',         // optional
-  rpcPort: 15501,               // optional
-});
+// SynapRPC — recommended default
+const client = new SynapClient('synap://127.0.0.1:15501');
 
-// RESP3 (Redis-compatible)
-const redisCompat = new Synap({
-  url: 'http://127.0.0.1:15500',
-  transport: 'resp3',
-  resp3Host: '127.0.0.1',
-  resp3Port: 6379,
-});
+// RESP3 — Redis-compatible
+const client = new SynapClient('resp3://127.0.0.1:6379');
 
-// Pure HTTP (no binary transport)
-const httpOnly = new Synap({
-  url: 'http://127.0.0.1:15500',
-  transport: 'http',
+// HTTP — full REST access
+const client = new SynapClient('http://127.0.0.1:15500');
+```
+
+**Queue, stream and pub/sub over `synap://`:**
+
+```typescript
+// Queue round-trip
+await client.queue.createQueue('tasks', 1000, 60);
+const id = await client.queue.publish('tasks', { job: 'resize' }, 5);
+const msg = await client.queue.consume('tasks', 'worker-1');
+await client.queue.ack('tasks', msg.id);
+
+// Stream publish + read
+await client.stream.createRoom('events');
+await client.stream.publish('events', 'user.created', { id: 'u1' });
+const events = await client.stream.read('events', 0);
+
+// Reactive pub/sub (server-push over dedicated TCP connection on synap://)
+await client.pubsub.subscribe(['news.*'], (msg) => {
+  console.log('got:', msg);
 });
+await client.pubsub.publish('news.breaking', { title: 'Hello' });
 ```
 
 ### End-to-end tests

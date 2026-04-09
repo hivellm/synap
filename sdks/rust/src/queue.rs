@@ -34,12 +34,16 @@ impl QueueManager {
         max_depth: Option<usize>,
         ack_deadline_secs: Option<u64>,
     ) -> Result<()> {
-        let mut payload = json!({"queue_name": queue_name});
+        let mut config = serde_json::Map::new();
         if let Some(depth) = max_depth {
-            payload["max_depth"] = json!(depth);
+            config.insert("max_depth".to_string(), json!(depth));
         }
         if let Some(deadline) = ack_deadline_secs {
-            payload["ack_deadline_secs"] = json!(deadline);
+            config.insert("ack_deadline_secs".to_string(), json!(deadline));
+        }
+        let mut payload = json!({"name": queue_name});
+        if !config.is_empty() {
+            payload["config"] = serde_json::Value::Object(config);
         }
 
         self.client.send_command("queue.create", payload).await?;
@@ -66,7 +70,7 @@ impl QueueManager {
         max_retries: Option<u32>,
     ) -> Result<String> {
         let body = json!({
-            "queue_name": queue_name,
+            "queue": queue_name,
             "payload": payload,
             "priority": priority,
             "max_retries": max_retries,
@@ -83,23 +87,31 @@ impl QueueManager {
     /// Consume a message from a queue
     pub async fn consume(&self, queue_name: &str, consumer_id: &str) -> Result<Option<Message>> {
         let payload = json!({
-            "queue_name": queue_name,
+            "queue": queue_name,
             "consumer_id": consumer_id,
         });
 
         let response = self.client.send_command("queue.consume", payload).await?;
 
-        if response.is_null() {
+        // HTTP transport wraps the message: {"message": {...}} or {"message": null}
+        // Native transports (SynapRPC, RESP3) return the message directly or Null.
+        let msg_val = if let Some(inner) = response.get("message") {
+            inner.clone()
+        } else {
+            response
+        };
+
+        if msg_val.is_null() {
             return Ok(None);
         }
 
-        Ok(serde_json::from_value(response).ok())
+        Ok(serde_json::from_value(msg_val).ok())
     }
 
     /// Acknowledge a message
     pub async fn ack(&self, queue_name: &str, message_id: &str) -> Result<()> {
         let payload = json!({
-            "queue_name": queue_name,
+            "queue": queue_name,
             "message_id": message_id
         });
 
@@ -110,7 +122,7 @@ impl QueueManager {
     /// Negative acknowledge a message (requeue)
     pub async fn nack(&self, queue_name: &str, message_id: &str) -> Result<()> {
         let payload = json!({
-            "queue_name": queue_name,
+            "queue": queue_name,
             "message_id": message_id
         });
 
@@ -120,7 +132,7 @@ impl QueueManager {
 
     /// Get queue statistics
     pub async fn stats(&self, queue_name: &str) -> Result<QueueStats> {
-        let payload = json!({"queue_name": queue_name});
+        let payload = json!({"queue": queue_name});
         let response = self.client.send_command("queue.stats", payload).await?;
         Ok(serde_json::from_value(response)?)
     }
@@ -133,7 +145,7 @@ impl QueueManager {
 
     /// Delete a queue
     pub async fn delete_queue(&self, queue_name: &str) -> Result<()> {
-        let payload = json!({"queue_name": queue_name});
+        let payload = json!({"queue": queue_name});
         self.client.send_command("queue.delete", payload).await?;
         Ok(())
     }

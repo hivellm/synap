@@ -47,21 +47,73 @@ pub struct SynapConfig {
 }
 
 impl SynapConfig {
-    /// Create a configuration that defaults to **SynapRPC** transport.
+    /// Create a configuration, inferring the transport from the URL scheme.
     ///
-    /// Provide the HTTP `base_url` for commands that fall back to REST
-    /// (pub/sub, queues, streams, and any command not yet mapped natively).
+    /// | Scheme | Transport | Default port |
+    /// |--------|-----------|--------------|
+    /// | `http://` or `https://` | HTTP REST | — (as given) |
+    /// | `synap://` | SynapRPC (MessagePack/TCP) | 15501 |
+    /// | `resp3://` | RESP3 (Redis wire/TCP) | 6379 |
     ///
-    /// The SynapRPC and RESP3 addresses default to `127.0.0.1:15501` and
-    /// `127.0.0.1:6379` respectively. Use the builder methods to customise.
-    pub fn new(base_url: impl Into<String>) -> Self {
+    /// For `synap://` and `resp3://` URLs the host and port are parsed from
+    /// the URL.  The HTTP base URL is set to `http://<host>:15500` as a
+    /// convenience for any HTTP-only admin calls.
+    ///
+    /// # Examples
+    /// ```
+    /// use synap_sdk::SynapConfig;
+    ///
+    /// let c = SynapConfig::new("synap://localhost:15501");
+    /// let c = SynapConfig::new("resp3://localhost:6379");
+    /// let c = SynapConfig::new("http://localhost:15500");
+    /// ```
+    pub fn new(url: impl Into<String>) -> Self {
+        let raw = url.into();
+
+        // Parse scheme to infer transport without pulling in the full `url` crate
+        // at this point (we just need scheme + host + port).
+        if let Some(rest) = raw.strip_prefix("synap://") {
+            let (host, port) = Self::parse_host_port(rest, 15501);
+            return Self {
+                base_url: format!("http://{}:15500", host),
+                rpc_host: host,
+                rpc_port: port,
+                resp3_host: "127.0.0.1".into(),
+                resp3_port: 6379,
+                transport: TransportMode::SynapRpc,
+                timeout: Duration::from_secs(30),
+                max_retries: 3,
+                auth_token: None,
+                username: None,
+                password: None,
+            };
+        }
+
+        if let Some(rest) = raw.strip_prefix("resp3://") {
+            let (host, port) = Self::parse_host_port(rest, 6379);
+            return Self {
+                base_url: format!("http://{}:15500", host),
+                rpc_host: "127.0.0.1".into(),
+                rpc_port: 15501,
+                resp3_host: host,
+                resp3_port: port,
+                transport: TransportMode::Resp3,
+                timeout: Duration::from_secs(30),
+                max_retries: 3,
+                auth_token: None,
+                username: None,
+                password: None,
+            };
+        }
+
+        // http:// or https:// → HTTP transport
         Self {
-            base_url: base_url.into(),
+            base_url: raw,
             rpc_host: "127.0.0.1".into(),
             rpc_port: 15501,
             resp3_host: "127.0.0.1".into(),
             resp3_port: 6379,
-            transport: TransportMode::SynapRpc,
+            transport: TransportMode::Http,
             timeout: Duration::from_secs(30),
             max_retries: 3,
             auth_token: None,
@@ -70,7 +122,30 @@ impl SynapConfig {
         }
     }
 
+    /// Parse `"host:port"` from a URL authority string, falling back to
+    /// `default_port` when no port is present.
+    fn parse_host_port(authority: &str, default_port: u16) -> (String, u16) {
+        // Strip any trailing path component.
+        let authority = authority.split('/').next().unwrap_or(authority);
+        if let Some(colon) = authority.rfind(':') {
+            let host = authority[..colon].to_string();
+            let port = authority[colon + 1..]
+                .parse::<u16>()
+                .unwrap_or(default_port);
+            (host, port)
+        } else {
+            (authority.to_string(), default_port)
+        }
+    }
+
     /// Use the HTTP REST transport only (original SDK behaviour).
+    ///
+    /// # Deprecated
+    /// Prefer passing an `http://` URL to [`SynapConfig::new`].
+    #[deprecated(
+        since = "0.11.0",
+        note = "Pass an `http://` URL to SynapConfig::new instead"
+    )]
     pub fn with_http_transport(mut self) -> Self {
         self.transport = TransportMode::Http;
         self
@@ -78,18 +153,39 @@ impl SynapConfig {
 
     /// Use the SynapRPC binary transport (MessagePack over TCP). This is the
     /// default and has the lowest latency of the three options.
+    ///
+    /// # Deprecated
+    /// Prefer passing a `synap://` URL to [`SynapConfig::new`].
+    #[deprecated(
+        since = "0.11.0",
+        note = "Pass a `synap://` URL to SynapConfig::new instead"
+    )]
     pub fn with_synap_rpc_transport(mut self) -> Self {
         self.transport = TransportMode::SynapRpc;
         self
     }
 
     /// Use the RESP3 text transport (Redis-compatible wire protocol over TCP).
+    ///
+    /// # Deprecated
+    /// Prefer passing a `resp3://` URL to [`SynapConfig::new`].
+    #[deprecated(
+        since = "0.11.0",
+        note = "Pass a `resp3://` URL to SynapConfig::new instead"
+    )]
     pub fn with_resp3_transport(mut self) -> Self {
         self.transport = TransportMode::Resp3;
         self
     }
 
     /// Override the SynapRPC listener address (host + port).
+    ///
+    /// # Deprecated
+    /// Encode the host and port in the `synap://host:port` URL instead.
+    #[deprecated(
+        since = "0.11.0",
+        note = "Encode host and port in the `synap://` URL passed to SynapConfig::new"
+    )]
     pub fn with_rpc_addr(mut self, host: impl Into<String>, port: u16) -> Self {
         self.rpc_host = host.into();
         self.rpc_port = port;
@@ -97,6 +193,13 @@ impl SynapConfig {
     }
 
     /// Override the RESP3 listener address (host + port).
+    ///
+    /// # Deprecated
+    /// Encode the host and port in the `resp3://host:port` URL instead.
+    #[deprecated(
+        since = "0.11.0",
+        note = "Encode host and port in the `resp3://` URL passed to SynapConfig::new"
+    )]
     pub fn with_resp3_addr(mut self, host: impl Into<String>, port: u16) -> Self {
         self.resp3_host = host.into();
         self.resp3_port = port;
@@ -281,30 +384,36 @@ impl SynapClient {
 
     /// Dispatch a command to the active transport.
     ///
-    /// For SynapRPC and RESP3 transports, commands that have a native mapping
-    /// are sent directly over TCP; unmapped commands fall back to HTTP REST.
+    /// For SynapRPC and RESP3 transports every command must have a native
+    /// mapping in the transport mapper.  Unmapped commands return
+    /// [`SynapError::UnsupportedCommand`] — there is no silent HTTP fallback.
+    /// Use an `http://` URL if you need HTTP REST for a command that is not
+    /// yet in the mapper.
     pub(crate) async fn send_command(&self, command: &str, payload: Value) -> Result<Value> {
         match self.transport.as_ref() {
             Transport::Http => self.send_http(command, payload).await,
 
-            Transport::SynapRpc(rpc) => {
-                if let Some((raw_cmd, args)) = map_command(command, &payload) {
+            Transport::SynapRpc(rpc) => match map_command(command, &payload) {
+                Some((raw_cmd, args)) => {
                     let wire = rpc.execute(raw_cmd, args).await?;
                     Ok(map_response(command, wire))
-                } else {
-                    // Unmapped command — fall back to HTTP.
-                    self.send_http(command, payload).await
                 }
-            }
+                None => Err(SynapError::UnsupportedCommand {
+                    command: command.to_owned(),
+                    transport: "SynapRpc".to_owned(),
+                }),
+            },
 
-            Transport::Resp3(resp3) => {
-                if let Some((raw_cmd, args)) = map_command(command, &payload) {
+            Transport::Resp3(resp3) => match map_command(command, &payload) {
+                Some((raw_cmd, args)) => {
                     let wire = resp3.execute(raw_cmd, args).await?;
                     Ok(map_response(command, wire))
-                } else {
-                    self.send_http(command, payload).await
                 }
-            }
+                None => Err(SynapError::UnsupportedCommand {
+                    command: command.to_owned(),
+                    transport: "Resp3".to_owned(),
+                }),
+            },
         }
     }
 
@@ -356,6 +465,15 @@ impl SynapClient {
     pub(crate) fn http_client(&self) -> &Client {
         &self.http_client
     }
+
+    /// Return a reference to the `SynapRpcTransport` when the active transport
+    /// is `SynapRpc`, or `None` for HTTP / RESP3.
+    pub(crate) fn synap_rpc_transport(&self) -> Option<Arc<SynapRpcTransport>> {
+        match self.transport.as_ref() {
+            Transport::SynapRpc(rpc) => Some(Arc::clone(rpc)),
+            _ => None,
+        }
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -365,21 +483,55 @@ mod tests {
     use super::*;
 
     fn http_config() -> SynapConfig {
-        SynapConfig::new("http://localhost:15500").with_http_transport()
+        SynapConfig::new("http://localhost:15500")
     }
 
     #[test]
-    fn test_config_creation() {
+    fn test_config_creation_http_url_infers_http_transport() {
         let config = SynapConfig::new("http://localhost:15500");
         assert_eq!(config.base_url, "http://localhost:15500");
         assert_eq!(config.timeout, Duration::from_secs(30));
         assert_eq!(config.max_retries, 3);
         assert!(config.auth_token.is_none());
-        assert!(matches!(config.transport, TransportMode::SynapRpc));
+        // http:// URLs → Http transport (not SynapRpc)
+        assert!(matches!(config.transport, TransportMode::Http));
     }
 
     #[test]
-    fn test_config_transport_selection() {
+    fn test_config_synap_url_infers_rpc_transport() {
+        let c = SynapConfig::new("synap://localhost:15501");
+        assert!(matches!(c.transport, TransportMode::SynapRpc));
+        assert_eq!(c.rpc_host, "localhost");
+        assert_eq!(c.rpc_port, 15501);
+    }
+
+    #[test]
+    fn test_config_resp3_url_infers_resp3_transport() {
+        let c = SynapConfig::new("resp3://localhost:6379");
+        assert!(matches!(c.transport, TransportMode::Resp3));
+        assert_eq!(c.resp3_host, "localhost");
+        assert_eq!(c.resp3_port, 6379);
+    }
+
+    #[test]
+    fn test_config_synap_url_default_port() {
+        let c = SynapConfig::new("synap://myhost");
+        assert!(matches!(c.transport, TransportMode::SynapRpc));
+        assert_eq!(c.rpc_host, "myhost");
+        assert_eq!(c.rpc_port, 15501); // default
+    }
+
+    #[test]
+    fn test_config_resp3_url_default_port() {
+        let c = SynapConfig::new("resp3://myhost");
+        assert!(matches!(c.transport, TransportMode::Resp3));
+        assert_eq!(c.resp3_host, "myhost");
+        assert_eq!(c.resp3_port, 6379); // default
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn test_config_deprecated_transport_selection() {
         let c = SynapConfig::new("http://localhost:15500").with_http_transport();
         assert!(matches!(c.transport, TransportMode::Http));
 
@@ -391,14 +543,16 @@ mod tests {
     }
 
     #[test]
-    fn test_config_rpc_addr() {
+    #[allow(deprecated)]
+    fn test_config_deprecated_rpc_addr() {
         let c = SynapConfig::new("http://localhost:15500").with_rpc_addr("10.0.0.1", 15502);
         assert_eq!(c.rpc_host, "10.0.0.1");
         assert_eq!(c.rpc_port, 15502);
     }
 
     #[test]
-    fn test_config_resp3_addr() {
+    #[allow(deprecated)]
+    fn test_config_deprecated_resp3_addr() {
         let c = SynapConfig::new("http://localhost:15500").with_resp3_addr("10.0.0.1", 6380);
         assert_eq!(c.resp3_host, "10.0.0.1");
         assert_eq!(c.resp3_port, 6380);
@@ -434,7 +588,7 @@ mod tests {
 
     #[test]
     fn test_client_creation_resp3() {
-        let config = SynapConfig::new("http://localhost:15500").with_resp3_transport();
+        let config = SynapConfig::new("resp3://localhost:6379");
         let client = SynapClient::new(config);
         assert!(client.is_ok());
     }
@@ -448,14 +602,16 @@ mod tests {
 
     #[test]
     fn test_client_invalid_url() {
-        let config = SynapConfig::new("not-a-valid-url").with_http_transport();
+        // No recognised scheme → falls through to HTTP with the raw string as base_url.
+        // The HTTP client builder rejects non-absolute URLs.
+        let config = SynapConfig::new("not-a-valid-url");
         let client = SynapClient::new(config);
         assert!(client.is_err());
     }
 
     #[test]
     fn test_client_relative_url() {
-        let config = SynapConfig::new("/relative/path").with_http_transport();
+        let config = SynapConfig::new("/relative/path");
         let client = SynapClient::new(config);
         assert!(client.is_err());
     }

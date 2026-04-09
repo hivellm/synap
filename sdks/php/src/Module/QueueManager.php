@@ -22,17 +22,11 @@ class QueueManager
      */
     public function createQueue(string $name, ?int $maxSize = null, ?int $messageTtl = null): void
     {
-        $data = [];
-
-        if ($maxSize !== null) {
-            $data['max_size'] = $maxSize;
-        }
-
-        if ($messageTtl !== null) {
-            $data['message_ttl'] = $messageTtl;
-        }
-
-        $this->client->execute('queue.create', $name, $data);
+        $this->client->sendCommand('queue.create', [
+            'name'             => $name,
+            'max_depth'        => $maxSize ?? 0,
+            'ack_deadline_secs' => $messageTtl ?? 0,
+        ]);
     }
 
     /**
@@ -40,11 +34,11 @@ class QueueManager
      */
     public function deleteQueue(string $name): void
     {
-        $this->client->execute('queue.delete', $name);
+        $this->client->sendCommand('queue.delete', ['queue' => $name]);
     }
 
     /**
-     * Publish a message to queue
+     * Publish a message to a queue
      */
     public function publish(
         string $queue,
@@ -52,30 +46,26 @@ class QueueManager
         ?int $priority = null,
         ?int $maxRetries = null
     ): string {
-        $data = ['message' => $message];
+        $response = $this->client->sendCommand('queue.publish', [
+            'queue'       => $queue,
+            'payload'     => $message,
+            'priority'    => $priority ?? 0,
+            'max_retries' => $maxRetries ?? 3,
+        ]);
 
-        if ($priority !== null) {
-            $data['priority'] = $priority;
-        }
-
-        if ($maxRetries !== null) {
-            $data['max_retries'] = $maxRetries;
-        }
-
-        $response = $this->client->execute('queue.publish', $queue, $data);
         $messageId = $response['message_id'] ?? '';
-
         assert(is_string($messageId));
 
         return $messageId;
     }
 
     /**
-     * Consume a message from queue
+     * Consume a message from a queue
      */
     public function consume(string $queue, string $consumerId): ?QueueMessage
     {
-        $response = $this->client->execute('queue.consume', $queue, [
+        $response = $this->client->sendCommand('queue.consume', [
+            'queue'       => $queue,
             'consumer_id' => $consumerId,
         ]);
 
@@ -85,11 +75,11 @@ class QueueManager
 
         $msg = $response['message'];
 
-        $id = $msg['id'] ?? '';
-        $priority = $msg['priority'] ?? 0;
-        $retries = $msg['retries'] ?? 0;
+        $id         = $msg['id'] ?? '';
+        $priority   = $msg['priority'] ?? 0;
+        $retries    = $msg['retries'] ?? 0;
         $maxRetries = $msg['max_retries'] ?? 3;
-        $timestamp = $msg['timestamp'] ?? 0;
+        $timestamp  = $msg['timestamp'] ?? 0;
 
         assert(is_string($id));
         assert(is_int($priority) || is_numeric($priority));
@@ -112,15 +102,22 @@ class QueueManager
      */
     public function ack(string $queue, string $messageId): void
     {
-        $this->client->execute('queue.ack', $queue, ['message_id' => $messageId]);
+        $this->client->sendCommand('queue.ack', [
+            'queue'      => $queue,
+            'message_id' => $messageId,
+        ]);
     }
 
     /**
      * Negative acknowledge (requeue)
      */
-    public function nack(string $queue, string $messageId): void
+    public function nack(string $queue, string $messageId, int $delaySecs = 0): void
     {
-        $this->client->execute('queue.nack', $queue, ['message_id' => $messageId]);
+        $this->client->sendCommand('queue.nack', [
+            'queue'      => $queue,
+            'message_id' => $messageId,
+            'delay_secs' => $delaySecs,
+        ]);
     }
 
     /**
@@ -130,7 +127,7 @@ class QueueManager
      */
     public function stats(string $queue): array
     {
-        return $this->client->execute('queue.stats', $queue);
+        return $this->client->sendCommand('queue.stats', ['queue' => $queue]);
     }
 
     /**
@@ -140,7 +137,7 @@ class QueueManager
      */
     public function list(): array
     {
-        $response = $this->client->execute('queue.list', '*');
+        $response = $this->client->sendCommand('queue.list', []);
         $queues = $response['queues'] ?? [];
 
         assert(is_array($queues));

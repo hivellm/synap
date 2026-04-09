@@ -71,6 +71,7 @@ export {
   NetworkError,
   ServerError,
   TimeoutError,
+  UnsupportedCommandError,
 } from './types';
 
 export { SynapClient } from './client';

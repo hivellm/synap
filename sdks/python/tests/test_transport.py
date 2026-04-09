@@ -156,14 +156,15 @@ class TestMapCommand:
         result = _map_command("set.add", {"key": "myset", "value": "member"})
         assert result == ("SADD", ["myset", "member"])
 
-    def test_queue_publish_returns_none(self) -> None:
-        # queue.publish has no native mapping → HTTP fallback
-        result = _map_command("queue.publish", {"key": "q", "value": "msg"})
-        assert result is None
+    def test_queue_publish_maps_to_qpublish(self) -> None:
+        result = _map_command("queue.publish", {"queue": "q", "payload": "msg"})
+        assert result is not None
+        assert result[0] == "QPUBLISH"
 
-    def test_stream_publish_returns_none(self) -> None:
-        result = _map_command("stream.publish", {"key": "s", "value": "event"})
-        assert result is None
+    def test_stream_publish_maps_to_spublish(self) -> None:
+        result = _map_command("stream.publish", {"room": "s", "event": "evt", "data": {}})
+        assert result is not None
+        assert result[0] == "SPUBLISH"
 
     def test_unknown_command_returns_none(self) -> None:
         result = _map_command("unknown.command", {})

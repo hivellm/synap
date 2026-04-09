@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-09
+
+### Added
+
+- **URL-scheme transport selection**: `SynapConfig.Create(url)` now parses the
+  URL scheme:
+  - `synap://host:port` → SynapRPC (recommended default)
+  - `resp3://host:port` → RESP3
+  - `http://` / `https://` → HTTP/REST
+- **Full command parity on SynapRPC + RESP3**: queue, stream, pub/sub,
+  transaction, script, geospatial, and HyperLogLog commands mapped in
+  `Transport.cs` (`CommandMapper`).
+- **`UnsupportedCommandException`**: thrown for commands not mapped on the
+  active native transport. Includes `Command` and `Transport` properties.
+- **`SynapRpcTransport.SubscribePushAsync()`**: opens a dedicated TCP push
+  connection, sends a SUBSCRIBE frame, and yields push frames
+  (`id == 0xFFFFFFFF`) as `IAsyncEnumerable<Dictionary<string, object?>>`.
+- **`PubSubManager.ObserveAsync()`**: returns an `IAsyncEnumerable<...>`
+  backed by native push on `synap://`.
+- **`SynapClient.SendCommandAsync()`**: sends a command with an explicit
+  payload dict, bypassing HTTP-style target injection.
+- **E2E suite** (`Modules/RpcParityS2STests.cs`): queue, stream, pub/sub,
+  transaction, script across HTTP/RPC/RESP3; `UnsupportedCommandException`
+  regression. Gated behind `SYNAP_S2S=true`.
+
+### Changed
+
+- **Builder methods marked `[Obsolete]`**: `WithSynapRpcTransport`,
+  `WithResp3Transport`, `WithHttpTransport`, `WithRpcAddr`, `WithResp3Addr`.
+  Migrate to URL-scheme construction. Will be removed in v0.12.0.
+
 ## [0.10.0] - 2026-04-08
 
 ### Added

@@ -11,23 +11,30 @@
 
 set -euo pipefail
 
-PROJECT_ROOT="$(pwd)"
+# Read the hook input from stdin (Claude Code passes it as JSON)
+input="$(cat)"
+
+# Resolve project root from hook input cwd, NOT $(pwd) — the hook may be
+# invoked from a sub-directory the user is currently editing.
+PROJECT_ROOT=""
+if [[ -n "$input" ]] && command -v jq &>/dev/null; then
+  PROJECT_ROOT="$(printf '%s' "$input" | jq -r '.cwd // empty' 2>/dev/null || true)"
+fi
+[[ -z "$PROJECT_ROOT" ]] && PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-$(pwd)}"
+
 CONFIG_FILE="${PROJECT_ROOT}/.rulebook/rulebook.json"
 HANDOFF_DIR="${PROJECT_ROOT}/.rulebook/handoff"
 
 # Defaults
 WARN_PCT=75
 FORCE_PCT=90
-MAX_CONTEXT_CHARS=800000  # ~200k tokens ≈ 800k chars (rough 1:4 ratio)
+MAX_CONTEXT_CHARS=1600000  # ~400k tokens ≈ 1.6M chars (rough 1:4 ratio)
 
 # Override from config if available
 if [[ -f "$CONFIG_FILE" ]] && command -v jq &>/dev/null; then
   WARN_PCT=$(jq -r '.handoff.warnThresholdPct // 75' "$CONFIG_FILE" 2>/dev/null || echo 75)
   FORCE_PCT=$(jq -r '.handoff.forceThresholdPct // 90' "$CONFIG_FILE" 2>/dev/null || echo 90)
 fi
-
-# Read the hook input from stdin (Claude Code passes it as JSON)
-input="$(cat)"
 
 # Try to find the transcript path from the session
 # Claude Code stores transcripts as JSONL in ~/.claude/projects/<hash>/

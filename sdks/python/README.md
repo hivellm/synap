@@ -67,47 +67,55 @@ asyncio.run(main())
 
 ## Transports
 
-Since v0.10.0 the SDK speaks three wire protocols, selectable via the
-`transport` argument on `SynapConfig`:
+Since v0.11.0 the SDK selects the transport via **URL scheme** — no extra arguments required:
 
-| Transport    | Default addr       | When to use                                               |
-|--------------|--------------------|-----------------------------------------------------------|
-| **SynapRPC** | `127.0.0.1:15501`  | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency, preserves int/float/bool/bytes. |
-| **RESP3**    | `127.0.0.1:6379`   | Redis-compatible text protocol — interop with existing Redis tooling. |
-| **HTTP**     | from `base_url`    | Original REST transport. Always required as the fallback channel. |
+| URL scheme    | Default port | When to use                                               |
+|---------------|--------------|-----------------------------------------------------------|
+| `synap://`    | `15501`      | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency, preserves int/float/bool/bytes. |
+| `resp3://`    | `6379`       | Redis-compatible text protocol — interop with existing Redis tooling. |
+| `http://` / `https://` | `15500` | Original REST transport — full command coverage. |
 
-> **Why `base_url` is always required.** SynapRPC and RESP3 only map KV,
-> Hash, List, Set, Sorted Set and Bitmap commands. Queues, streams, pub/sub,
-> scripting, transactions and anything unmapped fall back to HTTP REST
-> automatically — so the HTTP `base_url` must always point at a reachable
-> listener even when you pick a binary transport.
+All commands (KV, Hash, List, Set, Sorted Set, Queue, Stream, Pub/Sub, Transactions, Scripts, Geo, HyperLogLog) are fully supported on every transport. Native transports raise `UnsupportedCommandError` instead of silently falling back to HTTP.
 
 ```python
 from synap_sdk import SynapClient, SynapConfig
 
-# SynapRPC (default, recommended)
-config = SynapConfig("http://127.0.0.1:15500")  # transport="synaprpc" by default
+# SynapRPC — recommended default
+config = SynapConfig("synap://127.0.0.1:15501")
 client = SynapClient(config)
 
-# Explicit SynapRPC with a custom RPC endpoint (e.g. HTTP behind a TLS
-# load balancer, RPC exposed directly on the internal network).
-config = SynapConfig(
-    "https://synap.example.com",
-    transport="synaprpc",
-    rpc_host="10.0.0.42",
-    rpc_port=15501,
-)
+# RESP3 — Redis-compatible
+config = SynapConfig("resp3://127.0.0.1:6379")
+client = SynapClient(config)
 
-# RESP3 (Redis-compatible)
-config = SynapConfig(
-    "http://127.0.0.1:15500",
-    transport="resp3",
-    resp3_host="127.0.0.1",
-    resp3_port=6379,
-)
+# HTTP — full REST access
+config = SynapConfig("http://127.0.0.1:15500")
+client = SynapClient(config)
+```
 
-# Pure HTTP (no binary transport)
-config = SynapConfig("http://127.0.0.1:15500", transport="http")
+**Queue, stream and pub/sub over `synap://`:**
+
+```python
+import asyncio
+from synap_sdk import SynapClient, SynapConfig
+
+async def main():
+    async with SynapClient(SynapConfig("synap://127.0.0.1:15501")) as client:
+        # Queue round-trip
+        await client.queue.create_queue("tasks", max_size=1000, message_ttl=60)
+        msg_id = await client.queue.publish("tasks", {"job": "resize"}, priority=5)
+        msg = await client.queue.consume("tasks", "worker-1")
+        await client.queue.ack("tasks", msg.id)
+
+        # Stream publish + read
+        await client.stream.create_room("events")
+        await client.stream.publish("events", "user.created", {"id": "u1"})
+        events = await client.stream.read("events", offset=0)
+
+        # Reactive pub/sub (server-push over dedicated TCP connection on synap://)
+        async for msg in client.pubsub.observe(["news.*"]):
+            print("got:", msg)
+            break
 ```
 
 ## API Reference

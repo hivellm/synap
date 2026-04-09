@@ -58,7 +58,7 @@ try
     });
     Console.WriteLine($"  Published event at offset: {offset}");
 
-    var events = await client.Stream.ReadAsync("events", offset: 0, limit: 10);
+    var events = await client.Stream.ReadAsync("events", offset: 0);
     Console.WriteLine($"  Read {events.Count} events:");
     foreach (var evt in events)
     {

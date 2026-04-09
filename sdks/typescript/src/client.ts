@@ -17,7 +17,7 @@ import type {
   SynapClientOptions,
   AuthOptions,
 } from './types';
-import { NetworkError, ServerError, TimeoutError } from './types';
+import { NetworkError, ServerError, TimeoutError, UnsupportedCommandError } from './types';
 import {
   SynapRpcTransport,
   Resp3Transport,
@@ -46,37 +46,70 @@ export class SynapClient {
   private readonly transport: InternalTransport;
 
   constructor(options: SynapClientOptions = {}) {
-    this.baseUrl = options.url ?? 'http://localhost:15500';
     this.timeout = options.timeout ?? 30_000;
     this.debug = options.debug ?? false;
     this.auth = options.auth;
 
-    const mode: TransportMode = options.transport ?? 'synaprpc';
+    // ── URL-scheme-based transport inference (v0.11.0+) ──────────────────────
+    const rawUrl = options.url ?? '';
 
-    switch (mode) {
-      case 'synaprpc':
-        this.transport = {
-          kind: 'synaprpc',
-          impl: new SynapRpcTransport(
-            options.rpcHost ?? '127.0.0.1',
-            options.rpcPort ?? 15_501,
-            this.timeout,
-          ),
-        };
-        break;
-      case 'resp3':
-        this.transport = {
-          kind: 'resp3',
-          impl: new Resp3Transport(
-            options.resp3Host ?? '127.0.0.1',
-            options.resp3Port ?? 6_379,
-            this.timeout,
-          ),
-        };
-        break;
-      default:
-        this.transport = { kind: 'http' };
+    if (rawUrl.startsWith('synap://')) {
+      const [host, port] = SynapClient.parseHostPort(rawUrl.slice('synap://'.length), 15_501);
+      this.baseUrl = `http://${host}:15500`;
+      this.transport = {
+        kind: 'synaprpc',
+        impl: new SynapRpcTransport(host, port, this.timeout),
+      };
+    } else if (rawUrl.startsWith('resp3://')) {
+      const [host, port] = SynapClient.parseHostPort(rawUrl.slice('resp3://'.length), 6_379);
+      this.baseUrl = `http://${host}:15500`;
+      this.transport = {
+        kind: 'resp3',
+        impl: new Resp3Transport(host, port, this.timeout),
+      };
+    } else {
+      // http:// / https:// — or legacy options.transport field.
+      this.baseUrl = rawUrl || 'http://localhost:15500';
+
+      const mode: TransportMode = options.transport ?? 'http';
+      switch (mode) {
+        case 'synaprpc':
+          this.transport = {
+            kind: 'synaprpc',
+            impl: new SynapRpcTransport(
+              options.rpcHost ?? '127.0.0.1',
+              options.rpcPort ?? 15_501,
+              this.timeout,
+            ),
+          };
+          break;
+        case 'resp3':
+          this.transport = {
+            kind: 'resp3',
+            impl: new Resp3Transport(
+              options.resp3Host ?? '127.0.0.1',
+              options.resp3Port ?? 6_379,
+              this.timeout,
+            ),
+          };
+          break;
+        default:
+          this.transport = { kind: 'http' };
+      }
     }
+  }
+
+  /** Parse `"host:port"` from a URL authority string. */
+  private static parseHostPort(authority: string, defaultPort: number): [string, number] {
+    // Strip trailing path components.
+    const auth = authority.split('/')[0] ?? authority;
+    const colon = auth.lastIndexOf(':');
+    if (colon !== -1) {
+      const host = auth.slice(0, colon);
+      const port = parseInt(auth.slice(colon + 1), 10);
+      return [host, Number.isFinite(port) ? port : defaultPort];
+    }
+    return [auth, defaultPort];
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
@@ -119,10 +152,22 @@ export class SynapClient {
           throw new NetworkError('SynapRPC unknown error');
         }
       }
-      // Unmapped command → fall through to HTTP.
+      // Unmapped command on a native transport → UnsupportedCommandError.
+      // No silent HTTP fallback.
+      throw new UnsupportedCommandError(command, this.transport.kind);
     }
 
     return this.sendHttp<T>(command, payload);
+  }
+
+  /**
+   * Return the `SynapRpcTransport` instance when using the `synap://` URL scheme,
+   * or `null` for other transports.
+   *
+   * Used internally by reactive pub/sub to open dedicated push connections.
+   */
+  synapRpcTransport(): SynapRpcTransport | null {
+    return this.transport.kind === 'synaprpc' ? this.transport.impl : null;
   }
 
   /**

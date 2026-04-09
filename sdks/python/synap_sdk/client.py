@@ -9,7 +9,7 @@ import uuid
 import httpx
 
 from synap_sdk.config import SynapConfig
-from synap_sdk.exceptions import SynapException
+from synap_sdk.exceptions import SynapException, UnsupportedCommandError
 from synap_sdk.transport import SynapRpcTransport, Resp3Transport, map_command, map_response
 from synap_sdk.modules.kv_store import KVStore
 from synap_sdk.modules.hash import HashManager
@@ -174,6 +174,14 @@ class SynapClient:
         """Get the client configuration."""
         return self._config
 
+    def synap_rpc_transport(self) -> SynapRpcTransport | None:
+        """Return the ``SynapRpcTransport`` when using the ``synap://`` URL scheme,
+        or ``None`` for other transports.
+
+        Used internally by reactive pub/sub to open dedicated push connections.
+        """
+        return self._native if isinstance(self._native, SynapRpcTransport) else None
+
     async def health(self) -> dict[str, Any]:
         """Check the health status of the Synap server.
 
@@ -223,6 +231,9 @@ class SynapClient:
                     raise SynapException.network_error(
                         f"Native transport error: {exc}"
                     ) from exc
+            # Command has no native mapping on this transport — raise instead of
+            # silently falling back to HTTP.
+            raise UnsupportedCommandError(command, self._config.transport)
 
         return await self._send_http(command, pl)
 

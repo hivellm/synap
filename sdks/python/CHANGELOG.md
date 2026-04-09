@@ -2,6 +2,32 @@
 
 All notable changes to the Synap Python SDK will be documented in this file.
 
+## [0.11.0] - 2026-04-09
+
+### Added
+
+- **URL-scheme transport selection**: `SynapConfig(url)` now parses the scheme:
+  - `synap://host:port` → SynapRPC (recommended default)
+  - `resp3://host:port` → RESP3
+  - `http://` / `https://` → HTTP/REST
+- **Full command parity on SynapRPC**: queue, stream, pub/sub, transaction,
+  script, geospatial, and HyperLogLog commands mapped in `transport.py`.
+- **`UnsupportedCommandError`**: raised for commands not mapped on the active
+  native transport instead of silently falling back to HTTP.
+- **Reactive pub/sub async generator**: `PubSubManager.observe(topics)`
+  uses SynapRPC server-push when the client is on `synap://`, otherwise
+  HTTP polling.
+- **E2E suites extended** (`sdks/python/tests/test_rpc_parity_s2s.py`):
+  queue, stream, pub/sub, transaction, script across all three transports;
+  `UnsupportedCommandError` regression.
+
+### Changed
+
+- **`SynapConfig` constructor parameters deprecated**: `transport`,
+  `rpc_host`, `rpc_port`, `resp3_host`, `resp3_port` now emit
+  `DeprecationWarning`. Migrate to URL-scheme construction.
+  Will be removed in v0.12.0.
+
 ## [0.10.0] - 2026-04-08
 
 ### Added

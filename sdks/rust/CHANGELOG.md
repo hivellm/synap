@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-09
+
+### Added
+
+- **URL-scheme transport selection**: `SynapConfig::new(url)` now parses the
+  URL scheme to determine the transport:
+  - `synap://host:port` → SynapRPC (recommended default)
+  - `resp3://host:port` → RESP3
+  - `http://` / `https://` → HTTP/REST
+- **Full command parity on SynapRPC**: queue, stream, pub/sub, transaction,
+  script, geospatial, and HyperLogLog commands now have native RPC dispatch
+  handlers (`QCREATE`, `QPUBLISH`, `QCONSUME`, `SCREATE`, `SPUBLISH`,
+  `PUBLISH`, `SUBSCRIBE`, `MULTI`, `EXEC`, `EVAL`, `GEOADD`, `PFMERGE`, …).
+- **`SynapError::UnsupportedCommand { command, transport }`**: raised instead
+  of a silent HTTP fallback when a command is not mapped on the active
+  native transport.
+- **Reactive pub/sub over SynapRPC**: `subscribe()` opens a dedicated push
+  TCP connection; incoming push frames (`id == 0xFFFFFFFF`) are relayed to
+  the subscriber callback.
+- **E2E suites extended**: `run_queue_suite`, `run_stream_suite`,
+  `run_pubsub_suite`, `run_transaction_suite`, `run_script_suite` added to
+  `sdks/rust/tests/e2e_test.rs`; URL-scheme client helpers (`synap_client`,
+  `resp3_client`); `UnsupportedCommand` regression test.
+
+### Changed
+
+- **Builder methods deprecated** (`#[deprecated(since = "0.11.0")]`):
+  `with_synap_rpc_transport`, `with_resp3_transport`, `with_http_transport`,
+  `with_rpc_addr`, `with_resp3_addr`. Migrate to URL-scheme construction.
+  These will be removed in v0.12.0.
+
 ## [0.10.0] - 2026-04-08
 
 ### Added

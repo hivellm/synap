@@ -71,39 +71,52 @@ client.Dispose();
 
 ## Transports
 
-Since v0.10.0 the SDK speaks three wire protocols, selectable via
-`SynapConfig` builder methods:
+Since v0.11.0 the SDK selects the transport via **URL scheme** — no builder methods required:
 
-| Transport    | Default addr       | When to use                                               |
-|--------------|--------------------|-----------------------------------------------------------|
-| **SynapRPC** | `127.0.0.1:15501`  | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency. |
-| **RESP3**    | `127.0.0.1:6379`   | Redis-compatible text protocol — interop with existing Redis tooling. |
-| **HTTP**     | from `baseUrl`     | Original REST transport. Always required as the fallback channel. |
+| URL scheme    | Default port | When to use                                               |
+|---------------|--------------|-----------------------------------------------------------|
+| `synap://`    | `15501`      | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency. |
+| `resp3://`    | `6379`       | Redis-compatible text protocol — interop with existing Redis tooling. |
+| `http://` / `https://` | `15500` | Original REST transport — full command coverage. |
 
-> **Why `baseUrl` is always required.** SynapRPC and RESP3 only map KV,
-> Hash, List, Set, Sorted Set and Bitmap commands. Queues, streams, pub/sub,
-> scripting, transactions and anything unmapped fall back to HTTP REST
-> automatically.
+All commands (KV, Hash, List, Set, Sorted Set, Queue, Stream, Pub/Sub, Transactions, Scripts, Geo, HyperLogLog) are fully supported on every transport. Native transports throw `UnsupportedCommandException` instead of silently falling back to HTTP.
 
 ```csharp
 using Synap.SDK;
 
-// SynapRPC (default, recommended)
-var config = SynapConfig.Create("http://127.0.0.1:15500");
-var client = new SynapClient(config);
+// SynapRPC — recommended default
+var client = new SynapClient(SynapConfig.Create("synap://127.0.0.1:15501"));
 
-// Explicit SynapRPC with custom RPC endpoint
-var cfg = SynapConfig.Create("https://synap.example.com")
-    .WithSynapRpcTransport()
-    .WithRpcAddr("10.0.0.42", 15501);
+// RESP3 — Redis-compatible
+var client = new SynapClient(SynapConfig.Create("resp3://127.0.0.1:6379"));
 
-// RESP3 (Redis-compatible)
-var resp3 = SynapConfig.Create("http://127.0.0.1:15500")
-    .WithResp3Transport()
-    .WithResp3Addr("127.0.0.1", 6379);
+// HTTP — full REST access
+var client = new SynapClient(SynapConfig.Create("http://127.0.0.1:15500"));
+```
 
-// Pure HTTP (no binary transport)
-var http = SynapConfig.Create("http://127.0.0.1:15500").WithHttpTransport();
+**Queue, stream and pub/sub over `synap://`:**
+
+```csharp
+using Synap.SDK;
+
+await using var client = new SynapClient(SynapConfig.Create("synap://127.0.0.1:15501"));
+
+// Queue round-trip
+await client.Queue.CreateQueueAsync("tasks", 1000, 60);
+var id = await client.Queue.PublishAsync("tasks", new { job = "resize" }, 5);
+var msg = await client.Queue.ConsumeAsync("tasks", "worker-1");
+await client.Queue.AckAsync("tasks", msg!.Id);
+
+// Stream publish + read
+await client.Stream.CreateRoomAsync("events");
+await client.Stream.PublishAsync("events", "user.created", new { id = "u1" });
+var events = await client.Stream.ReadAsync("events", 0);
+
+// Reactive pub/sub (server-push via IAsyncEnumerable on synap://)
+await foreach (var push in client.PubSub.ObserveAsync(["news.*"], cancellationToken))
+{
+    Console.WriteLine($"got: {push["topic"]}");
+}
 ```
 
 ## API Reference

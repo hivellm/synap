@@ -206,6 +206,107 @@ export class SynapRpcTransport {
     this.socket?.destroy();
     this.socket = null;
   }
+
+  /**
+   * Open a **dedicated** TCP connection for server-push pub/sub delivery.
+   *
+   * Sends a SUBSCRIBE frame on the dedicated socket, waits for the initial
+   * acknowledgement (subscriber_id), then emits push frames (id === 0xFFFFFFFF)
+   * to the returned `onMessage` callback until `cancel()` is called.
+   *
+   * Returns `{ subscriberId, cancel }`.
+   */
+  async subscribePush(
+    topics: string[],
+    onMessage: (msg: { topic: string; payload: unknown; id: string; timestamp: number }) => void,
+  ): Promise<{ subscriberId: string; cancel: () => void }> {
+    // Open a fresh dedicated socket.
+    const sock = await new Promise<net.Socket>((resolve, reject) => {
+      const s = new net.Socket();
+      s.setTimeout(this.timeoutMs);
+      s.once('connect', () => resolve(s));
+      s.once('error', reject);
+      s.on('timeout', () => s.destroy(new Error('subscribePush connect timeout')));
+      s.connect(this.port, this.host);
+    });
+
+    // Send SUBSCRIBE frame.
+    const id = this.nextId++;
+    const wireArgs = topics.map(t => toWireValue(t));
+    const body = pack([id, 'SUBSCRIBE', wireArgs]);
+    const lenBuf = Buffer.allocUnsafe(4);
+    lenBuf.writeUInt32LE(body.length, 0);
+    sock.write(Buffer.concat([lenBuf, body]));
+
+    // Read the initial response (subscriber_id etc.) then switch to push mode.
+    let readBuf = Buffer.alloc(0);
+    let subscriberId = '';
+    let pushMode = false;
+    let cancelled = false;
+
+    const cancel = () => {
+      cancelled = true;
+      sock.destroy();
+    };
+
+    sock.on('data', (chunk: Buffer) => {
+      if (cancelled) return;
+      readBuf = Buffer.concat([readBuf, chunk]);
+
+      while (readBuf.length >= 4) {
+        const frameLen = readBuf.readUInt32LE(0);
+        if (readBuf.length < 4 + frameLen) break;
+
+        const frameBody = readBuf.slice(4, 4 + frameLen);
+        readBuf = readBuf.slice(4 + frameLen);
+
+        let decoded: unknown;
+        try { decoded = unpack(frameBody); } catch { continue; }
+
+        const resp = decoded as [number, Record<string, unknown>];
+        const [frameId, resultEnv] = resp;
+
+        if (!pushMode) {
+          // Initial SUBSCRIBE response — extract subscriber_id.
+          if ('Ok' in resultEnv) {
+            const val = fromWireValue(resultEnv.Ok);
+            if (val && typeof val === 'object' && 'subscriber_id' in (val as object)) {
+              subscriberId = String((val as Record<string, unknown>)['subscriber_id'] ?? '');
+            }
+          }
+          pushMode = true;
+          continue;
+        }
+
+        // Push frames carry id === 0xFFFFFFFF (u32::MAX).
+        if (frameId === 0xFFFFFFFF && 'Ok' in resultEnv) {
+          const val = fromWireValue(resultEnv.Ok) as Record<string, unknown>;
+          if (val && typeof val === 'object') {
+            const topic = String(val['topic'] ?? '');
+            const payloadStr = val['payload'];
+            let payload: unknown = payloadStr;
+            if (typeof payloadStr === 'string') {
+              try { payload = JSON.parse(payloadStr); } catch { payload = payloadStr; }
+            }
+            onMessage({
+              topic,
+              payload,
+              id: String(val['id'] ?? ''),
+              timestamp: Number(val['timestamp'] ?? 0),
+            });
+          }
+        }
+      }
+    });
+
+    sock.on('error', () => { /* connection closed */ });
+    sock.on('close', () => { /* push stream ended */ });
+
+    // Wait briefly for the initial SUBSCRIBE response before returning.
+    await new Promise<void>(resolve => setTimeout(resolve, 50));
+
+    return { subscriberId, cancel };
+  }
 }
 
 // ── RESP3 transport ───────────────────────────────────────────────────────────
@@ -601,6 +702,151 @@ export function mapCommand(
       return { rawCmd: raw, args: [s('destination'), String(keys.length), ...keys] };
     }
 
+    // ── Queue ────────────────────────────────────────────────────────────────
+    case 'queue.create': return {
+      rawCmd: 'QCREATE',
+      args: [
+        s('name'),
+        String(payload['max_depth'] ?? 0),
+        String(payload['ack_deadline_secs'] ?? 30),
+      ],
+    };
+
+    case 'queue.delete': return { rawCmd: 'QDELETE', args: [s('queue')] };
+    case 'queue.list':   return { rawCmd: 'QLIST',   args: [] };
+    case 'queue.purge':  return { rawCmd: 'QPURGE',  args: [s('queue')] };
+
+    case 'queue.publish': {
+      const pl = payload['payload'];
+      let payloadArg: unknown;
+      if (pl instanceof Uint8Array || Buffer.isBuffer(pl as unknown)) {
+        payloadArg = pl;
+      } else if (typeof pl === 'string') {
+        payloadArg = pl;
+      } else {
+        payloadArg = JSON.stringify(pl ?? '');
+      }
+      return {
+        rawCmd: 'QPUBLISH',
+        args: [
+          s('queue'),
+          payloadArg,
+          String(payload['priority'] ?? 0),
+          String(payload['max_retries'] ?? 3),
+        ],
+      };
+    }
+
+    case 'queue.consume': return { rawCmd: 'QCONSUME', args: [s('queue'), s('consumer_id')] };
+    case 'queue.ack':     return { rawCmd: 'QACK',     args: [s('queue'), s('message_id')] };
+    case 'queue.nack':    return {
+      rawCmd: 'QNACK',
+      args: [s('queue'), s('message_id'), String(payload['requeue'] ?? true)],
+    };
+    case 'queue.stats':   return { rawCmd: 'QSTATS',   args: [s('queue')] };
+
+    // ── Stream ───────────────────────────────────────────────────────────────
+    case 'stream.create': return {
+      rawCmd: 'SCREATE',
+      args: [s('room'), String(payload['max_events'] ?? 0)],
+    };
+    case 'stream.delete': return { rawCmd: 'SDELETE', args: [s('room')] };
+    case 'stream.list':   return { rawCmd: 'SLIST',   args: [] };
+    case 'stream.publish': return {
+      rawCmd: 'SPUBLISH',
+      args: [s('room'), s('event'), JSON.stringify(payload['data'] ?? {})],
+    };
+    case 'stream.consume': return {
+      rawCmd: 'SREAD',
+      args: [s('room'), s('subscriber_id'), String(payload['from_offset'] ?? 0)],
+    };
+    case 'stream.stats': return { rawCmd: 'SSTATS', args: [s('room')] };
+
+    // ── Pub/Sub ──────────────────────────────────────────────────────────────
+    case 'pubsub.publish': return { rawCmd: 'PUBLISH', args: [s('topic'), JSON.stringify(payload['payload'] ?? payload['data'] ?? '')] };
+
+    case 'pubsub.subscribe': {
+      const topics = Array.isArray(payload['topics']) ? payload['topics'] as string[] : [];
+      return { rawCmd: 'SUBSCRIBE', args: [...topics] };
+    }
+
+    case 'pubsub.unsubscribe': {
+      const topics = Array.isArray(payload['topics']) ? payload['topics'] as string[] : [];
+      return { rawCmd: 'UNSUBSCRIBE', args: [s('subscriber_id'), ...topics] };
+    }
+
+    case 'pubsub.topics':
+    case 'pubsub.list': return { rawCmd: 'TOPICS', args: [] };
+
+    // ── Transactions ─────────────────────────────────────────────────────────
+    case 'transaction.multi':    return { rawCmd: 'MULTI',    args: [s('client_id')] };
+    case 'transaction.exec':     return { rawCmd: 'EXEC',     args: [s('client_id')] };
+    case 'transaction.discard':  return { rawCmd: 'DISCARD',  args: [s('client_id')] };
+    case 'transaction.watch': {
+      const keys = Array.isArray(payload['keys']) ? payload['keys'] as string[] : [];
+      return { rawCmd: 'WATCH', args: [s('client_id'), ...keys] };
+    }
+    case 'transaction.unwatch':  return { rawCmd: 'UNWATCH',  args: [s('client_id')] };
+
+    // ── Scripts ──────────────────────────────────────────────────────────────
+    case 'script.eval': {
+      const keys = Array.isArray(payload['keys']) ? payload['keys'] as string[] : [];
+      const args = Array.isArray(payload['args']) ? payload['args'] as unknown[] : [];
+      return { rawCmd: 'EVAL', args: [s('script'), String(keys.length), ...keys, ...args.map(String)] };
+    }
+    case 'script.evalsha': {
+      const keys = Array.isArray(payload['keys']) ? payload['keys'] as string[] : [];
+      const args = Array.isArray(payload['args']) ? payload['args'] as unknown[] : [];
+      return { rawCmd: 'EVALSHA', args: [s('sha1'), String(keys.length), ...keys, ...args.map(String)] };
+    }
+    case 'script.load':   return { rawCmd: 'SCRIPT.LOAD',   args: [s('script')] };
+    case 'script.exists': {
+      const hashes = Array.isArray(payload['hashes']) ? payload['hashes'] as string[] : [];
+      return { rawCmd: 'SCRIPT.EXISTS', args: [...hashes] };
+    }
+    case 'script.flush':  return { rawCmd: 'SCRIPT.FLUSH',  args: [] };
+    case 'script.kill':   return { rawCmd: 'SCRIPT.KILL',   args: [] };
+
+    // ── HyperLogLog ──────────────────────────────────────────────────────────
+    case 'hyperloglog.pfadd': {
+      const elems = Array.isArray(payload['elements']) ? payload['elements'] as string[] : [];
+      return { rawCmd: 'PFADD', args: [s('key'), ...elems] };
+    }
+    case 'hyperloglog.pfcount': {
+      const keys2 = Array.isArray(payload['keys']) ? payload['keys'] as string[] : [s('key')];
+      return { rawCmd: 'PFCOUNT', args: [...keys2] };
+    }
+    case 'hyperloglog.pfmerge': {
+      const srcKeys = Array.isArray(payload['source_keys']) ? payload['source_keys'] as string[] : [];
+      return { rawCmd: 'PFMERGE', args: [s('dest_key'), ...srcKeys] };
+    }
+    case 'hyperloglog.stats': return { rawCmd: 'HLLSTATS', args: [] };
+
+    // ── Geospatial ───────────────────────────────────────────────────────────
+    case 'geospatial.geoadd': {
+      const members = Array.isArray(payload['members'])
+        ? (payload['members'] as Array<{ lat: number; lon: number; member: string }>)
+            .flatMap(m => [String(m.lat), String(m.lon), m.member])
+        : [];
+      return { rawCmd: 'GEOADD', args: [s('key'), ...members] };
+    }
+    case 'geospatial.geopos':   return { rawCmd: 'GEOPOS',   args: [s('key'), s('member')] };
+    case 'geospatial.geodist':  return { rawCmd: 'GEODIST',  args: [s('key'), s('member1'), s('member2'), s('unit') || 'm'] };
+    case 'geospatial.geohash':  return { rawCmd: 'GEOHASH',  args: [s('key'), s('member')] };
+    case 'geospatial.georadius': return {
+      rawCmd: 'GEORADIUS',
+      args: [s('key'), n('longitude', 0), n('latitude', 0), n('radius', 0), s('unit') || 'm'],
+    };
+    case 'geospatial.georadiusbymember': return {
+      rawCmd: 'GEORADIUSBYMEMBER',
+      args: [s('key'), s('member'), n('radius', 0), s('unit') || 'm'],
+    };
+    case 'geospatial.geosearch': return {
+      rawCmd: 'GEOSEARCH',
+      args: [s('key'), 'FROMLONLAT', n('longitude', 0), n('latitude', 0), 'BYRADIUS', n('radius', 0), s('unit') || 'm'],
+    };
+    case 'geospatial.stats': return { rawCmd: 'GEOSTATS', args: [s('key')] };
+
     default:
       return null;
   }
@@ -722,6 +968,78 @@ export function mapResponse(cmd: string, raw: unknown): unknown {
     case 'sortedset.zinterstore':
     case 'sortedset.zunionstore':
     case 'sortedset.zdiffstore': return { count: asInt(raw) };
+
+    // Queue
+    case 'queue.create':
+    case 'queue.delete':
+    case 'queue.purge': return {};
+    case 'queue.list': return Array.isArray(raw) ? raw : (raw == null ? [] : [raw]);
+    case 'queue.publish': {
+      if (raw && typeof raw === 'object' && 'message_id' in (raw as object)) return raw;
+      return { message_id: String(raw ?? '') };
+    }
+    case 'queue.consume': return raw ?? null;
+    case 'queue.ack':
+    case 'queue.nack': return {};
+    case 'queue.stats': return raw;
+
+    // Stream
+    case 'stream.create':
+    case 'stream.delete': return {};
+    case 'stream.list': return Array.isArray(raw) ? raw : (raw == null ? [] : [raw]);
+    case 'stream.publish': {
+      if (raw && typeof raw === 'object' && 'offset' in (raw as object)) return raw;
+      return { offset: asInt(raw) };
+    }
+    case 'stream.consume': return Array.isArray(raw) ? { events: raw } : raw;
+    case 'stream.stats': return raw;
+
+    // Pub/Sub
+    case 'pubsub.publish': {
+      if (raw && typeof raw === 'object' && 'subscribers_matched' in (raw as object)) return raw;
+      return { message_id: '', subscribers_matched: asInt(raw) };
+    }
+    case 'pubsub.subscribe': return raw;
+    case 'pubsub.unsubscribe': return {};
+    case 'pubsub.topics':
+    case 'pubsub.list': return Array.isArray(raw) ? { topics: raw } : (raw ?? { topics: [] });
+
+    // Transactions
+    case 'transaction.multi':
+    case 'transaction.discard':
+    case 'transaction.watch':
+    case 'transaction.unwatch': return raw ?? { success: true };
+    case 'transaction.exec': return raw;
+
+    // Scripts
+    case 'script.eval':
+    case 'script.evalsha': return raw;
+    case 'script.load': {
+      if (raw && typeof raw === 'object' && 'sha1' in (raw as object)) return raw;
+      return { sha1: String(raw ?? '') };
+    }
+    case 'script.exists': {
+      if (raw && typeof raw === 'object' && 'exists' in (raw as object)) return raw;
+      return { exists: Array.isArray(raw) ? raw.map(Boolean) : [] };
+    }
+    case 'script.flush': return raw ?? { cleared: 0 };
+    case 'script.kill': return raw ?? { terminated: false };
+
+    // HyperLogLog
+    case 'hyperloglog.pfadd': return { changed: asInt(raw) > 0 };
+    case 'hyperloglog.pfcount': return { count: asInt(raw) };
+    case 'hyperloglog.pfmerge': return {};
+    case 'hyperloglog.stats': return raw;
+
+    // Geospatial
+    case 'geospatial.geoadd': return { added: asInt(raw) };
+    case 'geospatial.geopos': return raw;
+    case 'geospatial.geodist': return { distance: raw == null ? null : asFloat(raw) };
+    case 'geospatial.geohash': return { hash: raw };
+    case 'geospatial.georadius':
+    case 'geospatial.georadiusbymember':
+    case 'geospatial.geosearch': return { members: asArr(raw) };
+    case 'geospatial.stats': return raw;
 
     default: return raw;
   }

@@ -43,10 +43,23 @@ export interface SynapResponse<T = any> {
 export type TransportMode = 'synaprpc' | 'resp3' | 'http';
 
 /**
- * Synap client configuration options
+ * Synap client configuration options.
+ *
+ * **Preferred constructor (v0.11.0+):** pass a URL with the transport scheme:
+ * ```
+ * new SynapClient({ url: 'synap://localhost:15501' })  // SynapRPC
+ * new SynapClient({ url: 'resp3://localhost:6379' })   // RESP3
+ * new SynapClient({ url: 'http://localhost:15500' })   // HTTP
+ * ```
+ * The `transport`, `rpcHost`, `rpcPort`, `resp3Host`, and `resp3Port` fields
+ * are kept for backward compatibility but deprecated.
  */
 export interface SynapClientOptions {
-  /** Synap server URL (default: http://localhost:15500) */
+  /**
+   * Synap server URL.
+   * Accepted schemes: `synap://` (SynapRPC), `resp3://` (RESP3), `http://` / `https://` (HTTP).
+   * Default: `http://localhost:15500`.
+   */
   url?: string;
   /** Request timeout in milliseconds (default: 30000) */
   timeout?: number;
@@ -57,17 +70,29 @@ export interface SynapClientOptions {
   /** Retry configuration */
   retry?: RetryOptions;
   /**
-   * Transport protocol (default: 'synaprpc').
-   * Mapped commands use the native transport; unmapped commands fall back to HTTP.
+   * Transport protocol override.
+   * @deprecated Pass the scheme in the `url` option instead (`synap://`, `resp3://`, `http://`).
    */
   transport?: TransportMode;
-  /** SynapRPC host (default: '127.0.0.1') */
+  /**
+   * SynapRPC host override.
+   * @deprecated Encode host and port in the `synap://host:port` URL instead.
+   */
   rpcHost?: string;
-  /** SynapRPC port (default: 15501) */
+  /**
+   * SynapRPC port override.
+   * @deprecated Encode host and port in the `synap://host:port` URL instead.
+   */
   rpcPort?: number;
-  /** RESP3 host (default: '127.0.0.1') */
+  /**
+   * RESP3 host override.
+   * @deprecated Encode host and port in the `resp3://host:port` URL instead.
+   */
   resp3Host?: string;
-  /** RESP3 port (default: 6379) */
+  /**
+   * RESP3 port override.
+   * @deprecated Encode host and port in the `resp3://host:port` URL instead.
+   */
   resp3Port?: number;
 }
 
@@ -406,6 +431,31 @@ export class ServerError extends SynapError {
     super(message, 'SERVER_ERROR', statusCode, requestId);
     this.name = 'ServerError';
     Object.setPrototypeOf(this, ServerError.prototype);
+  }
+}
+
+/**
+ * Raised when a command has no native mapping for the active transport and the
+ * "no silent HTTP fallback" policy is in effect.
+ *
+ * Use an `http://` URL (or omit the URL) if you need HTTP REST for commands
+ * that are not yet in the native mapper.
+ */
+export class UnsupportedCommandError extends SynapError {
+  /** SDK command name (e.g. `"pubsub.subscribe"`) */
+  readonly command: string;
+  /** Active transport mode (e.g. `"synaprpc"`, `"resp3"`) */
+  readonly transportMode: string;
+
+  constructor(command: string, transportMode: string) {
+    super(
+      `command '${command}' is not supported on transport '${transportMode}'`,
+      'UNSUPPORTED_COMMAND',
+    );
+    this.name = 'UnsupportedCommandError';
+    this.command = command;
+    this.transportMode = transportMode;
+    Object.setPrototypeOf(this, UnsupportedCommandError.prototype);
   }
 }
 

@@ -119,17 +119,14 @@ describe('toWireValue / fromWireValue (via SynapRpcTransport loopback)', () => {
     expect(result).toBe('hello');
   });
 
-  it('Buffer (bytes) → {Bytes: [...]} on wire → fromWireValue returns Uint8Array-like', async () => {
+  it('Buffer (bytes) → {Bytes: buf} on wire → fromWireValue decodes as UTF-8 string', async () => {
     const { server: s, port } = await makeEchoServer();
     server = s;
     transport = new SynapRpcTransport('127.0.0.1', port, 5000);
-    const buf = Buffer.from([1, 2, 3, 4]);
+    // fromWireValue decodes Bytes as UTF-8 string for SDK consumers
+    const buf = Buffer.from('hello');
     const result = await transport.execute('GET', [buf]);
-    // fromWireValue returns w.Bytes which is the raw decoded bytes value
-    expect(result).toBeTruthy();
-    // The decoded value should be some bytes-like value
-    const asArr = Array.from(result as Uint8Array);
-    expect(asArr).toEqual([1, 2, 3, 4]);
+    expect(result).toBe('hello');
   });
 
   it('undefined → treated as null (Null) on wire', async () => {
@@ -257,17 +254,21 @@ describe('mapCommand', () => {
     });
   });
 
+  describe('Queue/stream commands now mapped', () => {
+    it('"queue.publish" → QPUBLISH', () => {
+      const result = mapCommand('queue.publish', { queue: 'q1', payload: 'hello' });
+      expect(result).not.toBeNull();
+      expect(result?.rawCmd).toBe('QPUBLISH');
+    });
+
+    it('"stream.publish" → SPUBLISH', () => {
+      const result = mapCommand('stream.publish', { room: 's1', event: 'evt', data: {} });
+      expect(result).not.toBeNull();
+      expect(result?.rawCmd).toBe('SPUBLISH');
+    });
+  });
+
   describe('Unmapped commands (HTTP fallback)', () => {
-    it('"queue.publish" → null', () => {
-      const result = mapCommand('queue.publish', { queue: 'q1', message: 'hello' });
-      expect(result).toBeNull();
-    });
-
-    it('"stream.publish" → null', () => {
-      const result = mapCommand('stream.publish', { stream: 's1', data: {} });
-      expect(result).toBeNull();
-    });
-
     it('"unknown.command" → null', () => {
       const result = mapCommand('unknown.command', {});
       expect(result).toBeNull();

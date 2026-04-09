@@ -48,6 +48,19 @@ pub enum SynapError {
     #[error("Transport error: {0}")]
     Transport(String),
 
+    /// Command has no native mapping for the active transport.
+    ///
+    /// Raised when `synap://` or `resp3://` transport is selected and the
+    /// command is not in the native-protocol mapper.  Use `http://` transport
+    /// for commands that are not yet mapped, or check the transport mapper.
+    #[error("command '{command}' is not supported on transport '{transport}'")]
+    UnsupportedCommand {
+        /// The SDK command name (e.g. `"pubsub.subscribe"`).
+        command: String,
+        /// The active transport mode (e.g. `"SynapRpc"`, `"Resp3"`).
+        transport: String,
+    },
+
     /// Generic error
     #[error("{0}")]
     Other(String),

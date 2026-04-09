@@ -16,6 +16,7 @@ Structs (Request, Response) are encoded as msgpack arrays.
 from __future__ import annotations
 
 import asyncio
+import json
 import struct
 from typing import Any, Literal
 
@@ -289,6 +290,177 @@ def _map_command(cmd: str, payload: dict[str, Any]) -> tuple[str, list[Any]] | N
                 key,
                 *payload.get("keys", []),
             ]
+
+        # ── Queue ─────────────────────────────────────────────────────────────
+        case "queue.create":
+            return "QCREATE", [
+                payload.get("name", ""),
+                str(payload.get("max_depth", 0)),
+                str(payload.get("ack_deadline_secs", 30)),
+            ]
+        case "queue.delete":
+            return "QDELETE", [payload.get("queue", "")]
+        case "queue.list":
+            return "QLIST", []
+        case "queue.purge":
+            return "QPURGE", [payload.get("queue", "")]
+        case "queue.publish":
+            pl = payload.get("payload", "")
+            payload_arg = pl if isinstance(pl, (bytes, bytearray)) else str(pl)
+            return "QPUBLISH", [
+                payload.get("queue", ""),
+                payload_arg,
+                str(payload.get("priority", 0)),
+                str(payload.get("max_retries", 3)),
+            ]
+        case "queue.consume":
+            return "QCONSUME", [payload.get("queue", ""), payload.get("consumer_id", "")]
+        case "queue.ack":
+            return "QACK", [payload.get("queue", ""), payload.get("message_id", "")]
+        case "queue.nack":
+            return "QNACK", [
+                payload.get("queue", ""),
+                payload.get("message_id", ""),
+                str(payload.get("requeue", True)),
+            ]
+        case "queue.stats":
+            return "QSTATS", [payload.get("queue", "")]
+
+        # ── Stream ────────────────────────────────────────────────────────────
+        case "stream.create" | "stream.create_room":
+            return "SCREATE", [payload.get("room", ""), str(payload.get("max_events", 0))]
+        case "stream.delete" | "stream.delete_room":
+            return "SDELETE", [payload.get("room", "")]
+        case "stream.list" | "stream.list_rooms":
+            return "SLIST", []
+        case "stream.publish":
+            return "SPUBLISH", [
+                payload.get("room", ""),
+                payload.get("event", ""),
+                json.dumps(payload.get("data", {})),
+            ]
+        case "stream.consume" | "stream.read":
+            return "SREAD", [
+                payload.get("room", ""),
+                payload.get("subscriber_id", payload.get("consumer_id", "")),
+                str(payload.get("from_offset", payload.get("offset", 0))),
+            ]
+        case "stream.stats":
+            return "SSTATS", [payload.get("room", "")]
+
+        # ── Pub/Sub ───────────────────────────────────────────────────────────
+        case "pubsub.publish":
+            pl = payload.get("payload", payload.get("data", ""))
+            return "PUBLISH", [payload.get("topic", ""), json.dumps(pl)]
+        case "pubsub.subscribe":
+            topics: list[Any] = payload.get("topics", [])
+            return "SUBSCRIBE", [*topics]
+        case "pubsub.unsubscribe":
+            topics = payload.get("topics", [])
+            return "UNSUBSCRIBE", [payload.get("subscriber_id", ""), *topics]
+        case "pubsub.topics" | "pubsub.list":
+            return "TOPICS", []
+
+        # ── Transactions ──────────────────────────────────────────────────────
+        case "transaction.multi":
+            return "MULTI", [payload.get("client_id", "")]
+        case "transaction.exec":
+            return "EXEC", [payload.get("client_id", "")]
+        case "transaction.discard":
+            return "DISCARD", [payload.get("client_id", "")]
+        case "transaction.watch":
+            keys: list[Any] = payload.get("keys", [])
+            return "WATCH", [payload.get("client_id", ""), *keys]
+        case "transaction.unwatch":
+            return "UNWATCH", [payload.get("client_id", "")]
+
+        # ── Scripts ───────────────────────────────────────────────────────────
+        case "script.eval":
+            keys = payload.get("keys", [])
+            args: list[Any] = payload.get("args", [])
+            return "EVAL", [payload.get("script", ""), str(len(keys)), *keys, *[str(a) for a in args]]
+        case "script.evalsha":
+            keys = payload.get("keys", [])
+            args = payload.get("args", [])
+            return "EVALSHA", [payload.get("sha1", ""), str(len(keys)), *keys, *[str(a) for a in args]]
+        case "script.load":
+            return "SCRIPT", ["LOAD", payload.get("script", "")]
+        case "script.exists":
+            hashes: list[Any] = payload.get("hashes", [])
+            return "SCRIPT", ["EXISTS", *hashes]
+        case "script.flush":
+            return "SCRIPT", ["FLUSH"]
+        case "script.kill":
+            return "SCRIPT", ["KILL"]
+
+        # ── HyperLogLog ───────────────────────────────────────────────────────
+        case "hyperloglog.pfadd":
+            elements: list[Any] = payload.get("elements", [])
+            return "PFADD", [key, *elements]
+        case "hyperloglog.pfcount":
+            keys_arg: list[Any] = payload.get("keys", [key] if key else [])
+            return "PFCOUNT", [*keys_arg]
+        case "hyperloglog.pfmerge":
+            sources: list[Any] = payload.get("sources", [])
+            return "PFMERGE", [payload.get("destination", ""), *sources]
+        case "hyperloglog.stats":
+            return "HLLSTATS", []
+
+        # ── Geospatial ────────────────────────────────────────────────────────
+        case "geospatial.geoadd":
+            locations: list[Any] = payload.get("locations", [])
+            geo_args: list[Any] = [key]
+            for loc in locations:
+                geo_args.extend([str(loc.get("lon", 0)), str(loc.get("lat", 0)), str(loc.get("member", ""))])
+            return "GEOADD", geo_args
+        case "geospatial.geopos":
+            members: list[Any] = payload.get("members", [])
+            return "GEOPOS", [key, *members]
+        case "geospatial.geodist":
+            return "GEODIST", [
+                key,
+                payload.get("member1", ""),
+                payload.get("member2", ""),
+                payload.get("unit", "m"),
+            ]
+        case "geospatial.geohash":
+            members = payload.get("members", [])
+            return "GEOHASH", [key, *members]
+        case "geospatial.georadius":
+            return "GEORADIUS", [
+                key,
+                str(payload.get("longitude", 0)),
+                str(payload.get("latitude", 0)),
+                str(payload.get("radius", 0)),
+                payload.get("unit", "m"),
+                "WITHCOORD",
+                "WITHDIST",
+            ]
+        case "geospatial.georadiusbymember":
+            return "GEORADIUSBYMEMBER", [
+                key,
+                payload.get("member", ""),
+                str(payload.get("radius", 0)),
+                payload.get("unit", "m"),
+                "WITHCOORD",
+                "WITHDIST",
+            ]
+        case "geospatial.geosearch":
+            geo_args = [key]
+            if "member" in payload:
+                geo_args.extend(["FROMMEMBER", payload["member"]])
+            elif "longitude" in payload:
+                geo_args.extend(["FROMLONLAT", str(payload["longitude"]), str(payload["latitude"])])
+            geo_args.extend(["BYRADIUS", str(payload.get("radius", 0)), payload.get("unit", "m")])
+            geo_args.extend(["WITHCOORD", "WITHDIST"])
+            return "GEOSEARCH", geo_args
+        case "geospatial.stats":
+            return "GEOINFO", []
+
+        # ── kv.stats ──────────────────────────────────────────────────────────
+        case "kv.stats":
+            return "KVSTATS", []
+
         case _:
             return None
 
@@ -420,6 +592,119 @@ def _map_response(cmd: str, raw: Any) -> dict[str, Any]:  # noqa: ANN401
             return {"removed": raw}
         case "sorted_set.unionstore" | "sorted_set.interstore":
             return {"count": raw}
+
+        # ── Queue ─────────────────────────────────────────────────────────────
+        case "queue.create" | "queue.delete" | "queue.purge":
+            return {}
+        case "queue.list":
+            if isinstance(raw, list):
+                return {"queues": raw}
+            return {"queues": [] if raw is None else [raw]}
+        case "queue.publish":
+            if isinstance(raw, dict) and "message_id" in raw:
+                return raw
+            return {"message_id": str(raw or "")}
+        case "queue.consume":
+            return raw if isinstance(raw, dict) else {}
+        case "queue.ack" | "queue.nack":
+            return {"success": bool(raw)}
+        case "queue.stats":
+            return raw if isinstance(raw, dict) else {}
+
+        # ── Stream ────────────────────────────────────────────────────────────
+        case "stream.create" | "stream.create_room" | "stream.delete" | "stream.delete_room":
+            return {}
+        case "stream.list" | "stream.list_rooms":
+            if isinstance(raw, list):
+                return {"rooms": raw}
+            return {"rooms": [] if raw is None else [raw]}
+        case "stream.publish":
+            if isinstance(raw, dict) and "offset" in raw:
+                return raw
+            return {"offset": int(raw or 0)}
+        case "stream.consume" | "stream.read":
+            if isinstance(raw, dict) and "events" in raw:
+                return raw
+            if isinstance(raw, list):
+                return {"events": raw}
+            return {"events": []}
+        case "stream.stats":
+            return raw if isinstance(raw, dict) else {}
+
+        # ── Pub/Sub ───────────────────────────────────────────────────────────
+        case "pubsub.publish":
+            if isinstance(raw, dict):
+                return raw
+            return {"subscribers_matched": int(raw or 0)}
+        case "pubsub.subscribe" | "pubsub.unsubscribe":
+            return {"success": True}
+        case "pubsub.topics" | "pubsub.list":
+            if isinstance(raw, list):
+                return {"topics": raw}
+            return {"topics": [] if raw is None else [raw]}
+
+        # ── Transactions ──────────────────────────────────────────────────────
+        case "transaction.multi" | "transaction.discard" | "transaction.watch" | "transaction.unwatch":
+            if isinstance(raw, dict):
+                return raw
+            return {"success": raw == "OK" or raw is True, "message": str(raw or "")}
+        case "transaction.exec":
+            if isinstance(raw, dict):
+                return raw
+            if isinstance(raw, list):
+                return {"results": raw}
+            return {"results": []}
+
+        # ── Scripts ───────────────────────────────────────────────────────────
+        case "script.eval" | "script.evalsha":
+            if isinstance(raw, dict):
+                return raw
+            return {"result": raw, "sha1": ""}
+        case "script.load":
+            return {"sha1": str(raw or "")}
+        case "script.exists":
+            if isinstance(raw, list):
+                return {"exists": [bool(x) for x in raw]}
+            return {"exists": [bool(raw)]}
+        case "script.flush":
+            return {"cleared": 1 if raw == "OK" or raw is True else 0}
+        case "script.kill":
+            return {"terminated": raw == "OK" or raw is True}
+
+        # ── HyperLogLog ───────────────────────────────────────────────────────
+        case "hyperloglog.pfadd":
+            return {"updated": bool(raw)}
+        case "hyperloglog.pfcount":
+            return {"count": int(raw or 0)}
+        case "hyperloglog.pfmerge":
+            return {"success": raw == "OK" or raw is True}
+        case "hyperloglog.stats":
+            return raw if isinstance(raw, dict) else {}
+
+        # ── Geospatial ────────────────────────────────────────────────────────
+        case "geospatial.geoadd":
+            return {"added": int(raw or 0)}
+        case "geospatial.geopos":
+            if isinstance(raw, list):
+                return {"positions": raw}
+            return {"positions": []}
+        case "geospatial.geodist":
+            return {"distance": float(raw) if raw is not None else None}
+        case "geospatial.geohash":
+            if isinstance(raw, list):
+                return {"hashes": raw}
+            return {"hashes": []}
+        case "geospatial.georadius" | "geospatial.georadiusbymember" | "geospatial.geosearch":
+            if isinstance(raw, list):
+                return {"results": raw}
+            return {"results": []}
+        case "geospatial.stats":
+            return raw if isinstance(raw, dict) else {}
+
+        # ── kv.stats ──────────────────────────────────────────────────────────
+        case "kv.stats":
+            return raw if isinstance(raw, dict) else {}
+
         case _:
             if isinstance(raw, dict):
                 return raw
@@ -505,6 +790,86 @@ class SynapRpcTransport:
         await self._writer.drain()
 
         return await asyncio.wait_for(fut, timeout=self._timeout)
+
+    async def subscribe_push(
+        self,
+        topics: list[str],
+        on_message: Any,  # Callable[[dict], None]
+    ) -> tuple[str, Any]:
+        """Open a dedicated push connection for pub/sub subscriptions.
+
+        Sends a SUBSCRIBE command on a fresh TCP socket, reads the initial
+        response to extract the subscriber_id, then starts a background task
+        that reads incoming push frames (id == 0xFFFFFFFF) and calls
+        ``on_message`` with ``{topic, payload, id, timestamp}`` dicts.
+
+        Returns:
+            A ``(subscriber_id, cancel_fn)`` tuple. Call ``cancel_fn()`` to stop.
+        """
+        PUSH_ID = 0xFFFF_FFFF
+
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(self._host, self._port),
+            timeout=self._timeout,
+        )
+
+        # Send SUBSCRIBE frame
+        wire_args = [_to_wire(t) for t in topics]
+        body = msgpack.packb([1, "SUBSCRIBE", wire_args], use_bin_type=True)
+        frame = struct.pack("<I", len(body)) + body
+        writer.write(frame)
+        await writer.drain()
+
+        # Read the initial SUBSCRIBE response (not a push frame)
+        len_bytes = await asyncio.wait_for(reader.readexactly(4), timeout=self._timeout)
+        frame_len = struct.unpack_from("<I", len_bytes)[0]
+        init_body = await asyncio.wait_for(reader.readexactly(frame_len), timeout=self._timeout)
+        init_decoded = msgpack.unpackb(init_body, raw=False)
+        subscriber_id = ""
+        if len(init_decoded) >= 2:
+            result_env = init_decoded[1]
+            if isinstance(result_env, dict) and "Ok" in result_env:
+                val = _from_wire(result_env["Ok"])
+                if isinstance(val, dict) and "subscriber_id" in val:
+                    subscriber_id = str(val["subscriber_id"])
+
+        cancelled = False
+
+        async def _push_loop() -> None:
+            try:
+                while not cancelled:
+                    len_b = await asyncio.wait_for(reader.readexactly(4), timeout=self._timeout)
+                    f_len = struct.unpack_from("<I", len_b)[0]
+                    f_body = await asyncio.wait_for(reader.readexactly(f_len), timeout=self._timeout)
+                    decoded = msgpack.unpackb(f_body, raw=False)
+                    if len(decoded) < 2:
+                        continue
+                    frame_id, result_env = decoded[0], decoded[1]
+                    if frame_id != PUSH_ID:
+                        continue
+                    if isinstance(result_env, dict) and "Ok" in result_env:
+                        val = _from_wire(result_env["Ok"])
+                        if isinstance(val, dict):
+                            on_message({
+                                "topic": str(val.get("topic", "")),
+                                "payload": val.get("payload"),
+                                "id": str(val.get("id", "")),
+                                "timestamp": int(val.get("timestamp", 0)),
+                            })
+            except (asyncio.CancelledError, Exception):
+                pass
+            finally:
+                writer.close()
+
+        loop = asyncio.get_event_loop()
+        push_task = loop.create_task(_push_loop())
+
+        def cancel() -> None:
+            nonlocal cancelled
+            cancelled = True
+            push_task.cancel()
+
+        return subscriber_id, cancel
 
     async def close(self) -> None:
         """Close the TCP connection."""

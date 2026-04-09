@@ -2,6 +2,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Synap.SDK.Exceptions;
 using Synap.SDK.Modules;
+using System.Runtime.CompilerServices;
 
 namespace Synap.SDK;
 
@@ -185,6 +186,9 @@ public sealed class SynapClient : IDisposable
                     throw SynapException.NetworkError($"SynapRPC error: {ex.Message}");
                 }
             }
+
+            // Command has no native mapping — raise instead of silently falling back.
+            throw new UnsupportedCommandException(operation, "synaprpc");
         }
         else if (_resp3Transport is not null)
         {
@@ -207,11 +211,72 @@ public sealed class SynapClient : IDisposable
                     throw SynapException.NetworkError($"RESP3 error: {ex.Message}");
                 }
             }
+
+            throw new UnsupportedCommandException(operation, "resp3");
         }
 
-        // HTTP fallback (always available, also used for queue/stream/pubsub/transaction).
+        // HTTP path.
         return await ExecuteHttpAsync(operation, payloadData, cancellationToken).ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Sends a command with a pre-assembled payload dictionary (preferred over ExecuteAsync).
+    ///
+    /// Mapped commands are routed through native transport (SynapRPC or RESP3).
+    /// Unmapped commands raise <see cref="UnsupportedCommandException"/> on native transports.
+    /// </summary>
+    /// <param name="command">Command name (e.g. "queue.publish").</param>
+    /// <param name="payload">Full payload — no target injection.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The response as a JSON document.</returns>
+    public async Task<JsonDocument> SendCommandAsync(
+        string command,
+        Dictionary<string, object?>? payload = null,
+        CancellationToken cancellationToken = default)
+    {
+        var pl = payload ?? new Dictionary<string, object?>();
+
+        if (_rpcTransport is not null)
+        {
+            var mapped = CommandMapper.MapCommand(command, pl);
+            if (mapped.HasValue)
+            {
+                var (cmd, args) = mapped.Value;
+                try
+                {
+                    var raw = await _rpcTransport.ExecuteAsync(cmd, args, cancellationToken).ConfigureAwait(false);
+                    return DictToJsonDocument(CommandMapper.MapResponse(command, raw));
+                }
+                catch (SynapException) { throw; }
+                catch (Exception ex) { throw SynapException.NetworkError($"SynapRPC error: {ex.Message}"); }
+            }
+            throw new UnsupportedCommandException(command, "synaprpc");
+        }
+        else if (_resp3Transport is not null)
+        {
+            var mapped = CommandMapper.MapCommand(command, pl);
+            if (mapped.HasValue)
+            {
+                var (cmd, args) = mapped.Value;
+                try
+                {
+                    var raw = await _resp3Transport.ExecuteAsync(cmd, args, cancellationToken).ConfigureAwait(false);
+                    return DictToJsonDocument(CommandMapper.MapResponse(command, raw));
+                }
+                catch (SynapException) { throw; }
+                catch (Exception ex) { throw SynapException.NetworkError($"RESP3 error: {ex.Message}"); }
+            }
+            throw new UnsupportedCommandException(command, "resp3");
+        }
+
+        return await ExecuteHttpAsync(command, pl, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Returns the active <see cref="SynapRpcTransport"/> if the client was configured
+    /// with a SynapRPC transport, or <c>null</c> otherwise.
+    /// </summary>
+    internal SynapRpcTransport? GetSynapRpcTransport() => _rpcTransport;
 
     private async Task<JsonDocument> ExecuteHttpAsync(
         string operation,

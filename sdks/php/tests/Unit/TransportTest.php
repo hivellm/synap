@@ -199,14 +199,18 @@ final class TransportTest extends TestCase
 
     public function testMapCommandQueuePublishReturnsFallback(): void
     {
-        // queue.publish has no native wire mapping → HTTP fallback (null).
-        $this->assertNull(mapCommand('queue.publish', ['key' => 'q', 'value' => 'msg']));
+        // queue.publish is now mapped to QPUBLISH.
+        $result = mapCommand('queue.publish', ['queue' => 'q', 'payload' => 'msg']);
+        $this->assertNotNull($result);
+        $this->assertSame('QPUBLISH', $result[0]);
     }
 
     public function testMapCommandStreamPublishReturnsFallback(): void
     {
-        // stream.publish has no native wire mapping → HTTP fallback (null).
-        $this->assertNull(mapCommand('stream.publish', ['key' => 's', 'value' => 'ev']));
+        // stream.publish is now mapped to SPUBLISH.
+        $result = mapCommand('stream.publish', ['room' => 's', 'event' => 'ev', 'data' => null]);
+        $this->assertNotNull($result);
+        $this->assertSame('SPUBLISH', $result[0]);
     }
 
     public function testMapCommandUnknownReturnsFallback(): void

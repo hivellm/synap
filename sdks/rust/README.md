@@ -122,43 +122,51 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Transports
 
-Since v0.10.0 the SDK speaks three wire protocols, selectable per-client:
+Since v0.11.0 the SDK selects the transport via **URL scheme** — no separate builder options required:
 
-| Transport    | Default addr       | When to use                                               |
-|--------------|--------------------|-----------------------------------------------------------|
-| **SynapRPC** | `127.0.0.1:15501`  | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency, preserves `int`/`float`/`bool`/`bytes` on the wire. |
-| **RESP3**    | `127.0.0.1:6379`   | Redis-compatible text protocol. Use when integrating alongside existing Redis tooling. |
-| **HTTP**     | from `base_url`    | Original REST transport. Always required as the fallback channel. |
+| URL scheme    | Default port | When to use                                               |
+|---------------|--------------|-----------------------------------------------------------|
+| `synap://`    | `15501`      | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency, preserves `int`/`float`/`bool`/`bytes` on the wire. |
+| `resp3://`    | `6379`       | Redis-compatible text protocol — interop with existing Redis tooling. |
+| `http://` / `https://` | `15500` | Original REST transport — full command coverage. |
 
-> **Why HTTP is always required.** SynapRPC and RESP3 only map KV, Hash,
-> List, Set, Sorted Set and Bitmap commands. Queues, streams, pub/sub,
-> scripting, transactions and any unmapped command automatically fall back
-> to HTTP REST — so `base_url` must always point at a reachable HTTP
-> listener even when you use a binary transport.
+All commands (KV, Hash, List, Set, Sorted Set, Queue, Stream, Pub/Sub, Transactions, Scripts, Geo, HyperLogLog) are fully supported on every transport. Native transports raise `SynapError::UnsupportedCommand` instead of silently falling back to HTTP.
 
 ```rust
-use std::time::Duration;
 use synap_sdk::{SynapClient, SynapConfig};
 
-// SynapRPC (default, recommended)
-let cfg = SynapConfig::new("http://127.0.0.1:15500"); // transport = SynapRpc
+// SynapRPC — recommended default
+let cfg = SynapConfig::new("synap://127.0.0.1:15501");
 let client = SynapClient::new(cfg)?;
 
-// Explicit SynapRPC with custom RPC endpoint (e.g. RPC on a different host
-// than the HTTP gateway — common when HTTP is behind a TLS load balancer
-// and the RPC port is exposed directly on the internal network).
-let cfg = SynapConfig::new("https://synap.example.com")
-    .with_synap_rpc_transport()
-    .with_rpc_addr("10.0.0.42", 15501)
-    .with_timeout(Duration::from_secs(5));
+// RESP3 — Redis-compatible
+let cfg = SynapConfig::new("resp3://127.0.0.1:6379");
+let client = SynapClient::new(cfg)?;
 
-// RESP3 (Redis-compatible)
-let cfg = SynapConfig::new("http://127.0.0.1:15500")
-    .with_resp3_transport()
-    .with_resp3_addr("127.0.0.1", 6379);
+// HTTP — full REST access
+let cfg = SynapConfig::new("http://127.0.0.1:15500");
+let client = SynapClient::new(cfg)?;
+```
 
-// Pure HTTP (no binary transport)
-let cfg = SynapConfig::new("http://127.0.0.1:15500").with_http_transport();
+**Queue, stream and pub/sub over `synap://`:**
+
+```rust
+// Queue round-trip
+client.queue().create_queue("tasks", None, None).await?;
+let id = client.queue().publish("tasks", serde_json::json!({"job": "resize"}), None, None, None).await?;
+let msg = client.queue().consume("tasks", "worker-1").await?;
+client.queue().ack("tasks", &msg.id).await?;
+
+// Stream publish + read
+client.stream().create_room("events").await?;
+client.stream().publish("events", "user.created", serde_json::json!({"id": "u1"})).await?;
+let events = client.stream().read("events", 0, None).await?;
+
+// Reactive pub/sub (server-push over dedicated TCP connection)
+client.pubsub().subscribe(vec!["news.*"], |msg| async move {
+    println!("got: {:?}", msg);
+}).await?;
+client.pubsub().publish("news.breaking", serde_json::json!({"title": "Hello"})).await?;
 ```
 
 ### End-to-end test suite

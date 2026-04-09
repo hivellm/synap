@@ -8,7 +8,7 @@ commands when the equivalent MCP tool exists.
 
 | Server | Source |
 |--------|--------|
-| `mcp__rulebook__*` | `.cursor/mcp.json` |
+| `mcp__rulebook__*` | `.mcp.json` |
 
 Use `mcp__<server>__<tool>` syntax in tool calls. Check the server's
 tool list for available operations before falling back to shell commands.

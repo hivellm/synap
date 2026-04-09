@@ -113,7 +113,7 @@ public sealed class StreamManagerTests : IDisposable
             });
 
         // Act
-        var events = await _stream.ReadAsync("test-room", offset: 0, limit: 10);
+        var events = await _stream.ReadAsync("test-room", offset: 0);
 
         // Assert
         Assert.Equal(2, events.Count);

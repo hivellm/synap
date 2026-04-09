@@ -2,9 +2,9 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.85%2B)-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-528%2B%20(100%25)-brightgreen.svg)](#testing--quality)
+[![Tests](https://img.shields.io/badge/tests-636%2B%20(100%25)-brightgreen.svg)](#testing--quality)
 [![Coverage](https://img.shields.io/badge/coverage-99.30%25-brightgreen.svg)](docs/TESTING.md)
-[![Version](https://img.shields.io/badge/version-0.10.0-blue.svg)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.11.0-blue.svg)](#project-status)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
 
@@ -39,6 +39,8 @@ Synap provides multiple core capabilities in a single, cohesive system:
 - **⚙️ Async I/O**: Built on Tokio for non-blocking operations
 - **🗜️ Smart Compression**: LZ4/Zstd compression with minimal CPU overhead
 - **🔥 Hot Data Cache**: Decompressed cache for frequently accessed data
+- **⚡ SIMD Acceleration**: Runtime-dispatched AVX2/NEON/SIMD128 for BITCOUNT, BITOP, PFMERGE — up to 9.5× faster than scalar on HyperLogLog merge
+- **🔑 KV Optimizations**: ahash shard hasher, inline keys (CompactString), shard-aware MGET, per-shard TTL min-heap — 14–25% faster SET, 21% faster bulk insert, 14% faster TTL cleanup
 
 ### 🔐 Security & Authentication (✅ PRODUCTION READY - Jan 2025)
 - **🔒 Authentication System** - Root user, user management, API keys
@@ -85,40 +87,47 @@ Synap provides multiple core capabilities in a single, cohesive system:
 
 ### 🔗 Protocol Support
 
-Synap speaks **four wire protocols** on three separate ports. All SDKs
-(Rust, TypeScript, Python, PHP, C#) support all three data-plane transports
-and can switch between them per-client.
+Synap supports **three wire transports**. All SDKs (Rust, TypeScript, Python,
+PHP, C#) select the transport via URL scheme — no separate builder options required.
 
-| Protocol     | Port    | Framing                       | When to use                                             |
-|--------------|---------|-------------------------------|---------------------------------------------------------|
-| **SynapRPC** | `15501` | MessagePack over TCP          | **✅ Recommended default** — lowest latency, binary, persistent connection, native type fidelity |
-| **RESP3**    | `6379`  | Redis text protocol over TCP  | Redis-compatible tooling, `redis-cli`, existing Redis client libraries |
-| **HTTP/REST**| `15500` | JSON over HTTP                | Ad-hoc `curl`, webhooks, browsers, commands not yet mapped to binary transports |
-| **WebSocket**| `15500` | HTTP upgrade                  | Real-time subscriptions, reactive pub/sub, streaming consumers |
+| URL scheme    | Port    | Framing                       | When to use                                             |
+|---------------|---------|-------------------------------|---------------------------------------------------------|
+| `synap://`    | `15501` | MessagePack over TCP          | **✅ Recommended default** — lowest latency, binary, persistent connection, native type fidelity |
+| `resp3://`    | `6379`  | Redis text protocol over TCP  | Redis-compatible tooling, `redis-cli`, existing Redis client libraries |
+| `http://` / `https://` | `15500` | JSON over HTTP | Ad-hoc `curl`, webhooks, browsers |
 
-> **💡 Recommendation — use SynapRPC.**
+> **💡 Recommendation — use `synap://`.**
 > SynapRPC is the preferred transport for production workloads: it keeps a
 > persistent multiplexed TCP connection, avoids HTTP framing overhead, and
 > preserves integer/float/bool/bytes types on the wire (no stringification).
-> In benchmarks it consistently beats HTTP by a wide margin on small-value
-> KV workloads. Enable it with:
+> All commands — KV, queues, streams, pub/sub, transactions, scripts,
+> geospatial, HyperLogLog — are fully supported on every transport.
 >
 > ```ts
 > // TypeScript
-> const synap = new Synap({ transport: 'synaprpc', rpcHost: '127.0.0.1', rpcPort: 15501 });
+> const synap = new SynapClient("synap://127.0.0.1:15501");
+> ```
+> ```python
+> # Python
+> client = SynapClient(SynapConfig("synap://127.0.0.1:15501"))
 > ```
 > ```rust
-> // Rust — SynapRPC is the default transport.
-> // The HTTP base_url is still required: commands not mapped to the binary
-> // transport (queues, streams, pub/sub, scripting…) fall back to REST.
-> // RPC defaults to 127.0.0.1:15501; override with `.with_rpc_addr(host, port)`
-> // if RPC listens on a different host/port than HTTP.
-> let cfg = SynapConfig::new("http://127.0.0.1:15500");
+> // Rust
+> let cfg = SynapConfig::new("synap://127.0.0.1:15501");
 > ```
->
-> Commands not yet mapped to a native transport (queues, streams, pub/sub,
-> scripting, …) transparently fall back to HTTP, so switching transports is
-> a drop-in change.
+> ```php
+> // PHP
+> $client = new SynapClient(new SynapConfig("synap://127.0.0.1:15501"));
+> ```
+> ```csharp
+> // C#
+> var client = new SynapClient(SynapConfig.Create("synap://127.0.0.1:15501"));
+> ```
+
+> **⚠️ No silent HTTP fallback.**
+> Native transports (`synap://`, `resp3://`) raise `UnsupportedCommandError` for
+> any command not mapped on that transport instead of silently falling back to HTTP.
+> Use `http://` if you need full REST access for commands outside the parity matrix.
 
 Additional integration protocols:
 
@@ -139,12 +148,12 @@ Additional integration protocols:
 ┌─────────────────────────────────────────────────────────┐
 │                     Synap Server                        │
 ├─────────────────────────────────────────────────────────┤
-│  StreamableHTTP/WebSocket Protocol Layer               │
+│  StreamableHTTP/WebSocket Protocol Layer                │
 ├─────────────────────────────────────────────────────────┤
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
-│  │ Key-Value│ │  Queue   │ │  Event   │ │  Pub/Sub │  │
-│  │  Store   │ │  System  │ │  Stream  │ │          │  │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────┘  │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐    │
+│  │ Key-Value│ │  Queue   │ │  Event   │ │  Pub/Sub │    │
+│  │  Store   │ │  System  │ │  Stream  │ │          │    │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘    │
 ├─────────────────────────────────────────────────────────┤
 │            Replication Log (Append-Only)                │
 ├─────────────────────────────────────────────────────────┤
@@ -590,21 +599,26 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 
 ## 📊 Performance
 
-### ✅ Performance with Persistence Enabled (October 2025) ⚡
+### ✅ Head-to-Head vs Redis 7 (April 2026) ⚡
 
-**🚀 Realistic Benchmarks - Fair Comparison** ✅
+**🔬 Network-level comparison** — Synap v0.9.0 (HTTP/JSON, debug build) vs Redis 7-alpine (RESP/TCP, Docker).  
+Both measured sequentially over loopback. Release build improves Synap numbers by 2–4×; Redis numbers are constant.  
+Full results: [`docs/benchmarks/redis-vs-synap.md`](docs/benchmarks/redis-vs-synap.md)
 
-| Operation | Synap (Periodic fsync) | Redis/RabbitMQ | vs Competitor |
-|-----------|------------------------|----------------|---------------|
-| **KV Write** | **44K ops/s** (22.5µs) | 50-100K ops/s | 🟰 **Competitive** (2x slower) |
-| **KV Read** | **12M ops/s** (83ns) | 80-100K ops/s | ✅ **120x faster** |
-| **Queue Publish** | **19.2K msgs/s** (52µs) | 0.1-0.2K msgs/s | ✅ **100x faster** |
-| **Queue Consume+ACK** | **607µs** | 5-10ms | ✅ **8-16x faster** |
-| **Memory (1M keys)** | **92MB** | ~200MB | ✅ **54% reduction** |
-| **Recovery (1K ops)** | **120ms** | 50-200ms | 🟰 **Similar** |
-| **Concurrent Ops** | **64x parallel** | Single-thread | ✅ **Linear scaling** |
+| Operation | Synap p50 | Redis p50 | Synap edge |
+|-----------|-----------|-----------|-----------|
+| **GET (64 B)** | **299 µs** | 477 µs | ✅ **+60% faster** |
+| **GET (1 KB)** | **295 µs** | 459 µs | ✅ **+56% faster** |
+| **SET (64 B)** | **332 µs** | 466 µs | ✅ **+40% faster** |
+| **SET (4 KB)** | **454 µs** | 535 µs | ✅ **+18% faster** |
+| **INCR** | **341 µs** | 465 µs | ✅ **+36% faster** |
+| **BITCOUNT (1 MB bitmap)** | **296 µs** | 645 µs | ✅ **+118% faster** 🚀 |
+| **PFCOUNT** | **305 µs** | 472 µs | ✅ **+55% faster** |
+| **Concurrent reads (8T×100)** | **46.1 ms** | 70.7 ms | ✅ **+53% throughput** |
+| **MSET (100 keys)** | 994 µs | **644 µs** | 🟰 HTTP body overhead |
+| **Memory (1M keys)** | **92 MB** | ~200 MB | ✅ **54% reduction** |
 
-**Note**: Persistence enabled with `fsync_mode: periodic` (10ms batching) - Production config
+> BITCOUNT advantage grows with bitmap size because Synap processes entirely in memory (AVX2/NEON SIMD) while Redis incurs wire-serialization overhead for large payloads.
 
 ### 📈 Optimization Results
 
@@ -615,6 +629,12 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 | Read latency P99 | 2-5ms | **87ns** | **20,000x faster** |
 | Concurrent ops | Limited | **64x parallel** | Linear scaling |
 | TTL cleanup CPU | 100% | **1-10%** | **10-100x reduction** |
+| BITCOUNT throughput (AVX2) | 20 GiB/s | **64 GiB/s** | **3.1× faster** |
+| PFMERGE throughput (AVX2) | 1.9 GiB/s | **18 GiB/s** | **9.5× faster** |
+| KV SET (256B key) | 152 ns | **114 ns** | **25% faster** |
+| KV bulk insert (1M keys) | 1.56 s | **1.23 s** | **21% faster** |
+| MGET (100 keys) | 11.0 µs | **10.1 µs** | **8% faster** |
+| TTL cleanup (1K expiring keys) | 127 ns | **109 ns** | **14% faster** |
 
 ### 🔜 Planned
 
@@ -624,7 +644,7 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 | Pub/Sub Publish | < 0.5ms | 🔵 Planned |
 | Replication Lag | < 10ms | 🔵 Planned |
 
-**Test Coverage**: 456+ tests passing (99.30% coverage)
+**Test Coverage**: 636+ tests passing (100% passing)
 
 **Scripts**: `./scripts/test-performance.ps1` (full suite), `./scripts/quick-test.ps1` (fast validation)
 
@@ -785,8 +805,8 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 - Stress test: 5000 ops in ~4-5 seconds
 
 #### 🧪 Testing & Quality
-- ✅ **456+ tests passing** (99.30% test coverage)
-  - 128 library tests (KV, Queue, Streams, Partitioning, Consumer Groups, Persistence, Auth, Compression)
+- ✅ **636+ tests passing** (100% passing)
+  - 131 library tests (KV, Queue, Streams, Partitioning, Consumer Groups, Persistence, Auth, Compression) — includes 3 new KV optimization tests
   - 67 replication tests (25 unit + 16 extended + 10 integration TCP + 16 KV ops)
   - 21 integration tests (performance, hybrid storage, persistence e2e)
   - 7 Kafka-style integration tests (partition, consumer groups, retention)
@@ -795,8 +815,9 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
   - 30 Lua scripting tests
   - 11 transaction tests
   - 58 authentication tests
+  - 9 SIMD correctness tests (popcount, bitop AND/OR/XOR/NOT, max_reduce, bitpos, backend detection)
   - Protocol tests across REST, StreamableHTTP, WebSocket
-- ✅ **11 comprehensive benchmark suites**
+- ✅ **12 comprehensive benchmark suites**
   - `kv_bench`: Memory, sharding, TTL, concurrency
   - `queue_bench`: Arc sharing, priority, pending messages
   - `persistence_bench`: AsyncWAL, snapshots, recovery
@@ -806,8 +827,9 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
   - `compression_bench`: LZ4/Zstd performance
   - `kv_persistence_bench`: With disk I/O (3 fsync modes)
   - `queue_persistence_bench`: RabbitMQ-style durability
-  - `geospatial_bench`: GEO operations performance ✅ NEW
-  - `bitmap_bench`: Bit manipulation performance ✅ NEW
+  - `geospatial_bench`: GEO operations performance
+  - `bitmap_bench`: Bit manipulation performance
+  - `simd_bench`: SIMD vs scalar — popcount, BITOP AND, PFMERGE max-reduce ✅ NEW
 - ✅ **99.30% test coverage**
 - ✅ Clean `cargo fmt` and `cargo clippy`
 - ✅ WebSocket tests with graceful shutdown (s2s-tests feature)
@@ -820,7 +842,7 @@ git clone https://github.com/hivellm/synap.git
 cd synap
 cargo build --release
 
-# Run tests (456+ passing)
+# Run tests (636+ passing)
 cargo test
 
 # Run server

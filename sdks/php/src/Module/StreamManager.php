@@ -20,15 +20,9 @@ class StreamManager
     /**
      * Create a stream room
      */
-    public function createRoom(string $room, ?int $maxEvents = null): void
+    public function createRoom(string $room): void
     {
-        $data = [];
-
-        if ($maxEvents !== null) {
-            $data['max_events'] = $maxEvents;
-        }
-
-        $this->client->execute('stream.create', $room, $data);
+        $this->client->sendCommand('stream.create', ['room' => $room]);
     }
 
     /**
@@ -36,7 +30,7 @@ class StreamManager
      */
     public function deleteRoom(string $room): void
     {
-        $this->client->execute('stream.delete', $room);
+        $this->client->sendCommand('stream.delete', ['room' => $room]);
     }
 
     /**
@@ -44,28 +38,29 @@ class StreamManager
      */
     public function publish(string $room, string $event, mixed $data): int
     {
-        $response = $this->client->execute('stream.publish', $room, [
+        $response = $this->client->sendCommand('stream.publish', [
+            'room'  => $room,
             'event' => $event,
-            'data' => $data,
+            'data'  => $data,
         ]);
 
         $offset = $response['offset'] ?? 0;
-
         assert(is_int($offset) || is_numeric($offset));
 
         return (int) $offset;
     }
 
     /**
-     * Consume events from stream
+     * Read events from stream
      *
      * @return array<StreamEvent>
      */
-    public function consume(string $room, int $offset = 0, int $limit = 100): array
+    public function read(string $room, int $offset = 0, string $subscriberId = 'sdk-reader'): array
     {
-        $response = $this->client->execute('stream.consume', $room, [
-            'offset' => $offset,
-            'limit' => $limit,
+        $response = $this->client->sendCommand('stream.consume', [
+            'room'          => $room,
+            'subscriber_id' => $subscriberId,
+            'from_offset'   => $offset,
         ]);
 
         $events = $response['events'] ?? [];
@@ -81,9 +76,10 @@ class StreamManager
                 continue;
             }
 
-            $eventOffset = $event['offset'] ?? 0;
-            $eventName = $event['event'] ?? '';
+            $eventOffset    = $event['offset'] ?? 0;
+            $eventName      = $event['event'] ?? '';
             $eventTimestamp = $event['timestamp'] ?? 0;
+            $eventRoom      = $event['room'] ?? $room;
 
             assert(is_int($eventOffset) || is_numeric($eventOffset));
             assert(is_string($eventName));
@@ -101,28 +97,28 @@ class StreamManager
     }
 
     /**
-     * Get stream statistics
-     *
-     * @return array<string, mixed>
-     */
-    public function stats(string $room): array
-    {
-        return $this->client->execute('stream.stats', $room);
-    }
-
-    /**
      * List all stream rooms
      *
      * @return array<string>
      */
-    public function list(): array
+    public function listRooms(): array
     {
-        $response = $this->client->execute('stream.list', '*');
+        $response = $this->client->sendCommand('stream.list', []);
         $rooms = $response['rooms'] ?? [];
 
         assert(is_array($rooms));
 
         /** @var array<string> */
         return $rooms;
+    }
+
+    /**
+     * Get stream statistics
+     *
+     * @return array<string, mixed>
+     */
+    public function stats(string $room): array
+    {
+        return $this->client->sendCommand('stream.stats', ['room' => $room]);
     }
 }

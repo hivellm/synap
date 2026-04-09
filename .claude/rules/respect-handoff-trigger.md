@@ -23,7 +23,7 @@ at 80%+ context is measurably lower than at 0–50%. The handoff
 mechanism ensures work is preserved and the next session starts fresh
 with full context loaded via the `SessionStart` resume hook.
 
-This rule has the **highest precedence** after git safety (AGENTS.md Tier 1 §2). If a
+This rule has the **highest precedence** after `git-safety.md`. If a
 handoff trigger fires while you are mid-edit, finish the current
 atomic write (do not leave a file in a broken state), then stop.
 

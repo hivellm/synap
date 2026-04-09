@@ -98,16 +98,30 @@ export class PubSubManager {
     const stopSignal = new Subject<void>();
     this.subscriptions.set(stopKey, stopSignal);
 
-    // Create observable for pub/sub messages
-    // This is a simplified implementation using Subject
-    // In a real implementation, this would connect to WebSocket
     const messageSubject = new Subject<ProcessedPubSubMessage<T>>();
 
-    // Setup connection (simulated for now)
-    // In production, this would open a WebSocket connection
     const setupSubscription = async () => {
       try {
-        // Subscribe to topics
+        // ── SynapRPC native server-push path ──────────────────────────────
+        const rpcFn = (this.client as any).synapRpcTransport;
+        const rpc = typeof rpcFn === 'function' ? rpcFn.call(this.client) : null;
+        if (rpc) {
+          const { cancel } = await rpc.subscribePush(topics, (msg: { topic: string; payload: unknown; id: string; timestamp: number }) => {
+            messageSubject.next({
+              topic: msg.topic,
+              data: msg.payload as T,
+              timestamp: String(msg.timestamp),
+              subscriberId,
+              type: 'message',
+            } as ProcessedPubSubMessage<T>);
+          });
+
+          // Cancel the push connection when the stop signal fires.
+          stopSignal.subscribe(() => cancel());
+          return;
+        }
+
+        // ── HTTP fallback: register subscription (no real-time delivery) ──
         await this.client.sendCommand('pubsub.subscribe', {
           topics,
           subscriber_id: subscriberId,
@@ -118,7 +132,6 @@ export class PubSubManager {
       }
     };
 
-    // Start subscription
     setupSubscription();
 
     return messageSubject.pipe(

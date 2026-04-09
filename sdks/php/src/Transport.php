@@ -250,6 +250,178 @@ function mapCommand(string $cmd, array $payload): ?array
             return ['ZREM', [$key, $value]];
         case 'sorted_set.incrby':
             return ['ZINCRBY', [$key, $payload['increment'] ?? 1.0, $value]];
+
+        // ── Queue ─────────────────────────────────────────────────────────────
+        case 'queue.create':
+            return ['QCREATE', [
+                (string) ($payload['name'] ?? ''),
+                (int)    ($payload['max_depth'] ?? 0),
+                (int)    ($payload['ack_deadline_secs'] ?? 0),
+            ]];
+        case 'queue.delete':
+            return ['QDELETE', [(string) ($payload['queue'] ?? '')]];
+        case 'queue.publish': {
+            $args = [
+                (string) ($payload['queue'] ?? ''),
+                json_encode($payload['payload'] ?? null),
+                (int)    ($payload['priority'] ?? 0),
+                (int)    ($payload['max_retries'] ?? 3),
+            ];
+            return ['QPUBLISH', $args];
+        }
+        case 'queue.consume':
+            return ['QCONSUME', [
+                (string) ($payload['queue'] ?? ''),
+                (string) ($payload['consumer_id'] ?? ''),
+            ]];
+        case 'queue.ack':
+            return ['QACK', [
+                (string) ($payload['queue'] ?? ''),
+                (string) ($payload['message_id'] ?? ''),
+            ]];
+        case 'queue.nack':
+            return ['QNACK', [
+                (string) ($payload['queue'] ?? ''),
+                (string) ($payload['message_id'] ?? ''),
+                (int)    ($payload['delay_secs'] ?? 0),
+            ]];
+        case 'queue.stats':
+            return ['QSTATS', [(string) ($payload['queue'] ?? '')]];
+        case 'queue.purge':
+            return ['QPURGE', [(string) ($payload['queue'] ?? '')]];
+        case 'queue.list':
+            return ['QLIST', []];
+
+        // ── Stream ────────────────────────────────────────────────────────────
+        case 'stream.create':
+            return ['SCREATE', [(string) ($payload['room'] ?? '')]];
+        case 'stream.delete':
+            return ['SDELETE', [(string) ($payload['room'] ?? '')]];
+        case 'stream.publish':
+            return ['SPUBLISH', [
+                (string) ($payload['room'] ?? ''),
+                (string) ($payload['event'] ?? ''),
+                json_encode($payload['data'] ?? null),
+            ]];
+        case 'stream.consume':
+            return ['SREAD', [
+                (string) ($payload['room'] ?? ''),
+                (string) ($payload['subscriber_id'] ?? 'sdk-reader'),
+                (string) ($payload['from_offset'] ?? 0),
+            ]];
+        case 'stream.list':
+            return ['SLIST', []];
+
+        // ── Pub/Sub ───────────────────────────────────────────────────────────
+        case 'pubsub.publish':
+            return ['PPUBLISH', [
+                (string) ($payload['topic'] ?? ''),
+                json_encode($payload['payload'] ?? null),
+            ]];
+        case 'pubsub.subscribe':
+            return ['PSUBSCRIBE', array_merge(
+                [(string) ($payload['subscriber_id'] ?? '')],
+                (array) ($payload['topics'] ?? [])
+            )];
+        case 'pubsub.unsubscribe':
+            return ['PUNSUBSCRIBE', array_merge(
+                [(string) ($payload['subscriber_id'] ?? '')],
+                (array) ($payload['topics'] ?? [])
+            )];
+        case 'pubsub.topics':
+            return ['PTOPICS', []];
+        case 'pubsub.stats':
+            return ['PSTATS', []];
+
+        // ── Transaction ───────────────────────────────────────────────────────
+        case 'transaction.multi':
+            return ['MULTI', [(string) ($payload['client_id'] ?? '')]];
+        case 'transaction.exec':
+            return ['EXEC', [(string) ($payload['client_id'] ?? '')]];
+        case 'transaction.discard':
+            return ['DISCARD', [(string) ($payload['client_id'] ?? '')]];
+        case 'transaction.watch':
+            return ['WATCH', array_merge(
+                [(string) ($payload['client_id'] ?? '')],
+                (array) ($payload['keys'] ?? [])
+            )];
+        case 'transaction.unwatch':
+            return ['UNWATCH', [(string) ($payload['client_id'] ?? '')]];
+
+        // ── Scripting ─────────────────────────────────────────────────────────
+        case 'script.eval':
+            return ['EVAL', [
+                (string) ($payload['script'] ?? ''),
+                count((array) ($payload['keys'] ?? [])),
+                ...array_merge(
+                    (array) ($payload['keys'] ?? []),
+                    (array) ($payload['args'] ?? [])
+                ),
+            ]];
+        case 'script.evalsha':
+            return ['EVALSHA', [
+                (string) ($payload['sha'] ?? ''),
+                count((array) ($payload['keys'] ?? [])),
+                ...array_merge(
+                    (array) ($payload['keys'] ?? []),
+                    (array) ($payload['args'] ?? [])
+                ),
+            ]];
+
+        // ── HyperLogLog ───────────────────────────────────────────────────────
+        case 'hyperloglog.pfadd':
+            return ['PFADD', array_merge([$key], (array) ($payload['elements'] ?? []))];
+        case 'hyperloglog.pfcount':
+            return ['PFCOUNT', array_merge([$key], (array) ($payload['keys'] ?? []))];
+        case 'hyperloglog.pfmerge':
+            return ['PFMERGE', array_merge(
+                [(string) ($payload['destination'] ?? '')],
+                [$key],
+                (array) ($payload['sources'] ?? [])
+            )];
+
+        // ── Geospatial ────────────────────────────────────────────────────────
+        case 'geo.add':
+            return ['GEOADD', [
+                $key,
+                (float) ($payload['longitude'] ?? 0.0),
+                (float) ($payload['latitude'] ?? 0.0),
+                (string) ($payload['member'] ?? ''),
+            ]];
+        case 'geo.dist':
+            return ['GEODIST', [
+                $key,
+                (string) ($payload['member1'] ?? ''),
+                (string) ($payload['member2'] ?? ''),
+                (string) ($payload['unit'] ?? 'm'),
+            ]];
+        case 'geo.pos':
+            return ['GEOPOS', [$key, (string) ($payload['member'] ?? '')]];
+        case 'geo.radius':
+            return ['GEORADIUS', [
+                $key,
+                (float) ($payload['longitude'] ?? 0.0),
+                (float) ($payload['latitude'] ?? 0.0),
+                (float) ($payload['radius'] ?? 0.0),
+                (string) ($payload['unit'] ?? 'm'),
+                'WITHCOORD', 'WITHDIST', 'ASC',
+                'COUNT', (int) ($payload['count'] ?? 100),
+            ]];
+        case 'geo.search':
+            return ['GEOSEARCH', [
+                $key,
+                'FROMMEMBER', (string) ($payload['member'] ?? ''),
+                'BYRADIUS', (float) ($payload['radius'] ?? 0.0), (string) ($payload['unit'] ?? 'm'),
+                'ASC',
+                'COUNT', (int) ($payload['count'] ?? 100),
+            ]];
+        case 'geo.hash':
+            return ['GEOHASH', [$key, (string) ($payload['member'] ?? '')]];
+
+        // ── KV stats ─────────────────────────────────────────────────────────
+        case 'kv.stats':
+            return ['INFO', ['keyspace']];
+
         default:
             return null;
     }
@@ -398,6 +570,94 @@ function mapResponse(string $cmd, mixed $raw): array
             return ['count' => $raw];
         case 'sorted_set.incrby':
             return ['score' => (float) $raw];
+
+        // ── Queue ─────────────────────────────────────────────────────────────
+        case 'queue.create':
+            return ['success' => $raw === 'OK' || $raw === true];
+        case 'queue.delete':
+        case 'queue.purge':
+            return ['success' => (bool) $raw];
+        case 'queue.publish':
+            return ['message_id' => is_string($raw) ? $raw : (string) ($raw ?? '')];
+        case 'queue.consume':
+            if ($raw === null || $raw === 'Null') {
+                return [];
+            }
+            if (is_array($raw)) {
+                return ['message' => $raw];
+            }
+            return [];
+        case 'queue.ack':
+        case 'queue.nack':
+            return ['success' => (bool) $raw];
+        case 'queue.stats':
+            return is_array($raw) ? $raw : ['result' => $raw];
+        case 'queue.list':
+            return ['queues' => is_array($raw) ? $raw : []];
+
+        // ── Stream ────────────────────────────────────────────────────────────
+        case 'stream.create':
+            return ['success' => $raw === 'OK' || $raw === true];
+        case 'stream.delete':
+            return ['success' => (bool) $raw];
+        case 'stream.publish':
+            return ['offset' => is_int($raw) ? $raw : (int) ($raw ?? 0)];
+        case 'stream.consume':
+            return ['events' => is_array($raw) ? $raw : []];
+        case 'stream.list':
+            return ['rooms' => is_array($raw) ? $raw : []];
+
+        // ── Pub/Sub ───────────────────────────────────────────────────────────
+        case 'pubsub.publish':
+            return ['subscribers_matched' => is_int($raw) ? $raw : (int) ($raw ?? 0)];
+        case 'pubsub.subscribe':
+            return ['success' => (bool) $raw];
+        case 'pubsub.unsubscribe':
+            return ['success' => (bool) $raw];
+        case 'pubsub.topics':
+            return ['topics' => is_array($raw) ? $raw : []];
+        case 'pubsub.stats':
+            return is_array($raw) ? $raw : ['result' => $raw];
+
+        // ── Transaction ───────────────────────────────────────────────────────
+        case 'transaction.multi':
+        case 'transaction.discard':
+        case 'transaction.watch':
+        case 'transaction.unwatch':
+            return ['success' => $raw === 'OK' || $raw === true];
+        case 'transaction.exec':
+            return ['success' => true, 'results' => is_array($raw) ? $raw : []];
+
+        // ── Scripting ─────────────────────────────────────────────────────────
+        case 'script.eval':
+        case 'script.evalsha':
+            return ['result' => $raw];
+
+        // ── HyperLogLog ───────────────────────────────────────────────────────
+        case 'hyperloglog.pfadd':
+            return ['changed' => (bool) $raw];
+        case 'hyperloglog.pfcount':
+            return ['count' => is_int($raw) ? $raw : (int) ($raw ?? 0)];
+        case 'hyperloglog.pfmerge':
+            return ['success' => $raw === 'OK' || $raw === true];
+
+        // ── Geospatial ────────────────────────────────────────────────────────
+        case 'geo.add':
+            return ['added' => is_int($raw) ? $raw : (int) ($raw ?? 0)];
+        case 'geo.dist':
+            return ['distance' => $raw !== null ? (float) $raw : null];
+        case 'geo.pos':
+            return ['position' => is_array($raw) ? $raw : null];
+        case 'geo.radius':
+        case 'geo.search':
+            return ['members' => is_array($raw) ? $raw : []];
+        case 'geo.hash':
+            return ['hash' => is_string($raw) ? $raw : null];
+
+        // ── KV stats ─────────────────────────────────────────────────────────
+        case 'kv.stats':
+            return is_array($raw) ? $raw : ['result' => $raw];
+
         default:
             if (is_array($raw)) {
                 return $raw;
@@ -491,6 +751,101 @@ class SynapRpcTransport
             $chunk = fread($sock, $remaining);
             if ($chunk === false || $chunk === '') {
                 $this->socket = null;
+                throw SynapException::networkError('SynapRPC connection closed unexpectedly');
+            }
+            $buf .= $chunk;
+            $remaining -= strlen($chunk);
+        }
+        return $buf;
+    }
+
+    /**
+     * Open a dedicated server-push connection, send a SUBSCRIBE frame, and
+     * block calling the callback for each push message received.
+     *
+     * Push frames use id == 0xFFFFFFFF (U32_MAX) as a sentinel.
+     * The loop runs until $shouldStop returns true or the connection closes.
+     *
+     * @param list<string>      $topics     Topic patterns to subscribe to
+     * @param callable          $onMessage  Invoked with each push message array
+     * @param callable|null     $shouldStop Optional predicate; loop exits when it returns true
+     */
+    public function subscribePush(array $topics, callable $onMessage, ?callable $shouldStop = null): void
+    {
+        $errno  = 0;
+        $errstr = '';
+        /** @var resource|false $pushSock */
+        $pushSock = @fsockopen($this->host, $this->port, $errno, $errstr, $this->timeoutSecs);
+        if ($pushSock === false) {
+            throw SynapException::networkError("SynapRPC push connect failed ({$errno}): {$errstr}");
+        }
+        stream_set_timeout($pushSock, $this->timeoutSecs);
+
+        // Send SUBSCRIBE frame: [id=0xFFFFFFFF, "SUBSCRIBE", [topic, ...]]
+        $PUSH_ID = 0xFFFF_FFFF;
+        $wireTopics = array_map(__NAMESPACE__ . '\\toWireValue', $topics);
+        $body  = MessagePack::pack([$PUSH_ID, 'SUBSCRIBE', $wireTopics]);
+        $frame = pack('V', strlen($body)) . $body;
+
+        if (fwrite($pushSock, $frame) === false) {
+            fclose($pushSock);
+            throw SynapException::networkError('SynapRPC push SUBSCRIBE write failed');
+        }
+
+        // Read the initial SUBSCRIBE acknowledgement (id will be PUSH_ID)
+        $lenBytes = $this->readExactFrom($pushSock, 4);
+        $frameLen = unpack('V', $lenBytes)[1];
+        $respBody = $this->readExactFrom($pushSock, $frameLen);
+        // Ignore the initial ack value — any server error is encoded as {Err:...}
+        $ack = MessagePack::unpack($respBody);
+        if (isset($ack[1]['Err'])) {
+            fclose($pushSock);
+            throw SynapException::serverError((string) $ack[1]['Err']);
+        }
+
+        // Read push frames in a blocking loop
+        try {
+            while (true) {
+                if ($shouldStop !== null && ($shouldStop)()) {
+                    break;
+                }
+
+                $lenBytes = @fread($pushSock, 4);
+                if ($lenBytes === false || strlen($lenBytes) < 4) {
+                    break; // Connection closed
+                }
+
+                $frameLen  = unpack('V', $lenBytes)[1];
+                $pushBody  = $this->readExactFrom($pushSock, $frameLen);
+                $decoded   = MessagePack::unpack($pushBody);
+                [$frameId, $resultEnv] = $decoded;
+
+                if ((int) $frameId !== $PUSH_ID) {
+                    continue; // Skip non-push frames
+                }
+
+                $value = fromWireValue($resultEnv['Ok'] ?? null);
+                if (is_array($value)) {
+                    ($onMessage)($value);
+                }
+            }
+        } finally {
+            fclose($pushSock);
+        }
+    }
+
+    /**
+     * Read exactly $n bytes from a socket resource.
+     *
+     * @param resource $sock
+     */
+    private function readExactFrom(mixed $sock, int $n): string
+    {
+        $buf = '';
+        $remaining = $n;
+        while ($remaining > 0) {
+            $chunk = fread($sock, $remaining);
+            if ($chunk === false || $chunk === '') {
                 throw SynapException::networkError('SynapRPC connection closed unexpectedly');
             }
             $buf .= $chunk;

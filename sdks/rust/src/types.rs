@@ -18,13 +18,12 @@ pub struct Message {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueStats {
     pub depth: usize,
-    pub pending: usize,
-    pub max_depth: usize,
-    pub total_published: u64,
-    pub total_consumed: u64,
-    pub total_acked: u64,
-    pub total_nacked: u64,
-    pub dlq_count: usize,
+    pub consumers: usize,
+    pub published: u64,
+    pub consumed: u64,
+    pub acked: u64,
+    pub nacked: u64,
+    pub dead_lettered: usize,
 }
 
 /// Stream event

@@ -8,6 +8,7 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\RequestOptions;
 use Synap\SDK\Exception\SynapException;
+use Synap\SDK\Exception\UnsupportedCommandException;
 use Synap\SDK\Module\BitmapManager;
 use Synap\SDK\SynapRpcTransport;
 use Synap\SDK\Resp3Transport;
@@ -206,9 +207,11 @@ class SynapClient
                     throw SynapException::networkError('Native transport error: ' . $e->getMessage());
                 }
             }
+            // Command has no native mapping — raise instead of silently falling back.
+            throw new UnsupportedCommandException($operation, $this->config->getTransport());
         }
 
-        // HTTP fallback.
+        // HTTP path.
         try {
             // Generate request ID (UUID v4)
             $requestId = $this->generateUuid();
@@ -257,6 +260,87 @@ class SynapClient
         } catch (GuzzleException $e) {
             throw SynapException::networkError($e->getMessage());
         }
+    }
+
+    /**
+     * Send a command with a pre-assembled payload (preferred over execute()).
+     *
+     * Mapped commands are routed through the native transport (SynapRPC or
+     * RESP3). On a native transport, unmapped commands raise
+     * UnsupportedCommandException instead of silently falling back to HTTP.
+     *
+     * @param string $command Command name (e.g. 'queue.publish')
+     * @param array<string, mixed> $payload Full payload (no target injection)
+     * @return array<string, mixed>
+     */
+    public function sendCommand(string $command, array $payload = []): array
+    {
+        if ($this->native !== null) {
+            $mapped = \Synap\SDK\mapCommand($command, $payload);
+            if ($mapped !== null) {
+                [$rawCmd, $args] = $mapped;
+                try {
+                    $raw = $this->native->execute($rawCmd, $args);
+                    return \Synap\SDK\mapResponse($command, $raw);
+                } catch (SynapException $e) {
+                    throw $e;
+                } catch (\Throwable $e) {
+                    throw SynapException::networkError('Native transport error: ' . $e->getMessage());
+                }
+            }
+            throw new UnsupportedCommandException($command, $this->config->getTransport());
+        }
+
+        // HTTP path — send directly.
+        try {
+            $requestPayload = [
+                'command'    => $command,
+                'payload'    => $payload,
+                'request_id' => $this->generateUuid(),
+            ];
+
+            $options = [
+                RequestOptions::JSON    => $requestPayload,
+                RequestOptions::HEADERS => $this->buildHeaders(),
+            ];
+
+            $response = $this->httpClient->request('POST', '/api/v1/command', $options);
+            $body = (string) $response->getBody();
+
+            if (empty($body)) {
+                return [];
+            }
+
+            $result = json_decode($body, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw SynapException::invalidResponse('Failed to parse JSON response');
+            }
+
+            if (! is_array($result)) {
+                return [];
+            }
+
+            if (isset($result['success']) && $result['success'] === false) {
+                $error        = $result['error'] ?? 'Unknown error';
+                $errorMessage = is_string($error) ? $error : json_encode($error);
+                assert(is_string($errorMessage));
+                throw SynapException::serverError($errorMessage);
+            }
+
+            /** @var array<string, mixed> $result */
+            return $result['payload'] ?? $result;
+        } catch (GuzzleException $e) {
+            throw SynapException::networkError($e->getMessage());
+        }
+    }
+
+    /**
+     * Return the native SynapRpcTransport if the client is using SynapRPC, or null.
+     */
+    public function getSynapRpcTransport(): ?SynapRpcTransport
+    {
+        return $this->native instanceof SynapRpcTransport ? $this->native : null;
     }
 
     /**

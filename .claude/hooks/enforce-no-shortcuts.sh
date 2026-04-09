@@ -20,10 +20,10 @@ console.log('ALLOW');
 
 case "$result" in
   DENY_TODO)
-    echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: source code cannot contain // TODO, // FIXME, or // HACK. Implement the logic now. See AGENTS.md Tier 1 §1"}}'
+    echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: source code cannot contain // TODO, // FIXME, or // HACK. Implement the logic now. See .claude/rules/no-shortcuts.md"}}'
     ;;
   DENY_STUB)
-    echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: source code cannot contain placeholders or stubs. Implement real logic. See AGENTS.md Tier 1 §1"}}'
+    echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"DENIED: source code cannot contain placeholders or stubs. Implement real logic. See .claude/rules/no-shortcuts.md"}}'
     ;;
   *)
     echo '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"}}'

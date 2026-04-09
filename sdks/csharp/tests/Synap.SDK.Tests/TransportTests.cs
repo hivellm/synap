@@ -225,19 +225,23 @@ public sealed class TransportTests
     }
 
     [Fact]
-    public void MapCommand_QueuePublish_ReturnsNull()
+    public void MapCommand_QueuePublish_MapsToQPUBLISH()
     {
-        var payload = new Dictionary<string, object?> { ["key"] = "q" };
+        // queue.publish is now mapped to QPUBLISH.
+        var payload = new Dictionary<string, object?> { ["queue"] = "q", ["payload"] = "msg" };
         var result = CommandMapper.MapCommand("queue.publish", payload);
-        Assert.False(result.HasValue);
+        Assert.True(result.HasValue);
+        Assert.Equal("QPUBLISH", result!.Value.Command);
     }
 
     [Fact]
-    public void MapCommand_StreamPublish_ReturnsNull()
+    public void MapCommand_StreamPublish_MapsToSPUBLISH()
     {
-        var payload = new Dictionary<string, object?> { ["key"] = "s" };
+        // stream.publish is now mapped to SPUBLISH.
+        var payload = new Dictionary<string, object?> { ["room"] = "r", ["event"] = "ev", ["data"] = null };
         var result = CommandMapper.MapCommand("stream.publish", payload);
-        Assert.False(result.HasValue);
+        Assert.True(result.HasValue);
+        Assert.Equal("SPUBLISH", result!.Value.Command);
     }
 
     // =========================================================================

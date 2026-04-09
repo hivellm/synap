@@ -4,6 +4,35 @@ All notable changes to the Synap TypeScript SDK will be documented in this file.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-09
+
+### Added
+
+- **URL-scheme transport selection**: `SynapClient` constructor now accepts a
+  plain URL string whose scheme determines the transport:
+  - `synap://host:port` → SynapRPC (recommended default)
+  - `resp3://host:port` → RESP3
+  - `http://` / `https://` → HTTP/REST
+- **Full command parity on SynapRPC + RESP3**: queue, stream, pub/sub,
+  transaction, script, geospatial, and HyperLogLog commands mapped in
+  `mapCommand` / `mapResponse`; 364 unit tests pass.
+- **`UnsupportedCommandError`**: thrown for commands not mapped on the active
+  native transport. Exported from `@hivehub/synap` index.
+- **Reactive pub/sub over SynapRPC**: `SynapRpcTransport.subscribePush()`
+  opens a dedicated TCP socket and relays push frames (`id == 0xFFFFFFFF`)
+  to the subscriber callback.
+- **E2E suites extended**: `runQueueSuite`, `runStreamSuite`,
+  `runPubSubSuite`, `runTransactionSuite`, `runScriptSuite` added;
+  `UnsupportedCommandError` regression (3 cases: RPC/RESP3 raise, HTTP
+  succeeds).
+
+### Changed
+
+- **Constructor options deprecated**: `transport`, `rpcHost`, `rpcPort`,
+  `resp3Host`, `resp3Port` options on `SynapClient` / `Synap` are marked
+  `@deprecated`. Migrate to URL-scheme construction. Will be removed in
+  v0.12.0.
+
 ## [0.10.0] - 2026-04-08
 
 ### Added

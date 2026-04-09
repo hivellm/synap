@@ -2,6 +2,16 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Key buffer used by the in-memory KV shard storage.
+///
+/// Backed by `compact_str::CompactString`, which inlines strings up to
+/// 24 bytes (the typical Redis-style key) directly inside the
+/// `HashMap` bucket — eliminating one heap allocation and one
+/// indirection per stored entry. Long keys spill to the heap exactly
+/// like `String`. `CompactString` implements `Borrow<str>`, so all
+/// existing `&str` lookups remain zero-cost.
+pub type KeyBuf = compact_str::CompactString;
+
 /// Expiry specification for SET operations.
 ///
 /// Converted to an absolute millisecond timestamp before storage, enabling
