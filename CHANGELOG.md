@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Source module reorganization** — all files exceeding 1 500 lines split
+  into focused sub-modules for improved navigability, incremental compilation,
+  and code review:
+
+  | Before | After |
+  |--------|-------|
+  | `server/handlers.rs` (11 743 lines) | 17 handler modules: `kv`, `kv_cmd`, `hash`, `list`, `set`, `sorted_set`, `hll`, `bitmap`, `geospatial`, `queue`, `stream`, `pubsub`, `script`, `websocket`, `partition`, `admin_cmd`, `cluster` |
+  | `protocol/resp3/command.rs` (1 296 lines) | `command/{mod,kv,collections,advanced}.rs` |
+  | `protocol/synap_rpc/dispatch.rs` (3 146 lines) | `dispatch/{mod,kv,collections,advanced,tests}.rs` |
+  | `core/bitmap.rs` (1 517 lines) | `bitmap/{mod,tests}.rs` |
+  | `core/kv_store/store.rs` (2 606 lines) | `store.rs` + `store_tests.rs` |
+  | `sdks/rust/transport.rs` (2 378 lines) | `transport/{mod,mapping,tests}.rs` |
+  | `sdks/csharp/Transport.cs` (1 643 lines) | `Transport.cs` + `CommandMapper.cs` + `SynapRpcTransport.cs` + `Resp3Transport.cs` |
+  | `tests/transaction_s2s_tests.rs` (2 343 lines) | two files split at list-operations boundary |
+
+  No behaviour changes; `cargo check`, `cargo clippy`, and `cargo fmt` all pass.
+
 ## [0.11.0] - 2026-04-09
 
 ### Added
