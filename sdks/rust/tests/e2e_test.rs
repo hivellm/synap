@@ -14,7 +14,10 @@ use std::{
     process::{Child, Command, Stdio},
     time::{Duration, Instant},
 };
-use synap_sdk::{SynapClient, SynapConfig};
+use synap_sdk::{
+    SynapClient, SynapConfig, error::SynapError, scripting::ScriptEvalOptions,
+    transactions::TransactionOptions,
+};
 use tempfile::NamedTempFile;
 
 // ── Ports (chosen to avoid conflicts with production defaults) ────────────────
@@ -138,26 +141,27 @@ impl Drop for ServerGuard {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn http_client() -> SynapClient {
-    let cfg = SynapConfig::new(format!("http://127.0.0.1:{HTTP_PORT}"))
-        .with_http_transport()
-        .with_timeout(Duration::from_secs(5));
-    SynapClient::new(cfg).expect("http client")
+    SynapClient::new(
+        SynapConfig::new(format!("http://127.0.0.1:{HTTP_PORT}"))
+            .with_timeout(Duration::from_secs(5)),
+    )
+    .expect("http client")
 }
 
 fn rpc_client() -> SynapClient {
-    let cfg = SynapConfig::new(format!("http://127.0.0.1:{HTTP_PORT}"))
-        .with_synap_rpc_transport()
-        .with_rpc_addr("127.0.0.1", RPC_PORT)
-        .with_timeout(Duration::from_secs(5));
-    SynapClient::new(cfg).expect("rpc client")
+    SynapClient::new(
+        SynapConfig::new(format!("synap://127.0.0.1:{RPC_PORT}"))
+            .with_timeout(Duration::from_secs(5)),
+    )
+    .expect("rpc client")
 }
 
 fn resp3_client() -> SynapClient {
-    let cfg = SynapConfig::new(format!("http://127.0.0.1:{HTTP_PORT}"))
-        .with_resp3_transport()
-        .with_resp3_addr("127.0.0.1", RESP3_PORT)
-        .with_timeout(Duration::from_secs(5));
-    SynapClient::new(cfg).expect("resp3 client")
+    SynapClient::new(
+        SynapConfig::new(format!("resp3://127.0.0.1:{RESP3_PORT}"))
+            .with_timeout(Duration::from_secs(5)),
+    )
+    .expect("resp3 client")
 }
 
 // ── KV helpers used across all three transports ───────────────────────────────
@@ -366,4 +370,311 @@ async fn e2e_cross_transport_consistency() {
 
     // cleanup
     http.kv().delete(key).await.ok();
+}
+
+// ── Queue suite ───────────────────────────────────────────────────────────────
+
+async fn run_queue_suite(client: &SynapClient, prefix: &str) {
+    let q = client.queue();
+    let qname = format!("{prefix}:e2e:q");
+
+    // Create
+    q.create_queue(&qname, Some(1000), Some(30))
+        .await
+        .expect("create_queue");
+
+    // List — queue should appear
+    let queues = q.list().await.expect("queue list");
+    assert!(
+        queues.contains(&qname),
+        "queue should be listed after create"
+    );
+
+    // Publish
+    let msg_id = q
+        .publish(&qname, b"e2e-payload", None, None)
+        .await
+        .expect("queue publish");
+    assert!(!msg_id.is_empty(), "publish should return a message id");
+
+    // Stats: at least 1 published
+    let stats = q.stats(&qname).await.expect("queue stats");
+    assert!(stats.published >= 1, "published should be >= 1");
+
+    // Consume
+    let msg = q
+        .consume(&qname, "e2e-consumer")
+        .await
+        .expect("queue consume");
+    let msg = msg.expect("expected a message from queue");
+    assert_eq!(msg.id, msg_id, "consumed message id mismatch");
+    assert_eq!(msg.payload, b"e2e-payload", "payload mismatch");
+
+    // Ack
+    q.ack(&qname, &msg.id).await.expect("queue ack");
+
+    // Delete
+    q.delete_queue(&qname).await.expect("delete_queue");
+
+    // List — queue should be gone
+    let queues_after = q.list().await.expect("list after delete");
+    assert!(
+        !queues_after.contains(&qname),
+        "queue should be removed after delete"
+    );
+}
+
+// ── Stream suite ──────────────────────────────────────────────────────────────
+
+async fn run_stream_suite(client: &SynapClient, prefix: &str) {
+    use serde_json::json;
+
+    let s = client.stream();
+    let room = format!("{prefix}:e2e:room");
+
+    // Create room
+    s.create_room(&room, Some(1000)).await.expect("create_room");
+
+    // List — room should appear
+    let rooms = s.list().await.expect("stream list");
+    assert!(rooms.contains(&room), "room should be listed after create");
+
+    // Publish two events
+    let off0 = s
+        .publish(&room, "msg", json!({"n": 1}))
+        .await
+        .expect("stream publish 1");
+    let off1 = s
+        .publish(&room, "msg", json!({"n": 2}))
+        .await
+        .expect("stream publish 2");
+    assert!(off1 > off0, "second event offset should be greater");
+
+    // Consume all events from offset 0
+    let events = s.consume(&room, Some(0), Some(10)).await.expect("consume");
+    assert_eq!(events.len(), 2, "expected 2 events from stream");
+    assert_eq!(events[0].data["n"], json!(1), "first event data mismatch");
+    assert_eq!(events[1].data["n"], json!(2), "second event data mismatch");
+
+    // Stats
+    let stats = s.stats(&room).await.expect("stream stats");
+    assert_eq!(stats.total_events, 2, "total_events should be 2");
+
+    // Delete room
+    s.delete_room(&room).await.expect("delete_room");
+
+    // List — room should be gone
+    let rooms_after = s.list().await.expect("list after delete");
+    assert!(
+        !rooms_after.contains(&room),
+        "room should be removed after delete"
+    );
+}
+
+// ── Pub/Sub suite ─────────────────────────────────────────────────────────────
+
+async fn run_pubsub_suite(client: &SynapClient, prefix: &str) {
+    use serde_json::json;
+
+    let ps = client.pubsub();
+    let topic = format!("{prefix}:e2e:topic");
+
+    // Subscribe — receive a subscriber_id
+    let sub_id = ps
+        .subscribe_topics("e2e-sub", vec![topic.clone()])
+        .await
+        .expect("subscribe_topics");
+    assert!(!sub_id.is_empty(), "subscriber_id should not be empty");
+
+    // Topics should list our topic
+    let topics = ps.list_topics().await.expect("list_topics");
+    assert!(
+        topics.contains(&topic),
+        "topic should be listed after subscribe"
+    );
+
+    // Publish — at least 1 subscriber matched
+    let matched = ps
+        .publish(&topic, json!({"hello": "world"}), None, None)
+        .await
+        .expect("pubsub publish");
+    assert!(matched >= 1, "publish should reach at least 1 subscriber");
+
+    // Unsubscribe
+    ps.unsubscribe(&sub_id, vec![topic.clone()])
+        .await
+        .expect("unsubscribe");
+}
+
+// ── Transaction suite ─────────────────────────────────────────────────────────
+
+async fn run_transaction_suite(client: &SynapClient, prefix: &str) {
+    let tx = client.transaction();
+    let client_id = format!("{prefix}:e2e:txn");
+
+    let opts = TransactionOptions {
+        client_id: Some(client_id.clone()),
+    };
+
+    // MULTI — begin transaction
+    let multi_resp = tx.multi(opts.clone()).await.expect("transaction multi");
+    assert!(multi_resp.success, "MULTI should succeed");
+
+    // DISCARD — cancel the transaction
+    let discard_resp = tx.discard(opts.clone()).await.expect("transaction discard");
+    assert!(discard_resp.success, "DISCARD should succeed");
+
+    // MULTI + EXEC round-trip (empty transaction → Success with empty results)
+    let opts2 = TransactionOptions {
+        client_id: Some(format!("{prefix}:e2e:txn2")),
+    };
+    tx.multi(opts2.clone()).await.expect("multi for exec");
+    let exec_result = tx.exec(opts2).await.expect("transaction exec");
+    // An empty EXEC is valid — it succeeds with an empty result list.
+    match exec_result {
+        synap_sdk::transactions::TransactionExecResult::Success { results } => {
+            // Empty EXEC returns empty results — acceptable.
+            drop(results);
+        }
+        synap_sdk::transactions::TransactionExecResult::Aborted { aborted, .. } => {
+            // Some transports abort on an empty EXEC; that is also acceptable.
+            assert!(aborted, "Aborted flag should be true if exec aborted");
+        }
+    }
+}
+
+// ── Script suite ──────────────────────────────────────────────────────────────
+
+async fn run_script_suite(client: &SynapClient, _prefix: &str) {
+    let sc = client.script();
+
+    // Load a simple Lua script and get its SHA1
+    let sha = sc.load("return 1").await.expect("script load");
+    assert_eq!(sha.len(), 40, "SHA1 should be 40 hex chars");
+
+    // SCRIPT EXISTS — should be true for the loaded sha
+    let exists = sc.exists(&[&sha]).await.expect("script exists");
+    assert!(
+        exists.first().copied().unwrap_or(false),
+        "loaded script should exist"
+    );
+
+    // EVALSHA — execute the cached script
+    let eval_resp: synap_sdk::scripting::ScriptEvalResponse<serde_json::Value> = sc
+        .evalsha::<serde_json::Value>(
+            &sha,
+            ScriptEvalOptions {
+                keys: vec![],
+                args: vec![],
+                timeout_ms: None,
+            },
+        )
+        .await
+        .expect("evalsha");
+    // Lua `return 1` → integer 1
+    assert_eq!(
+        eval_resp.result,
+        serde_json::json!(1),
+        "evalsha result mismatch"
+    );
+
+    // EVAL — execute inline; Lua `return ARGV[1]` should echo the first arg
+    let eval_direct: synap_sdk::scripting::ScriptEvalResponse<serde_json::Value> = sc
+        .eval::<serde_json::Value>(
+            "return ARGV[1]",
+            ScriptEvalOptions {
+                keys: vec![],
+                args: vec![serde_json::json!("ping")],
+                timeout_ms: None,
+            },
+        )
+        .await
+        .expect("eval");
+    assert_eq!(
+        eval_direct.result,
+        serde_json::json!("ping"),
+        "eval ARGV echo mismatch"
+    );
+}
+
+// ── Extended E2E entry points ─────────────────────────────────────────────────
+
+#[tokio::test]
+async fn e2e_http_queues_streams_pubsub_txn_scripts() {
+    let _server = ServerGuard::start();
+    let client = http_client();
+
+    run_queue_suite(&client, "http").await;
+    run_stream_suite(&client, "http").await;
+    run_pubsub_suite(&client, "http").await;
+    run_transaction_suite(&client, "http").await;
+    run_script_suite(&client, "http").await;
+}
+
+#[tokio::test]
+async fn e2e_rpc_queues_streams_pubsub_txn_scripts() {
+    let _server = ServerGuard::start();
+    let client = rpc_client();
+
+    run_queue_suite(&client, "rpc").await;
+    run_stream_suite(&client, "rpc").await;
+    run_pubsub_suite(&client, "rpc").await;
+    run_transaction_suite(&client, "rpc").await;
+    run_script_suite(&client, "rpc").await;
+}
+
+#[tokio::test]
+async fn e2e_resp3_queues_streams_pubsub_txn_scripts() {
+    let _server = ServerGuard::start();
+    let client = resp3_client();
+
+    run_queue_suite(&client, "resp3").await;
+    run_stream_suite(&client, "resp3").await;
+    run_pubsub_suite(&client, "resp3").await;
+    run_transaction_suite(&client, "resp3").await;
+    run_script_suite(&client, "resp3").await;
+}
+
+// ── 6.2 UnsupportedCommand regression ────────────────────────────────────────
+
+/// `bitmap.setbit` has no native mapping in the SynapRpc / RESP3 mapper.
+/// Calling it on those transports must return `SynapError::UnsupportedCommand`,
+/// NOT silently fall back to HTTP.
+#[tokio::test]
+async fn e2e_unsupported_command_raises_error() {
+    let _server = ServerGuard::start();
+
+    // SynapRPC transport
+    let rpc = rpc_client();
+    let rpc_err = rpc
+        .bitmap()
+        .setbit("e2e:bitmap:rpc", 0, 1)
+        .await
+        .expect_err("bitmap.setbit on SynapRpc should return UnsupportedCommand");
+    assert!(
+        matches!(rpc_err, SynapError::UnsupportedCommand { .. }),
+        "expected UnsupportedCommand, got: {rpc_err:?}"
+    );
+
+    // RESP3 transport
+    let resp3 = resp3_client();
+    let resp3_err = resp3
+        .bitmap()
+        .setbit("e2e:bitmap:resp3", 0, 1)
+        .await
+        .expect_err("bitmap.setbit on Resp3 should return UnsupportedCommand");
+    assert!(
+        matches!(resp3_err, SynapError::UnsupportedCommand { .. }),
+        "expected UnsupportedCommand, got: {resp3_err:?}"
+    );
+
+    // HTTP transport — bitmap IS supported via the HTTP handler (no error)
+    let http = http_client();
+    http.bitmap()
+        .setbit("e2e:bitmap:http", 0, 1)
+        .await
+        .expect("bitmap.setbit on HTTP should succeed");
+
+    // Cleanup
+    http.kv().delete("e2e:bitmap:http").await.ok();
 }

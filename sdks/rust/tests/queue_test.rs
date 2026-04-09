@@ -201,7 +201,7 @@ mod tests {
 
         let stats = client.queue().stats("test_queue").await.unwrap();
         assert_eq!(stats.depth, 10);
-        assert_eq!(stats.total_published, 100);
+        assert_eq!(stats.published, 100);
 
         mock.assert_async().await;
     }
