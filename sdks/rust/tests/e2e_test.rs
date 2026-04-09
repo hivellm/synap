@@ -1,10 +1,14 @@
 //! End-to-end tests against a real Synap server binary.
 //!
 //! Run with:
-//!   cargo test --features e2e --test e2e_test -- --nocapture
+//!   cargo test --features e2e --test e2e_test -- --test-threads=1 --nocapture
 //!
-//! The test fixture starts the release binary, waits for readiness,
-//! exercises HTTP / SynapRPC / RESP3 transports, then kills the process.
+//! The test fixture starts the release binary ONCE (shared across all tests),
+//! waits for readiness, exercises HTTP / SynapRPC / RESP3 transports, then
+//! kills the process when all tests finish.
+//!
+//! **IMPORTANT**: Tests MUST run with `--test-threads=1` because they share a
+//! single server process bound to fixed ports.
 
 #![cfg(feature = "e2e")]
 
@@ -12,6 +16,7 @@ use std::{
     net::TcpStream,
     path::PathBuf,
     process::{Child, Command, Stdio},
+    sync::{LazyLock, Mutex},
     time::{Duration, Instant},
 };
 use synap_sdk::{
@@ -25,6 +30,18 @@ use tempfile::NamedTempFile;
 const HTTP_PORT: u16 = 25500;
 const RPC_PORT: u16 = 25501;
 const RESP3_PORT: u16 = 26379;
+
+// ── Shared server singleton ──────────────────────────────────────────────────
+
+/// Single server instance shared by all tests in this file.
+/// Started lazily on first access, killed when the process exits.
+static SERVER: LazyLock<Mutex<ServerGuard>> = LazyLock::new(|| Mutex::new(ServerGuard::start()));
+
+/// Ensure the server is running. Call this at the top of every test.
+fn ensure_server() {
+    // Accessing the LazyLock triggers start() exactly once.
+    let _lock = SERVER.lock().expect("server mutex poisoned");
+}
 
 // ── Server fixture ────────────────────────────────────────────────────────────
 
@@ -276,7 +293,7 @@ async fn run_list_suite(client: &SynapClient, prefix: &str) {
 
 #[tokio::test]
 async fn e2e_http_transport() {
-    let _server = ServerGuard::start();
+    ensure_server();
     let client = http_client();
 
     run_kv_suite(&client, "http").await;
@@ -286,7 +303,7 @@ async fn e2e_http_transport() {
 
 #[tokio::test]
 async fn e2e_synap_rpc_transport() {
-    let _server = ServerGuard::start();
+    ensure_server();
     let client = rpc_client();
 
     run_kv_suite(&client, "rpc").await;
@@ -296,7 +313,7 @@ async fn e2e_synap_rpc_transport() {
 
 #[tokio::test]
 async fn e2e_resp3_transport() {
-    let _server = ServerGuard::start();
+    ensure_server();
     let client = resp3_client();
 
     run_kv_suite(&client, "resp3").await;
@@ -307,7 +324,7 @@ async fn e2e_resp3_transport() {
 /// Verify that the three transports agree on the same data when interleaved.
 #[tokio::test]
 async fn e2e_cross_transport_consistency() {
-    let _server = ServerGuard::start();
+    ensure_server();
 
     let http = http_client();
     let rpc = rpc_client();
@@ -601,7 +618,7 @@ async fn run_script_suite(client: &SynapClient, _prefix: &str) {
 
 #[tokio::test]
 async fn e2e_http_queues_streams_pubsub_txn_scripts() {
-    let _server = ServerGuard::start();
+    ensure_server();
     let client = http_client();
 
     run_queue_suite(&client, "http").await;
@@ -613,7 +630,7 @@ async fn e2e_http_queues_streams_pubsub_txn_scripts() {
 
 #[tokio::test]
 async fn e2e_rpc_queues_streams_pubsub_txn_scripts() {
-    let _server = ServerGuard::start();
+    ensure_server();
     let client = rpc_client();
 
     run_queue_suite(&client, "rpc").await;
@@ -625,7 +642,7 @@ async fn e2e_rpc_queues_streams_pubsub_txn_scripts() {
 
 #[tokio::test]
 async fn e2e_resp3_queues_streams_pubsub_txn_scripts() {
-    let _server = ServerGuard::start();
+    ensure_server();
     let client = resp3_client();
 
     run_queue_suite(&client, "resp3").await;
@@ -642,7 +659,7 @@ async fn e2e_resp3_queues_streams_pubsub_txn_scripts() {
 /// NOT silently fall back to HTTP.
 #[tokio::test]
 async fn e2e_unsupported_command_raises_error() {
-    let _server = ServerGuard::start();
+    ensure_server();
 
     // SynapRPC transport
     let rpc = rpc_client();
