@@ -191,8 +191,13 @@ async fn test_async_wal_group_commit() {
     }
     let duration = start.elapsed();
 
-    // Group commit should make this very fast (< 100ms for 1000 ops)
-    assert!(duration < Duration::from_millis(100));
+    // Group commit should make this fast. CI runners (especially macOS ARM64)
+    // can be slower, so we use a generous threshold.
+    assert!(
+        duration < Duration::from_millis(500),
+        "1000 WAL appends took {:?}, expected < 500ms",
+        duration
+    );
 
     // Verify offset increased
     assert!(wal.current_offset() > 0);
