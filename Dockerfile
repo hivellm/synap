@@ -67,21 +67,24 @@ RUN apk add --no-cache \
     make \
     perl
 
-# Install nightly toolchain for Rust Edition 2024
-RUN rustup toolchain install nightly && \
+# Install nightly toolchain + musl target in one layer to avoid
+# overlayfs cross-device rename errors when rustup syncs channels.
+ARG TARGETARCH
+RUN case ${TARGETARCH} in \
+    amd64) TARGET_TRIPLE=x86_64-unknown-linux-musl ;; \
+    arm64) TARGET_TRIPLE=aarch64-unknown-linux-musl ;; \
+    *) TARGET_TRIPLE=x86_64-unknown-linux-musl ;; \
+    esac && \
+    rustup toolchain install nightly --target ${TARGET_TRIPLE} && \
     rustup default nightly
 
 # Set working directory
 WORKDIR /usr/src/synap
 
 # Configure Cargo for optimized builds
-# Use BuildKit cache mounts for faster rebuilds
 ENV CARGO_INCREMENTAL=1
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 ENV CARGO_NET_RETRY=2
-# Note: CARGO_BUILD_JOBS is not set (uses all available cores by default)
-# Note: RUSTFLAGS for stripping is handled by Cargo.toml [profile.release].strip = true
-# target-cpu=native is not used for cross-compilation (musl targets)
 
 # Copy Cargo configuration
 COPY .cargo/config.toml ./.cargo/config.toml
@@ -105,25 +108,17 @@ RUN sed -i '/^# Configure benchmarks to use Criterion/,/^$/d' synap-server/Cargo
     sed -i '/^\[\[bench\]\]/,/^$/d' synap-server/Cargo.toml
 
 # Build release binary with optimizations
-# - Static linking for portability
-# - Strip symbols for smaller size
-# - LTO for better optimization
-# - --bins flag compiles only binaries (ignores benches, examples, tests)
-# - Support multi-arch builds (AMD64 and ARM64)
-# - Use BuildKit cache mounts for incremental compilation
-ARG BUILD_DATE
-ARG VERSION
-ARG TARGETARCH
-ARG TARGETPLATFORM
+# - Static linking for portability (musl target)
+# - LTO + strip for smallest binary
+# - --bins flag skips benches/examples/tests
+# - BuildKit cache mounts for incremental compilation
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/src/synap/target \
     case ${TARGETARCH} in \
     amd64) TARGET_TRIPLE=x86_64-unknown-linux-musl ;; \
     arm64) TARGET_TRIPLE=aarch64-unknown-linux-musl ;; \
-    *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
-    rustup target add ${TARGET_TRIPLE} && \
     cargo build --release --bins \
     --target ${TARGET_TRIPLE} && \
     strip /usr/src/synap/target/${TARGET_TRIPLE}/release/synap-server && \
