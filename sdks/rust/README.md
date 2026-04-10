@@ -120,6 +120,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Transports
+
+Since v0.11.0 the SDK selects the transport via **URL scheme** — no separate builder options required:
+
+| URL scheme    | Default port | When to use                                               |
+|---------------|--------------|-----------------------------------------------------------|
+| `synap://`    | `15501`      | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency, preserves `int`/`float`/`bool`/`bytes` on the wire. |
+| `resp3://`    | `6379`       | Redis-compatible text protocol — interop with existing Redis tooling. |
+| `http://` / `https://` | `15500` | Original REST transport — full command coverage. |
+
+All commands (KV, Hash, List, Set, Sorted Set, Queue, Stream, Pub/Sub, Transactions, Scripts, Geo, HyperLogLog) are fully supported on every transport. Native transports raise `SynapError::UnsupportedCommand` instead of silently falling back to HTTP.
+
+```rust
+use synap_sdk::{SynapClient, SynapConfig};
+
+// SynapRPC — recommended default
+let cfg = SynapConfig::new("synap://127.0.0.1:15501");
+let client = SynapClient::new(cfg)?;
+
+// RESP3 — Redis-compatible
+let cfg = SynapConfig::new("resp3://127.0.0.1:6379");
+let client = SynapClient::new(cfg)?;
+
+// HTTP — full REST access
+let cfg = SynapConfig::new("http://127.0.0.1:15500");
+let client = SynapClient::new(cfg)?;
+```
+
+**Queue, stream and pub/sub over `synap://`:**
+
+```rust
+// Queue round-trip
+client.queue().create_queue("tasks", None, None).await?;
+let id = client.queue().publish("tasks", serde_json::json!({"job": "resize"}), None, None, None).await?;
+let msg = client.queue().consume("tasks", "worker-1").await?;
+client.queue().ack("tasks", &msg.id).await?;
+
+// Stream publish + read
+client.stream().create_room("events").await?;
+client.stream().publish("events", "user.created", serde_json::json!({"id": "u1"})).await?;
+let events = client.stream().read("events", 0, None).await?;
+
+// Reactive pub/sub (server-push over dedicated TCP connection)
+client.pubsub().subscribe(vec!["news.*"], |msg| async move {
+    println!("got: {:?}", msg);
+}).await?;
+client.pubsub().publish("news.breaking", serde_json::json!({"title": "Hello"})).await?;
+```
+
+### End-to-end test suite
+
+A real-server E2E suite covers all three transports plus cross-transport
+consistency (write via one, read via the others):
+
+```bash
+cargo build --release                              # build the server binary first
+cargo test --features e2e --test e2e_test -- --nocapture
+```
+
 ## API Reference
 
 ### Key-Value Store

@@ -9,11 +9,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Dependency Updates**
-  - **rmcp** `0.9.1 → 0.11.0` - Updated MCP library with breaking changes
-    - Added required `meta` field to `ListToolsResult` struct (set to `None`)
-  - **reqwest** `0.11 → 0.12` - Updated HTTP client in CLI and SDK
-  - **indicatif** `0.17 → 0.18` - Updated progress bar library in migration tool
+- **Source module reorganization** — all files exceeding 1 500 lines split
+  into focused sub-modules for improved navigability, incremental compilation,
+  and code review:
+
+  | Before | After |
+  |--------|-------|
+  | `server/handlers.rs` (11 743 lines) | 17 handler modules: `kv`, `kv_cmd`, `hash`, `list`, `set`, `sorted_set`, `hll`, `bitmap`, `geospatial`, `queue`, `stream`, `pubsub`, `script`, `websocket`, `partition`, `admin_cmd`, `cluster` |
+  | `protocol/resp3/command.rs` (1 296 lines) | `command/{mod,kv,collections,advanced}.rs` |
+  | `protocol/synap_rpc/dispatch.rs` (3 146 lines) | `dispatch/{mod,kv,collections,advanced,tests}.rs` |
+  | `core/bitmap.rs` (1 517 lines) | `bitmap/{mod,tests}.rs` |
+  | `core/kv_store/store.rs` (2 606 lines) | `store.rs` + `store_tests.rs` |
+  | `sdks/rust/transport.rs` (2 378 lines) | `transport/{mod,mapping,tests}.rs` |
+  | `sdks/csharp/Transport.cs` (1 643 lines) | `Transport.cs` + `CommandMapper.cs` + `SynapRpcTransport.cs` + `Resp3Transport.cs` |
+  | `tests/transaction_s2s_tests.rs` (2 343 lines) | two files split at list-operations boundary |
+
+  No behaviour changes; `cargo check`, `cargo clippy`, and `cargo fmt` all pass.
+
+## [0.11.0] - 2026-04-09
+
+### Added
+
+- **Full RPC + RESP3 command parity**: every command previously only available
+  over HTTP (queues, streams, pub/sub, transactions, scripts, geospatial,
+  HyperLogLog) is now served natively on SynapRPC and RESP3. See
+  `docs/transports.md` for the full command-parity matrix.
+- **URL-scheme transport selection**: all SDKs (Rust, TypeScript, Python, PHP,
+  C#) now accept a single connection URL whose scheme determines the transport:
+  - `synap://host:port` → SynapRPC (recommended default)
+  - `resp3://host:port` → RESP3
+  - `http://host:port` or `https://host:port` → HTTP/REST
+- **SynapRPC server-push frames**: pub/sub subscriptions, stream observation,
+  and reactive queue consumption now deliver messages over a dedicated TCP
+  connection. Push frames are identified by `id == 0xFFFFFFFF` (U32_MAX).
+- **`UnsupportedCommand` error**: native transports (`synap://`, `resp3://`)
+  raise a typed error for any command not mapped on that transport instead of
+  silently falling back to HTTP.
+- **`docs/transports.md`**: new reference document covering URL schemes, push
+  frame format, command-parity matrix, and deprecated builder methods.
+
+### Changed
+
+- **No silent HTTP fallback** (breaking for `synap://`/`resp3://` clients):
+  commands absent from the native transport's mapping now raise
+  `UnsupportedCommandError` / `UnsupportedCommandException` rather than
+  being forwarded to REST.
+- **Builder methods deprecated** across all five SDKs:
+  `with_synap_rpc_transport`, `with_rpc_addr`, `WithSynapRpcTransport`,
+  `withSynapRpcTransport`, etc. are marked deprecated and will be removed
+  in v0.12.0. Migrate to URL-scheme construction.
+
+## [0.10.0] - 2026-04-08
+
+### Added
+
+- **Multi-Transport SDKs**: all official SDKs (Rust, TypeScript, Python, PHP, C#)
+  now support three wire transports side-by-side:
+  - **HTTP** — original REST transport (default fallback)
+  - **SynapRPC** — MessagePack-framed binary TCP protocol on port 15501
+  - **RESP3** — Redis-compatible text protocol on port 6379
+  Transports are selectable per-client; unmapped commands transparently fall
+  back to HTTP.
+- **Rust SDK E2E suite** (`sdks/rust/tests/e2e_test.rs`): spawns the release
+  binary and exercises all three transports plus cross-transport consistency
+  (write via one, read via the others).
+- **TypeScript SDK E2E suite** (`sdks/typescript/src/__tests__/e2e.test.ts`):
+  gated behind `RUN_E2E=true`, same coverage as the Rust suite.
+
+### Fixed
+
+- **TypeScript SDK — SynapRPC `Bytes` decoding**: `fromWireValue` returned raw
+  `Uint8Array` for string values, breaking `kv.get()`. Now decoded as UTF-8.
+- **TypeScript SDK — RESP3 framing**: separate line/binary buffers lost residual
+  bytes when switching between header lines and bulk payloads, causing
+  `parseValue` to hang on multi-chunk responses. Unified into a single `Buffer`.
+- **TypeScript SDK — `asInt` boolean coercion**: SynapRPC returns `EXISTS` as
+  `Bool(true)`, which `parseInt("true")` turned into `NaN`, so `kv.exists()`
+  always returned `false`. Now handles booleans correctly.
+
+### Changed
+
+- **Dependency Updates** (rolled forward from 0.9.x Unreleased)
+  - **rmcp** `0.9.1 → 0.11.0` — breaking changes, added required `meta` field to `ListToolsResult`
+  - **reqwest** `0.11 → 0.12` — updated HTTP client in CLI and SDK
+  - **indicatif** `0.17 → 0.18` — updated progress bar library in migration tool
+- **Context footprint**: compressed `AGENTS.md` (31 KB → 7 KB), `CLAUDE.md`
+  (4 KB → 519 B), removed 11 redundant `.claude/rules/*.md` files. Total system
+  instructions loaded per conversation dropped from ~60 KB to ~16 KB (-74%).
 
 ## [0.9.1] - 2025-12-11
 

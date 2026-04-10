@@ -22,7 +22,7 @@ public sealed class BitmapManagerS2STests : IDisposable
         _client = new SynapClient(config);
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task SetBit_GetBit_Works()
     {
         var key = $"test:bitmap:{Process.GetCurrentProcess().Id}";
@@ -44,7 +44,7 @@ public sealed class BitmapManagerS2STests : IDisposable
         Assert.Equal(0, value2);
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task BitCount_Works()
     {
         var key = $"test:bitmap:count:{Process.GetCurrentProcess().Id}";
@@ -60,7 +60,7 @@ public sealed class BitmapManagerS2STests : IDisposable
         Assert.Equal(4, count);
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task BitPos_Works()
     {
         var key = $"test:bitmap:pos:{Process.GetCurrentProcess().Id}";
@@ -73,7 +73,7 @@ public sealed class BitmapManagerS2STests : IDisposable
         Assert.Equal(7, pos);
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task BitOp_AND_Works()
     {
         var timestamp = Process.GetCurrentProcess().Id;
@@ -102,7 +102,7 @@ public sealed class BitmapManagerS2STests : IDisposable
         Assert.Equal(0, await _client.Bitmap.GetBitAsync(dest, 3));
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task BitField_GetSet_Works()
     {
         var key = $"test:bitmap:bitfield:{Process.GetCurrentProcess().Id}";
@@ -141,7 +141,7 @@ public sealed class BitmapManagerS2STests : IDisposable
         Assert.Equal(42, getResults[0]);
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task BitField_IncrByWrap_Works()
     {
         var key = $"test:bitmap:bitfield_wrap:{Process.GetCurrentProcess().Id}";
@@ -179,7 +179,7 @@ public sealed class BitmapManagerS2STests : IDisposable
         Assert.Equal(4, results[0]); // 250 + 10 = 260 wraps to 4 (260 - 256)
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task BitField_IncrBySat_Works()
     {
         var key = $"test:bitmap:bitfield_sat:{Process.GetCurrentProcess().Id}";
@@ -220,7 +220,7 @@ public sealed class BitmapManagerS2STests : IDisposable
         Assert.Equal(15, results2[0]);
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task BitField_MultipleOperations_Works()
     {
         var key = $"test:bitmap:bitfield_multi:{Process.GetCurrentProcess().Id}";
@@ -278,7 +278,7 @@ public sealed class BitmapManagerS2STests : IDisposable
         Assert.Equal(150, results[4]); // Incremented offset 0
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task BitField_SignedValues_Works()
     {
         var key = $"test:bitmap:bitfield_signed:{Process.GetCurrentProcess().Id}";
@@ -314,7 +314,7 @@ public sealed class BitmapManagerS2STests : IDisposable
         Assert.Equal(-10, results[0]);
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task Stats_ReturnsValidData()
     {
         var key = $"test:bitmap:stats:{Process.GetCurrentProcess().Id}";

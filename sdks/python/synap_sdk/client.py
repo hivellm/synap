@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Union
 import base64
 import uuid
 
 import httpx
 
 from synap_sdk.config import SynapConfig
-from synap_sdk.exceptions import SynapException
+from synap_sdk.exceptions import SynapException, UnsupportedCommandError
+from synap_sdk.transport import SynapRpcTransport, Resp3Transport, map_command, map_response
 from synap_sdk.modules.kv_store import KVStore
 from synap_sdk.modules.hash import HashManager
 from synap_sdk.modules.list import ListManager
@@ -21,6 +22,8 @@ from synap_sdk.modules.bitmap import BitmapManager
 from synap_sdk.modules.hyperloglog import HyperLogLogManager
 from synap_sdk.modules.geospatial import GeospatialManager
 from synap_sdk.modules.transaction import TransactionManager
+
+_NativeTransport = Union[SynapRpcTransport, Resp3Transport]
 
 
 class SynapClient:
@@ -50,7 +53,7 @@ class SynapClient:
             self._http_client = http_client
         else:
             headers = {"Accept": "application/json"}
-            
+
             # Add authentication headers
             if config.auth_token:
                 headers["Authorization"] = f"Bearer {config.auth_token}"
@@ -64,6 +67,17 @@ class SynapClient:
                 base_url=config.base_url,
                 timeout=config.timeout,
                 headers=headers,
+            )
+
+        # Instantiate native transport if selected.
+        self._native: _NativeTransport | None = None
+        if config.transport == "synaprpc":
+            self._native = SynapRpcTransport(
+                config.rpc_host, config.rpc_port, float(config.timeout)
+            )
+        elif config.transport == "resp3":
+            self._native = Resp3Transport(
+                config.resp3_host, config.resp3_port, float(config.timeout)
             )
 
         self._kv: KVStore | None = None
@@ -160,6 +174,14 @@ class SynapClient:
         """Get the client configuration."""
         return self._config
 
+    def synap_rpc_transport(self) -> SynapRpcTransport | None:
+        """Return the ``SynapRpcTransport`` when using the ``synap://`` URL scheme,
+        or ``None`` for other transports.
+
+        Used internally by reactive pub/sub to open dedicated push connections.
+        """
+        return self._native if isinstance(self._native, SynapRpcTransport) else None
+
     async def health(self) -> dict[str, Any]:
         """Check the health status of the Synap server.
 
@@ -181,10 +203,13 @@ class SynapClient:
         command: str,
         payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Send a StreamableHTTP command to the Synap server.
+        """Send a command to the Synap server.
+
+        Mapped commands are routed through the native transport (SynapRPC or RESP3).
+        Unmapped commands (queues, streams, pub/sub, scripting, …) fall back to HTTP.
 
         Args:
-            command: The command name (e.g., 'geospatial.geoadd', 'bitmap.setbit')
+            command: The command name (e.g., 'kv.set', 'queue.publish')
             payload: The command payload data
 
         Returns:
@@ -193,12 +218,37 @@ class SynapClient:
         Raises:
             SynapException: If the operation fails
         """
+        pl = payload or {}
+
+        if self._native is not None:
+            mapped = map_command(command, pl)
+            if mapped is not None:
+                raw_cmd, args = mapped
+                try:
+                    raw_result = await self._native.execute(raw_cmd, args)
+                    return map_response(command, raw_result)
+                except Exception as exc:
+                    raise SynapException.network_error(
+                        f"Native transport error: {exc}"
+                    ) from exc
+            # Command has no native mapping on this transport — raise instead of
+            # silently falling back to HTTP.
+            raise UnsupportedCommandError(command, self._config.transport)
+
+        return await self._send_http(command, pl)
+
+    async def _send_http(
+        self,
+        command: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Send via HTTP REST (fallback or forced HTTP transport)."""
         try:
             request_id = str(uuid.uuid4())
             request_payload = {
                 "command": command,
                 "request_id": request_id,
-                "payload": payload or {},
+                "payload": payload,
             }
 
             response = await self._http_client.post("/api/v1/command", json=request_payload)
@@ -288,6 +338,9 @@ class SynapClient:
         await self.close()
 
     async def close(self) -> None:
-        """Close the HTTP client if we own it."""
+        """Close the HTTP client and any native TCP connections."""
+        if self._native is not None:
+            await self._native.close()
+            self._native = None
         if self._owns_client:
             await self._http_client.aclose()

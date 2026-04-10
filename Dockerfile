@@ -14,40 +14,22 @@
 # - Volume mounts for persistence
 #
 # Docker Commands:
-#   Build image (AMD64):
-#     docker build -t synap:0.9.1 -t synap:latest .
-#     docker build -t hivehub/synap:0.9.1 -t hivehub/synap:latest .
-#
-#   Build for ARM64:
-#     docker buildx build --platform linux/arm64 -t synap:0.9.1-arm64 .
+#   Build image:
+#     docker build -t hivehub/synap:0.11.0 -t hivehub/synap:latest .
 #
 #   Build multi-arch (AMD64 + ARM64):
 #     docker buildx build --platform linux/amd64,linux/arm64 \
-#       -t hivehub/synap:0.9.0 -t hivehub/synap:latest --push .
+#       -t hivehub/synap:0.11.0 -t hivehub/synap:latest --push .
 #
-#   Build for pre-release testing:
-#     docker build -t synap:0.9.0-rc -t synap:latest .
-#
-#   Run container:
-#     docker run -d --name synap-server-0.9.0 \
-#       -p 15500:15500 -p 15501:15501 \
+#   Run container (all three protocols):
+#     docker run -d --name synap-server \
+#       -p 15500:15500 -p 15501:15501 -p 6379:6379 \
 #       -v synap-data:/data \
-#       synap:0.9.0
+#       synap:latest
 #
 #   Run with authentication enabled:
 #     docker run -d --name synap-server \
-#       -p 15500:15500 -p 15501:15501 \
-#       -v synap-data:/data \
-#       -e SYNAP_AUTH_ENABLED=true \
-#       -e SYNAP_AUTH_REQUIRE_AUTH=true \
-#       -e SYNAP_AUTH_ROOT_USERNAME=root \
-#       -e SYNAP_AUTH_ROOT_PASSWORD=your_secure_password \
-#       -e SYNAP_AUTH_ROOT_ENABLED=true \
-#       synap:latest
-#
-#   Run with authentication and audit logging:
-#     docker run -d --name synap-server \
-#       -p 15500:15500 -p 15501:15501 \
+#       -p 15500:15500 -p 15501:15501 -p 6379:6379 \
 #       -v synap-data:/data \
 #       -e SYNAP_AUTH_ENABLED=true \
 #       -e SYNAP_AUTH_REQUIRE_AUTH=true \
@@ -58,25 +40,16 @@
 #
 #   Run with custom config:
 #     docker run -d --name synap-server \
-#       -p 15500:15500 -p 15501:15501 \
+#       -p 15500:15500 -p 15501:15501 -p 6379:6379 \
 #       -v synap-data:/data \
 #       -v /path/to/config.yml:/app/config.yml:ro \
 #       synap:latest
 #
 #   View logs:
-#     docker logs -f synap-server-0.9.0
+#     docker logs -f synap-server
 #
-#   Check status:
-#     docker ps --filter name=synap-server-0.9.0
-#
-#   Stop container:
-#     docker stop synap-server-0.9.0
-#
-#   Remove container:
-#     docker rm synap-server-0.9.0
-#
-#   Remove image:
-#     docker rmi synap:0.9.0
+#   Stop/remove:
+#     docker stop synap-server && docker rm synap-server
 # ============================================================================
 
 # ============================================================================
@@ -94,21 +67,24 @@ RUN apk add --no-cache \
     make \
     perl
 
-# Install nightly toolchain for Rust Edition 2024
-RUN rustup toolchain install nightly && \
+# Install nightly toolchain + musl target in one layer to avoid
+# overlayfs cross-device rename errors when rustup syncs channels.
+ARG TARGETARCH
+RUN case ${TARGETARCH} in \
+    amd64) TARGET_TRIPLE=x86_64-unknown-linux-musl ;; \
+    arm64) TARGET_TRIPLE=aarch64-unknown-linux-musl ;; \
+    *) TARGET_TRIPLE=x86_64-unknown-linux-musl ;; \
+    esac && \
+    rustup toolchain install nightly --target ${TARGET_TRIPLE} && \
     rustup default nightly
 
 # Set working directory
 WORKDIR /usr/src/synap
 
 # Configure Cargo for optimized builds
-# Use BuildKit cache mounts for faster rebuilds
 ENV CARGO_INCREMENTAL=1
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 ENV CARGO_NET_RETRY=2
-# Note: CARGO_BUILD_JOBS is not set (uses all available cores by default)
-# Note: RUSTFLAGS for stripping is handled by Cargo.toml [profile.release].strip = true
-# target-cpu=native is not used for cross-compilation (musl targets)
 
 # Copy Cargo configuration
 COPY .cargo/config.toml ./.cargo/config.toml
@@ -132,25 +108,17 @@ RUN sed -i '/^# Configure benchmarks to use Criterion/,/^$/d' synap-server/Cargo
     sed -i '/^\[\[bench\]\]/,/^$/d' synap-server/Cargo.toml
 
 # Build release binary with optimizations
-# - Static linking for portability
-# - Strip symbols for smaller size
-# - LTO for better optimization
-# - --bins flag compiles only binaries (ignores benches, examples, tests)
-# - Support multi-arch builds (AMD64 and ARM64)
-# - Use BuildKit cache mounts for incremental compilation
-ARG BUILD_DATE
-ARG VERSION
-ARG TARGETARCH
-ARG TARGETPLATFORM
+# - Static linking for portability (musl target)
+# - LTO + strip for smallest binary
+# - --bins flag skips benches/examples/tests
+# - BuildKit cache mounts for incremental compilation
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/usr/src/synap/target \
     case ${TARGETARCH} in \
     amd64) TARGET_TRIPLE=x86_64-unknown-linux-musl ;; \
     arm64) TARGET_TRIPLE=aarch64-unknown-linux-musl ;; \
-    *) echo "Unsupported architecture: ${TARGETARCH}" && exit 1 ;; \
     esac && \
-    rustup target add ${TARGET_TRIPLE} && \
     cargo build --release --bins \
     --target ${TARGET_TRIPLE} && \
     strip /usr/src/synap/target/${TARGET_TRIPLE}/release/synap-server && \
@@ -204,9 +172,10 @@ RUN chown -R synap:synap /app
 USER synap
 
 # Expose ports
-# 15500: HTTP/REST API + StreamableHTTP
-# 15501: Replication TCP port
-EXPOSE 15500 15501
+# 15500: HTTP/REST API + StreamableHTTP + WebSocket
+# 15501: SynapRPC binary protocol (MessagePack/TCP)
+# 6379:  RESP3 protocol (Redis-compatible wire protocol)
+EXPOSE 15500 15501 6379
 
 # Health check
 # Check if server responds to health endpoint

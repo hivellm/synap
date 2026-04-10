@@ -50,8 +50,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("3. Queue statistics");
     let stats = client.queue().stats("tasks").await?;
     tracing::info!("   Depth: {}", stats.depth);
-    tracing::info!("   Pending: {}", stats.pending);
-    tracing::info!("   Total published: {}\n", stats.total_published);
+    tracing::info!("   Consumed: {}", stats.consumed);
+    tracing::info!("   Published: {}\n", stats.published);
 
     // 4. Consume and ACK messages (consumed in priority order)
     tracing::info!("4. Consuming messages (priority order)");

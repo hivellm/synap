@@ -43,7 +43,7 @@ import { HyperLogLogManager } from './hyperloglog';
 import { BitmapManager } from './bitmap';
 import { GeospatialManager } from './geospatial';
 
-export type { SynapClientOptions, AuthOptions, RetryOptions } from './types';
+export type { SynapClientOptions, AuthOptions, RetryOptions, TransportMode } from './types';
 export type {
   SetOptions,
   KVStats,
@@ -71,6 +71,7 @@ export {
   NetworkError,
   ServerError,
   TimeoutError,
+  UnsupportedCommandError,
 } from './types';
 
 export { SynapClient } from './client';

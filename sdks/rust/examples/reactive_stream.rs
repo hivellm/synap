@@ -115,8 +115,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 5. Get final stats
     tracing::info!("4. Stream statistics");
     let stats = client.stream().stats("reactive-chat").await?;
-    tracing::info!("   Room: {}", stats.room);
-    tracing::info!("   Total events: {}", stats.total_events);
+    tracing::info!("   Room: {}", stats.name);
+    tracing::info!("   Total published: {}", stats.total_published);
     tracing::info!("   Max offset: {}\n", stats.max_offset);
 
     // 6. Cleanup

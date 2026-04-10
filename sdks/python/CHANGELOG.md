@@ -2,6 +2,50 @@
 
 All notable changes to the Synap Python SDK will be documented in this file.
 
+## [0.11.0] - 2026-04-09
+
+### Added
+
+- **URL-scheme transport selection**: `SynapConfig(url)` now parses the scheme:
+  - `synap://host:port` → SynapRPC (recommended default)
+  - `resp3://host:port` → RESP3
+  - `http://` / `https://` → HTTP/REST
+- **Full command parity on SynapRPC**: queue, stream, pub/sub, transaction,
+  script, geospatial, and HyperLogLog commands mapped in `transport.py`.
+- **`UnsupportedCommandError`**: raised for commands not mapped on the active
+  native transport instead of silently falling back to HTTP.
+- **Reactive pub/sub async generator**: `PubSubManager.observe(topics)`
+  uses SynapRPC server-push when the client is on `synap://`, otherwise
+  HTTP polling.
+- **E2E suites extended** (`sdks/python/tests/test_rpc_parity_s2s.py`):
+  queue, stream, pub/sub, transaction, script across all three transports;
+  `UnsupportedCommandError` regression.
+
+### Changed
+
+- **`SynapConfig` constructor parameters deprecated**: `transport`,
+  `rpc_host`, `rpc_port`, `resp3_host`, `resp3_port` now emit
+  `DeprecationWarning`. Migrate to URL-scheme construction.
+  Will be removed in v0.12.0.
+
+## [0.10.0] - 2026-04-08
+
+### Added
+
+- **Multi-transport support**: `SynapConfig` now accepts a `transport`
+  argument of `"synaprpc"` (default), `"resp3"` or `"http"`. SynapRPC
+  opens a persistent TCP connection and frames requests with MessagePack,
+  preserving numeric/bool/bytes types. RESP3 speaks the Redis wire
+  protocol. Unmapped commands (queues, streams, pub/sub, scripting,
+  transactions…) fall back to HTTP automatically.
+- **New config options**: `rpc_host`, `rpc_port`, `resp3_host`,
+  `resp3_port` for overriding binary listener endpoints (defaults
+  `127.0.0.1:15501` and `127.0.0.1:6379`).
+
+### Changed
+
+- SDK version aligned with the server and sibling SDKs (`0.2.0 → 0.10.0`).
+
 ## [0.2.0] - 2025-10-25
 
 ### Added - Redis Data Structures 🎉
@@ -119,6 +163,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Linting**: ruff for fast Python linting
 - **Documentation**: Complete docstrings with examples
 
-[unreleased]: https://github.com/hivellm/hivellm/compare/synap-python-v0.1.0...HEAD
-[0.1.0]: https://github.com/hivellm/hivellm/releases/tag/synap-python-v0.1.0
+[unreleased]: https://github.com/hivellm/synap/compare/synap-python-v0.1.0...HEAD
+[0.1.0]: https://github.com/hivellm/synap/releases/tag/synap-python-v0.1.0
 

@@ -82,7 +82,7 @@ server:
 
 kv_store:
   max_memory_mb: 2048
-  eviction_policy: "lru"
+  eviction_policy: "allkeys-lru"
   ttl_cleanup_interval_ms: 200
 
 queue:
@@ -169,7 +169,7 @@ server:
 
 kv_store:
   max_memory_mb: 1024
-  eviction_policy: "lfu"
+  eviction_policy: "volatile-lru"
   ttl_cleanup_interval_ms: 100
 
 queue:
@@ -201,7 +201,7 @@ rate_limit:
     fs::write(temp_file, yaml).unwrap();
 
     let config = ServerConfig::from_file(temp_file).unwrap();
-    assert_eq!(config.kv_store.eviction_policy, EvictionPolicy::Lfu);
+    assert_eq!(config.kv_store.eviction_policy, EvictionPolicy::VolatileLru);
 
     fs::remove_file(temp_file).ok();
 }

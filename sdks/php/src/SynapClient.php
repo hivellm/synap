@@ -8,7 +8,11 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Exception\GuzzleException;
 use GuzzleHttp\RequestOptions;
 use Synap\SDK\Exception\SynapException;
+use Synap\SDK\Exception\UnsupportedCommandException;
 use Synap\SDK\Module\BitmapManager;
+use Synap\SDK\SynapRpcTransport;
+use Synap\SDK\Resp3Transport;
+use Synap\SDK\TransportMode;
 use Synap\SDK\Module\GeospatialManager;
 use Synap\SDK\Module\HashManager;
 use Synap\SDK\Module\HyperLogLogManager;
@@ -27,6 +31,7 @@ class SynapClient
 {
     private Client $httpClient;
     private SynapConfig $config;
+    private SynapRpcTransport|Resp3Transport|null $native = null;
     private ?KVStore $kv = null;
     private ?HashManager $hash = null;
     private ?ListManager $list = null;
@@ -47,6 +52,26 @@ class SynapClient
             'timeout' => $config->getTimeout(),
             'headers' => $this->buildHeaders(),
         ]);
+
+        // Instantiate native transport if selected.
+        if ($config->getTransport() === TransportMode::SYNAP_RPC) {
+            $this->native = new SynapRpcTransport(
+                $config->getRpcHost(),
+                $config->getRpcPort(),
+                $config->getTimeout(),
+            );
+        } elseif ($config->getTransport() === TransportMode::RESP3) {
+            $this->native = new Resp3Transport(
+                $config->getResp3Host(),
+                $config->getResp3Port(),
+                $config->getTimeout(),
+            );
+        }
+    }
+
+    public function __destruct()
+    {
+        $this->native?->close();
     }
 
     public function kv(): KVStore
@@ -158,20 +183,38 @@ class SynapClient
      */
     public function execute(string $operation, string $target, array $data = []): array
     {
+        // Assemble the full payload (same logic for both native and HTTP paths).
+        $payloadData = $data;
+        if (! empty($target)) {
+            if (str_starts_with($operation, 'bitmap.bitop') || str_starts_with($operation, 'hyperloglog.pfmerge')) {
+                $payloadData['destination'] = $target;
+            } else {
+                $payloadData['key'] = $target;
+            }
+        }
+
+        // Try native transport (SynapRPC or RESP3) for mapped commands.
+        if ($this->native !== null) {
+            $mapped = \Synap\SDK\mapCommand($operation, $payloadData);
+            if ($mapped !== null) {
+                [$rawCmd, $args] = $mapped;
+                try {
+                    $raw = $this->native->execute($rawCmd, $args);
+                    return \Synap\SDK\mapResponse($operation, $raw);
+                } catch (SynapException $e) {
+                    throw $e;
+                } catch (\Throwable $e) {
+                    throw SynapException::networkError('Native transport error: ' . $e->getMessage());
+                }
+            }
+            // Command has no native mapping — raise instead of silently falling back.
+            throw new UnsupportedCommandException($operation, $this->config->getTransport());
+        }
+
+        // HTTP path.
         try {
             // Generate request ID (UUID v4)
             $requestId = $this->generateUuid();
-
-            // Include target in data if it's not empty (for commands that use 'key' or 'destination')
-            $payloadData = $data;
-            if (! empty($target)) {
-                // Determine field name based on operation
-                if (str_starts_with($operation, 'bitmap.bitop') || str_starts_with($operation, 'hyperloglog.pfmerge')) {
-                    $payloadData['destination'] = $target;
-                } else {
-                    $payloadData['key'] = $target;
-                }
-            }
 
             // StreamableHTTP format: {command, payload, request_id}
             $payload = [
@@ -217,6 +260,87 @@ class SynapClient
         } catch (GuzzleException $e) {
             throw SynapException::networkError($e->getMessage());
         }
+    }
+
+    /**
+     * Send a command with a pre-assembled payload (preferred over execute()).
+     *
+     * Mapped commands are routed through the native transport (SynapRPC or
+     * RESP3). On a native transport, unmapped commands raise
+     * UnsupportedCommandException instead of silently falling back to HTTP.
+     *
+     * @param string $command Command name (e.g. 'queue.publish')
+     * @param array<string, mixed> $payload Full payload (no target injection)
+     * @return array<string, mixed>
+     */
+    public function sendCommand(string $command, array $payload = []): array
+    {
+        if ($this->native !== null) {
+            $mapped = \Synap\SDK\mapCommand($command, $payload);
+            if ($mapped !== null) {
+                [$rawCmd, $args] = $mapped;
+                try {
+                    $raw = $this->native->execute($rawCmd, $args);
+                    return \Synap\SDK\mapResponse($command, $raw);
+                } catch (SynapException $e) {
+                    throw $e;
+                } catch (\Throwable $e) {
+                    throw SynapException::networkError('Native transport error: ' . $e->getMessage());
+                }
+            }
+            throw new UnsupportedCommandException($command, $this->config->getTransport());
+        }
+
+        // HTTP path — send directly.
+        try {
+            $requestPayload = [
+                'command'    => $command,
+                'payload'    => $payload,
+                'request_id' => $this->generateUuid(),
+            ];
+
+            $options = [
+                RequestOptions::JSON    => $requestPayload,
+                RequestOptions::HEADERS => $this->buildHeaders(),
+            ];
+
+            $response = $this->httpClient->request('POST', '/api/v1/command', $options);
+            $body = (string) $response->getBody();
+
+            if (empty($body)) {
+                return [];
+            }
+
+            $result = json_decode($body, true);
+
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw SynapException::invalidResponse('Failed to parse JSON response');
+            }
+
+            if (! is_array($result)) {
+                return [];
+            }
+
+            if (isset($result['success']) && $result['success'] === false) {
+                $error        = $result['error'] ?? 'Unknown error';
+                $errorMessage = is_string($error) ? $error : json_encode($error);
+                assert(is_string($errorMessage));
+                throw SynapException::serverError($errorMessage);
+            }
+
+            /** @var array<string, mixed> $result */
+            return $result['payload'] ?? $result;
+        } catch (GuzzleException $e) {
+            throw SynapException::networkError($e->getMessage());
+        }
+    }
+
+    /**
+     * Return the native SynapRpcTransport if the client is using SynapRPC, or null.
+     */
+    public function getSynapRpcTransport(): ?SynapRpcTransport
+    {
+        return $this->native instanceof SynapRpcTransport ? $this->native : null;
     }
 
     /**

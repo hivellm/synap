@@ -4,6 +4,65 @@ All notable changes to the Synap TypeScript SDK will be documented in this file.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-04-09
+
+### Added
+
+- **URL-scheme transport selection**: `SynapClient` constructor now accepts a
+  plain URL string whose scheme determines the transport:
+  - `synap://host:port` → SynapRPC (recommended default)
+  - `resp3://host:port` → RESP3
+  - `http://` / `https://` → HTTP/REST
+- **Full command parity on SynapRPC + RESP3**: queue, stream, pub/sub,
+  transaction, script, geospatial, and HyperLogLog commands mapped in
+  `mapCommand` / `mapResponse`; 364 unit tests pass.
+- **`UnsupportedCommandError`**: thrown for commands not mapped on the active
+  native transport. Exported from `@hivehub/synap` index.
+- **Reactive pub/sub over SynapRPC**: `SynapRpcTransport.subscribePush()`
+  opens a dedicated TCP socket and relays push frames (`id == 0xFFFFFFFF`)
+  to the subscriber callback.
+- **E2E suites extended**: `runQueueSuite`, `runStreamSuite`,
+  `runPubSubSuite`, `runTransactionSuite`, `runScriptSuite` added;
+  `UnsupportedCommandError` regression (3 cases: RPC/RESP3 raise, HTTP
+  succeeds).
+
+### Changed
+
+- **Constructor options deprecated**: `transport`, `rpcHost`, `rpcPort`,
+  `resp3Host`, `resp3Port` options on `SynapClient` / `Synap` are marked
+  `@deprecated`. Migrate to URL-scheme construction. Will be removed in
+  v0.12.0.
+
+## [0.10.0] - 2026-04-08
+
+### Added
+
+- **Multi-transport support**: `Synap` / `SynapClient` now accept a
+  `transport` option taking one of `'synaprpc'` (default), `'resp3'` or
+  `'http'`. SynapRPC opens a persistent TCP connection, frames requests
+  with MessagePack, and preserves numeric/boolean/byte types that HTTP
+  would otherwise stringify. RESP3 speaks the Redis wire protocol.
+  Unmapped commands (queues, streams, pub/sub, scripting, transactions…)
+  fall back to HTTP automatically.
+- **New client options**: `rpcHost`, `rpcPort`, `resp3Host`, `resp3Port`
+  for overriding binary listener endpoints.
+- **E2E test suite** (`src/__tests__/e2e.test.ts`, gated behind `RUN_E2E=true`):
+  spawns the release binary and exercises all three transports plus
+  cross-transport consistency.
+
+### Fixed
+
+- **SynapRPC `Bytes` decoding**: `fromWireValue` returned raw
+  `Uint8Array` for string values, breaking `kv.get()`. Now decoded as UTF-8.
+- **RESP3 framing**: separate line/binary buffers lost residual bytes when
+  switching between header lines and bulk payloads, causing `parseValue`
+  to hang on multi-chunk responses. Unified into a single `Buffer`.
+- **`asInt` boolean coercion**: SynapRPC returns `EXISTS` as `Bool(true)`,
+  which `parseInt('true')` turned into `NaN`, so `kv.exists()` always
+  returned `false`. Now handles booleans correctly.
+
+## [0.9.x] Previously under Unreleased
+
 ### Added - Sorted Set Support 🎉 (October 25, 2025)
 
 **New Module: sorted-set.ts with 18 operations**

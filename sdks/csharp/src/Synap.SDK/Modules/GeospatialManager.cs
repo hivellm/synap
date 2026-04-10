@@ -124,9 +124,14 @@ public sealed class GeospatialManager
         foreach (var loc in locationList)
         {
             if (loc.Lat < -90 || loc.Lat > 90)
+            {
                 throw new ArgumentException($"Latitude must be between -90 and 90, got: {loc.Lat}", nameof(locations));
+            }
+
             if (loc.Lon < -180 || loc.Lon > 180)
+            {
                 throw new ArgumentException($"Longitude must be between -180 and 180, got: {loc.Lon}", nameof(locations));
+            }
         }
 
         var data = new Dictionary<string, object?>
@@ -168,7 +173,10 @@ public sealed class GeospatialManager
         if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("distance", out var distance))
         {
             if (distance.ValueKind == JsonValueKind.Null)
+            {
                 return null;
+            }
+
             return distance.GetDouble();
         }
         return null;
@@ -190,9 +198,14 @@ public sealed class GeospatialManager
         CancellationToken cancellationToken = default)
     {
         if (centerLat < -90 || centerLat > 90)
+        {
             throw new ArgumentException($"Latitude must be between -90 and 90, got: {centerLat}", nameof(centerLat));
+        }
+
         if (centerLon < -180 || centerLon > 180)
+        {
             throw new ArgumentException($"Longitude must be between -180 and 180, got: {centerLon}", nameof(centerLon));
+        }
 
         var data = new Dictionary<string, object?>
         {
@@ -206,9 +219,14 @@ public sealed class GeospatialManager
         };
 
         if (count.HasValue)
+        {
             data["count"] = count.Value;
+        }
+
         if (!string.IsNullOrEmpty(sort))
+        {
             data["sort"] = sort;
+        }
 
         using var response = await _client.ExecuteAsync("geospatial.georadius", string.Empty, data, cancellationToken).ConfigureAwait(false);
         if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("results", out var results))
@@ -243,9 +261,14 @@ public sealed class GeospatialManager
         };
 
         if (count.HasValue)
+        {
             data["count"] = count.Value;
+        }
+
         if (!string.IsNullOrEmpty(sort))
+        {
             data["sort"] = sort;
+        }
 
         using var response = await _client.ExecuteAsync("geospatial.georadiusbymember", string.Empty, data, cancellationToken).ConfigureAwait(false);
         if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("results", out var results))

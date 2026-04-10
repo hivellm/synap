@@ -36,7 +36,7 @@ kv_store:
   #   lfu  -> Least Frequently Used
   #   ttl  -> Shortest Time-To-Live first
   #   none -> No eviction (returns errors on write)
-  eviction_policy: "lru"
+  eviction_policy: "allkeys-lru"
 
   # TTL cleanup interval in milliseconds
   # Lower = faster cleanup, higher CPU usage
@@ -175,6 +175,28 @@ protocols:
   rest:
     enabled: true
     prefix: "/kv"
+
+# ----------------------------------------------------------------------------
+# RESP3 TCP Listener (Redis-compatible protocol)
+# ----------------------------------------------------------------------------
+# Enables a raw TCP socket that speaks the Redis RESP3 wire protocol.
+# Any Redis client (redis-cli, redis-rs, ioredis, etc.) can connect directly.
+# Bind to 127.0.0.1 unless you intend to expose it on the network.
+resp3:
+  enabled: true
+  host: "0.0.0.0"
+  port: 6379
+
+# ----------------------------------------------------------------------------
+# SynapRPC TCP Listener (native binary protocol)
+# ----------------------------------------------------------------------------
+# Enables a raw TCP socket using the SynapRPC binary protocol:
+# 4-byte LE length prefix + MessagePack body.
+# Use the Synap SDK clients to connect; not compatible with Redis tooling.
+synap_rpc:
+  enabled: true
+  host: "0.0.0.0"
+  port: 15501
 
 # ----------------------------------------------------------------------------
 # MCP (Model Context Protocol) Tools
@@ -371,7 +393,7 @@ persistence:
   # Write-Ahead Log (WAL) settings
   wal:
     enabled: true
-    path: "./data/wal/synap.wal"
+    path: "/data/wal/synap.wal"
     buffer_size_kb: 64
     fsync_mode: "always" # Options: always, periodic, never
     fsync_interval_ms: 1000
@@ -380,7 +402,7 @@ persistence:
   # Snapshot settings
   snapshot:
     enabled: true
-    directory: "./data/snapshots"
+    directory: "/data/snapshots"
     interval_secs: 300 # Snapshot every 5 minutes
     operation_threshold: 10000 # Or every 10K operations
     max_snapshots: 10 # Keep last 10 snapshots

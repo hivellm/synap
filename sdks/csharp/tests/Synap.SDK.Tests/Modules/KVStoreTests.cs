@@ -50,7 +50,7 @@ public sealed class KVStoreTests : IDisposable
             Times.Once(),
             ItExpr.Is<HttpRequestMessage>(req =>
                 req.Method == HttpMethod.Post &&
-                req.RequestUri!.ToString().Contains("/api/stream")),
+                req.RequestUri!.ToString().Contains("/api/v1/command")),
             ItExpr.IsAny<CancellationToken>());
     }
 

@@ -1,4 +1,4 @@
-use super::types::{Operation, PersistenceConfig};
+use super::types::{FsyncMode, Operation, PersistenceConfig};
 use super::{AsyncWAL, SnapshotManager};
 use crate::core::{KVStore, QueueManager, StreamManager};
 use parking_lot::RwLock;
@@ -29,6 +29,17 @@ impl PersistenceLayer {
             last_snapshot: Arc::new(RwLock::new(Instant::now())),
             operations_since_snapshot: Arc::new(RwLock::new(0)),
         })
+    }
+
+    /// Returns true when the WAL fsync mode is Always (sync durability).
+    ///
+    /// When true, the SET handler must log to WAL BEFORE writing to memory.
+    /// When false, WAL is written asynchronously after the memory write (current
+    /// default behavior, labeled `Periodic` or `Never`).
+    pub fn is_sync_durability(&self) -> bool {
+        self.config.enabled
+            && self.config.wal.enabled
+            && self.config.wal.fsync_mode == FsyncMode::Always
     }
 
     /// Log a KV SET operation (non-blocking with group commit)

@@ -3,7 +3,46 @@
 use crate::client::SynapClient;
 use crate::error::Result;
 use crate::types::{Event, StreamStats};
+use serde::Deserialize;
 use serde_json::{Value, json};
+
+/// Wire format of a stream event as returned by the server.
+/// HTTP returns `data` as `Vec<u8>` (serde_json::to_vec of the original JSON).
+/// SynapRPC may return `data` as a string.  We accept both via `Value`.
+#[derive(Deserialize)]
+struct RawStreamEvent {
+    #[serde(default)]
+    offset: u64,
+    event: String,
+    data: Value,
+    #[serde(default)]
+    timestamp: Option<u64>,
+}
+
+impl From<RawStreamEvent> for Event {
+    fn from(raw: RawStreamEvent) -> Self {
+        let data = match &raw.data {
+            // HTTP: data arrives as JSON array of bytes → decode back to JSON
+            Value::Array(arr) => {
+                let bytes: Vec<u8> = arr
+                    .iter()
+                    .filter_map(|v| v.as_u64().map(|n| n as u8))
+                    .collect();
+                serde_json::from_slice(&bytes).unwrap_or(Value::Null)
+            }
+            // RPC: data arrives as a JSON string (the serialized JSON)
+            Value::String(s) => serde_json::from_str(s).unwrap_or(Value::String(s.clone())),
+            // Already a JSON value (unlikely but handle gracefully)
+            other => other.clone(),
+        };
+        Self {
+            offset: raw.offset,
+            event: raw.event,
+            data,
+            timestamp: raw.timestamp,
+        }
+    }
+}
 
 /// Stream Manager interface
 ///
@@ -77,12 +116,18 @@ impl StreamManager {
     ) -> Result<Vec<Event>> {
         let payload = json!({
             "room": room,
-            "offset": offset,
+            "subscriber_id": "sdk-default",
+            "from_offset": offset.unwrap_or(0),
             "limit": limit,
         });
 
         let response = self.client.send_command("stream.consume", payload).await?;
-        Ok(serde_json::from_value(response["events"].clone())?)
+
+        // Server stores data as Vec<u8> (serde_json::to_vec) and serialises the
+        // struct directly, so `data` arrives as a JSON byte-array.  We decode
+        // each event's data bytes back into the original JSON value.
+        let raw_events: Vec<RawStreamEvent> = serde_json::from_value(response["events"].clone())?;
+        Ok(raw_events.into_iter().map(Into::into).collect())
     }
 
     /// Get stream statistics

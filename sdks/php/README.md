@@ -66,6 +66,61 @@ $delivered = $client->pubsub()->publish('notifications.email', [
 ]);
 ```
 
+## Transports
+
+Since v0.11.0 the SDK selects the transport via **URL scheme** — no separate builder methods required:
+
+| URL scheme    | Default port | When to use                                               |
+|---------------|--------------|-----------------------------------------------------------|
+| `synap://`    | `15501`      | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency. |
+| `resp3://`    | `6379`       | Redis-compatible text protocol — interop with existing Redis tooling. |
+| `http://` / `https://` | `15500` | Original REST transport — full command coverage. |
+
+All commands (KV, Hash, List, Set, Sorted Set, Queue, Stream, Pub/Sub, Transactions, Scripts, Geo, HyperLogLog) are fully supported on every transport. Native transports throw `UnsupportedCommandException` instead of silently falling back to HTTP.
+
+```php
+use Synap\SDK\SynapConfig;
+use Synap\SDK\SynapClient;
+
+// SynapRPC — recommended default
+$config = new SynapConfig('synap://127.0.0.1:15501');
+$client = new SynapClient($config);
+
+// RESP3 — Redis-compatible
+$config = new SynapConfig('resp3://127.0.0.1:6379');
+$client = new SynapClient($config);
+
+// HTTP — full REST access
+$config = new SynapConfig('http://127.0.0.1:15500');
+$client = new SynapClient($config);
+```
+
+**Queue, stream and pub/sub over `synap://`:**
+
+```php
+use Synap\SDK\SynapConfig;
+use Synap\SDK\SynapClient;
+
+$client = new SynapClient(new SynapConfig('synap://127.0.0.1:15501'));
+
+// Queue round-trip
+$client->queue()->createQueue('tasks', 1000, 60);
+$id = $client->queue()->publish('tasks', ['job' => 'resize'], priority: 5);
+$msg = $client->queue()->consume('tasks', 'worker-1');
+$client->queue()->ack('tasks', $msg->id);
+
+// Stream publish + read
+$client->stream()->createRoom('events');
+$client->stream()->publish('events', 'user.created', ['id' => 'u1']);
+$events = $client->stream()->read('events', offset: 0);
+
+// Reactive pub/sub (server-push, blocking loop on synap://)
+$client->pubsub()->observe(['news.*'], function (array $msg) {
+    echo 'got: ' . json_encode($msg) . PHP_EOL;
+    return false; // return false to stop listening
+});
+```
+
 ## API Reference
 
 ### Configuration

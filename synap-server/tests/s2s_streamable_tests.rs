@@ -148,9 +148,8 @@ async fn test_streamable_kv_get() {
     let res = send_command(&client, &base_url, "kv.get", json!({"key": "test"})).await;
 
     assert_eq!(res["success"], true);
-    // Payload now returns value directly as JSON string
     let value_str = res["payload"].as_str().unwrap();
-    assert_eq!(value_str, "\"hello\"");
+    assert_eq!(value_str, "hello");
 }
 
 #[tokio::test]

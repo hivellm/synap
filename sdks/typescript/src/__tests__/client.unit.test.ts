@@ -133,7 +133,7 @@ describe('SynapClient (Unit Tests)', () => {
 
     it('should log debug info when debug is enabled', async () => {
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-      const client = new SynapClient({ debug: true });
+      const client = new SynapClient({ debug: true, transport: 'http' });
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -145,13 +145,13 @@ describe('SynapClient (Unit Tests)', () => {
       });
 
       await client.sendCommand('test.command', { test: 'data' });
-      
+
       expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[Synap] Request:'),
+        expect.stringContaining('[Synap] HTTP Request:'),
         expect.any(String)
       );
       expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('[Synap] Response:'),
+        expect.stringContaining('[Synap] HTTP Response:'),
         expect.any(String)
       );
 
@@ -493,7 +493,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should send correct command endpoint', async () => {
-      const client = new SynapClient({ url: 'http://localhost:15500' });
+      const client = new SynapClient({ url: 'http://localhost:15500', transport: 'http' });
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -513,7 +513,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should include payload in request body', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ transport: 'http' });
       const payload = { key: 'test-key', value: 'test-value' };
 
       mockFetch.mockResolvedValueOnce({

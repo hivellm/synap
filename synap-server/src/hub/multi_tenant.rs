@@ -3,6 +3,8 @@
 //! Provides helper functions for scoping resources by user in Hub mode.
 //! In standalone mode, these functions pass through resource names unchanged.
 
+use std::borrow::Cow;
+
 use super::naming::ResourceNaming;
 use uuid::Uuid;
 
@@ -40,10 +42,12 @@ impl MultiTenant {
     /// Scope a KV key by user ID (in Hub mode)
     ///
     /// Format: `user_{user_id}:{key}`
-    pub fn scope_kv_key(user_id: Option<&Uuid>, key: &str) -> String {
+    /// Returns `Cow::Borrowed(key)` when Hub is disabled (zero allocation);
+    /// `Cow::Owned(scoped_key)` when Hub is active.
+    pub fn scope_kv_key<'a>(user_id: Option<&Uuid>, key: &'a str) -> Cow<'a, str> {
         match user_id {
-            Some(uid) => ResourceNaming::format(uid, key),
-            None => key.to_string(),
+            Some(uid) => Cow::Owned(ResourceNaming::format(uid, key)),
+            None => Cow::Borrowed(key),
         }
     }
 

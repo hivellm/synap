@@ -89,10 +89,12 @@ impl PubSubManager {
             .send_command("pubsub.subscribe", payload)
             .await?;
 
-        Ok(response["subscription_id"]
+        // Server returns "subscriber_id"; check both field names for robustness.
+        let id = response["subscriber_id"]
             .as_str()
-            .unwrap_or_default()
-            .to_string())
+            .or_else(|| response["subscription_id"].as_str())
+            .unwrap_or_default();
+        Ok(id.to_string())
     }
 
     /// Unsubscribe from topics

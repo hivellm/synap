@@ -1,6 +1,21 @@
 """Exceptions for Synap SDK."""
 
 
+class UnsupportedCommandError(Exception):
+    """Raised when a command has no native mapping for the active transport.
+
+    Use an ``http://`` URL if you need HTTP REST for commands that are not yet
+    in the native mapper.
+    """
+
+    def __init__(self, command: str, transport_mode: str) -> None:
+        super().__init__(
+            f"command '{command}' is not supported on transport '{transport_mode}'"
+        )
+        self.command = command
+        self.transport_mode = transport_mode
+
+
 class SynapException(Exception):
     """Base exception for all Synap SDK errors."""
 

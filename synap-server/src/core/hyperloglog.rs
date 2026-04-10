@@ -133,14 +133,14 @@ impl HyperLogLogValue {
         estimate as u64
     }
 
-    /// Merge another HyperLogLog into this one
+    /// Merge another HyperLogLog into this one (SIMD-accelerated element-wise max).
     pub fn merge(&mut self, other: &HyperLogLogValue) {
         self.updated_at = Self::current_timestamp();
-        for i in 0..HLL_REGISTER_COUNT {
-            if other.registers[i] > self.registers[i] {
-                self.registers[i] = other.registers[i];
-            }
-        }
+        // Use a temporary Vec to satisfy the simd signature; the registers
+        // array is small (HLL_REGISTER_COUNT bytes) so the copy is cheap.
+        let mut dest: Vec<u8> = self.registers.to_vec();
+        crate::simd::max_reduce_u8(&mut dest, &other.registers);
+        self.registers.copy_from_slice(&dest[..HLL_REGISTER_COUNT]);
     }
 
     /// Hash element to u64

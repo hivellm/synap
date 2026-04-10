@@ -1,6 +1,6 @@
 {
   "name": "@hivehub/synap",
-  "version": "0.9.0",
+  "version": "0.11.0",
   "description": "Official TypeScript/JavaScript SDK for Synap - High-Performance In-Memory Key-Value Store & Message Broker",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -58,20 +58,21 @@
   },
   "homepage": "https://github.com/hivellm/synap#readme",
   "dependencies": {
+    "msgpackr": "^1.11.9",
     "rxjs": "^7.8.1",
     "uuid": "^11.1.0"
   },
   "devDependencies": {
-    "@types/node": "^24.10.3",
+    "@types/node": "^25.5.2",
     "@types/uuid": "^10.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.49.0",
-    "@typescript-eslint/parser": "^8.49.0",
+    "@typescript-eslint/eslint-plugin": "^8.58.0",
+    "@typescript-eslint/parser": "^8.58.0",
     "@vitest/coverage-v8": "^4.0.15",
     "eslint": "^9.39.1",
     "prettier": "^3.7.4",
     "tsup": "^8.5.1",
-    "typescript": "^5.7.2",
-    "typescript-eslint": "^8.49.0",
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.58.0",
     "vitest": "^4.0.15"
   },
   "engines": {

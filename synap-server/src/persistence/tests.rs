@@ -96,9 +96,11 @@ async fn test_crash_recovery() {
 
     let kv_config = KVConfig {
         max_memory_mb: 1024,
-        eviction_policy: crate::core::EvictionPolicy::Lru,
+        eviction_policy: crate::core::EvictionPolicy::NoEviction,
         ttl_cleanup_interval_ms: 100,
         allow_flush_commands: false,
+        max_value_size_bytes: None,
+        eviction_sample_size: 5,
     };
 
     let queue_config = QueueConfig::default();

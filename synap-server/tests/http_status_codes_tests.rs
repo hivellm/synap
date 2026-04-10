@@ -136,11 +136,8 @@ async fn test_kv_get_returns_200_when_found() {
 
     assert_eq!(response.status(), StatusCode::OK);
 
-    // Server returns value wrapped in GetResponse::String
-    // This causes double-encoding: the value is JSON-serialized twice
     let value_str: String = response.json().await.unwrap();
-    // Expected format after double-encoding
-    assert_eq!(value_str, "\"data\"");
+    assert_eq!(value_str, "data");
 }
 
 #[tokio::test]

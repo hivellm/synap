@@ -90,9 +90,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 5. Get room statistics
     tracing::info!("5. Getting room statistics");
     let stats = client.stream().stats("chat-room-1").await?;
-    tracing::info!("   Room: {}", stats.room);
+    tracing::info!("   Room: {}", stats.name);
     tracing::info!("   Max offset: {}", stats.max_offset);
-    tracing::info!("   Total events: {}\n", stats.total_events);
+    tracing::info!("   Total published: {}\n", stats.total_published);
 
     // 6. List all rooms
     tracing::info!("6. Listing all stream rooms");

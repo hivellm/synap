@@ -13,6 +13,7 @@ pub mod protocol;
 pub mod replication;
 pub mod scripting;
 pub mod server;
+pub mod simd;
 
 pub use hub::{HubClient, HubConfig, QuotaManager, ResourceNaming, UsageReporter};
 

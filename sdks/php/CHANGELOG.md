@@ -5,6 +5,53 @@ All notable changes to the Synap PHP SDK will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-04-09
+
+### Added
+
+- **URL-scheme transport selection**: `SynapConfig` constructor now parses the
+  URL scheme:
+  - `synap://host:port` → SynapRPC (recommended default)
+  - `resp3://host:port` → RESP3
+  - `http://` / `https://` → HTTP/REST
+- **Full command parity on SynapRPC**: queue, stream, pub/sub, transaction,
+  script, geospatial, and HyperLogLog commands mapped in `Transport.php`.
+- **`UnsupportedCommandException`**: thrown for commands not mapped on the
+  active native transport.
+- **Synchronous server-push**: `SynapRpcTransport::subscribePush()` opens a
+  dedicated blocking socket loop calling an `$onMessage` callable on each
+  received push frame (`id == 0xFFFFFFFF`).
+- **`PubSubManager::observe()`**: convenience wrapper using
+  `subscribePush()` on `synap://` or HTTP polling otherwise.
+- **`SynapClient::sendCommand()`**: sends a command with an explicit payload
+  dict, bypassing the HTTP-style `target`/`key` injection.
+- **E2E suite** (`sdks/php/tests/Unit/Module/RpcParityS2STest.php`): queue,
+  stream, pub/sub, transaction, script across all three transports;
+  `UnsupportedCommandException` regression. Gated behind `SYNAP_S2S=true`.
+
+### Changed
+
+- **Builder methods deprecated** (`trigger_error(E_USER_DEPRECATED)`):
+  `withSynapRpcTransport`, `withResp3Transport`, `withHttpTransport`,
+  `withRpcAddr`, `withResp3Addr`. Migrate to URL-scheme construction.
+  Will be removed in v0.12.0.
+
+## [0.10.0] - 2026-04-08
+
+### Added
+
+- **Multi-transport support**: `SynapConfig` now supports SynapRPC
+  (default), RESP3 and HTTP transports via `withSynapRpcTransport()`,
+  `withResp3Transport()`, `withHttpTransport()`. Override endpoints with
+  `withRpcAddr(host, port)` / `withResp3Addr(host, port)`. Unmapped
+  commands fall back to HTTP automatically.
+- SynapRPC uses MessagePack framing over persistent TCP; RESP3 speaks
+  the Redis wire protocol.
+
+### Changed
+
+- SDK version aligned with server and sibling SDKs (`0.2.0 → 0.10.0`).
+
 ## [0.2.0] - 2025-10-25
 
 ### Added - Redis Data Structures 🎉

@@ -19,7 +19,7 @@ public class TransactionManagerS2STests
         _client = new SynapClient(new SynapConfig(url));
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task MultiExec_Works()
     {
         var clientId = $"test:{Guid.NewGuid()}";
@@ -47,7 +47,7 @@ public class TransactionManagerS2STests
         Assert.Equal("value2", value2);
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task Discard_Works()
     {
         var clientId = $"test:{Guid.NewGuid()}";
@@ -68,7 +68,7 @@ public class TransactionManagerS2STests
         Assert.Null(value);
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task WatchUnwatch_Works()
     {
         var clientId = $"test:{Guid.NewGuid()}";
@@ -88,7 +88,7 @@ public class TransactionManagerS2STests
         Assert.True(result.Success);
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task WatchAbortOnConflict_Works()
     {
         var clientId = $"test:{Guid.NewGuid()}";
@@ -113,7 +113,7 @@ public class TransactionManagerS2STests
         Assert.True(aborted.Aborted);
     }
 
-    [Fact]
+    [Fact(Skip = "S2S test - requires running Synap server")]
     public async Task EmptyTransaction_Works()
     {
         var clientId = $"test:{Guid.NewGuid()}";

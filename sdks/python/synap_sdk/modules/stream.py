@@ -29,7 +29,7 @@ class StreamManager:
         Args:
             room: The room name
         """
-        await self._client.execute("stream.create_room", room)
+        await self._client.send_command("stream.create", {"room": room})
 
     async def delete_room(self, room: str) -> None:
         """Delete a stream room.
@@ -37,7 +37,7 @@ class StreamManager:
         Args:
             room: The room name
         """
-        await self._client.execute("stream.delete_room", room)
+        await self._client.send_command("stream.delete", {"room": room})
 
     async def publish(
         self,
@@ -55,10 +55,9 @@ class StreamManager:
         Returns:
             The event offset in the stream
         """
-        response = await self._client.execute(
+        response = await self._client.send_command(
             "stream.publish",
-            room,
-            {"event": event, "data": data},
+            {"room": room, "event": event, "data": data},
         )
         return int(response.get("offset", 0))
 
@@ -67,6 +66,7 @@ class StreamManager:
         room: str,
         offset: int = 0,
         limit: int = 100,
+        subscriber_id: str = "sdk-reader",
     ) -> list[StreamEvent]:
         """Read events from a stream.
 
@@ -74,14 +74,18 @@ class StreamManager:
             room: The room name
             offset: Starting offset (0 for beginning)
             limit: Maximum number of events to read
+            subscriber_id: Subscriber identifier
 
         Returns:
             List of stream events
         """
-        response = await self._client.execute(
-            "stream.read",
-            room,
-            {"offset": offset, "limit": limit},
+        response = await self._client.send_command(
+            "stream.consume",
+            {
+                "room": room,
+                "subscriber_id": subscriber_id,
+                "from_offset": offset,
+            },
         )
 
         events_data = response.get("events", [])
@@ -105,7 +109,7 @@ class StreamManager:
         Returns:
             Statistics as a dictionary
         """
-        return await self._client.execute("stream.stats", room)
+        return await self._client.send_command("stream.stats", {"room": room})
 
     async def list_rooms(self) -> list[str]:
         """List all stream rooms.
@@ -113,5 +117,5 @@ class StreamManager:
         Returns:
             List of room names
         """
-        response = await self._client.execute("stream.list_rooms", "*")
+        response = await self._client.send_command("stream.list", {})
         return list(response.get("rooms", []))

@@ -226,7 +226,7 @@ impl OptimizedWAL {
             }
 
             // Send responses
-            for (result, (_, response_tx)) in write_results.into_iter().zip(appends.into_iter()) {
+            for (result, (_, response_tx)) in write_results.into_iter().zip(appends) {
                 let _ = response_tx.send(result);
             }
 

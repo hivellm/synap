@@ -1,0 +1,15 @@
+# cargo-audit configuration for Synap
+# Pre-existing advisories that are tracked but cannot be resolved
+# without breaking changes or upstream fixes.
+
+[advisories]
+# RUSTSEC-2025-0141: bincode 2.0 is unmaintained; no current alternative
+# RUSTSEC-2026-0007: bytes integer overflow — no fix available for pinned version
+# RUSTSEC-2026-0037: quinn-proto DoS — transitive dep, no upgrade path available
+# RUSTSEC-2026-0049: rustls-webpki CRL matching — transitive dep
+ignore = [
+    "RUSTSEC-2025-0141",
+    "RUSTSEC-2026-0007",
+    "RUSTSEC-2026-0037",
+    "RUSTSEC-2026-0049",
+]

@@ -51,6 +51,7 @@ pub mod sorted_set;
 pub mod stream;
 mod stream_reactive;
 pub mod transactions;
+pub mod transport;
 pub mod types;
 
 pub use bitmap::{BitmapManager, BitmapOperation, BitmapStats};
@@ -77,4 +78,5 @@ pub use transactions::{
     TransactionCommandClient, TransactionExecResult, TransactionManager, TransactionOptions,
     TransactionResponse,
 };
+pub use transport::TransportMode;
 pub use types::HyperLogLogStats;

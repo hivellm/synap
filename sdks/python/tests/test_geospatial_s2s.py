@@ -11,9 +11,7 @@ from synap_sdk.config import SynapConfig
 @pytest.fixture
 def client():
     """Create a Synap client for testing."""
-    config = SynapConfig(
-        url=os.getenv("SYNAP_URL", "http://localhost:15500"),
-    )
+    config = SynapConfig(os.getenv("SYNAP_URL", "http://localhost:15500"))
     return SynapClient(config)
 
 

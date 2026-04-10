@@ -16,7 +16,7 @@ mod tests {
             .mock("POST", "/api/v1/command")
             .match_body(Matcher::PartialJson(json!({
                 "command": "queue.create",
-                "payload": {"queue_name": "test_queue"}
+                "payload": {"name": "test_queue"}
             })))
             .with_status(200)
             .with_body(r#"{"success": true, "payload": {}}"#)
@@ -38,9 +38,11 @@ mod tests {
             .match_body(Matcher::PartialJson(json!({
                 "command": "queue.create",
                 "payload": {
-                    "queue_name": "custom_queue",
-                    "max_depth": 1000,
-                    "ack_deadline_secs": 30
+                    "name": "custom_queue",
+                    "config": {
+                        "max_depth": 1000,
+                        "ack_deadline_secs": 30
+                    }
                 }
             })))
             .with_status(200)
@@ -66,7 +68,7 @@ mod tests {
             .match_body(Matcher::PartialJson(json!({
                 "command": "queue.publish",
                 "payload": {
-                    "queue_name": "test_queue",
+                    "queue": "test_queue",
                     "priority": 9,
                     "max_retries": 3
                 }
@@ -95,7 +97,7 @@ mod tests {
             .match_body(Matcher::PartialJson(json!({
                 "command": "queue.consume",
                 "payload": {
-                    "queue_name": "test_queue",
+                    "queue": "test_queue",
                     "consumer_id": "worker-1"
                 }
             })))
@@ -125,7 +127,7 @@ mod tests {
             .mock("POST", "/api/v1/command")
             .match_body(Matcher::PartialJson(json!({
                 "command": "queue.consume",
-                "payload": {"queue_name": "empty_queue", "consumer_id": "worker-1"}
+                "payload": {"queue": "empty_queue", "consumer_id": "worker-1"}
             })))
             .with_status(200)
             .with_body(r#"{"success": true, "payload": null}"#)
@@ -150,7 +152,7 @@ mod tests {
             .mock("POST", "/api/v1/command")
             .match_body(Matcher::PartialJson(json!({
                 "command": "queue.ack",
-                "payload": {"queue_name": "test_queue", "message_id": "msg-123"}
+                "payload": {"queue": "test_queue", "message_id": "msg-123"}
             })))
             .with_status(200)
             .with_body(r#"{"success": true, "payload": {}}"#)
@@ -171,7 +173,7 @@ mod tests {
             .mock("POST", "/api/v1/command")
             .match_body(Matcher::PartialJson(json!({
                 "command": "queue.nack",
-                "payload": {"queue_name": "test_queue", "message_id": "msg-123"}
+                "payload": {"queue": "test_queue", "message_id": "msg-123"}
             })))
             .with_status(200)
             .with_body(r#"{"success": true, "payload": {}}"#)
@@ -192,16 +194,16 @@ mod tests {
             .mock("POST", "/api/v1/command")
             .match_body(Matcher::PartialJson(json!({
                 "command": "queue.stats",
-                "payload": {"queue_name": "test_queue"}
+                "payload": {"queue": "test_queue"}
             })))
             .with_status(200)
-            .with_body(r#"{"success": true, "payload": {"depth": 10, "pending": 5, "max_depth": 1000, "total_published": 100, "total_consumed": 90, "total_acked": 85, "total_nacked": 5, "dlq_count": 2}}"#)
+            .with_body(r#"{"success": true, "payload": {"depth": 10, "consumers": 5, "published": 100, "consumed": 90, "acked": 85, "nacked": 5, "dead_lettered": 2}}"#)
             .create_async()
             .await;
 
         let stats = client.queue().stats("test_queue").await.unwrap();
         assert_eq!(stats.depth, 10);
-        assert_eq!(stats.total_published, 100);
+        assert_eq!(stats.published, 100);
 
         mock.assert_async().await;
     }
@@ -238,7 +240,7 @@ mod tests {
             .mock("POST", "/api/v1/command")
             .match_body(Matcher::PartialJson(json!({
                 "command": "queue.delete",
-                "payload": {"queue_name": "test_queue"}
+                "payload": {"queue": "test_queue"}
             })))
             .with_status(200)
             .with_body(r#"{"success": true, "payload": {}}"#)

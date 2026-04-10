@@ -113,8 +113,7 @@ function handleKVCommand(action: string, payload: any): any {
 /**
  * Mock Queue command responses
  */
-function handleQueueCommand(action: string, payload: any): any {
-  const mockQueues = new Map<string, any[]>();
+function handleQueueCommand(action: string, _payload: any): any {
   const messageId = `msg-${Date.now()}-${Math.random()}`;
 
   switch (action) {
@@ -303,7 +302,7 @@ export function createScenarioMock(scenario: 'empty-queue' | 'full-queue' | 'err
       break;
     
     case 'full-queue':
-      responses.set('queue.consume', (payload: any) => ({
+      responses.set('queue.consume', (_payload: any) => ({
         message: {
           id: `msg-${Date.now()}`,
           payload: Array.from(new TextEncoder().encode(JSON.stringify({ task: 'test' }))),

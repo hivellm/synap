@@ -1,6 +1,9 @@
 //! Reactive Pub/Sub operations
 //!
-//! Provides Stream-based message consumption for Pub/Sub topics using WebSocket.
+//! When the client uses the `synap://` URL scheme (SynapRpc transport), push
+//! messages are received over a dedicated TCP push connection wired directly
+//! through the server's pub/sub router.  For `http://` / `https://` URLs the
+//! original WebSocket path is used instead.
 
 use crate::reactive::{MessageStream, SubscriptionHandle};
 use crate::types::PubSubMessage;
@@ -55,27 +58,80 @@ impl crate::pubsub::PubSubManager {
         let topics_clone = topics.clone();
 
         let (tx, rx) = mpsc::unbounded_channel::<PubSubMessage>();
-        let (cancel_tx, mut cancel_rx) = mpsc::unbounded_channel();
+        let (cancel_tx, mut cancel_rx) = mpsc::unbounded_channel::<()>();
 
         tokio::spawn(async move {
-            // Build WebSocket URL
+            // ── SynapRPC native push path ─────────────────────────────────────
+            if let Some(rpc) = client.synap_rpc_transport() {
+                match rpc.subscribe_push(topics_clone).await {
+                    Ok((_sub_id, mut push_rx)) => {
+                        tracing::debug!(
+                            sub_id = %_sub_id,
+                            "PubSub SynapRPC push connection established"
+                        );
+                        loop {
+                            tokio::select! {
+                                _ = cancel_rx.recv() => {
+                                    tracing::debug!("PubSub RPC stream cancelled");
+                                    break;
+                                }
+                                msg = push_rx.recv() => {
+                                    match msg {
+                                        Some(json) => {
+                                            // Push frame: { topic, payload (JSON string), id, timestamp }
+                                            if let Some(topic) = json.get("topic").and_then(|t| t.as_str()) {
+                                                // payload is a JSON-encoded string produced by
+                                                // serde_json::Value::to_string() on the server.
+                                                let data = match json.get("payload").and_then(|p| p.as_str()) {
+                                                    Some(s) => serde_json::from_str::<Value>(s).unwrap_or(Value::String(s.to_string())),
+                                                    None => json.get("payload").cloned().unwrap_or(Value::Null),
+                                                };
+                                                let pubsub_msg = PubSubMessage {
+                                                    topic: topic.to_string(),
+                                                    data,
+                                                    priority: None,
+                                                    headers: None,
+                                                };
+                                                if tx.send(pubsub_msg).is_err() {
+                                                    break; // downstream receiver dropped
+                                                }
+                                            }
+                                        }
+                                        None => {
+                                            tracing::debug!("PubSub RPC push connection closed");
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("SynapRPC subscribe_push failed: {}", e);
+                    }
+                }
+                return;
+            }
+
+            // ── WebSocket fallback (HTTP / HTTPS transport) ───────────────────
             let base_url = client.base_url();
             let ws_url = match base_url.scheme() {
                 "http" => format!("ws://{}", base_url.authority()),
                 "https" => format!("wss://{}", base_url.authority()),
                 _ => {
-                    tracing::error!("Unsupported URL scheme: {}", base_url.scheme());
+                    tracing::error!(
+                        "Unsupported URL scheme for WebSocket PubSub: {}",
+                        base_url.scheme()
+                    );
                     return;
                 }
             };
 
-            // Build query string with topics
             let topics_query = topics_clone.join(",");
             let ws_endpoint = format!("{}/pubsub/ws?topics={}", ws_url, topics_query);
 
             tracing::debug!("Connecting to WebSocket: {}", ws_endpoint);
 
-            // Connect to WebSocket
             let ws_stream = match connect_async(&ws_endpoint).await {
                 Ok((stream, _)) => stream,
                 Err(e) => {
@@ -86,7 +142,6 @@ impl crate::pubsub::PubSubManager {
 
             let (_write, mut read) = ws_stream.split();
 
-            // Process WebSocket messages
             loop {
                 tokio::select! {
                     _ = cancel_rx.recv() => {
@@ -96,19 +151,14 @@ impl crate::pubsub::PubSubManager {
                     msg = read.next() => {
                         match msg {
                             Some(Ok(WsMessage::Text(text))) => {
-                                // Parse JSON message
                                 match serde_json::from_str::<Value>(&text) {
                                     Ok(json) => {
-                                        // Handle different message types
                                         if let Some(msg_type) = json.get("type").and_then(|t| t.as_str()) {
                                             match msg_type {
                                                 "connected" => {
                                                     tracing::debug!("PubSub WebSocket connected: {:?}", json);
-                                                    // Continue to receive messages
                                                 }
                                                 "message" | "publish" => {
-                                                    // Server sends: { "type": "message", "topic": "...", "payload": {...}, "metadata": {...} }
-                                                    // SDK expects: PubSubMessage { topic, data, priority, headers }
                                                     if let (Some(topic), Some(payload)) = (
                                                         json.get("topic").and_then(|t| t.as_str()),
                                                         json.get("payload")
@@ -120,7 +170,7 @@ impl crate::pubsub::PubSubManager {
                                                             headers: json.get("metadata").and_then(|h| serde_json::from_value(h.clone()).ok()),
                                                         };
                                                         if tx.send(pubsub_msg).is_err() {
-                                                            break; // Receiver dropped
+                                                            break;
                                                         }
                                                     }
                                                 }
@@ -130,25 +180,21 @@ impl crate::pubsub::PubSubManager {
                                                     }
                                                 }
                                                 _ => {
-                                                    tracing::debug!("Unknown message type: {}", msg_type);
+                                                    tracing::debug!("Unknown WS message type: {}", msg_type);
                                                 }
                                             }
-                                        } else {
-                                            // No type field, assume it's a message
-                                            // Try both "payload" (server format) and "data" (SDK format)
-                                            if let Some(topic) = json.get("topic").and_then(|t| t.as_str()) {
-                                                if let Some(payload_or_data) = json.get("payload").or_else(|| json.get("data")) {
-                                                    let pubsub_msg = PubSubMessage {
-                                                        topic: topic.to_string(),
-                                                        data: payload_or_data.clone(),
-                                                        priority: json.get("priority").and_then(|p| p.as_u64().map(|u| u as u8)),
-                                                        headers: json.get("metadata")
-                                                            .or_else(|| json.get("headers"))
-                                                            .and_then(|h| serde_json::from_value(h.clone()).ok()),
-                                                    };
-                                                    if tx.send(pubsub_msg).is_err() {
-                                                        break;
-                                                    }
+                                        } else if let Some(topic) = json.get("topic").and_then(|t| t.as_str()) {
+                                            if let Some(payload_or_data) = json.get("payload").or_else(|| json.get("data")) {
+                                                let pubsub_msg = PubSubMessage {
+                                                    topic: topic.to_string(),
+                                                    data: payload_or_data.clone(),
+                                                    priority: json.get("priority").and_then(|p| p.as_u64().map(|u| u as u8)),
+                                                    headers: json.get("metadata")
+                                                        .or_else(|| json.get("headers"))
+                                                        .and_then(|h| serde_json::from_value(h.clone()).ok()),
+                                                };
+                                                if tx.send(pubsub_msg).is_err() {
+                                                    break;
                                                 }
                                             }
                                         }
@@ -163,12 +209,9 @@ impl crate::pubsub::PubSubManager {
                                 break;
                             }
                             Some(Ok(WsMessage::Ping(_data))) => {
-                                // Ping received, server will handle pong automatically
-                                // Continue processing
+                                // pong handled automatically by tungstenite
                             }
-                            Some(Ok(_)) => {
-                                // Ignore other message types
-                            }
+                            Some(Ok(_)) => {}
                             Some(Err(e)) => {
                                 tracing::error!("WebSocket error: {}", e);
                                 break;

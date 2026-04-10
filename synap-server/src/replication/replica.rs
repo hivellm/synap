@@ -285,7 +285,7 @@ impl ReplicaNode {
         // Apply operation based on type
         match &op.operation {
             Operation::KVSet { key, value, ttl } => {
-                let _ = self.kv_store.set(key.as_str(), value.clone(), *ttl).await;
+                let _ = self.kv_store.set(key.clone(), value.clone(), *ttl).await; // S-12
             }
             Operation::KVDel { keys } => {
                 let _ = self.kv_store.mdel(keys).await;

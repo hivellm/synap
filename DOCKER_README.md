@@ -24,10 +24,12 @@ Synap is a modern, production-ready in-memory data platform built in Rust that p
 # Pull the image
 docker pull hivehub/synap:latest
 
-# Run a simple instance
+# Run a simple instance (all three protocols)
 docker run -d \
   --name synap \
   -p 15500:15500 \
+  -p 15501:15501 \
+  -p 6379:6379 \
   -v synap-data:/data \
   hivehub/synap:latest
 
@@ -45,13 +47,12 @@ services:
     image: hivehub/synap:latest
     container_name: synap-server
     ports:
-      - "15500:15500"  # HTTP/REST API
-      - "15501:15501"  # Replication port
+      - "15500:15500"  # HTTP/REST API + StreamableHTTP
+      - "15501:15501"  # SynapRPC binary protocol (synap://)
+      - "6379:6379"    # RESP3 Redis-compatible (resp3://)
     volumes:
       - synap-data:/data
       - ./config.yml:/app/config.yml:ro
-    environment:
-      - SYNAP_SERVER_ADDR=0.0.0.0:15500
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:15500/health"]
@@ -67,8 +68,8 @@ volumes:
 ## 📋 Supported Tags
 
 - `latest` - Latest stable release
-- `0.9.0` - Specific version tag
-- `0.9.x` - Version series tags
+- `0.11.0` - Specific version tag
+- `0.11.x` - Version series tags
 
 All images support multi-architecture builds:
 - `linux/amd64` - Intel/AMD 64-bit
@@ -102,9 +103,27 @@ All images support multi-architecture builds:
 | Port | Protocol | Description |
 |------|----------|-------------|
 | `15500` | HTTP/TCP | REST API, StreamableHTTP, WebSocket |
-| `15501` | TCP | Replication (master-slave) |
+| `15501` | TCP | SynapRPC binary protocol (`synap://host:15501`) |
+| `6379` | TCP | RESP3 Redis-compatible protocol (`resp3://host:6379`) |
+| `15600` | TCP | Replication (master-slave, internal) |
 
 ## 📖 Usage Examples
+
+### Connecting via Different Protocols
+
+Synap exposes three client-facing protocols. Choose based on your use case:
+
+```bash
+# HTTP/REST — universal, any HTTP client
+curl http://localhost:15500/kv/get/mykey
+
+# SynapRPC — lowest latency, use Synap SDKs (Rust, TypeScript, Python, etc.)
+# Rust SDK:
+#   let client = SynapClient::new(SynapConfig::new("synap://localhost:15501"))?;
+
+# RESP3 — Redis-compatible, any Redis client
+redis-cli -p 6379 GET mykey
+```
 
 ### Basic Key-Value Operations
 
@@ -178,6 +197,8 @@ curl -X POST http://localhost:15500/pubsub/publish \
 docker run -d \
   --name synap \
   -p 15500:15500 \
+  -p 15501:15501 \
+  -p 6379:6379 \
   -v synap-data:/data \
   -e SYNAP_AUTH_ENABLED=true \
   -e SYNAP_AUTH_REQUIRE_AUTH=true \
@@ -214,13 +235,13 @@ services:
   synap-master:
     image: hivehub/synap:latest
     ports:
-      - "15500:15500"
-      - "15501:15501"
+      - "15500:15500"  # HTTP/REST
+      - "15501:15501"  # SynapRPC
+      - "6379:6379"    # RESP3
+      - "15600:15600"  # Replication (internal)
     volumes:
       - master-data:/data
-    environment:
-      - SYNAP_REPLICATION_MODE=master
-      - SYNAP_REPLICATION_ADDR=0.0.0.0:15501
+      - ./config-master.yml:/app/config.yml:ro
     restart: unless-stopped
 
 volumes:
@@ -236,12 +257,14 @@ services:
   synap-replica:
     image: hivehub/synap:latest
     ports:
-      - "15502:15500"  # Different port for replica
+      - "15510:15500"  # HTTP/REST
+      - "15511:15501"  # SynapRPC
+      - "6380:6379"    # RESP3
     volumes:
       - replica-data:/data
+      - ./config-replica.yml:/app/config.yml:ro
     environment:
-      - SYNAP_REPLICATION_MODE=replica
-      - SYNAP_REPLICATION_MASTER_ADDR=master-host:15501
+      - SYNAP_MASTER_ADDRESS=master-host:15600
     restart: unless-stopped
     depends_on:
       - synap-master
@@ -258,7 +281,7 @@ volumes:
 # Check server health
 curl http://localhost:15500/health
 
-# Response: {"status":"ok","version":"0.9.0"}
+# Response: {"service":"synap","status":"healthy","version":"0.11.0"}
 ```
 
 ### Prometheus Metrics
@@ -289,28 +312,45 @@ curl http://localhost:15500/queue/stats/queue-name
 # Create custom config.yml
 cat > config.yml <<EOF
 server:
-  addr: "0.0.0.0:15500"
-  replication_addr: "0.0.0.0:15501"
+  host: "0.0.0.0"
+  port: 15500
 
-kv:
+kv_store:
   max_memory_mb: 1024
   eviction_policy: "lru"
 
 queue:
-  max_size: 10000
-  default_ttl: 3600
+  enabled: true
+  max_depth: 100000
+
+# Binary protocols (enabled by default)
+synap_rpc:
+  enabled: true
+  host: "0.0.0.0"
+  port: 15501
+
+resp3:
+  enabled: true
+  host: "0.0.0.0"
+  port: 6379
 
 persistence:
   enabled: true
-  wal_path: "/data/wal"
-  snapshot_path: "/data/snapshots"
-  snapshot_interval: 300
+  wal:
+    enabled: true
+    path: "/data/wal/synap.wal"
+  snapshot:
+    enabled: true
+    directory: "/data/snapshots"
+    interval_secs: 300
 EOF
 
 # Run with custom config
 docker run -d \
   --name synap \
   -p 15500:15500 \
+  -p 15501:15501 \
+  -p 6379:6379 \
   -v synap-data:/data \
   -v $(pwd)/config.yml:/app/config.yml:ro \
   hivehub/synap:latest
@@ -323,11 +363,12 @@ version: '3.8'
 
 services:
   synap:
-    image: hivehub/synap:0.9.0
+    image: hivehub/synap:0.11.0
     container_name: synap-production
     ports:
-      - "15500:15500"
-      - "15501:15501"
+      - "15500:15500"  # HTTP/REST
+      - "15501:15501"  # SynapRPC
+      - "6379:6379"    # RESP3
     volumes:
       - /var/lib/synap/data:/data
       - /etc/synap/config.yml:/app/config.yml:ro

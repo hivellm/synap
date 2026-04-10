@@ -80,7 +80,7 @@ mod tests {
             .create_async()
             .await;
 
-        // Create config with Basic Auth
+        // The mock server URL starts with http:// so the transport defaults to HTTP.
         let config = SynapConfig::new(server.url()).with_basic_auth(TEST_USERNAME, TEST_PASSWORD);
         let auth_client = SynapClient::new(config).expect("Failed to create client");
 
@@ -110,7 +110,7 @@ mod tests {
             .create_async()
             .await;
 
-        // Create config with API Key
+        // The mock server URL starts with http:// so the transport defaults to HTTP.
         let config = SynapConfig::new(server.url()).with_auth_token("sk_test123");
         let auth_client = SynapClient::new(config).expect("Failed to create client");
 

@@ -1,0 +1,56 @@
+{
+  "version": "5.3.2",
+  "installedAt": "2026-04-08T16:12:30.341Z",
+  "updatedAt": "2026-04-08T16:12:30.342Z",
+  "projectId": "synap",
+  "mode": "full",
+  "features": {
+    "watcher": false,
+    "agent": false,
+    "logging": true,
+    "telemetry": false,
+    "notifications": false,
+    "dryRun": false,
+    "gitHooks": true,
+    "repl": false,
+    "templates": true,
+    "context": true,
+    "health": true,
+    "plugins": false,
+    "parallel": true,
+    "smartContinue": true
+  },
+  "coverageThreshold": 95,
+  "language": "en",
+  "outputLanguage": "en",
+  "cliTools": [],
+  "maxParallelTasks": 5,
+  "timeouts": {
+    "taskExecution": 3600000,
+    "cliResponse": 180000,
+    "testRun": 600000
+  },
+  "memory": {
+    "enabled": false,
+    "dbPath": ".rulebook/memory/memory.db",
+    "maxSizeBytes": 524288000,
+    "autoCapture": false,
+    "vectorDimensions": 256
+  },
+  "ralph": {
+    "enabled": true,
+    "maxIterations": 10,
+    "tool": "claude",
+    "maxContextLoss": 3,
+    "parallel": {
+      "enabled": false,
+      "maxWorkers": 3
+    },
+    "planCheckpoint": {
+      "enabled": false,
+      "autoApproveAfterSeconds": 0,
+      "requireApprovalForStories": "all"
+    }
+  },
+  "agentsMode": "lean"
+}

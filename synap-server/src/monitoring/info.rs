@@ -151,7 +151,7 @@ impl MemoryInfo {
         let set_stats = set_store.stats();
         let sorted_set_stats = sorted_set_store.stats();
 
-        let used_memory = kv_stats.total_memory_bytes
+        let used_memory = kv_stats.total_memory_bytes.max(0) as usize
             + hash_stats.total_memory_bytes
             + (list_stats.total_elements * 64) // Estimate for lists
             + (set_stats.total_members * 48) // Estimate for sets
@@ -286,7 +286,7 @@ impl KeyspaceInfo {
         // Format: keys=total,expires=expired_keys,avg_ttl=avg_ttl
         let db0 = format!(
             "keys={},expires=0,avg_ttl=0",
-            kv_stats.total_keys
+            kv_stats.total_keys.max(0) as usize
                 + hash_stats.total_hashes
                 + list_stats.total_lists
                 + set_stats.total_sets

@@ -10,13 +10,13 @@
 
     <!-- Package Metadata -->
     <PackageId>HiveLLM.Synap.SDK</PackageId>
-    <Version>0.9.0</Version>
+    <Version>0.11.0</Version>
     <Authors>HiveLLM</Authors>
     <Company>HiveLLM</Company>
     <Description>Official C# SDK for Synap - High-Performance In-Memory Key-Value Store &amp; Message Broker</Description>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <PackageProjectUrl>https://github.com/hivellm/hivellm</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/hivellm/hivellm</RepositoryUrl>
+    <PackageProjectUrl>https://github.com/hivellm/synap</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/hivellm/synap</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>synap;kv-store;message-queue;pubsub;event-stream;redis;rabbitmq;kafka</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -36,6 +36,12 @@
 
   <ItemGroup>
     <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>Synap.SDK.Tests</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
 </Project>
 

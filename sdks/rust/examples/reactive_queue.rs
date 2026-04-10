@@ -109,9 +109,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("5. Queue statistics");
     let stats = client.queue().stats("reactive-tasks").await?;
     tracing::info!("   Depth: {}", stats.depth);
-    tracing::info!("   Total consumed: {}", stats.total_consumed);
-    tracing::info!("   Total acked: {}", stats.total_acked);
-    tracing::info!("   Total nacked: {}\n", stats.total_nacked);
+    tracing::info!("   Consumed: {}", stats.consumed);
+    tracing::info!("   Acked: {}", stats.acked);
+    tracing::info!("   Nacked: {}\n", stats.nacked);
 
     // 6. Cleanup
     tracing::info!("6. Deleting queue");

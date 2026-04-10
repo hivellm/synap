@@ -24,7 +24,7 @@ pytestmark = pytest.mark.skipif(
 @pytest.fixture
 async def client() -> SynapClient:
     """Create a real Synap client connected to server."""
-    config = SynapConfig(url=os.getenv("SYNAP_URL", "http://localhost:15500"))
+    config = SynapConfig(os.getenv("SYNAP_URL", "http://localhost:15500"))
     return SynapClient(config)
 
 

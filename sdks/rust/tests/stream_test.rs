@@ -83,14 +83,31 @@ mod tests {
     async fn test_stream_consume() {
         let (client, mut server) = setup_test_client().await;
 
+        // Server stores data as serde_json::to_vec, so the wire format for data
+        // is a JSON byte array, not the original object.
+        let data_bytes: Vec<u8> = serde_json::to_vec(&json!({"text": "hello"})).unwrap();
+
+        let response_body = serde_json::to_string(&json!({
+            "success": true,
+            "payload": {
+                "events": [{
+                    "offset": 0,
+                    "event": "message",
+                    "data": data_bytes,
+                    "timestamp": 1234567890u64
+                }]
+            }
+        }))
+        .unwrap();
+
         let mock = server
             .mock("POST", "/api/v1/command")
             .match_body(Matcher::PartialJson(json!({
                 "command": "stream.consume",
-                "payload": {"room": "chat-1", "offset": 0, "limit": 10}
+                "payload": {"room": "chat-1", "from_offset": 0}
             })))
             .with_status(200)
-            .with_body(r#"{"success": true, "payload": {"events": [{"offset": 0, "event_type": "message", "data": {"text": "hello"}, "timestamp": 1234567890}]}}"#)
+            .with_body(response_body)
             .create_async()
             .await;
 
@@ -102,6 +119,7 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].offset, 0);
         assert_eq!(events[0].event, "message");
+        assert_eq!(events[0].data["text"], "hello");
 
         mock.assert_async().await;
     }
@@ -117,13 +135,13 @@ mod tests {
                 "payload": {"room": "chat-1"}
             })))
             .with_status(200)
-            .with_body(r#"{"success": true, "payload": {"room": "chat-1", "max_offset": 99, "total_events": 100, "created_at": 1234567890, "last_activity": 1234567900}}"#)
+            .with_body(r#"{"success": true, "payload": {"name": "chat-1", "message_count": 50, "max_offset": 99, "total_published": 100, "total_consumed": 80, "subscriber_count": 3}}"#)
             .create_async()
             .await;
 
         let stats = client.stream().stats("chat-1").await.unwrap();
-        assert_eq!(stats.room, "chat-1");
-        assert_eq!(stats.total_events, 100);
+        assert_eq!(stats.name, "chat-1");
+        assert_eq!(stats.total_published, 100);
 
         mock.assert_async().await;
     }

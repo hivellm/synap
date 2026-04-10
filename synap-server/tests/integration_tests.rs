@@ -128,9 +128,8 @@ async fn test_kv_set_get_delete() {
         .unwrap();
 
     assert_eq!(res.status(), 200);
-    // Server returns value directly as JSON string
     let value_str: String = res.json().await.unwrap();
-    assert_eq!(value_str, "\"test_value\"");
+    assert_eq!(value_str, "test_value");
 
     // DELETE
     let res = client
@@ -185,9 +184,8 @@ async fn test_kv_with_ttl() {
         .await
         .unwrap();
 
-    // Server returns value directly
     let value_str: String = res.json().await.unwrap();
-    assert_eq!(value_str, "\"temporary\"");
+    assert_eq!(value_str, "temporary");
 
     // Wait for expiration
     tokio::time::sleep(Duration::from_secs(2)).await;
@@ -249,8 +247,7 @@ async fn test_streamable_http_command() {
     assert_eq!(res.status(), 200);
     let body: serde_json::Value = res.json().await.unwrap();
     assert_eq!(body["success"], true);
-    // Payload now returns value directly as JSON string
-    assert_eq!(body["payload"], "\"cmd_value\"");
+    assert_eq!(body["payload"], "cmd_value");
 }
 
 #[tokio::test]

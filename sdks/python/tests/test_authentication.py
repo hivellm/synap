@@ -12,6 +12,7 @@ TEST_PASSWORD = os.getenv("SYNAP_TEST_PASSWORD", "root")
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="S2S test - requires running Synap server")
 class TestBasicAuth:
     """Tests for Basic Auth authentication."""
 
@@ -57,6 +58,7 @@ class TestBasicAuth:
 
 
 @pytest.mark.asyncio
+@pytest.mark.skip(reason="S2S test - requires running Synap server")
 class TestApiKeyAuth:
     """Tests for API Key authentication."""
 

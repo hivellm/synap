@@ -65,6 +65,59 @@ async def main():
 asyncio.run(main())
 ```
 
+## Transports
+
+Since v0.11.0 the SDK selects the transport via **URL scheme** — no extra arguments required:
+
+| URL scheme    | Default port | When to use                                               |
+|---------------|--------------|-----------------------------------------------------------|
+| `synap://`    | `15501`      | **✅ Recommended default** — MessagePack over persistent TCP, lowest latency, preserves int/float/bool/bytes. |
+| `resp3://`    | `6379`       | Redis-compatible text protocol — interop with existing Redis tooling. |
+| `http://` / `https://` | `15500` | Original REST transport — full command coverage. |
+
+All commands (KV, Hash, List, Set, Sorted Set, Queue, Stream, Pub/Sub, Transactions, Scripts, Geo, HyperLogLog) are fully supported on every transport. Native transports raise `UnsupportedCommandError` instead of silently falling back to HTTP.
+
+```python
+from synap_sdk import SynapClient, SynapConfig
+
+# SynapRPC — recommended default
+config = SynapConfig("synap://127.0.0.1:15501")
+client = SynapClient(config)
+
+# RESP3 — Redis-compatible
+config = SynapConfig("resp3://127.0.0.1:6379")
+client = SynapClient(config)
+
+# HTTP — full REST access
+config = SynapConfig("http://127.0.0.1:15500")
+client = SynapClient(config)
+```
+
+**Queue, stream and pub/sub over `synap://`:**
+
+```python
+import asyncio
+from synap_sdk import SynapClient, SynapConfig
+
+async def main():
+    async with SynapClient(SynapConfig("synap://127.0.0.1:15501")) as client:
+        # Queue round-trip
+        await client.queue.create_queue("tasks", max_size=1000, message_ttl=60)
+        msg_id = await client.queue.publish("tasks", {"job": "resize"}, priority=5)
+        msg = await client.queue.consume("tasks", "worker-1")
+        await client.queue.ack("tasks", msg.id)
+
+        # Stream publish + read
+        await client.stream.create_room("events")
+        await client.stream.publish("events", "user.created", {"id": "u1"})
+        events = await client.stream.read("events", offset=0)
+
+        # Reactive pub/sub (server-push over dedicated TCP connection on synap://)
+        async for msg in client.pubsub.observe(["news.*"]):
+            print("got:", msg)
+            break
+```
+
 ## API Reference
 
 ### Configuration

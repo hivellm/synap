@@ -28,6 +28,14 @@ pub struct ServerConfig {
 
     #[serde(default)]
     pub hub: HubConfig,
+
+    /// Redis-compatible RESP3 TCP listener
+    #[serde(default)]
+    pub resp3: Resp3Config,
+
+    /// Native binary SynapRPC TCP listener
+    #[serde(default)]
+    pub synap_rpc: SynapRpcConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +52,9 @@ pub struct KVStoreConfig {
     pub ttl_cleanup_interval_ms: u64,
     #[serde(default)]
     pub allow_flush_commands: bool,
+    /// Maximum allowed value size in bytes. None means no limit.
+    #[serde(default)]
+    pub max_value_size_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -200,6 +211,70 @@ impl Default for McpConfig {
     }
 }
 
+/// Redis-compatible RESP3 TCP listener configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Resp3Config {
+    /// Enable the RESP3 listener (default: false).
+    #[serde(default)]
+    pub enabled: bool,
+    /// TCP port the RESP3 listener binds to (default: 6379).
+    #[serde(default = "default_resp3_port")]
+    pub port: u16,
+    /// Host/IP to bind (default: "127.0.0.1" — loopback only for safety).
+    #[serde(default = "default_resp3_host")]
+    pub host: String,
+}
+
+fn default_resp3_port() -> u16 {
+    6379
+}
+
+fn default_resp3_host() -> String {
+    "127.0.0.1".to_string()
+}
+
+impl Default for Resp3Config {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            port: default_resp3_port(),
+            host: default_resp3_host(),
+        }
+    }
+}
+
+/// Native binary SynapRPC TCP listener configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SynapRpcConfig {
+    /// Enable the SynapRPC listener (default: false).
+    #[serde(default)]
+    pub enabled: bool,
+    /// TCP port the SynapRPC listener binds to (default: 15501).
+    #[serde(default = "default_synap_rpc_port")]
+    pub port: u16,
+    /// Host/IP to bind (default: "0.0.0.0").
+    #[serde(default = "default_synap_rpc_host")]
+    pub host: String,
+}
+
+fn default_synap_rpc_port() -> u16 {
+    15501
+}
+
+fn default_synap_rpc_host() -> String {
+    "0.0.0.0".to_string()
+}
+
+impl Default for SynapRpcConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            port: default_synap_rpc_port(),
+            host: default_synap_rpc_host(),
+        }
+    }
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
@@ -210,9 +285,10 @@ impl Default for ServerConfig {
             },
             kv_store: KVStoreConfig {
                 max_memory_mb: 4096,
-                eviction_policy: EvictionPolicy::Lru,
+                eviction_policy: EvictionPolicy::NoEviction,
                 ttl_cleanup_interval_ms: 100,
                 allow_flush_commands: false,
+                max_value_size_bytes: None,
             },
             queue: QueueSystemConfig {
                 enabled: true,
@@ -246,6 +322,9 @@ impl Default for ServerConfig {
             auth: AuthConfig::default(),
 
             hub: crate::hub::HubConfig::default(),
+
+            resp3: Resp3Config::default(),
+            synap_rpc: SynapRpcConfig::default(),
         }
     }
 }
@@ -265,6 +344,8 @@ impl ServerConfig {
             eviction_policy: self.kv_store.eviction_policy,
             ttl_cleanup_interval_ms: self.kv_store.ttl_cleanup_interval_ms,
             allow_flush_commands: self.kv_store.allow_flush_commands,
+            max_value_size_bytes: self.kv_store.max_value_size_bytes,
+            eviction_sample_size: 5,
         }
     }
 

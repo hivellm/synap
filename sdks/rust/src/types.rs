@@ -1,50 +1,90 @@
 //! Common types for Synap SDK
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Deserialize a value that may arrive as either a number or a string
+/// (RESP3 returns all scalars as strings).
+fn from_str_or_num<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    use serde::de::Error;
+    let value = serde_json::Value::deserialize(deserializer)?;
+    match &value {
+        serde_json::Value::Number(n) => {
+            let s = n.to_string();
+            s.parse::<T>().map_err(Error::custom)
+        }
+        serde_json::Value::String(s) => s.parse::<T>().map_err(Error::custom),
+        other => Err(Error::custom(format!(
+            "expected number or string, got {other}"
+        ))),
+    }
+}
 
 /// Queue message
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Message {
     pub id: String,
     pub payload: Vec<u8>,
+    #[serde(default)]
     pub priority: u8,
+    #[serde(default)]
     pub retry_count: u32,
+    #[serde(default)]
     pub max_retries: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub deadline: Option<u64>,
 }
 
 /// Queue statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QueueStats {
+    #[serde(deserialize_with = "from_str_or_num")]
     pub depth: usize,
-    pub pending: usize,
-    pub max_depth: usize,
-    pub total_published: u64,
-    pub total_consumed: u64,
-    pub total_acked: u64,
-    pub total_nacked: u64,
-    pub dlq_count: usize,
+    #[serde(deserialize_with = "from_str_or_num")]
+    pub consumers: usize,
+    #[serde(deserialize_with = "from_str_or_num")]
+    pub published: u64,
+    #[serde(deserialize_with = "from_str_or_num")]
+    pub consumed: u64,
+    #[serde(deserialize_with = "from_str_or_num")]
+    pub acked: u64,
+    #[serde(deserialize_with = "from_str_or_num")]
+    pub nacked: u64,
+    #[serde(deserialize_with = "from_str_or_num")]
+    pub dead_lettered: usize,
 }
 
 /// Stream event
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
+    #[serde(default)]
     pub offset: u64,
-    #[serde(rename = "event_type")]
+    #[serde(alias = "event_type")]
     pub event: String,
     pub data: serde_json::Value,
+    #[serde(default)]
     pub timestamp: Option<u64>,
 }
 
 /// Stream statistics
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StreamStats {
-    pub room: String,
+    #[serde(alias = "room", default)]
+    pub name: String,
+    #[serde(default)]
+    pub message_count: usize,
+    #[serde(default)]
     pub max_offset: u64,
-    pub total_events: u64,
-    pub created_at: u64,
-    pub last_activity: u64,
+    #[serde(default)]
+    pub total_published: u64,
+    #[serde(default)]
+    pub total_consumed: u64,
+    #[serde(default)]
+    pub subscriber_count: usize,
 }
 
 /// Pub/Sub message

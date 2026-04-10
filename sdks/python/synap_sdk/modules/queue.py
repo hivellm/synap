@@ -38,13 +38,13 @@ class QueueManager:
             max_size: Optional maximum queue size
             message_ttl: Optional message TTL in seconds
         """
-        data: dict[str, Any] = {}
+        data: dict[str, Any] = {"name": name}
         if max_size is not None:
-            data["max_size"] = max_size
+            data["max_depth"] = max_size
         if message_ttl is not None:
-            data["message_ttl"] = message_ttl
+            data["ack_deadline_secs"] = message_ttl
 
-        await self._client.execute("queue.create", name, data)
+        await self._client.send_command("queue.create", data)
 
     async def delete_queue(self, name: str) -> None:
         """Delete a queue.
@@ -52,7 +52,7 @@ class QueueManager:
         Args:
             name: The queue name
         """
-        await self._client.execute("queue.delete", name)
+        await self._client.send_command("queue.delete", {"queue": name})
 
     async def publish(
         self,
@@ -65,20 +65,20 @@ class QueueManager:
 
         Args:
             queue: The queue name
-            message: The message payload
+            message: The message payload (string or bytes)
             priority: Message priority (0-9, higher is more important)
             max_retries: Maximum retry attempts
 
         Returns:
             The message ID
         """
-        data: dict[str, Any] = {"message": message}
+        data: dict[str, Any] = {"queue": queue, "payload": message}
         if priority is not None:
             data["priority"] = priority
         if max_retries is not None:
             data["max_retries"] = max_retries
 
-        response = await self._client.execute("queue.publish", queue, data)
+        response = await self._client.send_command("queue.publish", data)
         return str(response.get("message_id", ""))
 
     async def consume(
@@ -95,10 +95,9 @@ class QueueManager:
         Returns:
             The queue message, or None if no message is available
         """
-        response = await self._client.execute(
+        response = await self._client.send_command(
             "queue.consume",
-            queue,
-            {"consumer_id": consumer_id},
+            {"queue": queue, "consumer_id": consumer_id},
         )
 
         msg_data = response.get("message")
@@ -121,7 +120,7 @@ class QueueManager:
             queue: The queue name
             message_id: The message ID to acknowledge
         """
-        await self._client.execute("queue.ack", queue, {"message_id": message_id})
+        await self._client.send_command("queue.ack", {"queue": queue, "message_id": message_id})
 
     async def nack(self, queue: str, message_id: str) -> None:
         """Negative acknowledge a message (requeue for retry).
@@ -130,7 +129,7 @@ class QueueManager:
             queue: The queue name
             message_id: The message ID to requeue
         """
-        await self._client.execute("queue.nack", queue, {"message_id": message_id})
+        await self._client.send_command("queue.nack", {"queue": queue, "message_id": message_id})
 
     async def stats(self, queue: str) -> dict[str, Any]:
         """Get queue statistics.
@@ -141,7 +140,7 @@ class QueueManager:
         Returns:
             Statistics as a dictionary
         """
-        return await self._client.execute("queue.stats", queue)
+        return await self._client.send_command("queue.stats", {"queue": queue})
 
     async def list(self) -> list[str]:
         """List all queues.
@@ -149,5 +148,5 @@ class QueueManager:
         Returns:
             List of queue names
         """
-        response = await self._client.execute("queue.list", "*")
+        response = await self._client.send_command("queue.list", {})
         return list(response.get("queues", []))
