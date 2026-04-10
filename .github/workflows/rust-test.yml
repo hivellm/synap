@@ -17,8 +17,8 @@ jobs:
         os: [ ubuntu-latest, windows-latest, macos-latest ]
 
     steps:
-    - name: Install minimal stable
-      uses: dtolnay/rust-toolchain@stable
+    - name: Install Rust nightly (required for Edition 2024)
+      uses: dtolnay/rust-toolchain@nightly
     
     - uses: actions/checkout@v6
     
