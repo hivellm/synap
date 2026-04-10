@@ -821,6 +821,53 @@ pub(crate) fn map_command(cmd: &str, payload: &Value) -> Option<(&'static str, V
         }
         "geospatial.stats" => ("GEOSTATS", vec![]),
 
+        // ── Additional KV commands used by the CLI ─────────────────────────────
+        "kv.mdel" => {
+            let mut args = Vec::new();
+            if let Some(keys) = payload["keys"].as_array() {
+                for k in keys {
+                    args.push(WireValue::Str(k.as_str().unwrap_or("").to_string()));
+                }
+            }
+            ("DEL", args)
+        }
+        "kv.mset" => {
+            let mut args = Vec::new();
+            if let Some(pairs) = payload["pairs"].as_array() {
+                for pair in pairs {
+                    args.push(WireValue::Str(
+                        pair["key"].as_str().unwrap_or("").to_string(),
+                    ));
+                    args.push(WireValue::Str(
+                        pair["value"].as_str().unwrap_or("").to_string(),
+                    ));
+                }
+            }
+            ("MSET", args)
+        }
+        "kv.mget" => {
+            let mut args = Vec::new();
+            if let Some(keys) = payload["keys"].as_array() {
+                for k in keys {
+                    args.push(WireValue::Str(k.as_str().unwrap_or("").to_string()));
+                }
+            }
+            ("MGET", args)
+        }
+        "kv.persist" => ("PERSIST", vec![field_str("key")]),
+        "kv.dbsize" => ("DBSIZE", vec![]),
+        "kv.flushdb" => ("FLUSHDB", vec![]),
+        "kv.flushall" => ("FLUSHALL", vec![]),
+        "kv.scan" => {
+            let prefix = payload["prefix"].as_str().unwrap_or("");
+            let pattern = if prefix.is_empty() {
+                "*".to_string()
+            } else {
+                format!("{prefix}*")
+            };
+            ("KEYS", vec![WireValue::Str(pattern)])
+        }
+
         // Commands with no native mapping — caller returns UnsupportedCommand.
         _ => return None,
     })
@@ -1276,6 +1323,55 @@ pub(crate) fn map_response(cmd: &str, wire: WireValue) -> Value {
             json!({"hashes": hashes})
         }
         "geospatial.stats" => wire.to_json(),
+
+        // ── Additional KV command responses ──────────────────────────────────
+        "kv.mdel" => {
+            let deleted = match &wire {
+                WireValue::Int(n) => *n,
+                _ => 0,
+            };
+            json!({"deleted": deleted})
+        }
+        "kv.mset" => json!({"success": true}),
+        "kv.mget" => {
+            let values: Vec<Value> = match wire {
+                WireValue::Array(arr) => arr
+                    .iter()
+                    .map(|v| {
+                        if v.is_null() {
+                            Value::Null
+                        } else {
+                            v.to_json()
+                        }
+                    })
+                    .collect(),
+                _ => vec![],
+            };
+            json!({"values": values})
+        }
+        "kv.persist" => {
+            let ok = match &wire {
+                WireValue::Int(n) => *n > 0,
+                WireValue::Bool(b) => *b,
+                _ => false,
+            };
+            json!({"result": ok})
+        }
+        "kv.dbsize" => {
+            let size = match &wire {
+                WireValue::Int(n) => *n as u64,
+                _ => 0,
+            };
+            json!({"size": size})
+        }
+        "kv.flushdb" | "kv.flushall" => json!({}),
+        "kv.scan" => {
+            let keys: Vec<Value> = match wire {
+                WireValue::Array(arr) => arr.iter().map(WireValue::to_json).collect(),
+                _ => vec![],
+            };
+            json!({"keys": keys})
+        }
 
         // Fallthrough: return the raw JSON representation.
         _ => wire.to_json(),

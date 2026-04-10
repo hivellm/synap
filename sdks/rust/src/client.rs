@@ -389,7 +389,7 @@ impl SynapClient {
     /// [`SynapError::UnsupportedCommand`] — there is no silent HTTP fallback.
     /// Use an `http://` URL if you need HTTP REST for a command that is not
     /// yet in the mapper.
-    pub(crate) async fn send_command(&self, command: &str, payload: Value) -> Result<Value> {
+    pub async fn send_command(&self, command: &str, payload: Value) -> Result<Value> {
         match self.transport.as_ref() {
             Transport::Http => self.send_http(command, payload).await,
 
