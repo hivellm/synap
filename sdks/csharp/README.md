@@ -290,7 +290,7 @@ var client = new SynapClient(config, httpClient);
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+Apache License 2.0 - See [LICENSE](../../LICENSE) for details.
 
 ## Contributing
 

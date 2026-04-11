@@ -441,7 +441,7 @@ SYNAP_URL=http://localhost:15500 cargo test
 
 ## License
 
-MIT License - See [LICENSE](../../LICENSE) for details.
+Apache License 2.0 - See [LICENSE](../../LICENSE) for details.
 
 ## Links
 
