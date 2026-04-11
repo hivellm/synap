@@ -47,6 +47,31 @@ SHA256SUMS
 /build/
 *.AppImage
 
+# .NET / C#
+**/bin/
+**/obj/
+*.nupkg
+
+# Node.js
+**/node_modules/
+**/dist/
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/dist/
+*.egg-info/
+
+# PHP
+**/vendor/
+
+# Java
+**/target/
+
+# Go
+**/go.sum
+
 # Claude local settings
 .claude/settings.local.json
 **/settings.local.json
