@@ -29,10 +29,10 @@ class SynapConfig
     private string $resp3Host = '127.0.0.1';
     private int $resp3Port = 6379;
 
-    public function __construct(string $baseUrl)
+    public function __construct(string $baseUrl = 'synap://127.0.0.1:15501')
     {
         if (empty($baseUrl)) {
-            throw SynapException::invalidConfig('Base URL cannot be empty');
+            $baseUrl = 'synap://127.0.0.1:15501';
         }
 
         if (str_starts_with($baseUrl, 'synap://')) {

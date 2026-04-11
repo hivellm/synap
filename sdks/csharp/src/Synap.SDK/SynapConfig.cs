@@ -49,16 +49,27 @@ public sealed class SynapConfig
     public int Resp3Port { get; private set; } = 6379;
 
     /// <summary>
+    /// Initializes a new instance of <see cref="SynapConfig"/> with the default SynapRPC transport.
+    ///
+    /// Equivalent to <c>new SynapConfig("synap://127.0.0.1:15501")</c>.
+    /// SynapRPC (MessagePack over TCP) is the default transport because it is the most
+    /// efficient and feature-complete protocol supported by Synap.
+    /// </summary>
+    public SynapConfig() : this("synap://127.0.0.1:15501")
+    {
+    }
+
+    /// <summary>
     /// Initializes a new instance of <see cref="SynapConfig"/> from a URL.
     ///
     /// URL schemes:
     /// <list type="bullet">
-    ///   <item><c>http://</c> or <c>https://</c> — HTTP transport</item>
-    ///   <item><c>synap://host:port</c> — SynapRPC transport</item>
-    ///   <item><c>resp3://host:port</c> — RESP3 transport</item>
+    ///   <item><c>synap://host:port</c> — SynapRPC transport (DEFAULT, port 15501)</item>
+    ///   <item><c>resp3://host:port</c> — RESP3 transport (port 6379)</item>
+    ///   <item><c>http://</c> or <c>https://</c> — HTTP transport (port 15500)</item>
     /// </list>
     /// </summary>
-    /// <param name="url">The URL (with scheme) or bare HTTP base URL.</param>
+    /// <param name="url">The URL with scheme.</param>
     /// <exception cref="SynapException">Thrown when the URL is null or empty.</exception>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054:URI-like parameters should not be strings", Justification = "String is more convenient for users")]
     public SynapConfig(string url)
@@ -90,6 +101,13 @@ public sealed class SynapConfig
             Transport = TransportMode.Http;
         }
     }
+
+    /// <summary>
+    /// Creates a new configuration with the default SynapRPC transport
+    /// (<c>synap://127.0.0.1:15501</c>).
+    /// </summary>
+    /// <returns>A default <see cref="SynapConfig"/> instance.</returns>
+    public static SynapConfig Default() => new();
 
     /// <summary>Creates a new configuration with the specified URL.</summary>
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1054:URI-like parameters should not be strings", Justification = "String is more convenient for users")]

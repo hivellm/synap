@@ -50,13 +50,15 @@ Which data structures / features each SDK implements:
 
 ## Transport Support
 
-| Transport | URL Scheme | Rust | Others |
-|-----------|-----------|:----:|:------:|
-| HTTP/REST | `http://host:15500` | x | x |
-| SynapRPC (binary) | `synap://host:15501` | x | - |
-| RESP3 (Redis) | `resp3://host:6379` | x | - |
+All 7 SDKs support all 3 transports. **SynapRPC is the default** — HTTP is the fallback.
 
-> The Rust SDK is the reference implementation with full multi-transport support. Other SDKs currently use HTTP only — binary transports will be added in future releases.
+| Transport | URL Scheme | Default | Rust | TS | Python | Go | Java | PHP | C# |
+|-----------|-----------|:-------:|:----:|:--:|:------:|:--:|:----:|:---:|:--:|
+| **SynapRPC** (binary) | `synap://host:15501` | **yes** | x | x | x | x | x | x | x |
+| **RESP3** (Redis) | `resp3://host:6379` | | x | x | x | x | x | x | x |
+| HTTP/REST | `http://host:15500` | fallback | x | x | x | x | x | x | x |
+
+> The transport is auto-detected from the URL scheme. Use `synap://` for lowest latency, `resp3://` for Redis tooling compatibility, `http://` for maximum compatibility.
 
 ## Quick Start (all SDKs)
 

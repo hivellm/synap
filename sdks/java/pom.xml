@@ -29,6 +29,13 @@
             <version>${jackson.version}</version>
         </dependency>
 
+        <!-- MessagePack for SynapRPC binary transport -->
+        <dependency>
+            <groupId>org.msgpack</groupId>
+            <artifactId>jackson-dataformat-msgpack</artifactId>
+            <version>0.9.8</version>
+        </dependency>
+
         <!-- JUnit 5 for testing -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>

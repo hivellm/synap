@@ -51,6 +51,16 @@ export class SynapClient {
     this.auth = options.auth;
 
     // ── URL-scheme-based transport inference (v0.11.0+) ──────────────────────
+    //
+    // Resolution order:
+    //   1. synap://host:port  → SynapRPC (binary TCP, port 15501)
+    //   2. resp3://host:port  → RESP3 (text TCP, port 6379)
+    //   3. http[s]://host     → HTTP REST (port 15500)
+    //   4. no URL given       → SynapRPC on 127.0.0.1:15501 (DEFAULT)
+    //
+    // The legacy `transport`, `rpcHost`, `rpcPort`, `resp3Host`, `resp3Port`
+    // fields on `SynapClientOptions` remain supported for backward compatibility.
+
     const rawUrl = options.url ?? '';
 
     if (rawUrl.startsWith('synap://')) {
@@ -67,10 +77,47 @@ export class SynapClient {
         kind: 'resp3',
         impl: new Resp3Transport(host, port, this.timeout),
       };
+    } else if (rawUrl.startsWith('http://') || rawUrl.startsWith('https://')) {
+      // Explicit HTTP URL — honour the legacy transport field if set, else HTTP.
+      this.baseUrl = rawUrl;
+      const mode: TransportMode = options.transport ?? 'http';
+      switch (mode) {
+        case 'synaprpc':
+          this.transport = {
+            kind: 'synaprpc',
+            impl: new SynapRpcTransport(
+              options.rpcHost ?? '127.0.0.1',
+              options.rpcPort ?? 15_501,
+              this.timeout,
+            ),
+          };
+          break;
+        case 'resp3':
+          this.transport = {
+            kind: 'resp3',
+            impl: new Resp3Transport(
+              options.resp3Host ?? '127.0.0.1',
+              options.resp3Port ?? 6_379,
+              this.timeout,
+            ),
+          };
+          break;
+        default:
+          this.transport = { kind: 'http' };
+      }
+    } else if (rawUrl === '' && options.transport == null) {
+      // No URL and no explicit transport override → SynapRPC is the default.
+      const host = options.rpcHost ?? '127.0.0.1';
+      const port = options.rpcPort ?? 15_501;
+      this.baseUrl = `http://${host}:15500`;
+      this.transport = {
+        kind: 'synaprpc',
+        impl: new SynapRpcTransport(host, port, this.timeout),
+      };
     } else {
-      // http:// / https:// — or legacy options.transport field.
+      // Legacy: no URL but explicit options.transport override, or an unrecognised
+      // URL that we treat as an HTTP base URL for backward compatibility.
       this.baseUrl = rawUrl || 'http://localhost:15500';
-
       const mode: TransportMode = options.transport ?? 'http';
       switch (mode) {
         case 'synaprpc':

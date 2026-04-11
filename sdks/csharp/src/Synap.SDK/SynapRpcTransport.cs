@@ -3,10 +3,11 @@ using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Text;
 using Synap.SDK.Exceptions;
+using Synap.SDK.Transports;
 
 namespace Synap.SDK;
 
-internal sealed class SynapRpcTransport : IDisposable
+internal sealed class SynapRpcTransport : ITransport
 {
     private readonly string _host;
     private readonly int _port;
@@ -136,7 +137,7 @@ internal sealed class SynapRpcTransport : IDisposable
     }
 
     /// <summary>Executes a command over SynapRPC and returns the plain (unwrapped) result.</summary>
-    internal async Task<object?> ExecuteAsync(string command, object?[] args, CancellationToken ct = default)
+    public async Task<object?> ExecuteAsync(string command, object?[] args, CancellationToken ct = default)
     {
         await EnsureConnectedAsync(ct).ConfigureAwait(false);
 

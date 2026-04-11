@@ -3,10 +3,11 @@ using System.Collections.Concurrent;
 using System.Net.Sockets;
 using System.Text;
 using Synap.SDK.Exceptions;
+using Synap.SDK.Transports;
 
 namespace Synap.SDK;
 
-internal sealed class Resp3Transport : IDisposable
+internal sealed class Resp3Transport : ITransport
 {
     private readonly string _host;
     private readonly int _port;
@@ -80,7 +81,7 @@ internal sealed class Resp3Transport : IDisposable
     }
 
     /// <summary>Executes a RESP3 command and returns the decoded result.</summary>
-    internal async Task<object?> ExecuteAsync(string command, object?[] args, CancellationToken ct = default)
+    public async Task<object?> ExecuteAsync(string command, object?[] args, CancellationToken ct = default)
     {
         await EnsureConnectedAsync(ct).ConfigureAwait(false);
 

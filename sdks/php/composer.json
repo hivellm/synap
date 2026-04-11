@@ -28,7 +28,8 @@
             "Synap\\SDK\\": "src/"
         },
         "files": [
-            "src/Transport.php"
+            "src/Transport.php",
+            "src/CommandMapper.php"
         ]
     },
     "autoload-dev": {

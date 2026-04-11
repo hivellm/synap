@@ -2,30 +2,28 @@ package com.hivellm.synap;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import java.io.IOException;
-import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.UUID;
 
 /**
  * Main entry-point for the Synap Java SDK.
  *
- * <p>All operations are executed synchronously over the StreamableHTTP endpoint
- * ({@code POST /api/v1/command}).  The client is thread-safe: a single instance
- * can be shared across threads.</p>
+ * <p>The transport is selected automatically from the URL scheme supplied to
+ * {@link SynapConfig}:
+ * <ul>
+ *   <li>{@code synap://host:port} → SynapRPC (DEFAULT)</li>
+ *   <li>{@code resp3://host:port} → RESP3</li>
+ *   <li>{@code http://host:port}  → HTTP</li>
+ * </ul>
  *
- * <p>Always close the client when done to release the underlying HTTP connection
- * pool:
+ * <p>The default URL is {@code synap://127.0.0.1:15501}.
+ *
+ * <p>A single client instance is thread-safe and should be shared across threads:
  * <pre>{@code
- * try (SynapClient client = new SynapClient(config)) {
+ * try (SynapClient client = new SynapClient(SynapConfig.builder().build())) {
  *     client.kv().set("key", "value");
  * }
  * }</pre>
@@ -36,41 +34,59 @@ public final class SynapClient implements AutoCloseable {
     final ObjectMapper mapper;
 
     private final SynapConfig config;
-    private final HttpClient httpClient;
+    private final Transport   transport;
 
-    private volatile KVStore kvStore;
-    private volatile QueueManager queueManager;
+    private volatile KVStore       kvStore;
+    private volatile QueueManager  queueManager;
     private volatile StreamManager streamManager;
     private volatile PubSubManager pubSubManager;
-    private volatile HashManager hashManager;
-    private volatile ListManager listManager;
-    private volatile SetManager setManager;
+    private volatile HashManager   hashManager;
+    private volatile ListManager   listManager;
+    private volatile SetManager    setManager;
 
     /**
      * Creates a new SynapClient with the given configuration.
+     *
+     * <p>The transport is chosen from the URL scheme in {@code config}.</p>
      *
      * @param config the client configuration
      * @throws NullPointerException if config is null
      */
     public SynapClient(SynapConfig config) {
-        this.config = Objects.requireNonNull(config, "config must not be null");
-        this.mapper = new ObjectMapper();
-        this.httpClient = HttpClient.newBuilder()
-                .connectTimeout(config.getTimeout())
-                .version(HttpClient.Version.HTTP_1_1)
-                .build();
+        this.config    = Objects.requireNonNull(config, "config must not be null");
+        this.mapper    = new ObjectMapper();
+        this.transport = createTransport(config, mapper, null);
     }
 
     /**
-     * Package-private constructor that accepts a custom HttpClient for testing.
+     * Package-private constructor that accepts a custom {@link HttpClient} for testing.
+     *
+     * <p>When an explicit {@code HttpClient} is provided the client always uses the
+     * HTTP transport, regardless of the URL scheme.</p>
      *
      * @param config     the client configuration
-     * @param httpClient the HTTP client to use
+     * @param httpClient the HTTP client to use (forces HTTP transport)
      */
     SynapClient(SynapConfig config, HttpClient httpClient) {
-        this.config = Objects.requireNonNull(config, "config must not be null");
-        this.mapper = new ObjectMapper();
-        this.httpClient = Objects.requireNonNull(httpClient, "httpClient must not be null");
+        this.config    = Objects.requireNonNull(config,     "config must not be null");
+        this.mapper    = new ObjectMapper();
+        this.transport = new HttpTransport(config, mapper,
+                Objects.requireNonNull(httpClient, "httpClient must not be null"));
+    }
+
+    // ── Transport factory ──────────────────────────────────────────────────────
+
+    private static Transport createTransport(SynapConfig config, ObjectMapper mapper, HttpClient httpClient) {
+        if (httpClient != null) {
+            return new HttpTransport(config, mapper, httpClient);
+        }
+        return switch (config.getTransportMode()) {
+            case SYNAP_RPC -> new SynapRpcTransport(
+                    config.getHost(), config.getPort(), config.getTimeoutSeconds(), mapper);
+            case RESP3     -> new Resp3Transport(
+                    config.getHost(), config.getPort(), config.getTimeoutSeconds(), mapper);
+            case HTTP      -> new HttpTransport(config, mapper);
+        };
     }
 
     // ── Sub-clients (lazy, thread-safe via double-checked locking) ─────────────
@@ -83,9 +99,7 @@ public final class SynapClient implements AutoCloseable {
     public KVStore kv() {
         if (kvStore == null) {
             synchronized (this) {
-                if (kvStore == null) {
-                    kvStore = new KVStore(this);
-                }
+                if (kvStore == null) kvStore = new KVStore(this);
             }
         }
         return kvStore;
@@ -99,9 +113,7 @@ public final class SynapClient implements AutoCloseable {
     public QueueManager queue() {
         if (queueManager == null) {
             synchronized (this) {
-                if (queueManager == null) {
-                    queueManager = new QueueManager(this);
-                }
+                if (queueManager == null) queueManager = new QueueManager(this);
             }
         }
         return queueManager;
@@ -115,9 +127,7 @@ public final class SynapClient implements AutoCloseable {
     public StreamManager stream() {
         if (streamManager == null) {
             synchronized (this) {
-                if (streamManager == null) {
-                    streamManager = new StreamManager(this);
-                }
+                if (streamManager == null) streamManager = new StreamManager(this);
             }
         }
         return streamManager;
@@ -131,9 +141,7 @@ public final class SynapClient implements AutoCloseable {
     public PubSubManager pubsub() {
         if (pubSubManager == null) {
             synchronized (this) {
-                if (pubSubManager == null) {
-                    pubSubManager = new PubSubManager(this);
-                }
+                if (pubSubManager == null) pubSubManager = new PubSubManager(this);
             }
         }
         return pubSubManager;
@@ -147,9 +155,7 @@ public final class SynapClient implements AutoCloseable {
     public HashManager hash() {
         if (hashManager == null) {
             synchronized (this) {
-                if (hashManager == null) {
-                    hashManager = new HashManager(this);
-                }
+                if (hashManager == null) hashManager = new HashManager(this);
             }
         }
         return hashManager;
@@ -163,9 +169,7 @@ public final class SynapClient implements AutoCloseable {
     public ListManager list() {
         if (listManager == null) {
             synchronized (this) {
-                if (listManager == null) {
-                    listManager = new ListManager(this);
-                }
+                if (listManager == null) listManager = new ListManager(this);
             }
         }
         return listManager;
@@ -179,109 +183,33 @@ public final class SynapClient implements AutoCloseable {
     public SetManager set() {
         if (setManager == null) {
             synchronized (this) {
-                if (setManager == null) {
-                    setManager = new SetManager(this);
-                }
+                if (setManager == null) setManager = new SetManager(this);
             }
         }
         return setManager;
     }
 
-    // ── Core HTTP transport ────────────────────────────────────────────────────
+    // ── Core command dispatch ──────────────────────────────────────────────────
 
     /**
      * Sends a command to the Synap server and returns the parsed response payload.
      *
-     * <p>This is the single transport method used by all manager classes.  The
-     * {@code payload} map is serialised as the {@code "payload"} field in the
-     * wire JSON envelope.  A unique {@code request_id} UUID is generated for
-     * every call.</p>
+     * <p>This is the single dispatch point used by all manager classes.  Routing
+     * to the active transport (SynapRPC, RESP3, or HTTP) is transparent.</p>
      *
      * @param command the command name (e.g. {@code "kv.set"})
-     * @param payload key-value pairs to include in the payload; may be null
-     * @return the {@code payload} node from the server response (never null —
-     *         an empty object node is returned when the server omits it)
-     * @throws SynapException on network failure, HTTP error, or a server-side error
+     * @param payload key-value pairs to include; may be null
+     * @return the response payload as a {@link JsonNode} (never null — an empty
+     *         object node is returned when the server sends no payload)
+     * @throws SynapException on network failure, protocol error, or server error
      */
     JsonNode sendCommand(String command, Map<String, Object> payload) {
         Objects.requireNonNull(command, "command must not be null");
-
-        // Build the envelope.
-        ObjectNode envelope = mapper.createObjectNode();
-        envelope.put("command", command);
-        envelope.put("request_id", UUID.randomUUID().toString());
-
-        if (payload != null && !payload.isEmpty()) {
-            envelope.set("payload", mapper.valueToTree(payload));
-        } else {
-            envelope.set("payload", mapper.createObjectNode());
-        }
-
-        String requestBody;
-        try {
-            requestBody = mapper.writeValueAsString(envelope);
-        } catch (IOException e) {
-            throw SynapException.networkError("Failed to serialize request: " + e.getMessage(), e);
-        }
-
-        HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
-                .uri(URI.create(config.getBaseUrl() + "/api/v1/command"))
-                .timeout(config.getTimeout())
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(requestBody));
-
-        if (config.getAuthToken() != null && !config.getAuthToken().isBlank()) {
-            requestBuilder.header("Authorization", "Bearer " + config.getAuthToken());
-        }
-
-        HttpResponse<String> response;
-        try {
-            response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
-        } catch (IOException e) {
-            throw SynapException.networkError("Request failed: " + e.getMessage(), e);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw SynapException.networkError("Request interrupted", e);
-        }
-
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw SynapException.httpError("Unexpected status", response.statusCode());
-        }
-
-        String body = response.body();
-        if (body == null || body.isBlank()) {
-            return mapper.createObjectNode();
-        }
-
-        JsonNode root;
-        try {
-            root = mapper.readTree(body);
-        } catch (IOException e) {
-            throw SynapException.invalidResponse("Failed to parse JSON response: " + e.getMessage());
-        }
-
-        // Check the "success" field.
-        JsonNode successNode = root.get("success");
-        if (successNode != null && !successNode.asBoolean(true)) {
-            JsonNode errorNode = root.get("error");
-            String errorMessage = (errorNode != null && !errorNode.isNull())
-                    ? errorNode.asText()
-                    : "Unknown server error";
-            throw SynapException.serverError(errorMessage);
-        }
-
-        // Return the inner payload node (or an empty object if absent).
-        JsonNode payloadNode = root.get("payload");
-        if (payloadNode == null || payloadNode.isNull()) {
-            return mapper.createObjectNode();
-        }
-        return payloadNode;
+        return transport.execute(command, payload);
     }
 
     /**
-     * Convenience helper — builds a mutable payload map and calls
-     * {@link #sendCommand(String, Map)}.
+     * Convenience overload — sends a command with no payload.
      *
      * @param command the command name
      * @return the response payload node
@@ -291,17 +219,11 @@ public final class SynapClient implements AutoCloseable {
     }
 
     /**
-     * Closes the client and releases resources held by the underlying HTTP client.
-     *
-     * <p>The Java {@link HttpClient} introduced in Java 21 implements
-     * {@link AutoCloseable}; on Java 17 the client is not closeable and this
-     * method is a no-op for that resource.  Sub-client managers hold no
-     * independent resources and do not need disposal.</p>
+     * Closes the client and releases any resources held by the underlying transport.
      */
     @Override
     public void close() {
-        // HttpClient does not implement Closeable on Java 17; nothing to close.
-        // Included so the client works correctly in try-with-resources.
+        transport.close();
     }
 
     // ── Accessors ──────────────────────────────────────────────────────────────

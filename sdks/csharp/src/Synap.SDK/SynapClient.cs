@@ -2,21 +2,31 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Synap.SDK.Exceptions;
 using Synap.SDK.Modules;
-using System.Runtime.CompilerServices;
+using Synap.SDK.Transports;
 
 namespace Synap.SDK;
 
 /// <summary>
 /// Main Synap SDK client for interacting with the Synap server.
+///
+/// By default, the client connects over SynapRPC (MessagePack over TCP, port 15501).
+/// Use the URL scheme in <see cref="SynapConfig"/> to select a transport:
+/// <list type="bullet">
+///   <item><c>synap://host:port</c> — SynapRPC (default)</item>
+///   <item><c>resp3://host:port</c> — RESP3</item>
+///   <item><c>http://host:port</c>  — HTTP</item>
+/// </list>
 /// </summary>
 public sealed class SynapClient : IDisposable
 {
     private readonly HttpClient _httpClient;
     private readonly SynapConfig _config;
     private readonly bool _disposeHttpClient;
-    private readonly SynapRpcTransport? _rpcTransport;
-    private readonly Resp3Transport? _resp3Transport;
 
+    // Active native transport (null when using HTTP).
+    private readonly ITransport? _transport;
+
+    // Cached module instances (lazy-initialised on first access).
     private KVStore? _kv;
     private HashManager? _hash;
     private ListManager? _list;
@@ -28,6 +38,14 @@ public sealed class SynapClient : IDisposable
     private HyperLogLogManager? _hyperloglog;
     private GeospatialManager? _geospatial;
     private TransactionManager? _transaction;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SynapClient"/> class with the default
+    /// SynapRPC transport (<c>synap://127.0.0.1:15501</c>).
+    /// </summary>
+    public SynapClient() : this(new SynapConfig())
+    {
+    }
 
     /// <summary>
     /// Initializes a new instance of the <see cref="SynapClient"/> class.
@@ -65,14 +83,12 @@ public sealed class SynapClient : IDisposable
             _disposeHttpClient = true;
 
             // Instantiate native transport based on configured mode.
-            if (config.Transport == TransportMode.SynapRpc)
+            _transport = config.Transport switch
             {
-                _rpcTransport = new SynapRpcTransport(config.RpcHost, config.RpcPort, config.Timeout);
-            }
-            else if (config.Transport == TransportMode.Resp3)
-            {
-                _resp3Transport = new Resp3Transport(config.Resp3Host, config.Resp3Port, config.Timeout);
-            }
+                TransportMode.SynapRpc => new SynapRpcTransport(config.RpcHost, config.RpcPort, config.Timeout),
+                TransportMode.Resp3    => new Resp3Transport(config.Resp3Host, config.Resp3Port, config.Timeout),
+                _                      => null,
+            };
         }
 
         _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
@@ -165,7 +181,7 @@ public sealed class SynapClient : IDisposable
         }
 
         // Try native transport for mapped commands.
-        if (_rpcTransport is not null)
+        if (_transport is not null)
         {
             var mapped = CommandMapper.MapCommand(operation, payloadData);
             if (mapped.HasValue)
@@ -173,7 +189,7 @@ public sealed class SynapClient : IDisposable
                 var (cmd, args) = mapped.Value;
                 try
                 {
-                    var raw = await _rpcTransport.ExecuteAsync(cmd, args, cancellationToken).ConfigureAwait(false);
+                    var raw = await _transport.ExecuteAsync(cmd, args, cancellationToken).ConfigureAwait(false);
                     var responseDict = CommandMapper.MapResponse(operation, raw);
                     return DictToJsonDocument(responseDict);
                 }
@@ -183,36 +199,14 @@ public sealed class SynapClient : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    throw SynapException.NetworkError($"SynapRPC error: {ex.Message}");
+                    var transportName = _config.Transport == TransportMode.Resp3 ? "resp3" : "synaprpc";
+                    throw SynapException.NetworkError($"{transportName} error: {ex.Message}");
                 }
             }
 
             // Command has no native mapping — raise instead of silently falling back.
-            throw new UnsupportedCommandException(operation, "synaprpc");
-        }
-        else if (_resp3Transport is not null)
-        {
-            var mapped = CommandMapper.MapCommand(operation, payloadData);
-            if (mapped.HasValue)
-            {
-                var (cmd, args) = mapped.Value;
-                try
-                {
-                    var raw = await _resp3Transport.ExecuteAsync(cmd, args, cancellationToken).ConfigureAwait(false);
-                    var responseDict = CommandMapper.MapResponse(operation, raw);
-                    return DictToJsonDocument(responseDict);
-                }
-                catch (SynapException)
-                {
-                    throw;
-                }
-                catch (Exception ex)
-                {
-                    throw SynapException.NetworkError($"RESP3 error: {ex.Message}");
-                }
-            }
-
-            throw new UnsupportedCommandException(operation, "resp3");
+            var transportLabel = _config.Transport == TransportMode.Resp3 ? "resp3" : "synaprpc";
+            throw new UnsupportedCommandException(operation, transportLabel);
         }
 
         // HTTP path.
