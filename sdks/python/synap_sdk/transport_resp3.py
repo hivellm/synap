@@ -63,11 +63,16 @@ class Resp3Transport:
         )
         self._reader = reader
         self._writer = writer
-        # Negotiate RESP3; drain the inline map response.
+        # Negotiate RESP3; drain the inline map/array response.
         hello_cmd = b"*2\r\n$5\r\nHELLO\r\n$1\r\n3\r\n"
         writer.write(hello_cmd)
         await writer.drain()
-        await self._read_value()
+        try:
+            await self._read_value()
+        except SynapException:
+            # Server may not support HELLO (RESP2 only); ignore the error and
+            # continue — the connection is still usable for RESP2 commands.
+            pass
 
     async def _ensure_connected(self) -> None:
         """Connect if not already connected, guarded by a lock."""

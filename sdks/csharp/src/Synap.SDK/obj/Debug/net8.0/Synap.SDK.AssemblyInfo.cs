@@ -16,7 +16,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyDescriptionAttribute(("Official C# SDK for Synap - High-Performance In-Memory Key-Value Store & Message " +
     "Broker"))]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("0.11.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.11.0+3cc3d313f5cbaf14bbe7e1928e66a1861a56504d")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.11.0+401766dc0a6ef98a564b6f5f07dcac4690552d7f")]
 [assembly: System.Reflection.AssemblyProductAttribute("Synap.SDK")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Synap.SDK")]
 [assembly: System.Reflection.AssemblyVersionAttribute("0.11.0.0")]

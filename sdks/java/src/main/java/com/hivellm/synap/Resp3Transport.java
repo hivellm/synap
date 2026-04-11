@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -98,26 +99,42 @@ final class Resp3Transport implements Transport {
 
     /**
      * Sends a RESP2 multibulk array: {@code *N\r\n$len\r\narg\r\n…}
+     *
+     * <p>Uses binary-safe bulk-string framing so that argument bytes are written
+     * exactly, with the length prefix derived from the UTF-8 byte count (not the
+     * Java String character count), ensuring correctness for non-ASCII values.</p>
      */
     private void sendMultibulk(String command, String[] args) throws IOException {
-        StringBuilder sb = new StringBuilder();
+        ByteArrayOutputStream buf = new ByteArrayOutputStream(256);
+
         int total = 1 + args.length;
-        sb.append('*').append(total).append("\r\n");
+        writeAscii(buf, "*" + total + "\r\n");
 
-        // command
+        // command (always ASCII)
         byte[] cmdBytes = command.getBytes(StandardCharsets.UTF_8);
-        sb.append('$').append(cmdBytes.length).append("\r\n");
-        sb.append(command).append("\r\n");
+        writeAscii(buf, "$" + cmdBytes.length + "\r\n");
+        buf.write(cmdBytes);
+        writeAscii(buf, "\r\n");
 
-        // arguments
+        // arguments — binary-safe: compute byte length, then write raw bytes
         for (String arg : args) {
             byte[] argBytes = arg.getBytes(StandardCharsets.UTF_8);
-            sb.append('$').append(argBytes.length).append("\r\n");
-            sb.append(arg).append("\r\n");
+            writeAscii(buf, "$" + argBytes.length + "\r\n");
+            buf.write(argBytes);
+            writeAscii(buf, "\r\n");
         }
 
-        writer.write(sb.toString().getBytes(StandardCharsets.UTF_8));
+        writer.write(buf.toByteArray());
         writer.flush();
+    }
+
+    /** Writes a pure-ASCII string to the buffer (no encoding overhead). */
+    private static void writeAscii(ByteArrayOutputStream buf, String s) {
+        // All control characters (\r, \n) and RESP protocol chars (*, $, :, +, -)
+        // are in the ASCII range — getBytes(ISO_8859_1) is identical to getBytes(UTF_8)
+        // for these and avoids allocating a Charset lookup.
+        byte[] b = s.getBytes(StandardCharsets.US_ASCII);
+        buf.write(b, 0, b.length);
     }
 
     // ── RESP parser ────────────────────────────────────────────────────────────

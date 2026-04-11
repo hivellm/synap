@@ -121,6 +121,7 @@ type SynapClient struct {
 	httpClient *http.Client
 	endpoint   string
 	rpc        *SynapRpcTransport
+	resp3      *Resp3Transport
 }
 
 // NewClient creates a new SynapClient using the provided Config.
@@ -136,9 +137,7 @@ func NewClient(cfg *Config) *SynapClient {
 		c.rpc = newSynapRpcTransport(cfg.host, cfg.port, cfg.timeout)
 		c.endpoint = fmt.Sprintf("http://%s:15500/api/v1/command", cfg.host)
 	case TransportRESP3:
-		// RESP3 falls back to HTTP for now; the resp3 transport file
-		// will be integrated in a follow-up when the full RESP3 parser
-		// is battle-tested against the server.
+		c.resp3 = newResp3Transport(cfg.host, cfg.port, cfg.timeout)
 		c.endpoint = fmt.Sprintf("http://%s:15500/api/v1/command", cfg.host)
 	default:
 		c.endpoint = cfg.baseURL + "/api/v1/command"
@@ -170,9 +169,11 @@ func (c *SynapClient) Set() *SetManager { return &SetManager{client: c} }
 // sendCommand dispatches to the active transport (SynapRPC, RESP3, or HTTP)
 // and returns the raw payload bytes. The caller unmarshals into the expected type.
 func (c *SynapClient) sendCommand(ctx context.Context, command string, payload interface{}) (json.RawMessage, error) {
-	// For SynapRPC transport, use the binary protocol
 	if c.rpc != nil {
 		return c.sendRPC(ctx, command, payload)
+	}
+	if c.resp3 != nil {
+		return c.sendRESP3(ctx, command, payload)
 	}
 	return c.sendHTTP(ctx, command, payload)
 }
@@ -207,6 +208,35 @@ func (c *SynapClient) sendRPC(ctx context.Context, command string, payload inter
 	respBytes, err := json.Marshal(mapped)
 	if err != nil {
 		return nil, fmt.Errorf("synap: marshal rpc response: %w", err)
+	}
+	return json.RawMessage(respBytes), nil
+}
+
+// sendRESP3 dispatches a command via the RESP3 TCP transport.
+// The wire encoding follows RESP2 multibulk; responses are plain Go values
+// (string, int64, nil, []interface{}) that are fed through mapResponseFromWire.
+func (c *SynapClient) sendRESP3(ctx context.Context, command string, payload interface{}) (json.RawMessage, error) {
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("synap: marshal payload: %w", err)
+	}
+	var payloadMap map[string]interface{}
+	_ = json.Unmarshal(payloadBytes, &payloadMap)
+
+	wireCmd, wireArgs, err := mapCommandToWire(command, payloadMap)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := c.resp3.Execute(ctx, wireCmd, wireArgs)
+	if err != nil {
+		return nil, err
+	}
+
+	mapped := mapResponseFromWire(command, result)
+	respBytes, err := json.Marshal(mapped)
+	if err != nil {
+		return nil, fmt.Errorf("synap: marshal resp3 response: %w", err)
 	}
 	return json.RawMessage(respBytes), nil
 }

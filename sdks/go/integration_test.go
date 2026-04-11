@@ -25,6 +25,7 @@ var transports = []struct {
 }{
 	{"HTTP", "http://127.0.0.1:15500"},
 	{"SynapRPC", "synap://127.0.0.1:15501"},
+	{"RESP3", "resp3://127.0.0.1:6379"},
 }
 
 func TestIntegration_KV(t *testing.T) {

@@ -4,6 +4,15 @@
         <name>Synap.SDK</name>
     </assembly>
     <members>
+        <member name="M:Synap.SDK.CommandMapper.MapCommand(System.String,System.Collections.Generic.Dictionary{System.String,System.Object})">
+            <summary>
+            Maps a Synap operation + payload to a native command + args.
+            Returns null for operations that must fall back to HTTP.
+            </summary>
+        </member>
+        <member name="M:Synap.SDK.CommandMapper.MapResponse(System.String,System.Object)">
+            <summary>Maps the raw native response back to the Synap response shape.</summary>
+        </member>
         <member name="T:Synap.SDK.Exceptions.SynapException">
             <summary>
             Base exception for all Synap SDK errors.
@@ -820,9 +829,26 @@
             <param name="cancellationToken">Cancellation token.</param>
             <returns>Transaction execution result. If successful, returns results array. If aborted (due to watched keys changed), returns aborted status.</returns>
         </member>
+        <member name="M:Synap.SDK.Resp3Transport.ExecuteAsync(System.String,System.Object[],System.Threading.CancellationToken)">
+            <summary>Executes a RESP3 command and returns the decoded result.</summary>
+        </member>
         <member name="T:Synap.SDK.SynapClient">
+             <summary>
+             Main Synap SDK client for interacting with the Synap server.
+            
+             By default, the client connects over SynapRPC (MessagePack over TCP, port 15501).
+             Use the URL scheme in <see cref="T:Synap.SDK.SynapConfig"/> to select a transport:
+             <list type="bullet">
+               <item><c>synap://host:port</c> — SynapRPC (default)</item>
+               <item><c>resp3://host:port</c> — RESP3</item>
+               <item><c>http://host:port</c>  — HTTP</item>
+             </list>
+             </summary>
+        </member>
+        <member name="M:Synap.SDK.SynapClient.#ctor">
             <summary>
-            Main Synap SDK client for interacting with the Synap server.
+            Initializes a new instance of the <see cref="T:Synap.SDK.SynapClient"/> class with the default
+            SynapRPC transport (<c>synap://127.0.0.1:15501</c>).
             </summary>
         </member>
         <member name="M:Synap.SDK.SynapClient.#ctor(Synap.SDK.SynapConfig)">
@@ -956,19 +982,35 @@
         <member name="P:Synap.SDK.SynapConfig.Resp3Port">
             <summary>Gets the port for RESP3 transport.</summary>
         </member>
+        <member name="M:Synap.SDK.SynapConfig.#ctor">
+             <summary>
+             Initializes a new instance of <see cref="T:Synap.SDK.SynapConfig"/> with the default SynapRPC transport.
+            
+             Equivalent to <c>new SynapConfig("synap://127.0.0.1:15501")</c>.
+             SynapRPC (MessagePack over TCP) is the default transport because it is the most
+             efficient and feature-complete protocol supported by Synap.
+             </summary>
+        </member>
         <member name="M:Synap.SDK.SynapConfig.#ctor(System.String)">
              <summary>
              Initializes a new instance of <see cref="T:Synap.SDK.SynapConfig"/> from a URL.
             
              URL schemes:
              <list type="bullet">
-               <item><c>http://</c> or <c>https://</c> — HTTP transport</item>
-               <item><c>synap://host:port</c> — SynapRPC transport</item>
-               <item><c>resp3://host:port</c> — RESP3 transport</item>
+               <item><c>synap://host:port</c> — SynapRPC transport (DEFAULT, port 15501)</item>
+               <item><c>resp3://host:port</c> — RESP3 transport (port 6379)</item>
+               <item><c>http://</c> or <c>https://</c> — HTTP transport (port 15500)</item>
              </list>
              </summary>
-             <param name="url">The URL (with scheme) or bare HTTP base URL.</param>
+             <param name="url">The URL with scheme.</param>
              <exception cref="T:Synap.SDK.Exceptions.SynapException">Thrown when the URL is null or empty.</exception>
+        </member>
+        <member name="M:Synap.SDK.SynapConfig.Default">
+            <summary>
+            Creates a new configuration with the default SynapRPC transport
+            (<c>synap://127.0.0.1:15501</c>).
+            </summary>
+            <returns>A default <see cref="T:Synap.SDK.SynapConfig"/> instance.</returns>
         </member>
         <member name="M:Synap.SDK.SynapConfig.Create(System.String)">
             <summary>Creates a new configuration with the specified URL.</summary>
@@ -1015,6 +1057,22 @@
             </summary>
             <remarks>Deprecated: pass a <c>resp3://host:port</c> URL to the constructor instead.</remarks>
         </member>
+        <member name="M:Synap.SDK.SynapRpcTransport.ExecuteAsync(System.String,System.Object[],System.Threading.CancellationToken)">
+            <summary>Executes a command over SynapRPC and returns the plain (unwrapped) result.</summary>
+        </member>
+        <member name="M:Synap.SDK.SynapRpcTransport.SubscribePushAsync(System.Collections.Generic.IEnumerable{System.String},System.Threading.CancellationToken)">
+             <summary>
+             Opens a dedicated server-push TCP connection, sends a SUBSCRIBE frame,
+             and yields push messages as an async stream.
+            
+             Push frames from the server use id == 0xFFFFFFFF (U32_MAX) as a sentinel.
+             The stream completes when the cancellation token is cancelled or the
+             connection is closed by the server.
+             </summary>
+             <param name="topics">Topic patterns to subscribe to.</param>
+             <param name="cancellationToken">Token used to stop the stream.</param>
+             <returns>An async stream of push-message dictionaries.</returns>
+        </member>
         <member name="T:Synap.SDK.TransportMode">
             <summary>Transport mode for the Synap client.</summary>
         </member>
@@ -1033,33 +1091,33 @@
         <member name="M:Synap.SDK.WireValue.FromWire(System.Object)">
             <summary>Unwraps an externally-tagged WireValue decoded from MessagePack.</summary>
         </member>
-        <member name="M:Synap.SDK.CommandMapper.MapCommand(System.String,System.Collections.Generic.Dictionary{System.String,System.Object})">
-            <summary>
-            Maps a Synap operation + payload to a native command + args.
-            Returns null for operations that must fall back to HTTP.
-            </summary>
-        </member>
-        <member name="M:Synap.SDK.CommandMapper.MapResponse(System.String,System.Object)">
-            <summary>Maps the raw native response back to the Synap response shape.</summary>
-        </member>
-        <member name="M:Synap.SDK.SynapRpcTransport.ExecuteAsync(System.String,System.Object[],System.Threading.CancellationToken)">
-            <summary>Executes a command over SynapRPC and returns the plain (unwrapped) result.</summary>
-        </member>
-        <member name="M:Synap.SDK.SynapRpcTransport.SubscribePushAsync(System.Collections.Generic.IEnumerable{System.String},System.Threading.CancellationToken)">
+        <member name="T:Synap.SDK.Transports.ITransport">
              <summary>
-             Opens a dedicated server-push TCP connection, sends a SUBSCRIBE frame,
-             and yields push messages as an async stream.
+             Abstraction over the wire transport used by <see cref="T:Synap.SDK.SynapClient"/>.
             
-             Push frames from the server use id == 0xFFFFFFFF (U32_MAX) as a sentinel.
-             The stream completes when the cancellation token is cancelled or the
-             connection is closed by the server.
+             Three concrete implementations are provided:
+             <list type="bullet">
+               <item><see cref="T:Synap.SDK.SynapRpcTransport"/> — MessagePack over TCP (default, port 15501)</item>
+               <item><see cref="T:Synap.SDK.Resp3Transport"/> — RESP3 text protocol over TCP (port 6379)</item>
+               <item>HTTP — handled directly in <see cref="T:Synap.SDK.SynapClient"/> via <see cref="T:System.Net.Http.HttpClient"/></item>
+             </list>
              </summary>
-             <param name="topics">Topic patterns to subscribe to.</param>
-             <param name="cancellationToken">Token used to stop the stream.</param>
-             <returns>An async stream of push-message dictionaries.</returns>
         </member>
-        <member name="M:Synap.SDK.Resp3Transport.ExecuteAsync(System.String,System.Object[],System.Threading.CancellationToken)">
-            <summary>Executes a RESP3 command and returns the decoded result.</summary>
+        <member name="M:Synap.SDK.Transports.ITransport.ExecuteAsync(System.String,System.Object[],System.Threading.CancellationToken)">
+            <summary>
+            Executes a native command and returns the decoded result value.
+            </summary>
+            <param name="command">The native command name (e.g. "GET", "HSET", "QPUBLISH").</param>
+            <param name="args">
+            Positional arguments for the command. Each element must be a primitive
+            type supported by the transport's serialisation layer.
+            </param>
+            <param name="cancellationToken">Cancellation token.</param>
+            <returns>
+            The decoded result value. The concrete type depends on the server
+            response — callers should use <see cref="M:Synap.SDK.CommandMapper.MapResponse(System.String,System.Object)"/>
+            to normalise it into a <see cref="T:System.Collections.Generic.Dictionary`2"/>.
+            </returns>
         </member>
         <member name="T:Synap.SDK.Types.QueueMessage">
             <summary>

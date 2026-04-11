@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Synap.SDK.Tests")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c27fd8ca7a7eacc62a2a048da98543c1fa89c267")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+5df2d0d8aa0af5bff0357aaf400c2ff88282818d")]
 [assembly: System.Reflection.AssemblyProductAttribute("Synap.SDK.Tests")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Synap.SDK.Tests")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

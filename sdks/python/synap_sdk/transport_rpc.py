@@ -3,7 +3,7 @@
 Wire protocol:
 - Every frame is prefixed with a 4-byte little-endian unsigned integer giving
   the length of the MessagePack-encoded body that follows.
-- Request body (msgpack array): ``[id: int, command: str, args: [WireValue…]]``
+- Request body (msgpack map): ``{"id": uint, "command": str, "args": [WireValue…]}``
 - Response body (msgpack array): ``[id: int, {"Ok": WireValue} | {"Err": str}]``
 
 WireValue uses *serde externally-tagged* encoding (mirrors Rust's ``rmp_serde``):
@@ -52,7 +52,12 @@ def _to_wire(v: Any) -> Any:  # noqa: ANN401
 
 
 def _from_wire(wire: Any) -> Any:  # noqa: ANN401
-    """Unwrap a WireValue envelope back to a Python value."""
+    """Unwrap a WireValue envelope back to a Python value.
+
+    Handles the serde externally-tagged format used by the Synap server.
+    Bytes may arrive either as a msgpack bin type (bytes) or as a msgpack
+    array of unsigned integers (Rust rmp_serde Vec<u8> encoding).
+    """
     if wire == "Null" or wire is None:
         return None
     if isinstance(wire, dict):
@@ -65,7 +70,17 @@ def _from_wire(wire: Any) -> Any:  # noqa: ANN401
         if "Bool" in wire:
             return wire["Bool"]
         if "Bytes" in wire:
-            return wire["Bytes"]
+            raw_bytes = wire["Bytes"]
+            # rmp_serde encodes Vec<u8> as a msgpack array of ints, not bin type.
+            # Normalise to Python bytes, then decode to str if valid UTF-8.
+            if isinstance(raw_bytes, (list, tuple)):
+                raw_bytes = bytes(raw_bytes)
+            if isinstance(raw_bytes, (bytes, bytearray)):
+                try:
+                    return raw_bytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    return raw_bytes
+            return raw_bytes
         if "Array" in wire:
             return [_from_wire(x) for x in wire["Array"]]
         if "Map" in wire:
@@ -166,7 +181,10 @@ class SynapRpcTransport:
         self._next_id += 1
 
         wire_args = [_to_wire(a) for a in args]
-        body = msgpack.packb([req_id, cmd.upper(), wire_args], use_bin_type=True)
+        body = msgpack.packb(
+            {"id": req_id, "command": cmd.upper(), "args": wire_args},
+            use_bin_type=True,
+        )
         frame = struct.pack("<I", len(body)) + body
 
         fut: asyncio.Future[Any] = loop.create_future()
@@ -205,7 +223,10 @@ class SynapRpcTransport:
 
         # Send SUBSCRIBE frame
         wire_args = [_to_wire(t) for t in topics]
-        body = msgpack.packb([1, "SUBSCRIBE", wire_args], use_bin_type=True)
+        body = msgpack.packb(
+            {"id": 1, "command": "SUBSCRIBE", "args": wire_args},
+            use_bin_type=True,
+        )
         frame = struct.pack("<I", len(body)) + body
         writer.write(frame)
         await writer.drain()

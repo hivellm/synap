@@ -230,37 +230,22 @@ public sealed class SynapClient : IDisposable
     {
         var pl = payload ?? new Dictionary<string, object?>();
 
-        if (_rpcTransport is not null)
+        if (_transport is not null)
         {
+            var transportLabel = _config.Transport == TransportMode.Resp3 ? "resp3" : "synaprpc";
             var mapped = CommandMapper.MapCommand(command, pl);
             if (mapped.HasValue)
             {
                 var (cmd, args) = mapped.Value;
                 try
                 {
-                    var raw = await _rpcTransport.ExecuteAsync(cmd, args, cancellationToken).ConfigureAwait(false);
+                    var raw = await _transport.ExecuteAsync(cmd, args, cancellationToken).ConfigureAwait(false);
                     return DictToJsonDocument(CommandMapper.MapResponse(command, raw));
                 }
                 catch (SynapException) { throw; }
-                catch (Exception ex) { throw SynapException.NetworkError($"SynapRPC error: {ex.Message}"); }
+                catch (Exception ex) { throw SynapException.NetworkError($"{transportLabel} error: {ex.Message}"); }
             }
-            throw new UnsupportedCommandException(command, "synaprpc");
-        }
-        else if (_resp3Transport is not null)
-        {
-            var mapped = CommandMapper.MapCommand(command, pl);
-            if (mapped.HasValue)
-            {
-                var (cmd, args) = mapped.Value;
-                try
-                {
-                    var raw = await _resp3Transport.ExecuteAsync(cmd, args, cancellationToken).ConfigureAwait(false);
-                    return DictToJsonDocument(CommandMapper.MapResponse(command, raw));
-                }
-                catch (SynapException) { throw; }
-                catch (Exception ex) { throw SynapException.NetworkError($"RESP3 error: {ex.Message}"); }
-            }
-            throw new UnsupportedCommandException(command, "resp3");
+            throw new UnsupportedCommandException(command, transportLabel);
         }
 
         return await ExecuteHttpAsync(command, pl, cancellationToken).ConfigureAwait(false);
@@ -270,7 +255,7 @@ public sealed class SynapClient : IDisposable
     /// Returns the active <see cref="SynapRpcTransport"/> if the client was configured
     /// with a SynapRPC transport, or <c>null</c> otherwise.
     /// </summary>
-    internal SynapRpcTransport? GetSynapRpcTransport() => _rpcTransport;
+    internal SynapRpcTransport? GetSynapRpcTransport() => _transport as SynapRpcTransport;
 
     private async Task<JsonDocument> ExecuteHttpAsync(
         string operation,
@@ -354,8 +339,7 @@ public sealed class SynapClient : IDisposable
     /// <summary>Disposes the client and releases resources.</summary>
     public void Dispose()
     {
-        _rpcTransport?.Dispose();
-        _resp3Transport?.Dispose();
+        _transport?.Dispose();
 
         if (_disposeHttpClient)
         {

@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -14,7 +13,9 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -24,8 +25,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  *
  * <p>Wire format: {@code [u32-LE length][msgpack body]}.
  *
- * <p>Request body (msgpack array of 3 elements):
- * <pre>[id: int, command: String, args: [SynapValue…]]</pre>
+ * <p>Request body (msgpack MAP of 3 fields):
+ * <pre>{"id": uint32, "command": String, "args": [SynapValue…]}</pre>
  *
  * <p>Response body (msgpack array of 2 elements):
  * <pre>[id: int, {Ok: SynapValue} | {Err: String}]</pre>
@@ -112,9 +113,13 @@ final class SynapRpcTransport implements Transport {
 
         int id = idGen.getAndIncrement();
 
-        // Build request: [id, command, [wireArgs...]]
-        Object[] request = new Object[]{(long) id, command, wireArgs};
-        byte[] msgBytes  = MsgPackEncoder.encode(request);
+        // Build request as msgpack MAP: {"id": uint32, "command": "CMD", "args": [SynapValue...]}
+        // The server expects a MAP (serde externally-tagged), NOT an array.
+        LinkedHashMap<Object, Object> request = new LinkedHashMap<>(4);
+        request.put("id",      (long) id);
+        request.put("command", command);
+        request.put("args",    Arrays.asList(wireArgs));
+        byte[] msgBytes = MsgPackEncoder.encode(request);
 
         // Write 4-byte LE length prefix + body.
         byte[] lenBuf = ByteBuffer.allocate(4)
