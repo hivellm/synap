@@ -6,7 +6,7 @@
 
     <groupId>com.hivellm</groupId>
     <artifactId>synap-sdk</artifactId>
-    <version>0.11.0</version>
+    <version>0.11.1</version>
     <packaging>jar</packaging>
 
     <name>Synap Java SDK</name>

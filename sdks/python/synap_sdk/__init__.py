@@ -9,7 +9,7 @@ from synap_sdk.modules.hash import HashManager
 from synap_sdk.modules.list import ListManager
 from synap_sdk.modules.set import SetManager
 
-__version__ = "0.11.0"
+__version__ = "0.11.1"
 
 __all__ = [
     "SynapClient",

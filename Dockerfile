@@ -15,11 +15,11 @@
 #
 # Docker Commands:
 #   Build image:
-#     docker build -t hivehub/synap:0.11.0 -t hivehub/synap:latest .
+#     docker build -t hivehub/synap:0.11.1 -t hivehub/synap:latest .
 #
 #   Build multi-arch (AMD64 + ARM64):
 #     docker buildx build --platform linux/amd64,linux/arm64 \
-#       -t hivehub/synap:0.11.0 -t hivehub/synap:latest --push .
+#       -t hivehub/synap:0.11.1 -t hivehub/synap:latest --push .
 #
 #   Run container (all three protocols):
 #     docker run -d --name synap-server \

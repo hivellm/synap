@@ -68,7 +68,7 @@ volumes:
 ## 📋 Supported Tags
 
 - `latest` - Latest stable release
-- `0.11.0` - Specific version tag
+- `0.11.1` - Specific version tag
 - `0.11.x` - Version series tags
 
 All images support multi-architecture builds:
@@ -281,7 +281,7 @@ volumes:
 # Check server health
 curl http://localhost:15500/health
 
-# Response: {"service":"synap","status":"healthy","version":"0.11.0"}
+# Response: {"service":"synap","status":"healthy","version":"0.11.1"}
 ```
 
 ### Prometheus Metrics
@@ -363,7 +363,7 @@ version: '3.8'
 
 services:
   synap:
-    image: hivehub/synap:0.11.0
+    image: hivehub/synap:0.11.1
     container_name: synap-production
     ports:
       - "15500:15500"  # HTTP/REST
