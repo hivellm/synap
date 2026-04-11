@@ -98,7 +98,7 @@ func (s *SetManager) Card(ctx context.Context, key string) (int, error) {
 		return 0, err
 	}
 	var result struct {
-		Cardinality int `json:"cardinality"`
+		Cardinality int `json:"size"`
 	}
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return 0, newInvalidResponseError("set.card: " + err.Error())

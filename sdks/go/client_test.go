@@ -1119,7 +1119,7 @@ func TestSet_Card(t *testing.T) {
 		if cmd != "set.card" {
 			t.Errorf("expected set.card, got %s", cmd)
 		}
-		return `{"success":true,"request_id":"x","payload":{"cardinality":4}}`
+		return `{"success":true,"request_id":"x","payload":{"size":4}}`
 	})
 	defer srv.Close()
 

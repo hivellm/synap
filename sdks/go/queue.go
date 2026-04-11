@@ -43,13 +43,19 @@ func (q *QueueManager) Create(ctx context.Context, name string, maxDepth int, ac
 // priority is 0–9 (0 = default). maxRetries 0 means use the server default.
 // Returns the assigned message ID.
 func (q *QueueManager) Publish(ctx context.Context, name string, payload []byte, priority uint8, maxRetries uint32) (string, error) {
+	// Server expects payload as a JSON array of byte values [104,101,...],
+	// not as base64 (which is Go's default for []byte in JSON).
+	intPayload := make([]int, len(payload))
+	for i, b := range payload {
+		intPayload[i] = int(b)
+	}
 	type body struct {
 		Queue      string  `json:"queue"`
-		Payload    []byte  `json:"payload"`
+		Payload    []int   `json:"payload"`
 		Priority   uint8   `json:"priority"`
 		MaxRetries *uint32 `json:"max_retries,omitempty"`
 	}
-	b := body{Queue: name, Payload: payload, Priority: priority}
+	b := body{Queue: name, Payload: intPayload, Priority: priority}
 	if maxRetries > 0 {
 		b.MaxRetries = &maxRetries
 	}
