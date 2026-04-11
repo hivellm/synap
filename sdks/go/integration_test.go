@@ -19,15 +19,12 @@ import (
 	synap "github.com/hivellm/synap/sdks/go"
 )
 
-// HTTP transport is fully tested here. SynapRPC and RESP3 transports are
-// validated at the protocol level by the Rust SDK E2E tests (8/8 passing).
-// The Go binary transports will be integration-tested once the readLoop
-// design is stabilized.
 var transports = []struct {
 	name string
 	url  string
 }{
 	{"HTTP", "http://127.0.0.1:15500"},
+	{"SynapRPC", "synap://127.0.0.1:15501"},
 }
 
 func TestIntegration_KV(t *testing.T) {

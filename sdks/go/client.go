@@ -199,6 +199,9 @@ func (c *SynapClient) sendRPC(ctx context.Context, command string, payload inter
 		return nil, err
 	}
 
+	// Normalize int types (msgpack deserializes small ints as int8/uint8/int16 etc.)
+	result = normalizeInts(result)
+
 	// Map the native response back to the JSON shape the module methods expect
 	mapped := mapResponseFromWire(command, result)
 	respBytes, err := json.Marshal(mapped)
@@ -206,6 +209,30 @@ func (c *SynapClient) sendRPC(ctx context.Context, command string, payload inter
 		return nil, fmt.Errorf("synap: marshal rpc response: %w", err)
 	}
 	return json.RawMessage(respBytes), nil
+}
+
+// normalizeInts converts any integer type (int8, uint8, int16, etc.) to int64.
+// Go's msgpack library deserializes small numbers as int8/uint8 which breaks
+// type assertions expecting int64.
+func normalizeInts(v interface{}) interface{} {
+	switch val := v.(type) {
+	case int8:
+		return int64(val)
+	case int16:
+		return int64(val)
+	case int32:
+		return int64(val)
+	case uint8:
+		return int64(val)
+	case uint16:
+		return int64(val)
+	case uint32:
+		return int64(val)
+	case uint64:
+		return int64(val)
+	default:
+		return v
+	}
 }
 
 // sendHTTP dispatches a command via the HTTP REST transport.
@@ -513,22 +540,33 @@ func mapResponseFromWire(command string, result interface{}) interface{} {
 		return result
 	case "kv.del":
 		deleted := false
-		if n, ok := result.(int64); ok {
-			deleted = n > 0
+		switch v := result.(type) {
+		case bool:
+			deleted = v
+		case int64:
+			deleted = v > 0
+		case uint64:
+			deleted = v > 0
 		}
 		return map[string]interface{}{"deleted": deleted}
 	case "kv.exists":
 		exists := false
-		if n, ok := result.(int64); ok {
-			exists = n > 0
+		switch v := result.(type) {
+		case bool:
+			exists = v
+		case int64:
+			exists = v > 0
 		}
 		return map[string]interface{}{"exists": exists}
 	case "kv.incr", "kv.decr":
 		return map[string]interface{}{"value": result}
 	case "hash.set":
 		created := false
-		if n, ok := result.(int64); ok {
-			created = n > 0
+		switch v := result.(type) {
+		case bool:
+			created = v
+		case int64:
+			created = v > 0
 		}
 		return map[string]interface{}{"created": created}
 	case "hash.get":
@@ -538,8 +576,11 @@ func mapResponseFromWire(command string, result interface{}) interface{} {
 		return map[string]interface{}{"found": true, "value": result}
 	case "hash.exists":
 		exists := false
-		if n, ok := result.(int64); ok {
-			exists = n > 0
+		switch v := result.(type) {
+		case bool:
+			exists = v
+		case int64:
+			exists = v > 0
 		}
 		return map[string]interface{}{"exists": exists}
 	case "hash.del":
@@ -555,7 +596,7 @@ func mapResponseFromWire(command string, result interface{}) interface{} {
 		}
 		return map[string]interface{}{"fields": result}
 	case "list.lpush", "list.rpush":
-		return map[string]interface{}{"len": result}
+		return map[string]interface{}{"length": result}
 	case "list.lpop", "list.rpop":
 		if arr, ok := result.([]interface{}); ok {
 			return map[string]interface{}{"values": arr}
@@ -570,7 +611,7 @@ func mapResponseFromWire(command string, result interface{}) interface{} {
 		}
 		return map[string]interface{}{"values": []interface{}{}}
 	case "list.len":
-		return map[string]interface{}{"len": result}
+		return map[string]interface{}{"length": result}
 	case "set.add":
 		return map[string]interface{}{"added": result}
 	case "set.members":
@@ -580,14 +621,17 @@ func mapResponseFromWire(command string, result interface{}) interface{} {
 		return map[string]interface{}{"members": []interface{}{}}
 	case "set.ismember":
 		isMember := false
-		if n, ok := result.(int64); ok {
-			isMember = n > 0
+		switch v := result.(type) {
+		case bool:
+			isMember = v
+		case int64:
+			isMember = v > 0
 		}
 		return map[string]interface{}{"is_member": isMember}
 	case "set.rem":
 		return map[string]interface{}{"removed": result}
 	case "set.card":
-		return map[string]interface{}{"count": result}
+		return map[string]interface{}{"size": result}
 	case "queue.create", "queue.delete", "queue.ack", "queue.nack":
 		return map[string]interface{}{}
 	case "queue.publish":
