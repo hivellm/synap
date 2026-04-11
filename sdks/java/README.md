@@ -4,6 +4,7 @@ Official Java client library for [Synap](https://github.com/hivellm/synap) - Hig
 
 ## Features
 
+- **Multi-transport**: SynapRPC (default), RESP3, HTTP — auto-detected from URL scheme
 - Key-Value Store with TTL support
 - Message Queues with ACK/NACK
 - Event Streams with offset tracking
@@ -11,6 +12,14 @@ Official Java client library for [Synap](https://github.com/hivellm/synap) - Hig
 - Hash, List, Set data structures
 - Bearer token and Basic authentication
 - Java 17+ with `java.net.http.HttpClient`
+
+## Transport Selection
+
+| Transport | URL | Default |
+|-----------|-----|:-------:|
+| **SynapRPC** (binary, lowest latency) | `synap://host:15501` | **yes** |
+| **RESP3** (Redis-compatible) | `resp3://host:6379` | |
+| HTTP/REST (fallback) | `http://host:15500` | |
 
 ## Requirements
 
@@ -37,7 +46,10 @@ import com.hivellm.synap.*;
 
 public class Example {
     public static void main(String[] args) throws Exception {
-        SynapConfig config = SynapConfig.builder("http://localhost:15500")
+        // SynapRPC (default, fastest)
+        SynapConfig config = SynapConfig.builder("synap://localhost:15501")
+        // Or: SynapConfig.builder("resp3://localhost:6379")   — Redis-compatible
+        // Or: SynapConfig.builder("http://localhost:15500")    — HTTP fallback
             .timeout(java.time.Duration.ofSeconds(5))
             .build();
 

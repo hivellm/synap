@@ -73,35 +73,35 @@ Every SDK follows the same pattern:
 
 ### Rust
 ```rust
-let client = SynapClient::new(SynapConfig::new("http://localhost:15500"))?;
+let client = SynapClient::new(SynapConfig::new("synap://localhost:15501"))?;
 client.kv().set("key", "value", None).await?;
 let val: Option<String> = client.kv().get("key").await?;
 ```
 
 ### TypeScript
 ```typescript
-const client = new SynapClient({ url: 'http://localhost:15500' });
+const client = new SynapClient({ url: 'synap://localhost:15501' });
 await client.kv.set('key', 'value');
 const val = await client.kv.get('key');
 ```
 
 ### Python
 ```python
-async with SynapClient(SynapConfig("http://localhost:15500")) as client:
+async with SynapClient(SynapConfig("synap://localhost:15501")) as client:
     await client.kv.set("key", "value")
     val = await client.kv.get("key")
 ```
 
 ### Go
 ```go
-client := synap.NewClient(synap.NewConfig("http://localhost:15500"))
-err := client.KV().Set(ctx, "key", "value", nil)
+client := synap.NewClient(synap.NewConfig("synap://localhost:15501"))
+err := client.KV().Set(ctx, "key", "value", 0)
 val, err := client.KV().Get(ctx, "key")
 ```
 
 ### Java
 ```java
-try (var client = new SynapClient(SynapConfig.builder("http://localhost:15500").build())) {
+try (var client = new SynapClient(SynapConfig.builder("synap://localhost:15501").build())) {
     client.kv().set("key", "value");
     String val = client.kv().get("key");
 }
@@ -109,14 +109,14 @@ try (var client = new SynapClient(SynapConfig.builder("http://localhost:15500").
 
 ### C#
 ```csharp
-using var client = new SynapClient("http://localhost:15500");
+using var client = new SynapClient("synap://localhost:15501");
 await client.KV.SetAsync("key", "value");
 var val = await client.KV.GetAsync("key");
 ```
 
 ### PHP
 ```php
-$client = new SynapClient('http://localhost:15500');
+$client = new SynapClient('synap://localhost:15501');
 $client->kv()->set('key', 'value');
 $val = $client->kv()->get('key');
 ```

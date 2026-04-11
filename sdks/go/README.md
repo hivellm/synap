@@ -2,12 +2,18 @@
 
 Go client SDK for [Synap](https://github.com/hivellm/synap) — a high-performance in-memory data engine.
 
-Communicates with the Synap server via its StreamableHTTP endpoint (`POST /api/v1/command`).
+Supports three transports, auto-detected from the URL scheme:
+
+| Transport | URL | Default |
+|-----------|-----|:-------:|
+| **SynapRPC** (binary, lowest latency) | `synap://host:15501` | **yes** |
+| **RESP3** (Redis-compatible) | `resp3://host:6379` | |
+| HTTP/REST (fallback) | `http://host:15500` | |
 
 ## Requirements
 
 - Go 1.22+
-- No external dependencies — stdlib only
+- `github.com/vmihailenco/msgpack/v5` (for SynapRPC)
 
 ## Installation
 
@@ -29,8 +35,11 @@ import (
 )
 
 func main() {
-    cfg := synap.NewConfig("http://localhost:15500").
+    // SynapRPC (default, fastest)
+    cfg := synap.NewConfig("synap://localhost:15501").
         WithTimeout(10 * time.Second)
+    // Or: synap.NewConfig("resp3://localhost:6379")   — Redis-compatible
+    // Or: synap.NewConfig("http://localhost:15500")    — HTTP fallback
     client := synap.NewClient(cfg)
 
     ctx := context.Background()
