@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	synap "github.com/hivellm/synap-sdk-go"
+	synap "github.com/hivellm/synap/sdks/go"
 )
 
 func main() {

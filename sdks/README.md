@@ -13,7 +13,7 @@ All SDKs communicate via the **StreamableHTTP** protocol (`POST /api/v1/command`
 | [Python](python/) | Python 3.11+ | `synap-sdk` (PyPI) | Production |
 | [PHP](php/) | PHP 8.1+ | `hivehub/synap` (Packagist) | Production |
 | [C#](csharp/) | .NET 8+ | `Synap.SDK` (NuGet) | Production |
-| [Go](go/) | Go 1.22+ | `github.com/hivellm/synap-sdk-go` | Production |
+| [Go](go/) | Go 1.22+ | `github.com/hivellm/synap/sdks/go` | Production |
 | [Java](java/) | Java 17+ | `com.hivellm:synap-sdk` (Maven) | Production |
 
 ## Module Coverage

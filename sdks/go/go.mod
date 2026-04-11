@@ -1,3 +1,3 @@
-module github.com/hivellm/synap-sdk-go
+module github.com/hivellm/synap/sdks/go
 
 go 1.22

@@ -12,7 +12,7 @@ Communicates with the Synap server via its StreamableHTTP endpoint (`POST /api/v
 ## Installation
 
 ```bash
-go get github.com/hivellm/synap-sdk-go
+go get github.com/hivellm/synap/sdks/go
 ```
 
 ## Quick start
@@ -25,7 +25,7 @@ import (
     "fmt"
     "time"
 
-    synap "github.com/hivellm/synap-sdk-go"
+    synap "github.com/hivellm/synap/sdks/go"
 )
 
 func main() {

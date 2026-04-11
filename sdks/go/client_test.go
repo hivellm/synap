@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	synap "github.com/hivellm/synap-sdk-go"
+	synap "github.com/hivellm/synap/sdks/go"
 )
 
 // mockServer creates a test HTTP server that captures the last request body
