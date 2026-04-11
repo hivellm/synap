@@ -23,7 +23,7 @@ describe('SynapClient (Unit Tests)', () => {
 
   describe('Constructor & Configuration', () => {
     it('should create client with default options', () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
       expect(client).toBeTruthy();
     });
 
@@ -33,17 +33,17 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should create client with timeout', () => {
-      const client = new SynapClient({ timeout: 5000 });
+      const client = new SynapClient({ url: 'http://localhost:15500', timeout: 5000 });
       expect(client).toBeTruthy();
     });
 
     it('should create client with debug enabled', () => {
-      const client = new SynapClient({ debug: true });
+      const client = new SynapClient({ url: 'http://localhost:15500', debug: true });
       expect(client).toBeTruthy();
     });
 
     it('should create client with basic auth', () => {
-      const client = new SynapClient({
+      const client = new SynapClient({ url: 'http://localhost:15500',
         auth: {
           type: 'basic',
           username: 'user',
@@ -54,7 +54,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should create client with api_key auth', () => {
-      const client = new SynapClient({
+      const client = new SynapClient({ url: 'http://localhost:15500',
         auth: {
           type: 'api_key',
           apiKey: 'secret-key',
@@ -66,7 +66,7 @@ describe('SynapClient (Unit Tests)', () => {
 
   describe('sendCommand - Success Cases', () => {
     it('should send command successfully', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
       
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -83,7 +83,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should include basic auth header', async () => {
-      const client = new SynapClient({
+      const client = new SynapClient({ url: 'http://localhost:15500',
         auth: {
           type: 'basic',
           username: 'testuser',
@@ -108,7 +108,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should include bearer token header', async () => {
-      const client = new SynapClient({
+      const client = new SynapClient({ url: 'http://localhost:15500',
         auth: {
           type: 'api_key',
           apiKey: 'my-secret-key',
@@ -133,7 +133,7 @@ describe('SynapClient (Unit Tests)', () => {
 
     it('should log debug info when debug is enabled', async () => {
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-      const client = new SynapClient({ debug: true, transport: 'http' });
+      const client = new SynapClient({ url: 'http://localhost:15500', debug: true, transport: 'http' });
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -160,7 +160,7 @@ describe('SynapClient (Unit Tests)', () => {
 
     it('should not log when debug is disabled', async () => {
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
-      const client = new SynapClient({ debug: false });
+      const client = new SynapClient({ url: 'http://localhost:15500', debug: false });
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -180,7 +180,7 @@ describe('SynapClient (Unit Tests)', () => {
 
   describe('sendCommand - Error Cases', () => {
     it('should throw ServerError on HTTP error', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
 
       mockFetch.mockResolvedValue({
         ok: false,
@@ -193,7 +193,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should throw ServerError on success=false in response', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
 
       mockFetch.mockResolvedValue({
         ok: true,
@@ -209,7 +209,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should throw ServerError with default message when error is undefined', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
 
       mockFetch.mockResolvedValue({
         ok: true,
@@ -223,7 +223,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should throw TimeoutError on abort', async () => {
-      const client = new SynapClient({ timeout: 100 });
+      const client = new SynapClient({ url: 'http://localhost:15500', timeout: 100 });
 
       mockFetch.mockImplementation(() => 
         new Promise((_, reject) => {
@@ -239,7 +239,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should throw NetworkError on fetch failure', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
 
       mockFetch.mockRejectedValue(new Error('Network failure'));
 
@@ -247,7 +247,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should throw NetworkError on unknown error', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
 
       mockFetch.mockRejectedValue('unknown error string');
 
@@ -255,7 +255,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should rethrow ServerError as-is', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
       const serverError = new ServerError('Test error', 500, 'req-123');
 
       mockFetch.mockRejectedValue(serverError);
@@ -266,7 +266,7 @@ describe('SynapClient (Unit Tests)', () => {
 
   describe('ping()', () => {
     it('should return true on successful ping', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -277,7 +277,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should return false on failed ping', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
 
       mockFetch.mockResolvedValueOnce({
         ok: false,
@@ -288,7 +288,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should return false on network error', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
 
       mockFetch.mockRejectedValueOnce(new Error('Network error'));
 
@@ -314,7 +314,7 @@ describe('SynapClient (Unit Tests)', () => {
 
   describe('health()', () => {
     it('should return health status', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
       const healthData = {
         status: 'healthy',
         service: 'synap',
@@ -331,7 +331,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should throw NetworkError on failed health check', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
 
       mockFetch.mockResolvedValue({
         ok: false,
@@ -343,7 +343,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should throw on network error', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
 
       mockFetch.mockRejectedValueOnce(new Error('Connection refused'));
 
@@ -369,12 +369,12 @@ describe('SynapClient (Unit Tests)', () => {
 
   describe('close()', () => {
     it('should not throw on close', () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
       expect(() => client.close()).not.toThrow();
     });
 
     it('should be callable multiple times', () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
       expect(() => {
         client.close();
         client.close();
@@ -385,7 +385,7 @@ describe('SynapClient (Unit Tests)', () => {
 
   describe('Authentication Edge Cases', () => {
     it('should not add auth header if auth is undefined', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -404,7 +404,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should not add auth header if basic auth missing username', async () => {
-      const client = new SynapClient({
+      const client = new SynapClient({ url: 'http://localhost:15500',
         auth: {
           type: 'basic',
           password: 'pass',
@@ -428,7 +428,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should not add auth header if api_key missing apiKey', async () => {
-      const client = new SynapClient({
+      const client = new SynapClient({ url: 'http://localhost:15500',
         auth: {
           type: 'api_key',
         } as any,
@@ -453,7 +453,7 @@ describe('SynapClient (Unit Tests)', () => {
 
   describe('Request Formatting', () => {
     it('should include all required headers', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -475,7 +475,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should use POST method', async () => {
-      const client = new SynapClient();
+      const client = new SynapClient({ url: 'http://localhost:15500' });
 
       mockFetch.mockResolvedValueOnce({
         ok: true,
@@ -513,7 +513,7 @@ describe('SynapClient (Unit Tests)', () => {
     });
 
     it('should include payload in request body', async () => {
-      const client = new SynapClient({ transport: 'http' });
+      const client = new SynapClient({ url: 'http://localhost:15500', transport: 'http' });
       const payload = { key: 'test-key', value: 'test-value' };
 
       mockFetch.mockResolvedValueOnce({
