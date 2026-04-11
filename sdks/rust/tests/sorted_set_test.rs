@@ -7,6 +7,20 @@ async fn test_sorted_set_basic_operations() {
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).unwrap();
 
+    // Cleanup from previous runs
+    let _ = client
+        .sorted_set()
+        .rem(
+            "leaderboard",
+            vec![
+                "alice".into(),
+                "bob".into(),
+                "charlie".into(),
+                "dave".into(),
+            ],
+        )
+        .await;
+
     // ZADD - Add members
     let added = client
         .sorted_set()
@@ -148,6 +162,12 @@ async fn test_sorted_set_increment() {
     // Note: These are interface tests - will fail if server not running
     let config = SynapConfig::new("http://localhost:15500");
     let client = SynapClient::new(config).unwrap();
+
+    // Cleanup from previous runs
+    let _ = client
+        .sorted_set()
+        .rem("counters", vec!["visits".into()])
+        .await;
 
     // ZINCRBY - Increment score
     let score = client
