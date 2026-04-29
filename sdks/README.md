@@ -1,4 +1,4 @@
-# Synap SDKs — v0.11.1
+# Synap SDKs — v0.12.0
 
 Official client libraries for [Synap](https://github.com/hivellm/synap) — High-Performance In-Memory Key-Value Store & Message Broker.
 
@@ -8,13 +8,13 @@ All 7 SDKs support **three transports** with auto-detection from URL scheme. **S
 
 | SDK | Language | Package | Version |
 |-----|----------|---------|:-------:|
-| [Rust](rust/) | Rust | `synap-sdk` (crates.io) | 0.11.1 |
-| [TypeScript](typescript/) | TS/JS | `@hivehub/synap` (npm) | 0.11.1 |
-| [Python](python/) | Python 3.11+ | `synap-sdk` (PyPI) | 0.11.1 |
-| [Go](go/) | Go 1.22+ | `github.com/hivellm/synap/sdks/go` | 0.11.1 |
-| [Java](java/) | Java 17+ | `com.hivellm:synap-sdk` (Maven) | 0.11.1 |
-| [PHP](php/) | PHP 8.1+ | `hivellm/synap-sdk` (Packagist) | 0.11.1 |
-| [C#](csharp/) | .NET 8+ | `Synap.SDK` (NuGet) | 0.11.1 |
+| [Rust](rust/) | Rust | `synap-sdk` (crates.io) | 0.12.0 |
+| [TypeScript](typescript/) | TS/JS | `@hivehub/synap` (npm) | 0.12.0 |
+| [Python](python/) | Python 3.11+ | `synap-sdk` (PyPI) | 0.12.0 |
+| [Go](go/) | Go 1.22+ | `github.com/hivellm/synap/sdks/go` | 0.12.0 |
+| [Java](java/) | Java 17+ | `com.hivellm:synap-sdk` (Maven) | 0.12.0 |
+| [PHP](php/) | PHP 8.1+ | `hivellm/synap-sdk` (Packagist) | 0.12.0 |
+| [C#](csharp/) | .NET 8+ | `Synap.SDK` (NuGet) | 0.12.0 |
 
 ## Transport Support
 

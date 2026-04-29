@@ -4,7 +4,7 @@
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.85%2B)-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/tests-636%2B%20(100%25)-brightgreen.svg)](#testing--quality)
 [![Coverage](https://img.shields.io/badge/coverage-99.30%25-brightgreen.svg)](docs/TESTING.md)
-[![Version](https://img.shields.io/badge/version-0.11.0-blue.svg)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.12.0-blue.svg)](#project-status)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
 
@@ -738,9 +738,9 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 ## 📊 Project Status
 
 **Status**: ✅ Phase 1-3 Complete | ✅ Redis Phase 1-2 Complete (Hash, List, Set, Sorted Set, Geospatial, Bitmap, String Extensions)  
-**Version**: 0.8.1 (Dependency updates + SDK fixes)  
+**Version**: 0.12.0 (Idempotent stream room creation across all SDKs — closes #165)  
 **Edition**: Rust 2024 (nightly 1.85+)  
-**Last Updated**: November 12, 2025
+**Last Updated**: 2026-04-29
 
 ### ✅ Implementation Complete
 

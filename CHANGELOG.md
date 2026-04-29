@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-04-29
+
+### Added
+
+- **Idempotent stream room creation** ([#165](https://github.com/hivellm/synap/issues/165)).
+  Publishing to a Synap room that didn't exist previously returned
+  `Room 'X' not found`, forcing every client to wrap a
+  publish-or-create-then-republish dance. Three Cortex crates already
+  carried that boilerplate after a 2026-04-28 silent-loss incident; it
+  is now a single SDK call.
+  - Server: new `StreamManager::get_or_create_room` (returns whether
+    the room was newly created, never errors when it already exists),
+    new `stream.get_or_create` StreamableHTTP command, idempotent
+    `PUT /stream/{room}` REST endpoint, and `SGETORCREATE` SynapRPC
+    verb (returns `"CREATED"` or `"EXISTS"`).
+  - SDKs: `get_or_create_room` / `getOrCreateRoom` / `GetOrCreate`
+    added to all seven SDKs (Rust, TypeScript, Python, Go, Java, C#,
+    PHP), with command-mapper wiring for the SynapRPC transport.
+  - Docs: SDK READMEs and Rust SDK CHANGELOG updated with a "First
+    publish to a new stream" migration tip.
+
 ### Changed
 
 - **Source module reorganization** — all files exceeding 1 500 lines split
