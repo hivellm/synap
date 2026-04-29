@@ -296,9 +296,11 @@ impl ReplicaNode {
                 payload,
             } => {
                 if let Some(sm) = &self.stream_manager {
-                    // Create room if doesn't exist
-                    let _ = sm.create_room(room).await;
-                    // Publish event
+                    // Idempotent room creation (synap#165): never errors
+                    // when the room already exists, so we don't need to
+                    // discard a spurious "already exists" Err on every
+                    // subsequent replication of the same room.
+                    let _ = sm.get_or_create_room(room).await;
                     let _ = sm.publish(room, event_type, payload.clone()).await;
                 } else {
                     debug!("Skipping stream operation (no stream manager)");

@@ -7,19 +7,25 @@
 # 2. Runtime stage: Minimal runtime image with compiled binary
 #
 # Features:
-# - Optimized for size (< 50MB final image)
-# - Based on Alpine Linux for security
+# - Optimized for size (< 50MB final image — fully static musl binary)
+# - Runtime based on Docker Hardened Image (dhi.io/debian-base:trixie-dev)
+#   for continuous CVE patching and minimized attack surface
 # - Non-root user for security
 # - Health checks enabled
 # - Volume mounts for persistence
+# - Ships with SBOM + provenance attestations when built via buildx
 #
 # Docker Commands:
-#   Build image:
-#     docker build -t hivehub/synap:0.11.1 -t hivehub/synap:latest .
+#   Build image (single arch, with attestations — closes the
+#   "Missing supply chain attestation(s)" Scout finding):
+#     docker buildx build \
+#       --sbom=true --provenance=mode=max \
+#       -t hivehub/synap:0.12.0 -t hivehub/synap:latest --load .
 #
-#   Build multi-arch (AMD64 + ARM64):
+#   Build multi-arch (AMD64 + ARM64) and push with attestations:
 #     docker buildx build --platform linux/amd64,linux/arm64 \
-#       -t hivehub/synap:0.11.1 -t hivehub/synap:latest --push .
+#       --sbom=true --provenance=mode=max \
+#       -t hivehub/synap:0.12.0 -t hivehub/synap:latest --push .
 #
 #   Run container (all three protocols):
 #     docker run -d --name synap-server \
@@ -127,7 +133,11 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 # ============================================================================
 # Stage 2: Runtime
 # ============================================================================
-FROM alpine:3.19
+# Docker Hardened Image: continuously rebuilt with security patches,
+# minimal package surface, and SLSA-aligned supply chain. Closes the
+# "Fixable critical or high vulnerabilities found" Scout finding that
+# Alpine 3.19 was carrying.
+FROM dhi.io/debian-base:trixie-dev
 
 # Build metadata
 ARG BUILD_DATE
@@ -140,15 +150,23 @@ LABEL org.opencontainers.image.source="https://github.com/hivellm/synap"
 LABEL org.opencontainers.image.vendor="HiveLLM"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
-# Install runtime dependencies (minimal)
-RUN apk add --no-cache \
-    ca-certificates \
-    tzdata \
-    wget
+# Install runtime dependencies (minimal). The Synap binary is a
+# fully static musl build, so we only need ca-certificates for
+# outbound TLS, tzdata for log timestamps, and wget for the
+# HEALTHCHECK below.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        tzdata \
+        wget && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN addgroup -g 1000 synap && \
-    adduser -D -u 1000 -G synap synap
+# Create non-root user. DHI debian-base ships without the
+# `passwd`/`shadow` package, so groupadd/useradd are not available;
+# write directly to /etc/{passwd,group} instead.
+RUN echo 'synap:x:1000:' >> /etc/group && \
+    echo 'synap:x:1000:1000::/app:/usr/sbin/nologin' >> /etc/passwd
 
 # Create directories for data persistence
 RUN mkdir -p /data/wal /data/snapshots && \

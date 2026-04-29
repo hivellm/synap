@@ -165,21 +165,41 @@ async fn test_stream_partial_sync() {
         tracing::debug!("Published event {} at offset {}", i, offset);
     }
 
-    // Wait for replication
-    sleep(Duration::from_secs(2)).await;
-
-    // Verify room exists on replica
-    let rooms = replica_stream.list_rooms().await;
-    assert!(
-        rooms.contains(&"live_room".to_string()),
-        "live_room not replicated"
-    );
-
-    // Verify events were replicated
-    let events = replica_stream
-        .consume("live_room", "test_consumer", 0, 100)
-        .await
-        .unwrap();
+    // Poll for replication with a deadline. `master.replicate()` is
+    // fire-and-forget over a heartbeat-driven channel, so on a loaded
+    // CI runner the prior fixed `sleep(2s)` was racy — Ubuntu would
+    // intermittently observe an empty room list while macOS/Windows
+    // passed. Replace with a bounded poll so the test is deterministic.
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    let events = loop {
+        let rooms = replica_stream.list_rooms().await;
+        if rooms.contains(&"live_room".to_string()) {
+            let evts = replica_stream
+                .consume("live_room", "test_consumer", 0, 100)
+                .await
+                .unwrap();
+            if evts.len() >= 15 {
+                break evts;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            let rooms_now = replica_stream.list_rooms().await;
+            let evts_now = if rooms_now.contains(&"live_room".to_string()) {
+                replica_stream
+                    .consume("live_room", "test_consumer", 0, 100)
+                    .await
+                    .unwrap_or_default()
+                    .len()
+            } else {
+                0
+            };
+            panic!(
+                "live_room not replicated within deadline (rooms={:?}, events={})",
+                rooms_now, evts_now,
+            );
+        }
+        sleep(Duration::from_millis(100)).await;
+    };
 
     tracing::info!("Replica received {} events", events.len());
     assert!(

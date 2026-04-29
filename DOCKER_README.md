@@ -68,8 +68,8 @@ volumes:
 ## 📋 Supported Tags
 
 - `latest` - Latest stable release
-- `0.11.1` - Specific version tag
-- `0.11.x` - Version series tags
+- `0.12.0` - Specific version tag
+- `0.12.x` - Version series tags
 
 All images support multi-architecture builds:
 - `linux/amd64` - Intel/AMD 64-bit
@@ -281,7 +281,7 @@ volumes:
 # Check server health
 curl http://localhost:15500/health
 
-# Response: {"service":"synap","status":"healthy","version":"0.11.1"}
+# Response: {"service":"synap","status":"healthy","version":"0.12.0"}
 ```
 
 ### Prometheus Metrics
@@ -363,7 +363,7 @@ version: '3.8'
 
 services:
   synap:
-    image: hivehub/synap:0.11.1
+    image: hivehub/synap:0.12.0
     container_name: synap-production
     ports:
       - "15500:15500"  # HTTP/REST
@@ -460,11 +460,15 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](https:
 
 ## 🏷️ Image Details
 
-- **Base Image**: `alpine:3.19`
-- **Size**: ~50MB (compressed)
+- **Base Image**: `dhi.io/debian-base:trixie-dev` (Docker Hardened Image)
+- **Size**: ~50MB (compressed) — fully static musl binary
 - **Architecture**: Multi-arch (amd64, arm64)
 - **User**: Non-root (`synap:synap`, UID 1000)
 - **Health Check**: Built-in HTTP health endpoint
+- **Supply chain**: SBOM + provenance (SLSA) attestations published
+  alongside every tag — built with `docker buildx --sbom=true
+  --provenance=mode=max`. Verify with `docker buildx imagetools
+  inspect hivehub/synap:0.12.0 --format "{{ json .SBOM }}"`.
 
 ---
 
