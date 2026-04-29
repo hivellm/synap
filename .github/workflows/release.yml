@@ -19,6 +19,10 @@ jobs:
     name: Build Release (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
+      # Don't cancel sibling matrix entries when one fails — we need
+      # to be able to publish the macOS / Windows artifacts even if a
+      # Linux runner has a transient issue.
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -60,23 +64,17 @@ jobs:
       - name: Install Rust target
         run: rustup target add ${{ matrix.target }}
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      # Use the Rust-aware cache action. Cargo.lock is gitignored in
+      # this repo, so the prior raw `actions/cache@v4` on target/ keyed
+      # by `hashFiles('**/Cargo.lock')` produced a constant key every
+      # run and ended up restoring a poisoned mix of binaries from
+      # previous tags. Swatinem/rust-cache hashes Cargo.toml manifests,
+      # prunes the target dir of test/build-script artifacts, and
+      # honours the matrix target.
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
         with:
-          path: ~/.cargo/registry
-          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache cargo index
-        uses: actions/cache@v4
-        with:
-          path: ~/.cargo/git
-          key: ${{ runner.os }}-cargo-index-${{ hashFiles('**/Cargo.lock') }}
-
-      - name: Cache target directory
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-target-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ matrix.target }}-release
 
       - name: Build synap-server
         run: cargo build --release --bin synap-server --target ${{ matrix.target }}
