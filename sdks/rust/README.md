@@ -254,7 +254,16 @@ Event streams are **reactive by default** - use `observe_events()` or `observe_e
 use futures::StreamExt;
 use std::time::Duration;
 
-// Create a stream room
+// Create a stream room.
+//
+// First publish to a new stream? Use `get_or_create_room` instead —
+// it is idempotent, never errors when the room already exists, and
+// removes the publish-or-create-then-republish dance every client
+// otherwise reimplements (see hivellm/synap#165):
+//
+//     client.stream()
+//         .get_or_create_room("chat-room-1", Some(10000))
+//         .await?;
 client.stream().create_room("chat-room-1", Some(10000)).await?;
 
 // Publish an event

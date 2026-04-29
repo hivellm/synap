@@ -489,6 +489,7 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "pubsub.topics" => pubsub::handle_pubsub_topics_cmd(&state, &request).await,
         "pubsub.info" => pubsub::handle_pubsub_info_cmd(&state, &request).await,
         "stream.create" => stream::handle_stream_create_cmd(&state, &request).await,
+        "stream.get_or_create" => stream::handle_stream_get_or_create_cmd(&state, &request).await,
         "stream.publish" => stream::handle_stream_publish_cmd(&state, &request).await,
         "stream.consume" => stream::handle_stream_consume_cmd(&state, &request).await,
         "stream.stats" => stream::handle_stream_stats_cmd(&state, &request).await,

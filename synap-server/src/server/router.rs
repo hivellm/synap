@@ -318,14 +318,18 @@ pub fn create_router(
             "/stream/{room}/ws/{subscriber_id}",
             get(handlers::stream_websocket),
         ) // WebSocket for real-time push
-        .route("/stream/{room}", post(handlers::stream_create_room))
+        .route(
+            "/stream/{room}",
+            post(handlers::stream_create_room)
+                .put(handlers::stream_get_or_create_room)
+                .delete(handlers::stream_delete_room),
+        )
         .route("/stream/{room}/publish", post(handlers::stream_publish))
         .route(
             "/stream/{room}/consume/{subscriber_id}",
             get(handlers::stream_consume),
         )
         .route("/stream/{room}/stats", get(handlers::stream_room_stats))
-        .route("/stream/{room}", delete(handlers::stream_delete_room))
         .route("/stream/list", get(handlers::stream_list_rooms))
         // Queue endpoints
         .route(

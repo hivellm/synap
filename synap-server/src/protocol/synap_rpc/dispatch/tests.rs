@@ -1166,6 +1166,58 @@ async fn test_stream_create_publish_read_stats_delete_lifecycle() {
 }
 
 #[tokio::test]
+async fn test_stream_get_or_create_is_idempotent() {
+    // Regression for hivellm/synap#165: SGETORCREATE must succeed
+    // both on first creation and on a subsequent call for the same
+    // room, so SDK callers can stop hand-rolling the
+    // publish-or-create-then-republish dance.
+    let state = make_state_with_streams();
+
+    let first = dispatch(
+        &state,
+        req(1, "SGETORCREATE", vec![str_arg("room_idempotent")]),
+    )
+    .await;
+    assert_eq!(
+        first.result,
+        Ok(SynapValue::Str("CREATED".into())),
+        "first SGETORCREATE should report CREATED",
+    );
+
+    let second = dispatch(
+        &state,
+        req(2, "SGETORCREATE", vec![str_arg("room_idempotent")]),
+    )
+    .await;
+    assert_eq!(
+        second.result,
+        Ok(SynapValue::Str("EXISTS".into())),
+        "second SGETORCREATE must NOT error and must report EXISTS",
+    );
+
+    // Publishing immediately after must succeed — the foot-gun
+    // (Room not found on first publish) is gone.
+    let pub_resp = dispatch(
+        &state,
+        req(
+            3,
+            "SPUBLISH",
+            vec![
+                str_arg("room_idempotent"),
+                str_arg("first"),
+                bytes_arg(b"{}"),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(
+        pub_resp.result,
+        Ok(SynapValue::Int(0)),
+        "SPUBLISH right after SGETORCREATE must succeed",
+    );
+}
+
+#[tokio::test]
 async fn test_stream_replay_from_offset() {
     let state = make_state_with_streams();
 

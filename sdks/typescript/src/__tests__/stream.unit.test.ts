@@ -19,6 +19,50 @@ describe('StreamManager (Unit Tests - Additional Coverage)', () => {
     stream = new StreamManager(mockClient);
   });
 
+  describe('getOrCreateRoom() — hivellm/synap#165', () => {
+    it('returns true when the server reports the room as newly created', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValueOnce({
+        success: true,
+        room: 'cortex.events.raw',
+        created: true,
+      });
+
+      const created = await stream.getOrCreateRoom('cortex.events.raw');
+
+      expect(created).toBe(true);
+      expect(mockClient.sendCommand).toHaveBeenCalledWith('stream.get_or_create', {
+        room: 'cortex.events.raw',
+      });
+    });
+
+    it('is idempotent: returns false on the second call without erroring', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValueOnce({
+        success: true,
+        room: 'already-here',
+        created: false,
+      });
+
+      const created = await stream.getOrCreateRoom('already-here');
+
+      expect(created).toBe(false);
+    });
+
+    it('forwards maxEvents option as snake_case payload', async () => {
+      vi.mocked(mockClient.sendCommand).mockResolvedValueOnce({
+        success: true,
+        room: 'sized',
+        created: true,
+      });
+
+      await stream.getOrCreateRoom('sized', { maxEvents: 5000 });
+
+      expect(mockClient.sendCommand).toHaveBeenCalledWith('stream.get_or_create', {
+        room: 'sized',
+        max_events: 5000,
+      });
+    });
+  });
+
   describe('observeEvent() - Lines 218-226', () => {
     it('should filter events by name', async () => {
       const mockEvents = [

@@ -31,6 +31,38 @@ class StreamManager:
         """
         await self._client.send_command("stream.create", {"room": room})
 
+    async def get_or_create_room(
+        self,
+        room: str,
+        max_events: int | None = None,
+    ) -> bool:
+        """Get a stream room or create it if it does not yet exist.
+
+        Idempotent: calling twice for the same name from two callers
+        is safe — the second one observes the existing room instead
+        of erroring like ``create_room`` does. Use this on first
+        publish to a fresh room name to skip the
+        publish-or-create-then-republish dance.
+
+        Args:
+            room: The room name.
+            max_events: Optional maximum events kept in the room
+                buffer when the room is newly created. Ignored if
+                the room already exists.
+
+        Returns:
+            ``True`` if a new room was created by this call,
+            ``False`` if the room already existed.
+        """
+        payload: dict[str, Any] = {"room": room}
+        if max_events is not None:
+            payload["max_events"] = max_events
+        response = await self._client.send_command(
+            "stream.get_or_create",
+            payload,
+        )
+        return bool(response.get("created", False))
+
     async def delete_room(self, room: str) -> None:
         """Delete a stream room.
 

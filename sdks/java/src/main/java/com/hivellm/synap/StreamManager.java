@@ -36,6 +36,45 @@ public final class StreamManager {
     }
 
     /**
+     * Returns the named stream room or creates it if it does not yet
+     * exist.
+     *
+     * <p>Idempotent: calling twice for the same name from two callers
+     * is safe — the second one observes the existing room instead of
+     * erroring like {@link #create(String, long)} does. Use this on
+     * first publish to a fresh room name to skip the
+     * publish-or-create-then-republish dance.
+     *
+     * <p>See <a href="https://github.com/hivellm/synap/issues/165">synap#165</a>.
+     *
+     * @param room      room name
+     * @param maxEvents maximum number of events the room retains
+     *                  when it is newly created (0 = unlimited).
+     *                  Ignored if the room already exists.
+     * @return {@code true} if a new room was created by this call,
+     *         {@code false} if the room already existed.
+     * @throws SynapException on network or server error
+     */
+    public boolean getOrCreate(String room, long maxEvents) {
+        Map<String, Object> payload = SynapClient.newPayload();
+        payload.put("room", room);
+        if (maxEvents > 0) {
+            payload.put("max_events", maxEvents);
+        }
+        JsonNode responsePayload = client.sendCommand("stream.get_or_create", payload);
+        JsonNode createdNode = responsePayload.get("created");
+        return createdNode != null && createdNode.asBoolean(false);
+    }
+
+    /**
+     * Convenience overload: {@link #getOrCreate(String, long)} with no
+     * retention bound when the room is newly created.
+     */
+    public boolean getOrCreate(String room) {
+        return getOrCreate(room, 0L);
+    }
+
+    /**
      * Publishes an event to the named stream room.
      *
      * @param room      room name

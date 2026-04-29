@@ -30,6 +30,65 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_stream_get_or_create_room_returns_created_flag() {
+        // hivellm/synap#165: SDK callers must be able to skip the
+        // publish-or-create-then-republish dance entirely.
+        let (client, mut server) = setup_test_client().await;
+
+        let mock = server
+            .mock("POST", "/api/v1/command")
+            .match_body(Matcher::PartialJson(json!({
+                "command": "stream.get_or_create",
+                "payload": {"room": "cortex.events.raw"}
+            })))
+            .with_status(200)
+            .with_body(
+                r#"{"success": true, "payload": {"success": true, "room": "cortex.events.raw", "created": true}}"#,
+            )
+            .create_async()
+            .await;
+
+        let created = client
+            .stream()
+            .get_or_create_room("cortex.events.raw", None)
+            .await
+            .unwrap();
+        assert!(created);
+
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn test_stream_get_or_create_room_idempotent_returns_false() {
+        let (client, mut server) = setup_test_client().await;
+
+        let mock = server
+            .mock("POST", "/api/v1/command")
+            .match_body(Matcher::PartialJson(json!({
+                "command": "stream.get_or_create",
+                "payload": {"room": "already-here", "max_events": 5000}
+            })))
+            .with_status(200)
+            .with_body(
+                r#"{"success": true, "payload": {"success": true, "room": "already-here", "created": false}}"#,
+            )
+            .create_async()
+            .await;
+
+        let created = client
+            .stream()
+            .get_or_create_room("already-here", Some(5000))
+            .await
+            .unwrap();
+        assert!(
+            !created,
+            "second call must not error and must report not-created"
+        );
+
+        mock.assert_async().await;
+    }
+
+    #[tokio::test]
     async fn test_stream_create_room_with_max() {
         let (client, mut server) = setup_test_client().await;
 

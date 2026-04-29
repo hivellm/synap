@@ -70,6 +70,47 @@ impl StreamManager {
         Ok(())
     }
 
+    /// Get a stream room or create it if it does not yet exist.
+    ///
+    /// Idempotent: calling twice for the same name from two tasks is
+    /// safe — the second caller observes the existing room instead of
+    /// erroring like [`Self::create_room`] does. This removes the
+    /// publish-or-create-then-republish dance that every Synap client
+    /// was reimplementing on first use of a fresh room name.
+    ///
+    /// Returns `true` if a new room was created by this call, or
+    /// `false` if the room already existed.
+    ///
+    /// # Example
+    /// ```no_run
+    /// # use synap_sdk::{SynapClient, SynapConfig};
+    /// # use serde_json::json;
+    /// # #[tokio::main]
+    /// # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let client = SynapClient::new(SynapConfig::new("http://localhost:15500"))?;
+    /// // Safe to call on every startup — never errors if the room
+    /// // is already provisioned.
+    /// client.stream().get_or_create_room("cortex.events.raw", None).await?;
+    /// client.stream()
+    ///     .publish("cortex.events.raw", "tick", json!({"n": 1}))
+    ///     .await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn get_or_create_room(&self, room: &str, max_events: Option<usize>) -> Result<bool> {
+        let mut payload = json!({"room": room});
+        if let Some(max) = max_events {
+            payload["max_events"] = json!(max);
+        }
+
+        let response = self
+            .client
+            .send_command("stream.get_or_create", payload)
+            .await?;
+
+        Ok(response["created"].as_bool().unwrap_or(false))
+    }
+
     /// Publish an event to a stream
     ///
     /// # Returns

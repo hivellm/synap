@@ -138,7 +138,13 @@ const id = await client.queue.publish('tasks', { job: 'resize' }, 5);
 const msg = await client.queue.consume('tasks', 'worker-1');
 await client.queue.ack('tasks', msg.id);
 
-// Stream publish + read
+// Stream publish + read.
+//
+// First publish to a new stream? Use the idempotent
+// `getOrCreateRoom` instead — it never errors when the room
+// already exists, replacing the publish-or-create-then-republish
+// dance every client otherwise reimplements (synap#165):
+//   await client.stream.getOrCreateRoom('events');
 await client.stream.createRoom('events');
 await client.stream.publish('events', 'user.created', { id: 'u1' });
 const events = await client.stream.read('events', 0);

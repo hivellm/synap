@@ -235,6 +235,8 @@ function mapCommand(string $cmd, array $payload): ?array
         // ── Stream ────────────────────────────────────────────────────────────
         case 'stream.create':
             return ['SCREATE', [(string) ($payload['room'] ?? '')]];
+        case 'stream.get_or_create':
+            return ['SGETORCREATE', [(string) ($payload['room'] ?? '')]];
         case 'stream.delete':
             return ['SDELETE', [(string) ($payload['room'] ?? '')]];
         case 'stream.publish':
@@ -546,6 +548,13 @@ function mapResponse(string $cmd, mixed $raw): array
         // ── Stream ────────────────────────────────────────────────────────────
         case 'stream.create':
             return ['success' => $raw === 'OK' || $raw === true];
+        case 'stream.get_or_create':
+            // SGETORCREATE returns "CREATED" / "EXISTS" on the SynapRPC
+            // wire. Normalise to the StreamableHTTP shape.
+            if (is_array($raw)) {
+                return $raw;
+            }
+            return ['created' => $raw === 'CREATED'];
         case 'stream.delete':
             return ['success' => (bool) $raw];
         case 'stream.publish':

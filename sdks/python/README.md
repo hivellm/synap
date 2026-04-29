@@ -193,7 +193,14 @@ await client.queue.delete_queue("tasks")
 ### Event Streams
 
 ```python
-# Create stream room
+# First publish to a new stream? Use the idempotent
+# get_or_create_room — it never errors when the room already exists,
+# replacing the publish-or-create-then-republish dance every client
+# otherwise reimplements (see hivellm/synap#165):
+#
+#     await client.stream.get_or_create_room("events")
+#
+# Or, when you genuinely need to fail on duplicates:
 await client.stream.create_room("events")
 
 # Publish event

@@ -259,6 +259,29 @@ impl StreamManager {
         Ok(())
     }
 
+    /// Get a room or create it if it does not exist.
+    ///
+    /// Idempotent: the second concurrent caller observes the
+    /// already-created room and returns `false` for `created`,
+    /// instead of erroring like [`Self::create_room`] does.
+    ///
+    /// Returns `true` if a new room was created by this call,
+    /// `false` if the room already existed.
+    pub async fn get_or_create_room(&self, room_name: &str) -> Result<bool, String> {
+        let mut rooms = self.rooms.write();
+
+        if rooms.contains_key(room_name) {
+            return Ok(false);
+        }
+
+        rooms.insert(
+            room_name.to_string(),
+            Room::new(room_name.to_string(), self.config.clone()),
+        );
+
+        Ok(true)
+    }
+
     /// Publish an event to a room
     pub async fn publish(
         &self,
@@ -391,6 +414,43 @@ mod tests {
         let rooms = manager.list_rooms().await;
         assert_eq!(rooms.len(), 1);
         assert!(rooms.contains(&"test-room".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_stream_get_or_create_room_is_idempotent() {
+        let manager = StreamManager::new(StreamConfig::default());
+
+        // First call creates the room.
+        let created = manager.get_or_create_room("idempotent").await.unwrap();
+        assert!(created, "first call should report the room as created");
+
+        // Second call must NOT error and must report the room as
+        // already-existing (closes hivellm/synap#165).
+        let created_again = manager.get_or_create_room("idempotent").await.unwrap();
+        assert!(
+            !created_again,
+            "second call should observe the existing room without erroring"
+        );
+
+        // The room must be usable immediately after creation, with no
+        // "Room not found" first-publish failure.
+        let offset = manager
+            .publish("idempotent", "evt", b"first".to_vec())
+            .await
+            .unwrap();
+        assert_eq!(offset, 0);
+
+        let rooms = manager.list_rooms().await;
+        assert_eq!(rooms.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_stream_get_or_create_after_create_room_does_not_error() {
+        let manager = StreamManager::new(StreamConfig::default());
+
+        manager.create_room("mixed").await.unwrap();
+        let created = manager.get_or_create_room("mixed").await.unwrap();
+        assert!(!created);
     }
 
     #[tokio::test]

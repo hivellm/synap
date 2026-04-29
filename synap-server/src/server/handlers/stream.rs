@@ -38,6 +38,45 @@ pub async fn stream_create_room(
     })))
 }
 
+/// Get or create a stream room (idempotent).
+///
+/// Unlike [`stream_create_room`], calling this twice for the same
+/// room name does not error: the second call returns
+/// `created: false` so callers can collapse the
+/// publish-or-create-then-republish dance into a single request.
+pub async fn stream_get_or_create_room(
+    State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
+    Path(room_name): Path<String>,
+) -> Result<Json<serde_json::Value>, SynapError> {
+    debug!("REST GET_OR_CREATE STREAM ROOM: {}", room_name);
+
+    require_permission(&ctx, &format!("stream:{}", room_name), Action::Configure)?;
+
+    let stream_manager = state
+        .stream_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
+
+    let scoped_name = crate::hub::MultiTenant::scope_stream_name(
+        hub_ctx.as_ref().map(|c| c.user_id()),
+        &room_name,
+    );
+
+    let created = stream_manager
+        .get_or_create_room(&scoped_name)
+        .await
+        .map_err(SynapError::InvalidRequest)?;
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "room": room_name,
+        "created": created,
+    })))
+}
+
 /// Publish event to stream room
 pub async fn stream_publish(
     State(state): State<AppState>,
@@ -259,6 +298,33 @@ pub(super) async fn handle_stream_create_cmd(
     Ok(serde_json::json!({
         "success": true,
         "room": room
+    }))
+}
+
+pub(super) async fn handle_stream_get_or_create_cmd(
+    state: &AppState,
+    request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let stream_manager = state
+        .stream_manager
+        .as_ref()
+        .ok_or_else(|| SynapError::InvalidRequest("Stream system disabled".to_string()))?;
+
+    let room = request
+        .payload
+        .get("room")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| SynapError::InvalidRequest("Missing 'room' field".to_string()))?;
+
+    let created = stream_manager
+        .get_or_create_room(room)
+        .await
+        .map_err(SynapError::InvalidRequest)?;
+
+    Ok(serde_json::json!({
+        "success": true,
+        "room": room,
+        "created": created,
     }))
 }
 

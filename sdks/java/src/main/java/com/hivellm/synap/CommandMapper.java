@@ -99,8 +99,9 @@ final class CommandMapper {
             case "queue.stats"   -> cmd("QSTATS",   p.get("queue"));
 
             // ---- Stream ----
-            case "stream.create"  -> cmd("SCREATE",  p.get("room"));
-            case "stream.delete"  -> cmd("SDELETE",  p.get("room"));
+            case "stream.create"        -> cmd("SCREATE",      p.get("room"));
+            case "stream.get_or_create" -> cmd("SGETORCREATE", p.get("room"));
+            case "stream.delete"        -> cmd("SDELETE",      p.get("room"));
             case "stream.publish" -> buildSPublish(p);
             case "stream.consume" -> cmd("SREAD",
                                          p.get("room"),
@@ -177,8 +178,10 @@ final class CommandMapper {
             case "queue.stats"   -> rawToNode(m, raw);
 
             // ---- Stream ----
-            case "stream.create"  -> obj(m, "success", isOk(raw));
-            case "stream.delete"  -> obj(m, "success", isOk(raw));
+            case "stream.create"        -> obj(m, "success", isOk(raw));
+            case "stream.get_or_create" -> obj(m, "created",
+                    raw instanceof String s && "CREATED".equals(s));
+            case "stream.delete"        -> obj(m, "success", isOk(raw));
             case "stream.publish" -> obj(m, "offset",  toLong(raw));
             case "stream.consume" -> obj(m, "events",  toArrayNode(m, raw));
             case "stream.list"    -> obj(m, "rooms",   toArrayNode(m, raw));

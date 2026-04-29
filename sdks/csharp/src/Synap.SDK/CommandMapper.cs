@@ -157,6 +157,8 @@ internal static class CommandMapper
             // ---- Stream ----
             "stream.create" => payload.TryGetValue("room", out var scr)
                 ? ("SCREATE", new object?[] { scr }) : null,
+            "stream.get_or_create" => payload.TryGetValue("room", out var sgcr)
+                ? ("SGETORCREATE", new object?[] { sgcr }) : null,
             "stream.delete" => payload.TryGetValue("room", out var sdr)
                 ? ("SDELETE", new object?[] { sdr }) : null,
             "stream.publish" => BuildSPublish(payload),
@@ -250,6 +252,9 @@ internal static class CommandMapper
 
             // ---- Stream responses ----
             "stream.create" => new Dictionary<string, object?> { ["success"] = IsOk(raw) },
+            "stream.get_or_create" => raw is Dictionary<string, object?> sgcrd
+                ? sgcrd
+                : new Dictionary<string, object?> { ["created"] = raw is string s && string.Equals(s, "CREATED", StringComparison.Ordinal) },
             "stream.delete" => new Dictionary<string, object?> { ["success"] = raw is true or 1L },
             "stream.publish" => new Dictionary<string, object?> { ["offset"] = raw is long sl ? sl : Convert.ToInt64(raw ?? 0L, System.Globalization.CultureInfo.InvariantCulture) },
             "stream.consume" => new Dictionary<string, object?> { ["events"] = RawToList(raw) },

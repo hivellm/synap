@@ -24,6 +24,36 @@ func (s *StreamManager) Create(ctx context.Context, room string, maxEvents int) 
 	return err
 }
 
+// GetOrCreate returns the named stream room or creates it if it does
+// not yet exist. Idempotent: calling twice for the same name is safe
+// — the second caller observes the existing room instead of erroring
+// like Create does. maxEvents 0 means unlimited retention; the value
+// is ignored if the room already exists.
+//
+// Returns true if a new room was created by this call, false if the
+// room already existed. See https://github.com/hivellm/synap/issues/165.
+func (s *StreamManager) GetOrCreate(ctx context.Context, room string, maxEvents int) (bool, error) {
+	type payload struct {
+		Room      string `json:"room"`
+		MaxEvents *int   `json:"max_events,omitempty"`
+	}
+	p := payload{Room: room}
+	if maxEvents > 0 {
+		p.MaxEvents = &maxEvents
+	}
+	raw, err := s.client.sendCommand(ctx, "stream.get_or_create", p)
+	if err != nil {
+		return false, err
+	}
+	var result struct {
+		Created bool `json:"created"`
+	}
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return false, newInvalidResponseError("stream.get_or_create: " + err.Error())
+	}
+	return result.Created, nil
+}
+
 // Publish appends an event to the stream room and returns the assigned offset.
 // data must be JSON-serialisable.
 func (s *StreamManager) Publish(ctx context.Context, room, eventType string, data interface{}) (uint64, error) {

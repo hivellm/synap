@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`StreamManager::get_or_create_room`**: idempotent variant of
+  `create_room` that returns `true` if the room was newly created and
+  `false` if it already existed, instead of erroring. Replaces the
+  publish-or-create-then-republish dance every client implementation
+  was reimplementing on first publish to a fresh room
+  ([hivellm/synap#165](https://github.com/hivellm/synap/issues/165)).
+  Wire-level support: new `stream.get_or_create` StreamableHTTP
+  command, idempotent `PUT /stream/{room}` REST endpoint, and
+  `SGETORCREATE` SynapRPC verb.
+
 ## [0.11.0] - 2026-04-09
 
 ### Added

@@ -564,6 +564,24 @@ pub(super) async fn run(
                 .await
                 .map(|()| SynapValue::Str("OK".into()))
         }
+        "SGETORCREATE" => {
+            // SGETORCREATE room
+            // Idempotent: returns "CREATED" if a new room was created,
+            // "EXISTS" if the room was already present. Mirrors
+            // `stream.get_or_create` on the StreamableHTTP wire.
+            let room = arg_str(args, 0)?;
+            let sm = state
+                .stream_manager
+                .as_deref()
+                .ok_or_else(|| "ERR stream subsystem not enabled".to_string())?;
+            sm.get_or_create_room(&room).await.map(|created| {
+                SynapValue::Str(if created {
+                    "CREATED".into()
+                } else {
+                    "EXISTS".into()
+                })
+            })
+        }
         "SPUBLISH" => {
             // SPUBLISH room event_type data
             let room = arg_str(args, 0)?;

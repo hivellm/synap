@@ -24,6 +24,45 @@ public sealed class StreamManager
             cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Returns the named stream room or creates it if it does not yet
+    /// exist. Idempotent: calling twice for the same name from two
+    /// callers is safe — the second one observes the existing room
+    /// instead of erroring like <see cref="CreateRoomAsync"/> does.
+    /// Use this on first publish to a fresh room name to skip the
+    /// publish-or-create-then-republish dance.
+    /// See https://github.com/hivellm/synap/issues/165.
+    /// </summary>
+    /// <param name="room">Room name.</param>
+    /// <param name="maxEvents">
+    /// Optional maximum events kept in the room buffer when the room
+    /// is newly created. Ignored if the room already exists.
+    /// </param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// <c>true</c> if a new room was created by this call, <c>false</c>
+    /// if the room already existed.
+    /// </returns>
+    public async Task<bool> GetOrCreateRoomAsync(
+        string room,
+        long? maxEvents = null,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = new Dictionary<string, object?> { ["room"] = room };
+        if (maxEvents.HasValue && maxEvents.Value > 0)
+        {
+            payload["max_events"] = maxEvents.Value;
+        }
+
+        using var response = await _client.SendCommandAsync(
+            "stream.get_or_create",
+            payload,
+            cancellationToken).ConfigureAwait(false);
+
+        return response.RootElement.TryGetProperty("created", out var created)
+            && created.ValueKind == JsonValueKind.True;
+    }
+
     /// <summary>Deletes a stream room.</summary>
     public async Task DeleteRoomAsync(string room, CancellationToken cancellationToken = default)
     {

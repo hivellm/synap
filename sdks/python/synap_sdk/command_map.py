@@ -308,6 +308,8 @@ def _map_command_inner(cmd: str, payload: dict[str, Any]) -> tuple[str, list[Any
         # ── Stream ────────────────────────────────────────────────────────────
         case "stream.create" | "stream.create_room":
             return "SCREATE", [payload.get("room", ""), str(payload.get("max_events", 0))]
+        case "stream.get_or_create" | "stream.get_or_create_room":
+            return "SGETORCREATE", [payload.get("room", "")]
         case "stream.delete" | "stream.delete_room":
             return "SDELETE", [payload.get("room", "")]
         case "stream.list" | "stream.list_rooms":
@@ -617,6 +619,14 @@ def map_response(cmd: str, raw: Any) -> dict[str, Any]:  # noqa: ANN401
         # ── Stream ────────────────────────────────────────────────────────────
         case "stream.create" | "stream.create_room" | "stream.delete" | "stream.delete_room":
             return {}
+        case "stream.get_or_create" | "stream.get_or_create_room":
+            # SynapRPC SGETORCREATE returns "CREATED" or "EXISTS" as a
+            # bare string. Normalise it back to the same JSON shape the
+            # StreamableHTTP wire returns so SDK callers see one
+            # contract regardless of transport.
+            if isinstance(raw, dict):
+                return raw
+            return {"created": str(raw or "").upper() == "CREATED"}
         case "stream.list" | "stream.list_rooms":
             if isinstance(raw, list):
                 return {"rooms": raw}

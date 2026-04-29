@@ -38,6 +38,47 @@ async def test_create_room(
 
 
 @pytest.mark.asyncio
+async def test_get_or_create_room_returns_created_flag(
+    stream_manager: StreamManager,
+    mock_client: MagicMock,
+) -> None:
+    """First call to get_or_create_room reports the room as created (synap#165)."""
+    mock_client.send_command.return_value = {
+        "success": True,
+        "room": "cortex.events.raw",
+        "created": True,
+    }
+
+    created = await stream_manager.get_or_create_room("cortex.events.raw")
+
+    assert created is True
+    mock_client.send_command.assert_called_once_with(
+        "stream.get_or_create", {"room": "cortex.events.raw"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_room_idempotent_returns_false(
+    stream_manager: StreamManager,
+    mock_client: MagicMock,
+) -> None:
+    """Second call must NOT raise and must report not-created."""
+    mock_client.send_command.return_value = {
+        "success": True,
+        "room": "already-here",
+        "created": False,
+    }
+
+    created = await stream_manager.get_or_create_room("already-here", max_events=5000)
+
+    assert created is False
+    mock_client.send_command.assert_called_once_with(
+        "stream.get_or_create",
+        {"room": "already-here", "max_events": 5000},
+    )
+
+
+@pytest.mark.asyncio
 async def test_publish_returns_offset(
     stream_manager: StreamManager,
     mock_client: MagicMock,

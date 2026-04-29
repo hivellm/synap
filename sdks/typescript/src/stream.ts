@@ -42,6 +42,41 @@ export class StreamManager {
   }
 
   /**
+   * Get a stream room or create it if it does not yet exist.
+   *
+   * Idempotent: calling twice for the same name from two callers is
+   * safe — the second one observes the existing room instead of
+   * erroring like {@link createRoom} does. This collapses the
+   * publish-or-create-then-republish dance every Synap client ends
+   * up reimplementing on first publish to a fresh room.
+   *
+   * @returns `true` if a new room was created by this call, `false`
+   *   if the room already existed.
+   *
+   * @example
+   * ```typescript
+   * // Safe to call on every startup.
+   * await synap.stream.getOrCreateRoom('cortex.events.raw');
+   * await synap.stream.publish('cortex.events.raw', 'tick', { n: 1 });
+   * ```
+   */
+  async getOrCreateRoom(
+    roomName: string,
+    options?: { maxEvents?: number }
+  ): Promise<boolean> {
+    const payload: Record<string, any> = { room: roomName };
+    if (options?.maxEvents !== undefined) {
+      payload.max_events = options.maxEvents;
+    }
+
+    const result = await this.client.sendCommand<{ created?: boolean }>(
+      'stream.get_or_create',
+      payload
+    );
+    return !!result.created;
+  }
+
+  /**
    * Publish an event to a stream room
    */
   async publish(

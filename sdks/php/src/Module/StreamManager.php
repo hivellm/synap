@@ -26,6 +26,36 @@ class StreamManager
     }
 
     /**
+     * Return the named stream room or create it if it does not yet
+     * exist.
+     *
+     * Idempotent: calling twice for the same name from two callers
+     * is safe — the second one observes the existing room instead
+     * of erroring like {@see createRoom()} does. Use this on first
+     * publish to a fresh room name to skip the
+     * publish-or-create-then-republish dance.
+     *
+     * @see https://github.com/hivellm/synap/issues/165
+     *
+     * @param int|null $maxEvents Optional retention bound applied
+     *                            only when the room is newly created.
+     *
+     * @return bool True if a new room was created by this call,
+     *              false if the room already existed.
+     */
+    public function getOrCreateRoom(string $room, ?int $maxEvents = null): bool
+    {
+        $payload = ['room' => $room];
+        if ($maxEvents !== null && $maxEvents > 0) {
+            $payload['max_events'] = $maxEvents;
+        }
+
+        $response = $this->client->sendCommand('stream.get_or_create', $payload);
+
+        return (bool) ($response['created'] ?? false);
+    }
+
+    /**
      * Delete a stream room
      */
     public function deleteRoom(string $room): void
