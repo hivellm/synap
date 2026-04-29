@@ -1,7 +1,7 @@
 use super::{AppState, get_mcp_tools, handle_mcp_tool};
 use crate::config::McpConfig;
 use rmcp::model::{
-    CallToolRequestParam, CallToolResult, ErrorData, Implementation, ProtocolVersion,
+    CallToolRequestParams, CallToolResult, ErrorData, Implementation, ProtocolVersion,
     ServerCapabilities, ServerInfo,
 };
 use std::sync::Arc;
@@ -15,25 +15,23 @@ pub struct SynapMcpService {
 
 impl rmcp::ServerHandler for SynapMcpService {
     fn get_info(&self) -> ServerInfo {
-        ServerInfo {
-            protocol_version: ProtocolVersion::default(),
-            capabilities: ServerCapabilities::builder()
+        ServerInfo::new(
+            ServerCapabilities::builder()
                 .enable_tools()
                 .build(),
-            server_info: Implementation {
-                name: "synap-server".to_string(),
-                title: Some("Synap - High-Performance Data Platform".to_string()),
-                version: env!("CARGO_PKG_VERSION").to_string(),
-                website_url: Some("https://github.com/hivellm/synap".to_string()),
-                icons: None,
-            },
-            instructions: Some("Synap MCP Server - High-performance key-value store, message queues, event streams (Kafka-style partitioned topics with consumer groups), and pub/sub messaging.".to_string()),
-        }
+        )
+        .with_protocol_version(ProtocolVersion::default())
+        .with_server_info(
+            Implementation::new("synap-server", env!("CARGO_PKG_VERSION"))
+                .with_title("Synap - High-Performance Data Platform")
+                .with_website_url("https://github.com/hivellm/synap"),
+        )
+        .with_instructions("Synap MCP Server - High-performance key-value store, message queues, event streams (Kafka-style partitioned topics with consumer groups), and pub/sub messaging.")
     }
 
     async fn list_tools(
         &self,
-        _request: Option<rmcp::model::PaginatedRequestParam>,
+        _request: Option<rmcp::model::PaginatedRequestParams>,
         _context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<rmcp::model::ListToolsResult, ErrorData> {
         use rmcp::model::ListToolsResult;
@@ -49,7 +47,7 @@ impl rmcp::ServerHandler for SynapMcpService {
 
     async fn call_tool(
         &self,
-        request: CallToolRequestParam,
+        request: CallToolRequestParams,
         _context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
         handle_mcp_tool(request, self.state.clone()).await

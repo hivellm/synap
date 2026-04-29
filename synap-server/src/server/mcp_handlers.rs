@@ -1,4 +1,4 @@
-use rmcp::model::{CallToolRequestParam, CallToolResult, Content, ErrorData};
+use rmcp::model::{CallToolRequestParams, CallToolResult, Content, ErrorData};
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -29,7 +29,7 @@ fn check_mcp_permission(resource: &str, action: Action) -> Result<(), ErrorData>
 }
 
 pub async fn handle_mcp_tool(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     match request.name.as_ref() {
@@ -71,7 +71,7 @@ pub async fn handle_mcp_tool(
 }
 
 async fn handle_kv_get(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -116,7 +116,7 @@ async fn handle_kv_get(
 }
 
 async fn handle_kv_set(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -163,7 +163,7 @@ async fn handle_kv_set(
 }
 
 async fn handle_kv_delete(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -202,7 +202,7 @@ async fn handle_kv_delete(
 // ==================== String Extension MCP Handlers ====================
 
 async fn handle_kv_append(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -244,7 +244,7 @@ async fn handle_kv_append(
 }
 
 async fn handle_kv_getrange(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -281,7 +281,7 @@ async fn handle_kv_getrange(
 }
 
 async fn handle_kv_strlen(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -308,7 +308,7 @@ async fn handle_kv_strlen(
 // ==================== Key Management MCP Handlers ====================
 
 async fn handle_key_type(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -340,7 +340,7 @@ async fn handle_key_type(
 }
 
 async fn handle_key_exists(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -372,7 +372,7 @@ async fn handle_key_exists(
 }
 
 async fn handle_key_rename(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -411,7 +411,7 @@ async fn handle_key_rename(
 // ==================== Hash MCP Handlers ====================
 
 async fn handle_hash_set(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -450,7 +450,7 @@ async fn handle_hash_set(
 }
 
 async fn handle_hash_get(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -490,7 +490,7 @@ async fn handle_hash_get(
 }
 
 async fn handle_hash_getall(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -524,7 +524,7 @@ async fn handle_hash_getall(
 }
 
 async fn handle_list_push(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -573,7 +573,7 @@ async fn handle_list_push(
 }
 
 async fn handle_list_pop(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -621,7 +621,7 @@ async fn handle_list_pop(
 }
 
 async fn handle_list_range(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -661,7 +661,7 @@ async fn handle_list_range(
 }
 
 async fn handle_queue_publish(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let queue_manager = state
@@ -705,7 +705,7 @@ async fn handle_queue_publish(
 
 // Set MCP handlers
 async fn handle_set_add(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -742,7 +742,7 @@ async fn handle_set_add(
 }
 
 async fn handle_set_members(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -771,7 +771,7 @@ async fn handle_set_members(
 }
 
 async fn handle_set_inter(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -809,7 +809,7 @@ async fn handle_set_inter(
 }
 
 async fn handle_sortedset_zadd(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -843,7 +843,7 @@ async fn handle_sortedset_zadd(
 }
 
 async fn handle_sortedset_zrange(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -887,7 +887,7 @@ async fn handle_sortedset_zrange(
 }
 
 async fn handle_sortedset_zrank(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -916,7 +916,7 @@ async fn handle_sortedset_zrank(
 // ==================== Transaction MCP Handlers ====================
 
 async fn handle_transaction_multi(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request
@@ -946,7 +946,7 @@ async fn handle_transaction_multi(
 }
 
 async fn handle_transaction_exec(
-    request: CallToolRequestParam,
+    request: CallToolRequestParams,
     state: Arc<AppState>,
 ) -> Result<CallToolResult, ErrorData> {
     let args = request

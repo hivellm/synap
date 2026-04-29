@@ -3,7 +3,7 @@
 //! Run with `cargo bench --bench simd_bench`.
 
 use criterion::{BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
-use rand::{Rng, SeedableRng, rngs::StdRng};
+use rand::{RngExt, SeedableRng, rngs::StdRng};
 use synap_server::simd;
 
 fn random_bytes(seed: u64, len: usize) -> Vec<u8> {

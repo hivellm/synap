@@ -1,4 +1,4 @@
-﻿//! MCP Authentication Integration Tests
+//! MCP Authentication Integration Tests
 //!
 //! Tests that verify authentication and permission checks work correctly
 //! for MCP (Model Context Protocol) requests.
@@ -6,7 +6,7 @@
 use axum::http::StatusCode;
 use base64::{Engine as _, engine::general_purpose};
 use reqwest::Client;
-use rmcp::model::CallToolRequestParam;
+use rmcp::model::CallToolRequestParams;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -338,23 +338,21 @@ async fn test_mcp_permission_check_read_only() {
 
     // Test read operation (should succeed)
     set_auth_context(read_only_ctx.clone());
-    let read_request = CallToolRequestParam {
-        name: "synap_kv_get".into(),
-        arguments: json!({"key": "test_key"}).as_object().cloned(),
-    };
+    let read_request = CallToolRequestParams::new("synap_kv_get")
+        .with_arguments(json!({"key": "test_key"}).as_object().cloned().unwrap());
     let read_result = handle_mcp_tool(read_request, state.clone()).await;
     assert!(read_result.is_ok(), "Read operation should succeed");
 
     // Test write operation (should fail)
-    let write_request = CallToolRequestParam {
-        name: "synap_kv_set".into(),
-        arguments: json!({
+    let write_request = CallToolRequestParams::new("synap_kv_set").with_arguments(
+        json!({
             "key": "test_key2",
             "value": "new_value"
         })
         .as_object()
-        .cloned(),
-    };
+        .cloned()
+        .unwrap(),
+    );
     let write_result = handle_mcp_tool(write_request, state.clone()).await;
     assert!(
         write_result.is_err(),
@@ -430,15 +428,15 @@ async fn test_mcp_permission_check_write_allowed() {
 
     // Test write operation (should succeed)
     set_auth_context(write_ctx.clone());
-    let write_request = CallToolRequestParam {
-        name: "synap_kv_set".into(),
-        arguments: json!({
+    let write_request = CallToolRequestParams::new("synap_kv_set").with_arguments(
+        json!({
             "key": "test_write_key",
             "value": "test_value"
         })
         .as_object()
-        .cloned(),
-    };
+        .cloned()
+        .unwrap(),
+    );
     let write_result = handle_mcp_tool(write_request, state.clone()).await;
     assert!(write_result.is_ok(), "Write operation should succeed");
 
@@ -513,31 +511,27 @@ async fn test_mcp_admin_bypass_permissions() {
     set_auth_context(admin_ctx.clone());
 
     // Write operation
-    let write_request = CallToolRequestParam {
-        name: "synap_kv_set".into(),
-        arguments: json!({
+    let write_request = CallToolRequestParams::new("synap_kv_set").with_arguments(
+        json!({
             "key": "admin_key",
             "value": "admin_value"
         })
         .as_object()
-        .cloned(),
-    };
+        .cloned()
+        .unwrap(),
+    );
     let write_result = handle_mcp_tool(write_request, state.clone()).await;
     assert!(write_result.is_ok(), "Admin should be able to write");
 
     // Read operation
-    let read_request = CallToolRequestParam {
-        name: "synap_kv_get".into(),
-        arguments: json!({"key": "admin_key"}).as_object().cloned(),
-    };
+    let read_request = CallToolRequestParams::new("synap_kv_get")
+        .with_arguments(json!({"key": "admin_key"}).as_object().cloned().unwrap());
     let read_result = handle_mcp_tool(read_request, state.clone()).await;
     assert!(read_result.is_ok(), "Admin should be able to read");
 
     // Delete operation
-    let delete_request = CallToolRequestParam {
-        name: "synap_kv_delete".into(),
-        arguments: json!({"key": "admin_key"}).as_object().cloned(),
-    };
+    let delete_request = CallToolRequestParams::new("synap_kv_delete")
+        .with_arguments(json!({"key": "admin_key"}).as_object().cloned().unwrap());
     let delete_result = handle_mcp_tool(delete_request, state.clone()).await;
     assert!(delete_result.is_ok(), "Admin should be able to delete");
 

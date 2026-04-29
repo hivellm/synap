@@ -58,21 +58,22 @@
   },
   "homepage": "https://github.com/hivellm/synap#readme",
   "dependencies": {
-    "msgpackr": "^1.11.9",
+    "msgpackr": "^1.11.10",
     "rxjs": "^7.8.1",
-    "uuid": "^11.1.0"
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
-    "@types/node": "^25.5.2",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^25.6.0",
     "@types/uuid": "^10.0.0",
-    "@typescript-eslint/eslint-plugin": "^8.58.0",
-    "@typescript-eslint/parser": "^8.58.0",
+    "@typescript-eslint/eslint-plugin": "^8.59.1",
+    "@typescript-eslint/parser": "^8.59.1",
     "@vitest/coverage-v8": "^4.0.15",
-    "eslint": "^9.39.1",
-    "prettier": "^3.7.4",
+    "eslint": "^10.2.1",
+    "prettier": "^3.8.3",
     "tsup": "^8.5.1",
-    "typescript": "^5.8.3",
-    "typescript-eslint": "^8.58.0",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.59.1",
     "vitest": "^4.0.15"
   },
   "engines": {

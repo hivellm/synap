@@ -1,4 +1,4 @@
-﻿use rmcp::model::CallToolRequestParam;
+use rmcp::model::CallToolRequestParams;
 use serde_json::json;
 use std::sync::Arc;
 use synap_server::monitoring::MonitoringManager;
@@ -64,10 +64,8 @@ async fn test_mcp_kv_get() {
         .unwrap();
 
     // Test MCP tool call
-    let request = CallToolRequestParam {
-        name: "synap_kv_get".into(),
-        arguments: json!({"key": "test_key"}).as_object().cloned(),
-    };
+    let request = CallToolRequestParams::new("synap_kv_get")
+        .with_arguments(json!({"key": "test_key"}).as_object().cloned().unwrap());
 
     let result = handle_mcp_tool(request, state).await;
     assert!(result.is_ok());
@@ -122,16 +120,16 @@ async fn test_mcp_kv_set() {
         hub_client: None,
     });
 
-    let request = CallToolRequestParam {
-        name: "synap_kv_set".into(),
-        arguments: json!({
+    let request = CallToolRequestParams::new("synap_kv_set").with_arguments(
+        json!({
             "key": "mcp_key",
             "value": "mcp_value",
             "ttl": 60
         })
         .as_object()
-        .cloned(),
-    };
+        .cloned()
+        .unwrap(),
+    );
 
     let result = handle_mcp_tool(request, state.clone()).await;
     assert!(result.is_ok());
@@ -198,10 +196,8 @@ async fn test_mcp_kv_delete() {
         .await
         .unwrap();
 
-    let request = CallToolRequestParam {
-        name: "synap_kv_delete".into(),
-        arguments: json!({"key": "to_del"}).as_object().cloned(),
-    };
+    let request = CallToolRequestParams::new("synap_kv_delete")
+        .with_arguments(json!({"key": "to_del"}).as_object().cloned().unwrap());
 
     let result = handle_mcp_tool(request, state.clone()).await;
     assert!(result.is_ok());
@@ -270,16 +266,16 @@ async fn test_mcp_queue_publish() {
     // Create queue
     queue_manager.create_queue("test_q", None).await.unwrap();
 
-    let request = CallToolRequestParam {
-        name: "synap_queue_publish".into(),
-        arguments: json!({
+    let request = CallToolRequestParams::new("synap_queue_publish").with_arguments(
+        json!({
             "queue": "test_q",
             "message": "test message",
             "priority": 8
         })
         .as_object()
-        .cloned(),
-    };
+        .cloned()
+        .unwrap(),
+    );
 
     let result = handle_mcp_tool(request, state).await;
     assert!(result.is_ok());

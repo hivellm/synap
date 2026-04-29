@@ -2,7 +2,7 @@ use super::{AuthResult, Permission};
 use crate::core::SynapError;
 use chrono::{DateTime, Duration, Utc};
 use parking_lot::RwLock;
-use rand::Rng;
+use rand::RngExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::IpAddr;

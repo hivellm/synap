@@ -311,7 +311,7 @@ fn memchr_not_equal(haystack: &[u8], start: usize, target: u8) -> Option<usize> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rand::{Rng, SeedableRng, rngs::StdRng};
+    use rand::{RngExt, SeedableRng, rngs::StdRng};
 
     fn random_bytes(seed: u64, len: usize) -> Vec<u8> {
         let mut rng = StdRng::seed_from_u64(seed);

@@ -49,13 +49,12 @@ pub fn get_mcp_tools(config: &McpConfig) -> Vec<Tool> {
 
 fn get_kv_tools() -> Vec<Tool> {
     vec![
-        Tool {
-            name: Cow::Borrowed("synap_kv_get"),
-            title: Some("Get Key-Value".to_string()),
-            description: Some(Cow::Borrowed(
+        Tool::new(
+            Cow::Borrowed("synap_kv_get"),
+            Cow::Borrowed(
                 "Retrieve a value from the key-value store (returns string by default)",
-            )),
-            input_schema: json!({
+            ),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {
@@ -73,18 +72,14 @@ fn get_kv_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_kv_set"),
-            title: Some("Set Key-Value".to_string()),
-            description: Some(Cow::Borrowed("Store a value in the key-value store")),
-            input_schema: json!({
+            .clone(),
+        )
+        .with_title("Get Key-Value".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(true).idempotent(true)),
+        Tool::new(
+            Cow::Borrowed("synap_kv_set"),
+            Cow::Borrowed("Store a value in the key-value store"),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "Key to store"},
@@ -95,18 +90,14 @@ fn get_kv_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_kv_delete"),
-            title: Some("Delete Key".to_string()),
-            description: Some(Cow::Borrowed("Delete a key from the store")),
-            input_schema: json!({
+            .clone(),
+        )
+        .with_title("Set Key-Value".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(false)),
+        Tool::new(
+            Cow::Borrowed("synap_kv_delete"),
+            Cow::Borrowed("Delete a key from the store"),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {"type": "string"}
@@ -115,21 +106,17 @@ fn get_kv_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-            meta: None,
-        },
+            .clone(),
+        )
+        .with_title("Delete Key".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(false)),
         // String Extension tools (3)
-        Tool {
-            name: Cow::Borrowed("synap_kv_append"),
-            title: Some("Append to String".to_string()),
-            description: Some(Cow::Borrowed(
+        Tool::new(
+            Cow::Borrowed("synap_kv_append"),
+            Cow::Borrowed(
                 "Append bytes to an existing value, or create new key with value if it doesn't exist",
-            )),
-            input_schema: json!({
+            ),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {
@@ -145,20 +132,16 @@ fn get_kv_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_kv_getrange"),
-            title: Some("Get String Range".to_string()),
-            description: Some(Cow::Borrowed(
+            .clone(),
+        )
+        .with_title("Append to String".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(false)),
+        Tool::new(
+            Cow::Borrowed("synap_kv_getrange"),
+            Cow::Borrowed(
                 "Get substring using Redis-style negative indices. start and end are inclusive. Negative indices count from the end (-1 = last byte)",
-            )),
-            input_schema: json!({
+            ),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {
@@ -178,18 +161,14 @@ fn get_kv_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_kv_strlen"),
-            title: Some("Get String Length".to_string()),
-            description: Some(Cow::Borrowed("Get the length of the string value in bytes")),
-            input_schema: json!({
+            .clone(),
+        )
+        .with_title("Get String Range".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(true).idempotent(true)),
+        Tool::new(
+            Cow::Borrowed("synap_kv_strlen"),
+            Cow::Borrowed("Get the length of the string value in bytes"),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {
@@ -201,21 +180,17 @@ fn get_kv_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
-            meta: None,
-        },
+            .clone(),
+        )
+        .with_title("Get String Length".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(true).idempotent(true)),
         // Key Management tools (3)
-        Tool {
-            name: Cow::Borrowed("synap_key_type"),
-            title: Some("Get Key Type".to_string()),
-            description: Some(Cow::Borrowed(
+        Tool::new(
+            Cow::Borrowed("synap_key_type"),
+            Cow::Borrowed(
                 "Get the type of a key across all stores (string, hash, list, set, zset, none)",
-            )),
-            input_schema: json!({
+            ),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {
@@ -227,20 +202,16 @@ fn get_kv_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_key_exists"),
-            title: Some("Check Key Exists".to_string()),
-            description: Some(Cow::Borrowed(
+            .clone(),
+        )
+        .with_title("Get Key Type".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(true).idempotent(true)),
+        Tool::new(
+            Cow::Borrowed("synap_key_exists"),
+            Cow::Borrowed(
                 "Check if a key exists in any store (KV, Hash, List, Set, SortedSet)",
-            )),
-            input_schema: json!({
+            ),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {
@@ -252,20 +223,16 @@ fn get_kv_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_key_rename"),
-            title: Some("Rename Key".to_string()),
-            description: Some(Cow::Borrowed(
+            .clone(),
+        )
+        .with_title("Check Key Exists".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(true).idempotent(true)),
+        Tool::new(
+            Cow::Borrowed("synap_key_rename"),
+            Cow::Borrowed(
                 "Rename a key atomically, overwriting destination if it exists. Works across all data types.",
-            )),
-            input_schema: json!({
+            ),
+            json!({
                 "type": "object",
                 "properties": {
                     "source": {
@@ -281,23 +248,19 @@ fn get_kv_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-            meta: None,
-        },
+            .clone(),
+        )
+        .with_title("Rename Key".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(false)),
     ]
 }
 
 fn get_hash_tools() -> Vec<Tool> {
     vec![
-        Tool {
-            name: Cow::Borrowed("synap_hash_set"),
-            title: Some("Set Hash Field".to_string()),
-            description: Some(Cow::Borrowed("Set a field value in a hash")),
-            input_schema: json!({
+        Tool::new(
+            Cow::Borrowed("synap_hash_set"),
+            Cow::Borrowed("Set a field value in a hash"),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "Hash key"},
@@ -308,18 +271,14 @@ fn get_hash_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_hash_get"),
-            title: Some("Get Hash Field".to_string()),
-            description: Some(Cow::Borrowed("Retrieve a field value from a hash")),
-            input_schema: json!({
+            .clone(),
+        )
+        .with_title("Set Hash Field".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(false)),
+        Tool::new(
+            Cow::Borrowed("synap_hash_get"),
+            Cow::Borrowed("Retrieve a field value from a hash"),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "Hash key"},
@@ -329,18 +288,14 @@ fn get_hash_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_hash_getall"),
-            title: Some("Get All Hash Fields".to_string()),
-            description: Some(Cow::Borrowed("Retrieve all field-value pairs from a hash")),
-            input_schema: json!({
+            .clone(),
+        )
+        .with_title("Get Hash Field".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(true).idempotent(true)),
+        Tool::new(
+            Cow::Borrowed("synap_hash_getall"),
+            Cow::Borrowed("Retrieve all field-value pairs from a hash"),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "Hash key"}
@@ -349,23 +304,19 @@ fn get_hash_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
-            meta: None,
-        },
+            .clone(),
+        )
+        .with_title("Get All Hash Fields".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(true).idempotent(true)),
     ]
 }
 
 fn get_list_tools() -> Vec<Tool> {
     vec![
-        Tool {
-            name: Cow::Borrowed("synap_list_push"),
-            title: Some("Push to List".to_string()),
-            description: Some(Cow::Borrowed("Push element(s) to left (LPUSH) or right (RPUSH) of a list")),
-            input_schema: json!({
+        Tool::new(
+            Cow::Borrowed("synap_list_push"),
+            Cow::Borrowed("Push element(s) to left (LPUSH) or right (RPUSH) of a list"),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "List key"},
@@ -377,18 +328,14 @@ fn get_list_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_list_pop"),
-            title: Some("Pop from List".to_string()),
-            description: Some(Cow::Borrowed("Pop element(s) from left (LPOP) or right (RPOP) of a list")),
-            input_schema: json!({
+            .clone(),
+        )
+        .with_title("Push to List".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(false)),
+        Tool::new(
+            Cow::Borrowed("synap_list_pop"),
+            Cow::Borrowed("Pop element(s) from left (LPOP) or right (RPOP) of a list"),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "List key"},
@@ -399,18 +346,14 @@ fn get_list_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_list_range"),
-            title: Some("Get List Range".to_string()),
-            description: Some(Cow::Borrowed("Get a range of elements from a list (LRANGE)")),
-            input_schema: json!({
+            .clone(),
+        )
+        .with_title("Pop from List".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(false)),
+        Tool::new(
+            Cow::Borrowed("synap_list_range"),
+            Cow::Borrowed("Get a range of elements from a list (LRANGE)"),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "List key"},
@@ -421,23 +364,19 @@ fn get_list_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
-            meta: None,
-        },
+            .clone(),
+        )
+        .with_title("Get List Range".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(true).idempotent(true)),
     ]
 }
 
 fn get_set_tools() -> Vec<Tool> {
     vec![
-        Tool {
-            name: Cow::Borrowed("synap_set_add"),
-            title: Some("Add Set Members".to_string()),
-            description: Some(Cow::Borrowed("Add one or more members to a set")),
-            input_schema: json!({
+        Tool::new(
+            Cow::Borrowed("synap_set_add"),
+            Cow::Borrowed("Add one or more members to a set"),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "Set key"},
@@ -451,18 +390,14 @@ fn get_set_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_set_members"),
-            title: Some("Get Set Members".to_string()),
-            description: Some(Cow::Borrowed("Get all members of a set")),
-            input_schema: json!({
+            .clone(),
+        )
+        .with_title("Add Set Members".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(false)),
+        Tool::new(
+            Cow::Borrowed("synap_set_members"),
+            Cow::Borrowed("Get all members of a set"),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "Set key"}
@@ -471,18 +406,14 @@ fn get_set_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_set_inter"),
-            title: Some("Set Intersection".to_string()),
-            description: Some(Cow::Borrowed("Compute intersection of multiple sets")),
-            input_schema: json!({
+            .clone(),
+        )
+        .with_title("Get Set Members".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(true).idempotent(true)),
+        Tool::new(
+            Cow::Borrowed("synap_set_inter"),
+            Cow::Borrowed("Compute intersection of multiple sets"),
+            json!({
                 "type": "object",
                 "properties": {
                     "keys": {
@@ -495,48 +426,42 @@ fn get_set_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
-            meta: None,
-        },
+            .clone(),
+        )
+        .with_title("Set Intersection".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(true).idempotent(true)),
     ]
 }
 
 fn get_queue_tools() -> Vec<Tool> {
-    vec![Tool {
-        name: Cow::Borrowed("synap_queue_publish"),
-        title: Some("Publish to Queue".to_string()),
-        description: Some(Cow::Borrowed("Publish a message to a queue")),
-        input_schema: json!({
-            "type": "object",
-            "properties": {
-                "queue": {"type": "string"},
-                "message": {"type": "string"},
-                "priority": {"type": "integer", "minimum": 0, "maximum": 9, "default": 5}
-            },
-            "required": ["queue", "message"]
-        })
-        .as_object()
-        .unwrap()
-        .clone()
-        .into(),
-        output_schema: None,
-        icons: None,
-        annotations: Some(ToolAnnotations::new().read_only(false)),
-        meta: None,
-    }]
+    vec![
+        Tool::new(
+            Cow::Borrowed("synap_queue_publish"),
+            Cow::Borrowed("Publish a message to a queue"),
+            json!({
+                "type": "object",
+                "properties": {
+                    "queue": {"type": "string"},
+                    "message": {"type": "string"},
+                    "priority": {"type": "integer", "minimum": 0, "maximum": 9, "default": 5}
+                },
+                "required": ["queue", "message"]
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        )
+        .with_title("Publish to Queue".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(false)),
+    ]
 }
 
 fn get_sortedset_tools() -> Vec<Tool> {
     vec![
-        Tool {
-            name: Cow::Borrowed("synap_sortedset_zadd"),
-            title: Some("Add to Sorted Set".to_string()),
-            description: Some(Cow::Borrowed("Add member with score to sorted set")),
-            input_schema: json!({
+        Tool::new(
+            Cow::Borrowed("synap_sortedset_zadd"),
+            Cow::Borrowed("Add member with score to sorted set"),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "Sorted set key"},
@@ -547,18 +472,14 @@ fn get_sortedset_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_sortedset_zrange"),
-            title: Some("Get Sorted Set Range".to_string()),
-            description: Some(Cow::Borrowed("Get range of members by rank (0-based index)")),
-            input_schema: json!({
+            .clone(),
+        )
+        .with_title("Add to Sorted Set".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(false)),
+        Tool::new(
+            Cow::Borrowed("synap_sortedset_zrange"),
+            Cow::Borrowed("Get range of members by rank (0-based index)"),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "Sorted set key"},
@@ -570,18 +491,14 @@ fn get_sortedset_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_sortedset_zrank"),
-            title: Some("Get Sorted Set Rank".to_string()),
-            description: Some(Cow::Borrowed("Get rank of member in sorted set (0-based, lowest score = rank 0)")),
-            input_schema: json!({
+            .clone(),
+        )
+        .with_title("Get Sorted Set Range".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(true).idempotent(true)),
+        Tool::new(
+            Cow::Borrowed("synap_sortedset_zrank"),
+            Cow::Borrowed("Get rank of member in sorted set (0-based, lowest score = rank 0)"),
+            json!({
                 "type": "object",
                 "properties": {
                     "key": {"type": "string", "description": "Sorted set key"},
@@ -591,13 +508,10 @@ fn get_sortedset_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(true).idempotent(true)),
-            meta: None,
-        },
+            .clone(),
+        )
+        .with_title("Get Sorted Set Rank".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(true).idempotent(true)),
     ]
 }
 
@@ -625,13 +539,12 @@ fn get_sortedset_tools() -> Vec<Tool> {
 
 fn get_transaction_tools() -> Vec<Tool> {
     vec![
-        Tool {
-            name: Cow::Borrowed("synap_transaction_multi"),
-            title: Some("Start Transaction".to_string()),
-            description: Some(Cow::Borrowed(
+        Tool::new(
+            Cow::Borrowed("synap_transaction_multi"),
+            Cow::Borrowed(
                 "Start a new transaction. After calling this, all subsequent commands will be queued until EXEC is called.",
-            )),
-            input_schema: json!({
+            ),
+            json!({
                 "type": "object",
                 "properties": {
                     "client_id": {
@@ -642,20 +555,16 @@ fn get_transaction_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-            meta: None,
-        },
-        Tool {
-            name: Cow::Borrowed("synap_transaction_exec"),
-            title: Some("Execute Transaction".to_string()),
-            description: Some(Cow::Borrowed(
+            .clone(),
+        )
+        .with_title("Start Transaction".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(false)),
+        Tool::new(
+            Cow::Borrowed("synap_transaction_exec"),
+            Cow::Borrowed(
                 "Execute all queued commands in the transaction atomically. Returns results array or null if transaction was aborted due to watched keys changing.",
-            )),
-            input_schema: json!({
+            ),
+            json!({
                 "type": "object",
                 "properties": {
                     "client_id": {
@@ -667,12 +576,9 @@ fn get_transaction_tools() -> Vec<Tool> {
             })
             .as_object()
             .unwrap()
-            .clone()
-            .into(),
-            output_schema: None,
-            icons: None,
-            annotations: Some(ToolAnnotations::new().read_only(false)),
-            meta: None,
-        },
+            .clone(),
+        )
+        .with_title("Execute Transaction".to_string())
+        .with_annotations(ToolAnnotations::new().read_only(false)),
     ]
 }

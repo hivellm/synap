@@ -1,6 +1,6 @@
 use super::error::{Result, SynapError};
 use super::{HashStore, KVStore, ListStore, SetStore, SortedSetStore};
-use rand::Rng;
+use rand::RngExt;
 use std::sync::Arc;
 use tracing::{debug, warn};
 
