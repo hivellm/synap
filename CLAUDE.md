@@ -58,3 +58,61 @@ After implementing, capture at least one entry per task:
 8. The mandatory tail (docs + tests + verify) is **not optional** — `rulebook_task_archive` will refuse to close the task otherwise.
 
 <!-- RULEBOOK:END -->
+
+<!-- Project-specific reinforcement, preserved across `rulebook update`. -->
+
+## Agents, teams, and parallelism (project preference)
+
+**Use specialized agents and parallel execution aggressively.** A turn that funnels every search, review, and edit through the main thread is usually slower and produces shallower work than splitting it across the right specialists. The agent pool and Teams support are *load-bearing*, not optional polish — reach for them by default, not as a last resort.
+
+### Delegate to the right specialist by default
+
+| Situation | Spawn |
+|---|---|
+| Open-ended exploration ("how is X wired up?", "where do we call Y?", more than ~3 hops) | `Explore` or `researcher` |
+| Code review of just-changed code | `code-reviewer` / `feature-dev:code-reviewer` |
+| Implementation plan for a non-trivial feature | `Plan` first, then `feature-dev:code-architect` |
+| Refactor / code-smell hunt | `refactoring-agent` |
+| Build / CI / Docker / dependency breakage | `build-engineer` or `devops-engineer` |
+| Performance / profiling / hot-path analysis | `performance-engineer` |
+| Security audit of pending changes | `security-reviewer` |
+| Database schema, migrations, query tuning | `database-architect` |
+| REST / GraphQL surface design | `api-designer` |
+| Accessibility / UX review of frontend changes | `accessibility-reviewer` / `ux-reviewer` |
+| Test writing after implementation | `tester` |
+| Documentation updates after code changes | `docs-writer` |
+
+When two or more of these apply to one task, **spawn them in parallel from the same turn** (one assistant message, multiple `Agent` tool calls).
+
+### Parallelism is the default execution mode
+
+- Independent searches, reads, or edits → **one message with multiple tool calls**, never a sequential chain.
+- Independent shell checks (`git status` + `git diff` + `git log`; `cargo check` + `npx tsc --noEmit`) → batched in a single `Bash` invocation or sent as parallel calls.
+- Independent agent runs (research vs. review vs. test writing) → spawned together so they execute concurrently.
+- Sequential is only correct when one call's output is required to shape the next.
+
+### Multi-agent work goes through Teams
+
+- Background `Agent` calls without `team_name` are **rejected by the rulebook hook** unless they are the `team-lead` bootstrap.
+- Multi-agent parallel work flows: `TeamCreate` → spawn members with `team_name` → members coordinate via `SendMessage`. See `.claude/rules/multi-agent-teams.md`.
+- When in doubt, spawn a foreground `team-lead` and let it shape the team — don't try to coordinate background agents from the main thread without a Team.
+
+### Codify recurring patterns into skills and agents
+
+- A recurring sub-task (3+ occurrences) with a clear, reusable shape → create a **skill** under `.claude/skills/` or a slash command under `.claude/commands/` so the next session can invoke it by name.
+- A specialist role we keep ad-hoc spawning with similar prompts → register a custom agent under `.claude/agents/` with its system prompt, allowed tools, and trigger conditions baked in. Then call it by name instead of re-explaining the role each time.
+- Capture the rationale via `rulebook_decision_create` or `rulebook_learn_capture` so the codification has institutional memory and future sessions know *why* the skill/agent exists.
+
+### What does NOT need an agent
+
+Single-file edits, lookups against a known path (`Read` / `Grep`), one-shot verifications (`cargo check` after a small edit), and tasks where the main thread already holds the relevant context. Delegating those just dilutes context and adds round-trip latency.
+
+### Self-check before answering a non-trivial question
+
+Before replying directly, ask:
+
+1. Is this open-ended enough that an agent would do it deeper?
+2. Are there independent sub-tasks I can fan out in parallel?
+3. Is this the third time I've done a similar ad-hoc thing? → time to make a skill or agent for it.
+
+If yes to any → delegate / parallelise / codify *before* answering.
