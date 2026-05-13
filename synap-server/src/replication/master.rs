@@ -384,7 +384,7 @@ impl MasterNode {
 
             let current_time = Self::current_timestamp();
             let mut reps = replicas.write();
-            for (_, replica) in reps.iter_mut() {
+            for replica in reps.values_mut() {
                 // Update last_heartbeat timestamp when sending heartbeat
                 replica.last_heartbeat = current_time;
 
@@ -428,7 +428,7 @@ impl MasterNode {
                     // Send to all replicas
                     let reps = replicas.read();
                     let replica_count = reps.len() as u64;
-                    for (_, replica) in reps.iter() {
+                    for replica in reps.values() {
                         let cmd = ReplicationCommand::Operation(ReplicationOperation {
                             offset: _offset,
                             timestamp: Self::current_timestamp(),
