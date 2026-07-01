@@ -293,18 +293,84 @@ lazy_static! {
     // System Metrics
     // ============================================================================
 
-    /// Process memory usage
+    /// Process memory usage in bytes (this Synap process only).
+    /// `type`: "rss" (resident set size) | "virtual".
     pub static ref PROCESS_MEMORY_BYTES: IntGaugeVec = register_int_gauge_vec!(
         "synap_process_memory_bytes",
-        "Process memory usage in bytes",
+        "Memory usage of the Synap process in bytes (rss/virtual)",
         &["type"]
     ).unwrap();
 
-    /// Process CPU usage (percentage * 100)
+    /// CPU usage of the Synap process as a percentage (100 = one full core).
+    /// `core`: "process".  Populated from a per-process sampler, NOT host load.
     pub static ref PROCESS_CPU_USAGE: IntGaugeVec = register_int_gauge_vec!(
         "synap_process_cpu_usage_percent",
-        "Process CPU usage percentage",
+        "CPU usage of the Synap process as a percentage (100 = one core)",
         &["core"]
+    ).unwrap();
+
+    // ============================================================================
+    // Host Metrics (whole machine — distinct from the per-process gauges above)
+    // ============================================================================
+
+    /// Host (whole machine) memory in bytes. `type`: "used" | "total".
+    pub static ref HOST_MEMORY_BYTES: IntGaugeVec = register_int_gauge_vec!(
+        "synap_host_memory_bytes",
+        "Host machine memory in bytes (used/total)",
+        &["type"]
+    ).unwrap();
+
+    /// Host load average * 100. `window`: "1min" | "5min" | "15min".
+    pub static ref HOST_LOAD_AVERAGE: IntGaugeVec = register_int_gauge_vec!(
+        "synap_host_load_average",
+        "Host load average multiplied by 100 (1min/5min/15min)",
+        &["window"]
+    ).unwrap();
+
+    // ============================================================================
+    // Broker State Gauges (populated live on each /metrics scrape)
+    // ============================================================================
+
+    /// Last (highest) offset published to a stream/room — a stream-length signal.
+    pub static ref STREAM_LAST_OFFSET: IntGaugeVec = register_int_gauge_vec!(
+        "synap_stream_last_offset",
+        "Last published offset per stream/room",
+        &["room"]
+    ).unwrap();
+
+    /// Number of events currently buffered in a partition.
+    pub static ref PARTITION_MESSAGES: IntGaugeVec = register_int_gauge_vec!(
+        "synap_partition_messages",
+        "Number of events currently buffered per topic partition",
+        &["topic", "partition"]
+    ).unwrap();
+
+    /// High-water-mark (last published offset) per topic partition.
+    pub static ref PARTITION_END_OFFSET: IntGaugeVec = register_int_gauge_vec!(
+        "synap_partition_end_offset",
+        "High-water-mark (last published offset) per topic partition",
+        &["topic", "partition"]
+    ).unwrap();
+
+    /// Active members in a consumer group.
+    pub static ref CONSUMER_GROUP_MEMBERS: IntGaugeVec = register_int_gauge_vec!(
+        "synap_consumer_group_members",
+        "Number of active members per consumer group",
+        &["group", "topic"]
+    ).unwrap();
+
+    /// Last committed (acked) offset per consumer group + partition.
+    pub static ref CONSUMER_GROUP_COMMITTED_OFFSET: IntGaugeVec = register_int_gauge_vec!(
+        "synap_consumer_group_committed_offset",
+        "Last committed (acked) offset per consumer group and partition",
+        &["group", "topic", "partition"]
+    ).unwrap();
+
+    /// Consumer lag = partition high-water-mark − committed offset.
+    pub static ref CONSUMER_GROUP_LAG: IntGaugeVec = register_int_gauge_vec!(
+        "synap_consumer_group_lag",
+        "Consumer lag (end offset − committed offset) per group and partition",
+        &["group", "topic", "partition"]
     ).unwrap();
 }
 
@@ -380,6 +446,111 @@ pub fn update_replication_lag(replica_id: &str, lag: i64) {
 pub fn record_replication_op(op_type: &str, status: &str, bytes: u64) {
     REPL_OPS_TOTAL.with_label_values(&[op_type, status]).inc();
     REPL_BYTES_TOTAL.with_label_values(&["sent"]).inc_by(bytes);
+}
+
+// ── System / host / process snapshot helpers ──────────────────────────────────
+
+/// Set the per-process CPU + memory gauges (this Synap process only).
+/// `cpu_percent` is scaled where 100 = one full core.
+pub fn set_process_metrics(rss_bytes: u64, virtual_bytes: u64, cpu_percent: f64) {
+    PROCESS_MEMORY_BYTES
+        .with_label_values(&["rss"])
+        .set(rss_bytes as i64);
+    PROCESS_MEMORY_BYTES
+        .with_label_values(&["virtual"])
+        .set(virtual_bytes as i64);
+    PROCESS_CPU_USAGE
+        .with_label_values(&["process"])
+        .set(cpu_percent.round() as i64);
+}
+
+/// Set the whole-machine (host) memory + load-average gauges.
+pub fn set_host_metrics(used_bytes: i64, total_bytes: i64, load1: f64, load5: f64, load15: f64) {
+    HOST_MEMORY_BYTES
+        .with_label_values(&["used"])
+        .set(used_bytes);
+    HOST_MEMORY_BYTES
+        .with_label_values(&["total"])
+        .set(total_bytes);
+    HOST_LOAD_AVERAGE
+        .with_label_values(&["1min"])
+        .set((load1 * 100.0) as i64);
+    HOST_LOAD_AVERAGE
+        .with_label_values(&["5min"])
+        .set((load5 * 100.0) as i64);
+    HOST_LOAD_AVERAGE
+        .with_label_values(&["15min"])
+        .set((load15 * 100.0) as i64);
+}
+
+// ── Broker-state snapshot helpers (populated live on each /metrics scrape) ─────
+
+/// Clear all live broker-state gauges before repopulating them from a fresh
+/// snapshot, so streams/groups/queues that were deleted stop reporting stale
+/// values.
+pub fn reset_broker_gauges() {
+    STREAM_BUFFER_SIZE.reset();
+    STREAM_SUBSCRIBERS.reset();
+    STREAM_LAST_OFFSET.reset();
+    PARTITION_MESSAGES.reset();
+    PARTITION_END_OFFSET.reset();
+    CONSUMER_GROUP_MEMBERS.reset();
+    CONSUMER_GROUP_COMMITTED_OFFSET.reset();
+    CONSUMER_GROUP_LAG.reset();
+    QUEUE_DEPTH.reset();
+    QUEUE_DLQ_TOTAL.reset();
+}
+
+/// Set the live gauges for one stream/room.
+pub fn set_stream_gauges(room: &str, message_count: i64, last_offset: i64, subscribers: i64) {
+    STREAM_BUFFER_SIZE
+        .with_label_values(&[room])
+        .set(message_count);
+    STREAM_LAST_OFFSET
+        .with_label_values(&[room])
+        .set(last_offset);
+    STREAM_SUBSCRIBERS
+        .with_label_values(&[room])
+        .set(subscribers);
+}
+
+/// Set the live gauges for one topic partition.
+pub fn set_partition_gauges(topic: &str, partition: &str, messages: i64, end_offset: i64) {
+    PARTITION_MESSAGES
+        .with_label_values(&[topic, partition])
+        .set(messages);
+    PARTITION_END_OFFSET
+        .with_label_values(&[topic, partition])
+        .set(end_offset);
+}
+
+/// Set the member-count gauge for one consumer group.
+pub fn set_consumer_group_members(group: &str, topic: &str, members: i64) {
+    CONSUMER_GROUP_MEMBERS
+        .with_label_values(&[group, topic])
+        .set(members);
+}
+
+/// Set the committed-offset + lag gauges for one consumer group partition.
+pub fn set_consumer_group_partition(
+    group: &str,
+    topic: &str,
+    partition: &str,
+    committed: i64,
+    lag: i64,
+) {
+    CONSUMER_GROUP_COMMITTED_OFFSET
+        .with_label_values(&[group, topic, partition])
+        .set(committed);
+    CONSUMER_GROUP_LAG
+        .with_label_values(&[group, topic, partition])
+        .set(lag);
+}
+
+/// Set the depth + dead-letter gauges for one queue.
+pub fn set_queue_gauges(queue: &str, depth: i64, dlq: i64) {
+    QUEUE_DEPTH.with_label_values(&[queue]).set(depth);
+    QUEUE_DLQ_TOTAL.with_label_values(&[queue]).set(dlq);
 }
 
 // ── RESP3 helpers ─────────────────────────────────────────────────────────────

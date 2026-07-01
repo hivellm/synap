@@ -8,6 +8,9 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  # CI starts from a cold cache, so incremental compilation only adds
+  # artifacts and slows the build. See docs/rust-target-hygiene.md.
+  CARGO_INCREMENTAL: 0
 
 jobs:
   rust-tests:

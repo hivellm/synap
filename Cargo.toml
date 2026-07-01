@@ -36,6 +36,12 @@ base64 = "0.22"
 rand = "0.10"
 compact_str = { version = "0.9", features = ["serde"] }
 
+[profile.dev]
+# Keep file:line in panics/backtraces but drop full variable debuginfo — the
+# single biggest lever on `target/` size, and ~30-40% faster incremental
+# rebuilds (Rust perf-team, Kobzol 2025). See docs/rust-target-hygiene.md.
+debug = "line-tables-only"
+
 [profile.release]
 opt-level = 3
 lto = "fat"              # Fat LTO for better optimization across crates

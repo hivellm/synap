@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-01
+
+### Added
+
+- **Broker-level observability metrics** ([#196](https://github.com/hivellm/synap/issues/196)).
+  `GET /metrics` previously exposed only process CPU + memory. It now
+  reports live broker state on every scrape, so operators can see backlog
+  and stuck consumer groups from the outside:
+  - `synap_stream_buffer_size` / `synap_stream_last_offset` /
+    `synap_stream_subscribers` — per-room length, last published offset,
+    and subscriber count.
+  - `synap_partition_messages` / `synap_partition_end_offset` — per-topic
+    partition depth and high-water-mark.
+  - `synap_consumer_group_members` /
+    `synap_consumer_group_committed_offset` / `synap_consumer_group_lag`
+    — per-group membership, committed offset, and lag
+    (last-published − committed offset) per partition.
+  - `synap_queue_depth` / `synap_queue_dlq_messages` — ready depth and
+    dead-letter count per queue.
+  - Gauges are reset and repopulated from a fresh snapshot each scrape, so
+    deleted streams/groups/queues stop reporting stale values.
+
+### Fixed
+
+- **`synap_process_*` metrics now measure the process, not the host**
+  ([#196](https://github.com/hivellm/synap/issues/196)). The reported
+  "high idle CPU" was a measurement artifact: `synap_process_cpu_usage_percent`
+  was actually the host **load average** (via `sys_info::loadavg()`) and
+  `synap_process_memory_bytes` was host memory — so an idle broker on a
+  busy shared host read `1min=111, 5min=180`. Process CPU/RSS are now
+  sampled per-process via `sysinfo`; host stats are preserved under the
+  correctly-named `synap_host_memory_bytes` and `synap_host_load_average`
+  gauges. (A full audit of every background task confirmed no busy-poll
+  loop — all loops `.await` on timers/channels/accepts.)
+
+### Build
+
+- **Bound `target/` directory growth**
+  ([#211](https://github.com/hivellm/synap/issues/211)).
+  `[profile.dev] debug = "line-tables-only"` keeps `file:line` in
+  panics/backtraces while slashing debuginfo size and speeding incremental
+  rebuilds; `scripts/sweep-target.{sh,ps1}` wrap `cargo-sweep` for
+  time-based artifact cleanup; the Rust CI workflows set
+  `CARGO_INCREMENTAL=0` (cold cache); see `docs/rust-target-hygiene.md`.
+
 ## [0.12.0] - 2026-04-29
 
 ### Added

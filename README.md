@@ -4,7 +4,7 @@
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.85%2B)-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/tests-636%2B%20(100%25)-brightgreen.svg)](#testing--quality)
 [![Coverage](https://img.shields.io/badge/coverage-99.30%25-brightgreen.svg)](docs/TESTING.md)
-[![Version](https://img.shields.io/badge/version-0.12.0-blue.svg)](#project-status)
+[![Version](https://img.shields.io/badge/version-0.13.0-blue.svg)](#project-status)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
 
@@ -76,7 +76,7 @@ Synap provides multiple core capabilities in a single, cohesive system:
 - **🐌 SLOWLOG** - Slow query logging with configurable threshold (default 10ms)
 - **💾 MEMORY USAGE** - Per-key memory tracking across all data types
 - **👥 CLIENT LIST** - Active connection tracking and management
-- **📊 Prometheus Metrics** - 17 metric types for comprehensive monitoring
+- **📊 Prometheus Metrics** - process-scoped CPU/memory plus broker-level gauges (per-stream length, consumer-group lag, queue depth) at `GET /metrics` — see [Observability](docs/observability.md)
 
 ### 👨‍💻 Developer Experience
 - **🤖 AI Integration**: MCP support for Cursor, Claude Desktop, and AI assistants
@@ -738,9 +738,9 @@ See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution
 ## 📊 Project Status
 
 **Status**: ✅ Phase 1-3 Complete | ✅ Redis Phase 1-2 Complete (Hash, List, Set, Sorted Set, Geospatial, Bitmap, String Extensions)  
-**Version**: 0.12.0 (Idempotent stream room creation across all SDKs — closes #165)  
+**Version**: 0.13.0 (Broker observability metrics + `target/` hygiene — closes #196, #211)  
 **Edition**: Rust 2024 (nightly 1.85+)  
-**Last Updated**: 2026-04-29
+**Last Updated**: 2026-07-01
 
 ### ✅ Implementation Complete
 
