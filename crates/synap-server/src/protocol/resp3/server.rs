@@ -15,12 +15,19 @@
 //! - Commands slower than 1 ms are logged at WARN level.
 
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Instant;
 
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::Semaphore;
 
 use crate::metrics;
 use crate::server::handlers::AppState;
+
+/// Maximum concurrent client connections accepted per binary listener. Beyond
+/// this the listener refuses new connections instead of exhausting FDs/memory
+/// (audit M-015).
+pub const MAX_CONNECTIONS: usize = 10_000;
 
 /// Spawn the RESP3 TCP listener on `addr`.
 ///
@@ -28,15 +35,26 @@ use crate::server::handlers::AppState;
 pub async fn spawn_resp3_listener(state: AppState, addr: SocketAddr) -> std::io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     tracing::info!("RESP3 server listening on {addr}");
+    let limiter = Arc::new(Semaphore::new(MAX_CONNECTIONS));
 
     tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, peer)) => {
+                    // Refuse the connection if we are already at capacity.
+                    let permit = match Arc::clone(&limiter).try_acquire_owned() {
+                        Ok(p) => p,
+                        Err(_) => {
+                            tracing::warn!(peer = %peer, "RESP3 max connections reached, refusing");
+                            drop(stream);
+                            continue;
+                        }
+                    };
                     metrics::resp3_connection_open();
                     tracing::debug!(peer = %peer, "RESP3 connection accepted");
                     let state = state.clone();
                     tokio::spawn(async move {
+                        let _permit = permit; // released when this connection ends
                         let span = tracing::info_span!("resp3.conn", peer = %peer);
                         let _guard = span.enter();
                         if let Err(e) = handle_connection(stream, state).await {

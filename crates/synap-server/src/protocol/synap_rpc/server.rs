@@ -47,15 +47,28 @@ fn rpc_str(v: &SynapValue) -> Option<String> {
 pub async fn spawn_synap_rpc_listener(state: AppState, addr: SocketAddr) -> std::io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     tracing::info!("SynapRPC server listening on {addr}");
+    let limiter = Arc::new(tokio::sync::Semaphore::new(
+        crate::protocol::resp3::server::MAX_CONNECTIONS,
+    ));
 
     tokio::spawn(async move {
         loop {
             match listener.accept().await {
                 Ok((stream, peer)) => {
+                    // Refuse the connection if we are already at capacity.
+                    let permit = match Arc::clone(&limiter).try_acquire_owned() {
+                        Ok(p) => p,
+                        Err(_) => {
+                            tracing::warn!(peer = %peer, "SynapRPC max connections reached, refusing");
+                            drop(stream);
+                            continue;
+                        }
+                    };
                     metrics::synap_rpc_connection_open();
                     tracing::debug!(peer = %peer, "SynapRPC connection accepted");
                     let state = state.clone();
                     tokio::spawn(async move {
+                        let _permit = permit; // released when this connection ends
                         let span = tracing::info_span!("rpc.conn", peer = %peer);
                         let _guard = span.enter();
                         if let Err(e) = handle_connection(stream, state).await {
