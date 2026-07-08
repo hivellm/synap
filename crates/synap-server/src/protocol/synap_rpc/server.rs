@@ -28,9 +28,9 @@ use crate::core::pubsub::Message as PubSubMessage;
 use crate::metrics;
 use crate::server::handlers::AppState;
 
-use super::codec::{encode_frame, read_request, write_response};
 use super::dispatch::dispatch;
-use super::types::{Response, SynapValue};
+use synap_protocol::synap_rpc::codec::{encode_frame, read_request, write_response};
+use synap_protocol::synap_rpc::types::{Response, SynapValue};
 
 /// Spawn the SynapRPC TCP listener on `addr`.
 ///

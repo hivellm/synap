@@ -2,7 +2,7 @@
 // Tests for Request/Response envelope structures
 
 use serde_json::json;
-use synap_server::protocol::{Request, Response};
+use synap_server::{Request, Response};
 
 #[test]
 fn test_request_new() {

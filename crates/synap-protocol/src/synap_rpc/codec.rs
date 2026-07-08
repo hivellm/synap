@@ -94,7 +94,7 @@ async fn write_frame<T: Serialize, W: AsyncWrite + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::synap_rpc::types::SynapValue;
+    use crate::synap_rpc::types::SynapValue;
 
     #[test]
     fn encode_decode_roundtrip_request() {

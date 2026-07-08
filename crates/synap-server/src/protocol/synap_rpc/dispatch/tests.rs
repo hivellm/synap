@@ -1,4 +1,3 @@
-use super::super::types::{Request, SynapValue};
 use super::dispatch;
 use crate::core::types::KVConfig;
 use crate::core::{GeospatialStore, HashStore, HyperLogLogStore, KVStore, SortedSetStore};
@@ -7,6 +6,7 @@ use crate::scripting::ScriptManager;
 use crate::server::handlers::AppState;
 use std::sync::Arc;
 use std::time::Duration;
+use synap_protocol::synap_rpc::types::{Request, SynapValue};
 fn make_state() -> AppState {
     let kv_store = Arc::new(KVStore::new(KVConfig::default()));
     let hash_store = Arc::new(HashStore::new());

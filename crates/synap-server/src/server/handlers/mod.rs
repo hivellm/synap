@@ -7,7 +7,6 @@ use crate::core::{
 use crate::monitoring::{
     InfoSection, KeyspaceInfo, MemoryInfo, MemoryUsage, ReplicationInfo, ServerInfo, StatsInfo,
 };
-use crate::protocol::{Request, Response};
 use crate::scripting::{ScriptExecContext, ScriptManager};
 use axum::{
     Json,
@@ -23,6 +22,7 @@ use serde_json::json;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{collections::HashMap, time::Duration};
+use synap_protocol::{Request, Response};
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 

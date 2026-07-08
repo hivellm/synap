@@ -11,6 +11,7 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+synap-protocol = { path = "../synap-protocol" }
 tokio.workspace = true
 axum = { workspace = true, features = ["ws"] }
 radix_trie.workspace = true

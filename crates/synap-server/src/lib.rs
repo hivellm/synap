@@ -30,9 +30,9 @@ pub use core::{
     QueueConfig, QueueManager, RetentionPolicy, RoomStats, StreamConfig, StreamManager,
     SubscribeResult, SynapError, TopicInfo,
 };
-pub use protocol::{Request, Response};
 pub use replication::{
     MasterNode, NodeRole, ReplicaNode, ReplicationConfig, ReplicationLog, ReplicationStats,
 };
 pub use scripting::ScriptManager;
 pub use server::{AppState, create_router, get_mcp_tools, handle_mcp_tool, init_metrics};
+pub use synap_protocol::{Request, Response};

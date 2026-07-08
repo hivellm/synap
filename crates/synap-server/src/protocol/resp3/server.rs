@@ -60,8 +60,8 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
     use tokio::io::BufReader;
 
     use super::command::dispatch;
-    use super::parser::{Resp3Value, parse_from_reader, parse_inline};
-    use super::writer::Resp3Writer;
+    use synap_protocol::resp3::parser::{Resp3Value, parse_from_reader, parse_inline};
+    use synap_protocol::resp3::writer::Resp3Writer;
 
     let peer = stream.peer_addr()?;
     let (read_half, write_half) = stream.into_split();
@@ -180,7 +180,10 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
         let written = writer.bytes_written() - before_write;
 
         // Record metrics.
-        let is_err = matches!(response, super::parser::Resp3Value::Error(_));
+        let is_err = matches!(
+            response,
+            synap_protocol::resp3::parser::Resp3Value::Error(_)
+        );
         metrics::record_resp3_command(&cmd_upper, !is_err, elapsed);
         metrics::resp3_bytes(0, written); // read bytes tracked per-frame below
 

@@ -4,8 +4,8 @@
 //! `SynapValue` result.  Mirrors the RESP3 command dispatcher but operates on
 //! the binary `SynapValue` type instead of `Resp3Value`.
 
-use super::types::{Request, Response, SynapValue};
 use crate::server::handlers::AppState;
+use synap_protocol::synap_rpc::types::{Request, Response, SynapValue};
 
 mod advanced;
 mod collections;
