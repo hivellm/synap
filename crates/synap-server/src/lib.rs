@@ -1,10 +1,5 @@
 pub mod auth;
-pub mod cache;
-pub mod cluster;
-pub mod compression;
 pub mod config;
-pub mod core;
-
 pub mod hub;
 pub mod metrics;
 pub mod monitoring;
@@ -13,7 +8,11 @@ pub mod protocol;
 pub mod replication;
 pub mod scripting;
 pub mod server;
-pub mod simd;
+
+// Engine modules live in the `synap-core` crate. Re-export them under their
+// original paths so existing `crate::core`, `crate::cluster`, `crate::cache`,
+// `crate::compression` and `crate::simd` references keep resolving unchanged.
+pub use synap_core::{cache, cluster, compression, core, simd};
 
 pub use hub::{HubClient, HubConfig, QuotaManager, ResourceNaming, UsageReporter};
 

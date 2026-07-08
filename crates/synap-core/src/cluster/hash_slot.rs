@@ -67,7 +67,7 @@ fn extract_hash_tag(key: &str) -> Option<&str> {
 ///
 /// # Example
 /// ```
-/// use synap_server::cluster::hash_slot::hash_slot;
+/// use synap_core::cluster::hash_slot::hash_slot;
 ///
 /// let slot = hash_slot("user:1001");
 /// assert!(slot < 16384);
