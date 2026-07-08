@@ -15,6 +15,11 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use super::types::{Request, Response};
 
+/// Maximum accepted SynapRPC frame body size (512 MiB). A 4-byte length prefix
+/// can claim up to ~4 GiB; this cap stops a single frame header from triggering
+/// an unbounded allocation.
+pub const MAX_FRAME_SIZE: usize = 512 * 1024 * 1024;
+
 /// Encode any `Serialize` value into a length-prefixed MessagePack frame.
 pub fn encode_frame<T: Serialize>(msg: &T) -> Result<Vec<u8>, rmp_serde::encode::Error> {
     let body = rmp_serde::to_vec(msg)?;
@@ -76,6 +81,12 @@ async fn read_frame<T: for<'de> Deserialize<'de>, R: AsyncRead + Unpin>(
     let mut len_buf = [0u8; 4];
     reader.read_exact(&mut len_buf).await?;
     let len = u32::from_le_bytes(len_buf) as usize;
+    if len > MAX_FRAME_SIZE {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "frame length exceeds maximum",
+        ));
+    }
     let mut body = vec![0u8; len];
     reader.read_exact(&mut body).await?;
     rmp_serde::from_slice(&body)
@@ -115,6 +126,16 @@ mod tests {
         assert_eq!(consumed, frame.len());
         assert_eq!(decoded.id, req.id);
         assert_eq!(decoded.command, req.command);
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_frame() {
+        // A length prefix above MAX_FRAME_SIZE must be rejected before the body
+        // is allocated.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&((MAX_FRAME_SIZE as u32) + 1).to_le_bytes());
+        let mut reader = &buf[..];
+        assert!(read_request(&mut reader).await.is_err());
     }
 
     #[test]

@@ -11,7 +11,7 @@
 //! The `parse_from_reader` async variant is used by the server accept loop.
 
 use std::str;
-use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt};
+use tokio::io::{AsyncBufRead, AsyncReadExt};
 
 /// A RESP3 value.
 #[derive(Debug, Clone, PartialEq)]
@@ -82,25 +82,49 @@ pub async fn parse_from_reader<R: AsyncBufRead + Unpin>(
     Ok(Some(value))
 }
 
+/// Maximum bulk-string / verbatim byte length accepted from a client
+/// (512 MiB, matching Redis's `proto-max-bulk-len` default). Guards against a
+/// length header claiming a huge size to trigger an unbounded allocation.
+pub const MAX_BULK_LEN: usize = 512 * 1024 * 1024;
+/// Maximum element count in an aggregate (array/set/map/attribute) header.
+pub const MAX_AGGREGATE_LEN: usize = 1024 * 1024;
+/// Maximum length of a single protocol line (type headers / inline commands).
+pub const MAX_LINE_LEN: usize = 64 * 1024;
+
 fn resp_err(msg: &str) -> std::io::Error {
     std::io::Error::new(std::io::ErrorKind::InvalidData, msg)
 }
 
 async fn read_line<R: AsyncBufRead + Unpin>(reader: &mut R) -> std::io::Result<String> {
-    let mut line = String::new();
-    reader.read_line(&mut line).await?;
-    if line.ends_with("\r\n") {
-        line.truncate(line.len() - 2);
-    } else if line.ends_with('\n') {
-        line.truncate(line.len() - 1);
+    // Read up to the next newline, bounded by MAX_LINE_LEN so a client cannot
+    // exhaust memory by sending an endless line with no terminator.
+    let mut line: Vec<u8> = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        if reader.read(&mut byte).await? == 0 {
+            break; // EOF
+        }
+        if byte[0] == b'\n' {
+            break;
+        }
+        if line.len() >= MAX_LINE_LEN {
+            return Err(resp_err("protocol line exceeds maximum length"));
+        }
+        line.push(byte[0]);
     }
-    Ok(line)
+    if line.last() == Some(&b'\r') {
+        line.pop();
+    }
+    String::from_utf8(line).map_err(|_| resp_err("invalid utf-8 in protocol line"))
 }
 
 async fn read_bulk_bytes<R: AsyncBufRead + Unpin>(
     reader: &mut R,
     len: usize,
 ) -> std::io::Result<Vec<u8>> {
+    if len > MAX_BULK_LEN {
+        return Err(resp_err("bulk length exceeds maximum"));
+    }
     let mut data = vec![0u8; len];
     reader.read_exact(&mut data).await?;
     // Consume the trailing \r\n
@@ -146,6 +170,9 @@ async fn parse_type<R: AsyncBufRead + Unpin>(
             let count: i64 = s.parse().map_err(|_| resp_err("invalid array count"))?;
             if count < 0 {
                 return Ok(Resp3Value::Null);
+            }
+            if count as usize > MAX_AGGREGATE_LEN {
+                return Err(resp_err("array count exceeds maximum"));
             }
             let mut items = Vec::with_capacity(count as usize);
             for _ in 0..count {
@@ -200,6 +227,9 @@ async fn parse_type<R: AsyncBufRead + Unpin>(
         b'~' => {
             let s = read_line(reader).await?;
             let count: usize = s.parse().map_err(|_| resp_err("invalid set count"))?;
+            if count > MAX_AGGREGATE_LEN {
+                return Err(resp_err("set count exceeds maximum"));
+            }
             let mut items = Vec::with_capacity(count);
             for _ in 0..count {
                 let mut prefix = [0u8; 1];
@@ -212,6 +242,9 @@ async fn parse_type<R: AsyncBufRead + Unpin>(
         b'%' => {
             let s = read_line(reader).await?;
             let count: usize = s.parse().map_err(|_| resp_err("invalid map count"))?;
+            if count > MAX_AGGREGATE_LEN {
+                return Err(resp_err("map count exceeds maximum"));
+            }
             let mut pairs = Vec::with_capacity(count);
             for _ in 0..count {
                 let mut prefix = [0u8; 1];
@@ -228,6 +261,9 @@ async fn parse_type<R: AsyncBufRead + Unpin>(
         b'|' => {
             let s = read_line(reader).await?;
             let count: usize = s.parse().map_err(|_| resp_err("invalid attr count"))?;
+            if count > MAX_AGGREGATE_LEN {
+                return Err(resp_err("attribute count exceeds maximum"));
+            }
             for _ in 0..count {
                 let mut prefix = [0u8; 1];
                 reader.read_exact(&mut prefix).await?;
@@ -272,6 +308,20 @@ mod tests {
     async fn parse(input: &[u8]) -> Resp3Value {
         let mut r = BufReader::new(std::io::Cursor::new(input));
         parse_from_reader(&mut r).await.unwrap().unwrap()
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_bulk_length() {
+        let input = format!("${}\r\n", MAX_BULK_LEN + 1);
+        let mut r = BufReader::new(std::io::Cursor::new(input.into_bytes()));
+        assert!(parse_from_reader(&mut r).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_array_count() {
+        let input = format!("*{}\r\n", MAX_AGGREGATE_LEN + 1);
+        let mut r = BufReader::new(std::io::Cursor::new(input.into_bytes()));
+        assert!(parse_from_reader(&mut r).await.is_err());
     }
 
     #[tokio::test]
