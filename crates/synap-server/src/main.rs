@@ -293,9 +293,61 @@ async fn main() -> Result<()> {
         Some(router)
     };
 
+    // Start the replication node (self-runs on construction). The master is
+    // handed to the persistence layer so every logged write is propagated to
+    // replicas; the replica keeps itself alive via its own background loop.
+    let replication_master = if config.replication.enabled {
+        use synap_server::replication::{MasterNode, ReplicaNode};
+        match config.replication.role {
+            NodeRole::Master if config.replication.replica_listen_address.is_some() => {
+                match MasterNode::new(
+                    config.replication.clone(),
+                    kv_store.clone(),
+                    stream_manager.clone(),
+                )
+                .await
+                {
+                    Ok(m) => {
+                        info!("Replication master node started");
+                        Some(Arc::new(m))
+                    }
+                    Err(e) => {
+                        warn!("Failed to start replication master: {}", e);
+                        None
+                    }
+                }
+            }
+            NodeRole::Replica if config.replication.master_address.is_some() => {
+                match ReplicaNode::new(
+                    config.replication.clone(),
+                    kv_store.clone(),
+                    stream_manager.clone(),
+                )
+                .await
+                {
+                    Ok(_replica) => {
+                        info!("Replication replica node started (background sync loop running)");
+                    }
+                    Err(e) => {
+                        warn!("Failed to start replication replica: {}", e);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     // Create persistence layer if enabled
     let persistence = if config.persistence.enabled {
-        match PersistenceLayer::new(config.persistence.clone()).await {
+        match PersistenceLayer::new_with_replication(
+            config.persistence.clone(),
+            replication_master.clone(),
+        )
+        .await
+        {
             Ok(layer) => {
                 info!("Persistence layer initialized (WAL + Snapshots)");
                 // The background snapshot task is started later, once every

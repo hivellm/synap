@@ -16,11 +16,24 @@ pub struct PersistenceLayer {
     config: PersistenceConfig,
     last_snapshot: Arc<RwLock<Instant>>,
     operations_since_snapshot: Arc<RwLock<usize>>,
+    /// When set (master role), every logged operation is also propagated to
+    /// connected replicas (audit M-005). Replication piggybacks on the
+    /// persistence log, so it currently requires persistence to be enabled.
+    replication_master: Option<Arc<crate::replication::MasterNode>>,
 }
 
 impl PersistenceLayer {
-    /// Create a new persistence layer with AsyncWAL
+    /// Create a new persistence layer with AsyncWAL (no replication).
     pub async fn new(config: PersistenceConfig) -> super::types::Result<Self> {
+        Self::new_with_replication(config, None).await
+    }
+
+    /// Create a persistence layer that also propagates each logged operation to
+    /// replicas through the given master node.
+    pub async fn new_with_replication(
+        config: PersistenceConfig,
+        replication_master: Option<Arc<crate::replication::MasterNode>>,
+    ) -> super::types::Result<Self> {
         let wal = AsyncWAL::open(config.wal.clone()).await?;
         let snapshot_mgr = SnapshotManager::new(config.snapshot.clone());
 
@@ -30,7 +43,15 @@ impl PersistenceLayer {
             config,
             last_snapshot: Arc::new(RwLock::new(Instant::now())),
             operations_since_snapshot: Arc::new(RwLock::new(0)),
+            replication_master,
         })
+    }
+
+    /// Propagate an operation to connected replicas when running as master.
+    fn maybe_replicate(&self, operation: &Operation) {
+        if let Some(master) = &self.replication_master {
+            master.replicate(operation.clone());
+        }
     }
 
     /// Returns true when the WAL fsync mode is Always (sync durability).
@@ -58,6 +79,7 @@ impl PersistenceLayer {
         let operation = Operation::KVSet { key, value, ttl };
 
         // AsyncWAL batches this automatically
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         // Track operations for snapshot threshold
@@ -75,6 +97,7 @@ impl PersistenceLayer {
 
         let operation = Operation::KVDel { keys };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -98,6 +121,7 @@ impl PersistenceLayer {
             destination,
         };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -119,6 +143,7 @@ impl PersistenceLayer {
 
         let operation = Operation::HashSet { key, field, value };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -135,6 +160,7 @@ impl PersistenceLayer {
 
         let operation = Operation::HashDel { key, fields };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -160,6 +186,7 @@ impl PersistenceLayer {
             increment,
         };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -185,6 +212,7 @@ impl PersistenceLayer {
             increment,
         };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -206,6 +234,7 @@ impl PersistenceLayer {
 
         let operation = Operation::ListPush { key, values, left };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -227,6 +256,7 @@ impl PersistenceLayer {
 
         let operation = Operation::ListPop { key, count, left };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -248,6 +278,7 @@ impl PersistenceLayer {
 
         let operation = Operation::ListSet { key, index, value };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -269,6 +300,7 @@ impl PersistenceLayer {
 
         let operation = Operation::ListTrim { key, start, stop };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -290,6 +322,7 @@ impl PersistenceLayer {
 
         let operation = Operation::ListRem { key, count, value };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -317,6 +350,7 @@ impl PersistenceLayer {
             value,
         };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -340,6 +374,7 @@ impl PersistenceLayer {
             destination,
         };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -360,6 +395,7 @@ impl PersistenceLayer {
 
         let operation = Operation::QueuePublish { queue, message };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -380,6 +416,7 @@ impl PersistenceLayer {
 
         let operation = Operation::QueueAck { queue, message_id };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         Ok(())
@@ -402,6 +439,7 @@ impl PersistenceLayer {
             requeue,
         };
 
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         Ok(())
@@ -523,6 +561,7 @@ impl PersistenceLayer {
         }
 
         let operation = Operation::SetAdd { key, members };
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -542,6 +581,7 @@ impl PersistenceLayer {
         }
 
         let operation = Operation::SetRem { key, members };
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -566,6 +606,7 @@ impl PersistenceLayer {
             destination,
             member,
         };
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -585,6 +626,7 @@ impl PersistenceLayer {
         }
 
         let operation = Operation::SetInterStore { destination, keys };
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -604,6 +646,7 @@ impl PersistenceLayer {
         }
 
         let operation = Operation::SetUnionStore { destination, keys };
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -623,6 +666,7 @@ impl PersistenceLayer {
         }
 
         let operation = Operation::SetDiffStore { destination, keys };
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -656,6 +700,7 @@ impl PersistenceLayer {
             gt,
             lt,
         };
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -671,6 +716,7 @@ impl PersistenceLayer {
         }
 
         let operation = Operation::ZRem { key, members };
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -695,6 +741,7 @@ impl PersistenceLayer {
             member,
             increment,
         };
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -715,6 +762,7 @@ impl PersistenceLayer {
         }
 
         let operation = Operation::ZRemRangeByRank { key, start, stop };
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -735,6 +783,7 @@ impl PersistenceLayer {
         }
 
         let operation = Operation::ZRemRangeByScore { key, min, max };
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -761,6 +810,7 @@ impl PersistenceLayer {
             weights,
             aggregate,
         };
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -787,6 +837,7 @@ impl PersistenceLayer {
             weights,
             aggregate,
         };
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();
@@ -806,6 +857,7 @@ impl PersistenceLayer {
         }
 
         let operation = Operation::ZDiffStore { destination, keys };
+        self.maybe_replicate(&operation);
         self.wal.append(operation).await?;
 
         let mut ops = self.operations_since_snapshot.write();

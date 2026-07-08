@@ -308,6 +308,61 @@ async fn test_snapshot_roundtrip_all_datatypes() {
 }
 
 #[tokio::test]
+async fn persistence_propagates_writes_to_replication_master() {
+    use crate::replication::{MasterNode, NodeRole, ReplicationConfig};
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    // Master node bound to an ephemeral replica-listen port.
+    let mut repl_config = ReplicationConfig::default();
+    repl_config.enabled = true;
+    repl_config.role = NodeRole::Master;
+    repl_config.replica_listen_address = Some("127.0.0.1:0".parse().unwrap());
+
+    let kv = Arc::new(KVStore::new(KVConfig::default()));
+    let master = Arc::new(MasterNode::new(repl_config, kv, None).await.unwrap());
+    let before = master.replication_offset();
+
+    let wal_path = PathBuf::from("/tmp/test_repl_piggyback.wal");
+    let _ = tokio::fs::remove_file(&wal_path).await;
+    let persist_config = types::PersistenceConfig {
+        enabled: true,
+        wal: types::WALConfig {
+            enabled: true,
+            path: wal_path.clone(),
+            buffer_size_kb: 64,
+            fsync_mode: types::FsyncMode::Always,
+            fsync_interval_ms: 1000,
+            max_size_mb: 1024,
+        },
+        snapshot: types::SnapshotConfig {
+            enabled: false,
+            directory: PathBuf::from("/tmp/test_repl_piggyback_snap"),
+            interval_secs: 300,
+            operation_threshold: 10_000,
+            max_snapshots: 5,
+            compression: false,
+        },
+    };
+
+    let layer = PersistenceLayer::new_with_replication(persist_config, Some(master.clone()))
+        .await
+        .unwrap();
+    layer
+        .log_kv_set("k".into(), b"v".to_vec(), None)
+        .await
+        .unwrap();
+
+    // The logged write should have been propagated to the replication master.
+    assert!(
+        master.replication_offset() > before,
+        "logged write should reach the replication master"
+    );
+
+    let _ = tokio::fs::remove_file(&wal_path).await;
+}
+
+#[tokio::test]
 async fn test_snapshot_cleanup_old() {
     use std::path::PathBuf;
 

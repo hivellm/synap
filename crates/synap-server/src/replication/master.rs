@@ -448,6 +448,12 @@ impl MasterNode {
         }
     }
 
+    /// Current replication-log offset — the number of operations propagated so
+    /// far. Useful for INFO/status and for verifying that writes are flowing.
+    pub fn replication_offset(&self) -> u64 {
+        self.replication_log.current_offset()
+    }
+
     /// Replicate an operation to all replicas
     pub fn replicate(&self, operation: Operation) -> u64 {
         let offset = self.replication_log.append(operation.clone());
