@@ -8,6 +8,19 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::{debug, info};
 
+/// Constant-time byte-slice equality — avoids leaking how many leading bytes
+/// matched via timing (used for the legacy SHA-512 verification path).
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// User account
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct User {
@@ -36,7 +49,7 @@ impl User {
         // Validate password requirements
         validate_password(password)?;
 
-        let password_hash = Self::hash_password(password);
+        let password_hash = Self::hash_password(password)?;
 
         Ok(Self {
             username: username.into(),
@@ -50,17 +63,32 @@ impl User {
         })
     }
 
-    /// Hash password using SHA512
-    fn hash_password(password: &str) -> String {
-        let mut hasher = Sha512::new();
-        hasher.update(password.as_bytes());
-        hex::encode(hasher.finalize())
+    /// Hash a password with bcrypt (salted, computationally hard).
+    fn hash_password(password: &str) -> AuthResult<String> {
+        bcrypt::hash(password, bcrypt::DEFAULT_COST)
+            .map_err(|e| SynapError::InternalError(format!("password hashing failed: {e}")))
     }
 
-    /// Verify password
+    /// Verify a password against the stored hash.
+    ///
+    /// bcrypt hashes (prefix `$2`) are verified in constant time by the bcrypt
+    /// crate. Legacy unsalted SHA-512 hashes are verified with a constant-time
+    /// comparison and should be upgraded via [`Self::needs_rehash`] on next login.
     pub fn verify_password(&self, password: &str) -> bool {
-        let hashed = Self::hash_password(password);
-        hashed == self.password_hash
+        if self.password_hash.starts_with("$2") {
+            bcrypt::verify(password, &self.password_hash).unwrap_or(false)
+        } else {
+            let mut hasher = Sha512::new();
+            hasher.update(password.as_bytes());
+            let computed = hex::encode(hasher.finalize());
+            constant_time_eq(computed.as_bytes(), self.password_hash.as_bytes())
+        }
+    }
+
+    /// True when the stored hash is a legacy (non-bcrypt) hash that should be
+    /// re-hashed with bcrypt after the next successful authentication.
+    pub fn needs_rehash(&self) -> bool {
+        !self.password_hash.starts_with("$2")
     }
 
     /// Change password
@@ -68,7 +96,7 @@ impl User {
         // Validate password requirements
         validate_password(new_password)?;
 
-        self.password_hash = Self::hash_password(new_password);
+        self.password_hash = Self::hash_password(new_password)?;
         Ok(())
     }
 
@@ -261,6 +289,14 @@ impl UserManager {
         }
 
         user.update_last_login();
+
+        // Transparently upgrade a legacy SHA-512 hash to bcrypt on successful login.
+        if user.needs_rehash() {
+            if let Ok(new_hash) = User::hash_password(password) {
+                user.password_hash = new_hash;
+            }
+        }
+
         Ok(user.clone())
     }
 
