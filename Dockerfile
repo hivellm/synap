@@ -97,21 +97,21 @@ COPY .cargo/config.toml ./.cargo/config.toml
 
 # Copy manifest files first (for better Docker layer caching)
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
-COPY synap-server/Cargo.toml ./synap-server/
-COPY synap-cli/Cargo.toml ./synap-cli/
-COPY synap-migrate/Cargo.toml ./synap-migrate/
+COPY crates/synap-server/Cargo.toml ./crates/synap-server/
+COPY crates/synap-cli/Cargo.toml ./crates/synap-cli/
+COPY crates/synap-migrate/Cargo.toml ./crates/synap-migrate/
 COPY sdks/rust/Cargo.toml ./sdks/rust/
 
 # Copy source code (needed for cargo to validate workspace)
-COPY synap-server/src ./synap-server/src
-COPY synap-cli/src ./synap-cli/src
-COPY synap-migrate/src ./synap-migrate/src
+COPY crates/synap-server/src ./crates/synap-server/src
+COPY crates/synap-cli/src ./crates/synap-cli/src
+COPY crates/synap-migrate/src ./crates/synap-migrate/src
 COPY sdks/rust/src ./sdks/rust/src
 
 # Remove benchmark declarations from Cargo.toml for Docker build
 # (benchmarks are not needed for production image)
-RUN sed -i '/^# Configure benchmarks to use Criterion/,/^$/d' synap-server/Cargo.toml && \
-    sed -i '/^\[\[bench\]\]/,/^$/d' synap-server/Cargo.toml
+RUN sed -i '/^# Configure benchmarks to use Criterion/,/^$/d' crates/synap-server/Cargo.toml && \
+    sed -i '/^\[\[bench\]\]/,/^$/d' crates/synap-server/Cargo.toml
 
 # Build release binary with optimizations
 # - Static linking for portability (musl target)

@@ -43,12 +43,16 @@ docker push hivehub/synap:latest
 
 ```
 synap/
-├── synap-server/     # Main server binary and library
-├── synap-cli/        # Command-line client
-├── synap-migrate/    # Migration utilities
-├── sdks/             # Client SDKs (rust, typescript, python, php, csharp)
-└── gui/              # Electron-based dashboard
+├── crates/
+│   ├── synap-server/     # Main server binary and library
+│   ├── synap-cli/        # Command-line client
+│   └── synap-migrate/    # Migration utilities
+├── sdks/                 # Client SDKs (rust, typescript, python, php, csharp)
+└── gui/                  # Electron-based dashboard
 ```
+
+> Workspace members: `crates/*` + `sdks/rust`. First-party crates live under
+> `crates/` (Vectorizer/Nexus layout); the Rust SDK stays at `sdks/rust`.
 
 ## synap-server Module Layers
 

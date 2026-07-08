@@ -29,8 +29,8 @@ jobs:
             --ignore-words=.codespellignore \
             --quiet-level=2 \
             docs/ \
-            synap-server/src/ \
-            synap-cli/src/ \
+            crates/synap-server/src/ \
+            crates/synap-cli/src/ \
             README.md \
             CHANGELOG.md \
             scripts/ \
