@@ -1,4 +1,4 @@
-﻿//! WebSocket Stream Tests
+//! WebSocket Stream Tests
 //! These tests require a running Synap server
 
 #[cfg(feature = "s2s-tests")]
@@ -72,6 +72,8 @@ async fn spawn_test_server() -> (String, tokio::sync::oneshot::Sender<()>) {
         cluster_topology: None,
         cluster_migration: None,
         hub_client: None,
+        user_manager: None,
+        require_auth: false,
     };
 
     let user_manager = Arc::new(UserManager::new());

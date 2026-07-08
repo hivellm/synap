@@ -1,4 +1,4 @@
-﻿// HTTP Status Code Tests
+// HTTP Status Code Tests
 // Tests that REST API returns correct HTTP status codes for various scenarios
 
 use reqwest::{Client, StatusCode};
@@ -60,6 +60,8 @@ async fn spawn_test_server() -> String {
         cluster_topology: None,
         cluster_migration: None,
         hub_client: None,
+        user_manager: None,
+        require_auth: false,
     };
 
     let user_manager = Arc::new(UserManager::new());

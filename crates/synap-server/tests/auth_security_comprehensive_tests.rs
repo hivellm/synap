@@ -19,26 +19,22 @@ use synap_server::auth::{Action, ApiKeyManager, Permission, UserManager};
 // ==================== Password Security Tests ====================
 
 #[test]
-fn test_password_hashing_consistency() {
+fn test_password_hashing_is_salted() {
     let manager = UserManager::new();
     manager.create_user("user1", "password123", false).unwrap();
 
-    // Same password should produce the same hash (deterministic, no salt currently)
-    let user1 = manager.get_user("user1").unwrap();
-    let hash1 = user1.password_hash.clone();
+    let hash1 = manager.get_user("user1").unwrap().password_hash;
 
-    // Delete and recreate with same password
+    // Delete and recreate with the same password.
     manager.delete_user("user1").unwrap();
     manager.create_user("user1", "password123", false).unwrap();
 
     let user2 = manager.get_user("user1").unwrap();
     let hash2 = user2.password_hash.clone();
 
-    // Hashes should be the same (deterministic SHA512, no salt currently)
-    assert_eq!(hash1, hash2);
-
-    // Both should verify correctly
-    // Note: user1 was deleted, so we can only verify user2
+    // bcrypt uses a random per-hash salt, so the same password yields different
+    // hashes each time (this is the security property) — yet both still verify.
+    assert_ne!(hash1, hash2);
     assert!(user2.verify_password("password123"));
 }
 
@@ -59,7 +55,7 @@ fn test_password_hash_not_reversible() {
 }
 
 #[test]
-fn test_sha512_hash_format() {
+fn test_password_hash_is_bcrypt() {
     let manager = UserManager::new();
     manager
         .create_user("user1", "password12345", false)
@@ -68,9 +64,10 @@ fn test_sha512_hash_format() {
     let user = manager.get_user("user1").unwrap();
     let hash = &user.password_hash;
 
-    // SHA512 hashes are hexadecimal strings (128 characters for SHA512)
-    assert_eq!(hash.len(), 128);
-    assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+    // bcrypt hashes carry the "$2" version marker and are 60 chars long.
+    assert!(hash.starts_with("$2"), "expected bcrypt hash, got {hash}");
+    assert_eq!(hash.len(), 60);
+    assert!(user.verify_password("password12345"));
 }
 
 #[test]

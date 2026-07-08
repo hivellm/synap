@@ -1,4 +1,4 @@
-﻿use reqwest::Client;
+use reqwest::Client;
 use serde_json::json;
 use std::sync::Arc;
 use std::time::Duration;
@@ -52,6 +52,8 @@ async fn spawn_test_server() -> String {
         cluster_topology: None,
         cluster_migration: None,
         hub_client: None,
+        user_manager: None,
+        require_auth: false,
     };
     let user_manager = Arc::new(UserManager::new());
     let api_key_manager = Arc::new(ApiKeyManager::new());

@@ -55,6 +55,8 @@ async fn test_mcp_kv_get() {
         cluster_topology: None,
         cluster_migration: None,
         hub_client: None,
+        user_manager: None,
+        require_auth: false,
     });
 
     // Set a value first (use clone before moving to state)
@@ -118,6 +120,8 @@ async fn test_mcp_kv_set() {
         cluster_topology: None,
         cluster_migration: None,
         hub_client: None,
+        user_manager: None,
+        require_auth: false,
     });
 
     let request = CallToolRequestParams::new("synap_kv_set").with_arguments(
@@ -188,6 +192,8 @@ async fn test_mcp_kv_delete() {
         cluster_topology: None,
         cluster_migration: None,
         hub_client: None,
+        user_manager: None,
+        require_auth: false,
     });
 
     // Set then delete (use clone before moving to state)
@@ -261,6 +267,8 @@ async fn test_mcp_queue_publish() {
         cluster_topology: None,
         cluster_migration: None,
         hub_client: None,
+        user_manager: None,
+        require_auth: false,
     });
 
     // Create queue

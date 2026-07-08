@@ -61,6 +61,8 @@ pub fn create_test_app_state() -> AppState {
         cluster_topology: None,
         cluster_migration: None,
         hub_client: None,
+        user_manager: None,
+        require_auth: false,
     }
 }
 

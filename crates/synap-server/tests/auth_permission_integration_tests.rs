@@ -1,4 +1,4 @@
-﻿//! Integration tests for authentication and permission checking
+//! Integration tests for authentication and permission checking
 //!
 //! Tests that verify authentication middleware and permission checks work correctly
 //! across all REST API endpoints.
@@ -75,6 +75,8 @@ async fn spawn_test_server_with_auth(
         cluster_topology: None,
         cluster_migration: None,
         hub_client: None,
+        user_manager: None,
+        require_auth: false,
     };
 
     // Create user manager and API key manager

@@ -68,11 +68,9 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
     let mut reader = BufReader::new(read_half);
     let mut writer = Resp3Writer::new(write_half);
 
-    // AppState does not currently carry an auth manager — authentication for
-    // the RESP3 port is enforced at the network level (bind to loopback or
-    // use a firewall). When AppState gains an auth field this line becomes
-    // `!state.auth.require_auth`.
-    let mut authenticated = true;
+    // When auth is required the connection starts unauthenticated and must issue
+    // a successful AUTH before any command is accepted.
+    let mut authenticated = !state.require_auth;
 
     loop {
         let value = match parse_from_reader(&mut reader).await? {
@@ -106,24 +104,38 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
             .unwrap_or_default();
 
         // AUTH command — handled before dispatch.
+        // Redis AUTH: `AUTH <password>` (default user) or `AUTH <user> <password>`.
         if cmd_upper == "AUTH" {
-            if args.len() < 2 {
+            let creds: Option<(&str, &str)> = if args.len() == 2 {
+                args[1].as_str().map(|p| ("default", p))
+            } else if args.len() >= 3 {
+                match (args[1].as_str(), args[2].as_str()) {
+                    (Some(u), Some(p)) => Some((u, p)),
+                    _ => None,
+                }
+            } else {
                 writer
                     .write_error("ERR wrong number of arguments for 'AUTH' command")
                     .await?;
-            } else if let Some(password) = args[1].as_str() {
-                if check_auth(&state, password).await {
+                writer.flush().await?;
+                continue;
+            };
+
+            match creds {
+                Some((user, password)) if check_auth(&state, user, password).await => {
                     authenticated = true;
                     writer.write_ok().await?;
-                } else {
+                }
+                Some(_) => {
                     writer
                         .write_error(
                             "WRONGPASS invalid username-password pair or user is disabled.",
                         )
                         .await?;
                 }
-            } else {
-                writer.write_error("ERR password must be a string").await?;
+                None => {
+                    writer.write_error("ERR password must be a string").await?;
+                }
             }
             writer.flush().await?;
             continue;
@@ -210,11 +222,12 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
     Ok(())
 }
 
-/// Return `true` if the password is accepted.
-///
-/// Currently always returns `true` because AppState does not carry an auth
-/// manager. When auth is wired into AppState this function will delegate to
-/// `state.auth.user_manager.authenticate("default", password).is_ok()`.
-async fn check_auth(_state: &AppState, _password: &str) -> bool {
-    true
+/// Return `true` if the username/password pair authenticates against the
+/// configured user manager. Returns `false` when no user manager is present
+/// (callers only reach this path when `require_auth` is set).
+async fn check_auth(state: &AppState, username: &str, password: &str) -> bool {
+    match &state.user_manager {
+        Some(um) => um.authenticate(username, password).is_ok(),
+        None => false,
+    }
 }

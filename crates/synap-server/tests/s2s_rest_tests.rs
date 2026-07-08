@@ -1,4 +1,4 @@
-﻿// Server-to-Server REST API Tests
+// Server-to-Server REST API Tests
 // Tests all REST endpoints with real HTTP requests
 
 use reqwest::Client;
@@ -65,6 +65,8 @@ async fn spawn_test_server() -> String {
         cluster_topology: None,
         cluster_migration: None,
         hub_client: None,
+        user_manager: None,
+        require_auth: false,
     };
     let user_manager = Arc::new(UserManager::new());
     let api_key_manager = Arc::new(ApiKeyManager::new());

@@ -32,6 +32,15 @@ use super::dispatch::dispatch;
 use synap_protocol::synap_rpc::codec::{encode_frame, read_request, write_response};
 use synap_protocol::synap_rpc::types::{Response, SynapValue};
 
+/// Extract a UTF-8 string from a `SynapValue` for the AUTH handshake.
+fn rpc_str(v: &SynapValue) -> Option<String> {
+    match v {
+        SynapValue::Str(s) => Some(s.clone()),
+        SynapValue::Bytes(b) => String::from_utf8(b.clone()).ok(),
+        _ => None,
+    }
+}
+
 /// Spawn the SynapRPC TCP listener on `addr`.
 ///
 /// Returns immediately; the listener runs as a background task.
@@ -118,6 +127,10 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
     // Shared state — Arc so each request task can clone it cheaply.
     let state = Arc::new(state);
 
+    // Per-connection auth flag. The read loop is sequential, so AUTH and the
+    // gate check below serialize ahead of the per-request tasks.
+    let mut authenticated = !state.require_auth;
+
     // Read loop — one task per request for concurrency.
     loop {
         // Read raw frame bytes so we can measure the incoming size.
@@ -133,6 +146,42 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
         // Approximate in-frame size: rmp_serde encoding of the request.
         let in_bytes = rmp_serde::to_vec(&req).map(|b| b.len() + 4).unwrap_or(0);
         let command = req.command.clone();
+
+        // AUTH is handled inline (serialized ahead of request tasks).
+        // `AUTH <password>` (default user) or `AUTH <user> <password>`.
+        if req.command.eq_ignore_ascii_case("AUTH") {
+            let creds: Option<(String, String)> = match req.args.as_slice() {
+                [p] => rpc_str(p).map(|p| ("default".to_string(), p)),
+                [u, p, ..] => match (rpc_str(u), rpc_str(p)) {
+                    (Some(u), Some(p)) => Some((u, p)),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let ok = matches!(
+                (&creds, &state.user_manager),
+                (Some((u, p)), Some(um)) if um.authenticate(u, p).is_ok()
+            );
+            let response = if ok {
+                authenticated = true;
+                Response::ok(req.id, SynapValue::Str("OK".into()))
+            } else {
+                Response::err(
+                    req.id,
+                    "WRONGPASS invalid username-password pair or user is disabled.".to_string(),
+                )
+            };
+            let _ = tx.send((response, command, 0.0, in_bytes)).await;
+            continue;
+        }
+
+        // Reject every other command until the connection has authenticated.
+        if !authenticated {
+            let response = Response::err(req.id, "NOAUTH Authentication required.".to_string());
+            let _ = tx.send((response, command, 0.0, in_bytes)).await;
+            continue;
+        }
+
         let state = Arc::clone(&state);
         let tx = tx.clone();
 

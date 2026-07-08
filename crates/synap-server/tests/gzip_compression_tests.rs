@@ -1,4 +1,4 @@
-﻿// Gzip Compression Tests
+// Gzip Compression Tests
 // Tests that REST API supports gzip compression (tower-http CompressionLayer)
 
 use reqwest::Client;
@@ -61,6 +61,8 @@ async fn spawn_test_server() -> String {
         cluster_topology: None,
         cluster_migration: None,
         hub_client: None,
+        user_manager: None,
+        require_auth: false,
     };
 
     let user_manager = Arc::new(UserManager::new());

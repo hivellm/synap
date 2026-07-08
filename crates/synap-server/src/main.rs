@@ -522,6 +522,12 @@ async fn main() -> Result<()> {
         cluster_migration: None, // TODO: Initialize cluster migration from config
 
         hub_client,
+        user_manager: if config.auth.enabled {
+            Some(user_manager.clone())
+        } else {
+            None
+        },
+        require_auth: config.auth.enabled && config.auth.require_auth,
     };
 
     // Initialize Prometheus metrics

@@ -1,4 +1,4 @@
-﻿//! Cluster REST API Integration Tests
+//! Cluster REST API Integration Tests
 //!
 //! Tests REST API endpoints for cluster management
 
@@ -64,6 +64,8 @@ async fn spawn_test_server_with_cluster() -> String {
         cluster_topology: Some(topology),
         cluster_migration: Some(migration),
         hub_client: None,
+        user_manager: None,
+        require_auth: false,
     };
 
     let user_manager = Arc::new(UserManager::new());

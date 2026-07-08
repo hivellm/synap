@@ -244,6 +244,8 @@ mod tests {
             cluster_topology: None,
             cluster_migration: None,
             hub_client: None,
+            user_manager: None,
+            require_auth: false,
         }
     }
 
