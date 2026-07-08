@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use rmcp::model::{CallToolRequestParams, Content};
+use rmcp::model::{CallToolRequestParams, ContentBlock};
 use serde_json::{Value, json};
 use tracing::{debug, error};
 use umicp_core::{Envelope, OperationType};
@@ -79,7 +79,7 @@ fn capabilities_to_mcp_request(
 }
 
 /// Convert MCP Content to JSON
-fn content_to_json(content: &[Content]) -> serde_json::Value {
+fn content_to_json(content: &[ContentBlock]) -> serde_json::Value {
     if content.is_empty() {
         return json!({"result": "ok"});
     }

@@ -1,4 +1,4 @@
-use rmcp::model::{CallToolRequestParams, CallToolResult, Content, ErrorData};
+use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock, ErrorData};
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -112,7 +112,7 @@ async fn handle_kv_get(
         None => "null".to_string(),
     };
 
-    Ok(CallToolResult::success(vec![Content::text(response)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(response)]))
 }
 
 async fn handle_kv_set(
@@ -157,7 +157,7 @@ async fn handle_kv_set(
         }
     }
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"success": true}).to_string(),
     )]))
 }
@@ -194,7 +194,7 @@ async fn handle_kv_delete(
         }
     }
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"deleted": deleted}).to_string(),
     )]))
 }
@@ -238,7 +238,7 @@ async fn handle_kv_append(
         }
     }
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"length": length, "key": key}).to_string(),
     )]))
 }
@@ -275,7 +275,7 @@ async fn handle_kv_getrange(
 
     let response = String::from_utf8(range_bytes).unwrap_or_else(|_| "<binary data>".to_string());
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"range": response}).to_string(),
     )]))
 }
@@ -300,7 +300,7 @@ async fn handle_kv_strlen(
         .await
         .map_err(|e| ErrorData::internal_error(format!("STRLEN failed: {}", e), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"length": length, "key": key}).to_string(),
     )]))
 }
@@ -334,7 +334,7 @@ async fn handle_key_type(
         .await
         .map_err(|e| ErrorData::internal_error(format!("TYPE failed: {}", e), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"key": key, "type": key_type.as_str()}).to_string(),
     )]))
 }
@@ -366,7 +366,7 @@ async fn handle_key_exists(
         .await
         .map_err(|e| ErrorData::internal_error(format!("EXISTS failed: {}", e), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"key": key, "exists": exists}).to_string(),
     )]))
 }
@@ -403,7 +403,7 @@ async fn handle_key_rename(
         .await
         .map_err(|e| ErrorData::internal_error(format!("RENAME failed: {}", e), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"success": true, "source": source, "destination": destination}).to_string(),
     )]))
 }
@@ -444,7 +444,7 @@ async fn handle_hash_set(
         .hset(key, field, value_bytes)
         .map_err(|e| ErrorData::internal_error(format!("HSET failed: {}", e), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"created": created, "key": key, "field": field}).to_string(),
     )]))
 }
@@ -486,7 +486,7 @@ async fn handle_hash_get(
         None => json!({"found": false}).to_string(),
     };
 
-    Ok(CallToolResult::success(vec![Content::text(response)]))
+    Ok(CallToolResult::success(vec![ContentBlock::text(response)]))
 }
 
 async fn handle_hash_getall(
@@ -518,7 +518,7 @@ async fn handle_hash_getall(
         })
         .collect();
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"fields": result, "count": result.len()}).to_string(),
     )]))
 }
@@ -567,7 +567,7 @@ async fn handle_list_push(
     }
     .map_err(|e| ErrorData::internal_error(format!("Push failed: {}", e), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"length": length, "key": key}).to_string(),
     )]))
 }
@@ -615,7 +615,7 @@ async fn handle_list_pop(
         })
         .collect();
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"values": json_values, "key": key}).to_string(),
     )]))
 }
@@ -655,7 +655,7 @@ async fn handle_list_range(
         })
         .collect();
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"values": json_values, "key": key}).to_string(),
     )]))
 }
@@ -698,7 +698,7 @@ async fn handle_queue_publish(
         .await
         .map_err(|e| ErrorData::internal_error(format!("Publish failed: {}", e), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"message_id": message_id}).to_string(),
     )]))
 }
@@ -736,7 +736,7 @@ async fn handle_set_add(
         .sadd(key, member_bytes)
         .map_err(|e| ErrorData::internal_error(format!("SADD failed: {}", e), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"added": added, "key": key}).to_string(),
     )]))
 }
@@ -765,7 +765,7 @@ async fn handle_set_members(
         .map(|b| serde_json::from_slice(b).unwrap_or(json!(null)))
         .collect();
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"members": members, "count": members.len()}).to_string(),
     )]))
 }
@@ -803,7 +803,7 @@ async fn handle_set_inter(
         .map(|b| serde_json::from_slice(b).unwrap_or(json!(null)))
         .collect();
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"intersection": intersection, "count": intersection.len()}).to_string(),
     )]))
 }
@@ -837,7 +837,7 @@ async fn handle_sortedset_zadd(
 
     let (added, _) = state.sorted_set_store.zadd(key, member_bytes, score, &opts);
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"added": added > 0, "key": key, "member": member, "score": score}).to_string(),
     )]))
 }
@@ -881,7 +881,7 @@ async fn handle_sortedset_zrange(
         })
         .collect();
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"members": result, "count": result.len()}).to_string(),
     )]))
 }
@@ -908,7 +908,7 @@ async fn handle_sortedset_zrank(
     let member_bytes = member.as_bytes();
     let rank = state.sorted_set_store.zrank(key, member_bytes);
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"rank": rank, "key": key, "member": member}).to_string(),
     )]))
 }
@@ -935,7 +935,7 @@ async fn handle_transaction_multi(
         .multi(client_id.clone())
         .map_err(|e| ErrorData::internal_error(format!("Transaction multi failed: {}", e), None))?;
 
-    Ok(CallToolResult::success(vec![Content::text(
+    Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({
             "success": true,
             "message": "Transaction started",
@@ -966,14 +966,14 @@ async fn handle_transaction_exec(
         .await
         .map_err(|e| ErrorData::internal_error(format!("Transaction exec failed: {}", e), None))?
     {
-        Some(results) => Ok(CallToolResult::success(vec![Content::text(
+        Some(results) => Ok(CallToolResult::success(vec![ContentBlock::text(
             json!({
                 "success": true,
                 "results": results
             })
             .to_string(),
         )])),
-        None => Ok(CallToolResult::success(vec![Content::text(
+        None => Ok(CallToolResult::success(vec![ContentBlock::text(
             json!({
                 "aborted": true,
                 "message": "Transaction aborted: watched keys changed"

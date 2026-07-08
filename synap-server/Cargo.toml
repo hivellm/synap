@@ -1,6 +1,6 @@
 [package]
 name = "synap-server"
-version = "0.12.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 authors.workspace = true
@@ -37,10 +37,10 @@ rand.workspace = true
 bincode = { version = "2.0", features = ["serde"] }
 crc32fast = "1.4"
 compact_str.workspace = true
-rmcp = { version = "1.5.0", features = ["server", "transport-streamable-http-server"] }
+rmcp = { version = "2.1.0", features = ["server", "transport-streamable-http-server"] }
 hyper = "1.7"
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
-mlua = { version = "0.11.5", features = ["lua54", "async", "send", "serialize", "vendored"] }
+mlua = { version = "0.12.0", features = ["lua54", "async", "send", "serialize", "vendored"] }
 sha1 = "0.11"
 hex = "0.4"
 geohash = "0.13"
@@ -61,7 +61,7 @@ umicp-core = { version = "0.2.3", features = ["websocket", "http2"] }
 prometheus = "0.14"
 lazy_static = "1.4"
 sys-info = "0.9"                     # host-wide memory / load average
-sysinfo = { version = "0.33", default-features = false, features = ["system"] }  # per-process CPU / RSS
+sysinfo = { version = "0.39", default-features = false, features = ["system"] }  # per-process CPU / RSS
 
 # Testing
 tempfile = "3.15"
