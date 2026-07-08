@@ -1,5 +1,6 @@
 {
   "permissions": {
+    "defaultMode": "acceptEdits",
     "allow": [
       "Bash(*)",
       "Read(*)",
@@ -7,61 +8,36 @@
       "Edit(*)",
       "Glob(*)",
       "Grep(*)",
-      "Agent(*)"
+      "Agent(*)",
+      "TodoWrite(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "Skill(*)",
+      "mcp__tml__*",
+      "mcp__rulebook__*",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(find:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git blame:*)",
+      "Bash(npm run type-check:*)",
+      "Bash(npm test:*)",
+      "Bash(*)",
+      "mcp__rulebook"
     ]
   },
   "hooks": {
-    "SessionStart": [
-      {
-        "matcher": "compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash F:/Node/hivellm/synap/.claude/hooks/on-compact-reinject.sh"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash F:/Node/hivellm/synap/.claude/hooks/resume-from-handoff.sh"
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash F:/Node/hivellm/synap/.claude/hooks/check-context-and-handoff.sh"
-          }
-        ]
-      }
-    ],
     "PreToolUse": [
       {
+        "matcher": "Edit|Write",
         "hooks": [
           {
             "type": "command",
-            "command": "bash F:/Node/hivellm/synap/.claude/hooks/enforce-no-deferred.sh"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash F:/Node/hivellm/synap/.claude/hooks/enforce-no-shortcuts.sh"
-          }
-        ]
-      },
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash F:/Node/hivellm/synap/.claude/hooks/enforce-mcp-for-tasks.sh"
+            "command": "bash $CLAUDE_PROJECT_DIR/.claude/hooks/enforce-pre-tool.sh"
           }
         ]
       }
