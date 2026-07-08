@@ -218,16 +218,23 @@ impl SnapshotManager {
         let file = File::open(latest).await?;
         let mut reader = BufReader::new(file);
 
+        // Running digest, updated with the exact same byte sequence the writer
+        // fed into its CRC64 (LE for numeric fields, raw bytes for data), so we
+        // can verify integrity against the trailing checksum at the end.
+        let mut checksum = CRC64::new();
+
         // Read header: magic (8 bytes) + version (1 byte)
         let mut magic = [0u8; 8];
         reader.read_exact(&mut magic).await?;
+        checksum.update(&magic);
 
         if &magic != b"SYNAP002" {
-            // Try old format
+            // Unknown / older on-disk format.
             return Err(PersistenceError::SnapshotCorrupted(latest.clone()));
         }
 
         let version = reader.read_u8().await?;
+        checksum.update(&[version]);
         if version != SNAPSHOT_VERSION {
             warn!(
                 "Snapshot version mismatch: expected {}, got {}",
@@ -238,44 +245,57 @@ impl SnapshotManager {
 
         // Read metadata
         let timestamp = reader.read_u64().await?;
+        checksum.update(&timestamp.to_le_bytes());
         let wal_offset = reader.read_u64().await?;
+        checksum.update(&wal_offset.to_le_bytes());
 
         // Read KV data
         let kv_count = reader.read_u64().await?;
+        checksum.update(&kv_count.to_le_bytes());
         let mut kv_data = HashMap::new();
 
         for _ in 0..kv_count {
-            let key_len = reader.read_u32().await? as usize;
-            let mut key_bytes = vec![0u8; key_len];
+            let key_len = reader.read_u32().await?;
+            checksum.update(&key_len.to_le_bytes());
+            let mut key_bytes = vec![0u8; key_len as usize];
             reader.read_exact(&mut key_bytes).await?;
+            checksum.update(&key_bytes);
             let key = String::from_utf8(key_bytes)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-            let value_len = reader.read_u32().await? as usize;
-            let mut value = vec![0u8; value_len];
+            let value_len = reader.read_u32().await?;
+            checksum.update(&value_len.to_le_bytes());
+            let mut value = vec![0u8; value_len as usize];
             reader.read_exact(&mut value).await?;
+            checksum.update(&value);
 
             kv_data.insert(key, value);
         }
 
         // Read Queue data
         let queue_count = reader.read_u64().await?;
+        checksum.update(&queue_count.to_le_bytes());
         let mut queue_data = HashMap::new();
 
         for _ in 0..queue_count {
-            let queue_len = reader.read_u32().await? as usize;
-            let mut queue_bytes = vec![0u8; queue_len];
+            let queue_len = reader.read_u32().await?;
+            checksum.update(&queue_len.to_le_bytes());
+            let mut queue_bytes = vec![0u8; queue_len as usize];
             reader.read_exact(&mut queue_bytes).await?;
+            checksum.update(&queue_bytes);
             let queue_name = String::from_utf8(queue_bytes)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
             let msg_count = reader.read_u64().await?;
+            checksum.update(&msg_count.to_le_bytes());
             let mut messages = Vec::new();
 
             for _ in 0..msg_count {
-                let msg_len = reader.read_u32().await? as usize;
-                let mut msg_bytes = vec![0u8; msg_len];
+                let msg_len = reader.read_u32().await?;
+                checksum.update(&msg_len.to_le_bytes());
+                let mut msg_bytes = vec![0u8; msg_len as usize];
                 reader.read_exact(&mut msg_bytes).await?;
+                checksum.update(&msg_bytes);
 
                 let (message, _): (QueueMessage, _) =
                     bincode::serde::decode_from_slice(&msg_bytes, bincode::config::legacy())
@@ -286,38 +306,49 @@ impl SnapshotManager {
             queue_data.insert(queue_name, messages);
         }
 
-        // Read Stream data (optional for backward compatibility)
+        // Read Stream data (always present in the v2 format, count may be 0)
+        let stream_count = reader.read_u64().await?;
+        checksum.update(&stream_count.to_le_bytes());
         let mut stream_data = HashMap::new();
+        for _ in 0..stream_count {
+            let room_len = reader.read_u32().await?;
+            checksum.update(&room_len.to_le_bytes());
+            let mut room_bytes = vec![0u8; room_len as usize];
+            reader.read_exact(&mut room_bytes).await?;
+            checksum.update(&room_bytes);
+            let room_name = String::from_utf8(room_bytes)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-        // Try to read stream data (might not exist in old snapshots)
-        if let Ok(stream_count) = reader.read_u64().await {
-            for _ in 0..stream_count {
-                let room_len = reader.read_u32().await? as usize;
-                let mut room_bytes = vec![0u8; room_len];
-                reader.read_exact(&mut room_bytes).await?;
-                let room_name = String::from_utf8(room_bytes)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+            let event_count = reader.read_u64().await?;
+            checksum.update(&event_count.to_le_bytes());
+            let mut events = Vec::new();
 
-                let event_count = reader.read_u64().await?;
-                let mut events = Vec::new();
+            for _ in 0..event_count {
+                let event_len = reader.read_u32().await?;
+                checksum.update(&event_len.to_le_bytes());
+                let mut event_bytes = vec![0u8; event_len as usize];
+                reader.read_exact(&mut event_bytes).await?;
+                checksum.update(&event_bytes);
 
-                for _ in 0..event_count {
-                    let event_len = reader.read_u32().await? as usize;
-                    let mut event_bytes = vec![0u8; event_len];
-                    reader.read_exact(&mut event_bytes).await?;
-
-                    let (event, _): (StreamEvent, _) =
-                        bincode::serde::decode_from_slice(&event_bytes, bincode::config::legacy())
-                            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-                    events.push(event);
-                }
-
-                stream_data.insert(room_name, events);
+                let (event, _): (StreamEvent, _) =
+                    bincode::serde::decode_from_slice(&event_bytes, bincode::config::legacy())
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+                events.push(event);
             }
+
+            stream_data.insert(room_name, events);
         }
 
-        // Verify checksum
-        let _checksum = reader.read_u64().await.unwrap_or(0); // Optional for backward compatibility
+        // Verify integrity: the trailing CRC64 must match the running digest.
+        let stored_checksum = reader.read_u64().await?;
+        let computed_checksum = checksum.finalize();
+        if stored_checksum != computed_checksum {
+            warn!(
+                "Snapshot checksum mismatch at {:?} (stored={:#x}, computed={:#x})",
+                latest, stored_checksum, computed_checksum
+            );
+            return Err(PersistenceError::SnapshotCorrupted(latest.clone()));
+        }
 
         info!(
             "Snapshot loaded successfully: version={}, timestamp={}, wal_offset={}, streams={}",

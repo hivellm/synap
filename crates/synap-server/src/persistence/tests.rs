@@ -192,6 +192,50 @@ async fn test_snapshot_create_and_load() {
 }
 
 #[tokio::test]
+async fn test_snapshot_rejects_corrupted_checksum() {
+    use std::path::PathBuf;
+
+    let snapshot_dir = PathBuf::from("/tmp/test_snapshot_corrupt_dir");
+    let _ = tokio::fs::remove_dir_all(&snapshot_dir).await;
+
+    let config = types::SnapshotConfig {
+        enabled: true,
+        directory: snapshot_dir.clone(),
+        interval_secs: 300,
+        operation_threshold: 10_000,
+        max_snapshots: 5,
+        compression: false,
+    };
+    let snapshot_mgr = SnapshotManager::new(config);
+
+    let kv_store = KVStore::new(KVConfig::default());
+    kv_store
+        .set("k", b"some-value-bytes".to_vec(), None)
+        .await
+        .unwrap();
+
+    let path = snapshot_mgr
+        .create_snapshot(&kv_store, None, None, 7)
+        .await
+        .unwrap();
+
+    // Flip the last byte (part of the trailing CRC64) to simulate bit rot.
+    let mut bytes = tokio::fs::read(&path).await.unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xFF;
+    tokio::fs::write(&path, &bytes).await.unwrap();
+
+    // Load must fail with a corruption error rather than returning bad data.
+    let result = snapshot_mgr.load_latest().await;
+    assert!(
+        matches!(result, Err(types::PersistenceError::SnapshotCorrupted(_))),
+        "expected SnapshotCorrupted, got {result:?}"
+    );
+
+    let _ = tokio::fs::remove_dir_all(&snapshot_dir).await;
+}
+
+#[tokio::test]
 async fn test_snapshot_cleanup_old() {
     use std::path::PathBuf;
 
