@@ -17,8 +17,13 @@ pub type SubscriberId = String;
 /// Unique identifier for a message
 pub type MessageId = String;
 
-/// Message sender channel for WebSocket delivery
-pub type MessageSender = mpsc::UnboundedSender<Message>;
+/// Message sender channel for delivery to a subscriber connection (bounded).
+pub type MessageSender = mpsc::Sender<Message>;
+
+/// Per-subscriber delivery buffer capacity. A subscriber whose buffer fills up
+/// is treated as too slow and disconnected, so one stuck client cannot grow
+/// server memory without bound (audit M-011).
+pub const SUBSCRIBER_CHANNEL_CAPACITY: usize = 1024;
 
 /// Pub/Sub Router - manages topic-based publish/subscribe messaging
 #[derive(Clone)]
@@ -75,6 +80,9 @@ pub struct PubSubStats {
     pub total_wildcard_subscriptions: usize,
     pub messages_published: u64,
     pub messages_delivered: u64,
+    /// Subscribers disconnected because their delivery buffer was full.
+    #[serde(default)]
+    pub slow_consumers_dropped: u64,
 }
 
 /// Published message
@@ -116,6 +124,7 @@ impl PubSubRouter {
                 total_wildcard_subscriptions: 0,
                 messages_published: 0,
                 messages_delivered: 0,
+                slow_consumers_dropped: 0,
             })),
         }
     }
@@ -431,20 +440,43 @@ impl PubSubRouter {
             .as_secs()
     }
 
-    /// Deliver message to active WebSocket subscribers
+    /// Deliver a message to active subscriber connections.
+    ///
+    /// Uses a non-blocking `try_send` on each subscriber's bounded channel. A
+    /// subscriber whose buffer is full (too slow) or whose receiver is gone is
+    /// collected and disconnected after the loop, so a single stuck client can
+    /// never grow server memory without bound (audit M-011).
     fn deliver_message(&self, message: &Message, subscribers: &HashSet<SubscriberId>) -> usize {
-        let connections = self.connections.read();
         let mut delivered = 0;
+        let mut to_drop: Vec<SubscriberId> = Vec::new();
 
-        for sub_id in subscribers {
-            if let Some(sender) = connections.get(sub_id) {
-                // Try to send message to WebSocket (non-blocking, unbounded channel)
-                if sender.send(message.clone()).is_ok() {
-                    delivered += 1;
-                } else {
-                    warn!("Failed to deliver message to subscriber: {}", sub_id);
+        {
+            let connections = self.connections.read();
+            for sub_id in subscribers {
+                if let Some(sender) = connections.get(sub_id) {
+                    match sender.try_send(message.clone()) {
+                        Ok(()) => delivered += 1,
+                        Err(mpsc::error::TrySendError::Full(_)) => {
+                            warn!(
+                                "Subscriber {} is too slow (delivery buffer full), disconnecting",
+                                sub_id
+                            );
+                            to_drop.push(sub_id.clone());
+                        }
+                        Err(mpsc::error::TrySendError::Closed(_)) => {
+                            to_drop.push(sub_id.clone());
+                        }
+                    }
                 }
             }
+        } // release the read lock before unregister_connection takes the write lock
+
+        if !to_drop.is_empty() {
+            let dropped = to_drop.len() as u64;
+            for sub_id in &to_drop {
+                self.unregister_connection(sub_id);
+            }
+            self.stats.write().slow_consumers_dropped += dropped;
         }
 
         delivered
@@ -502,6 +534,27 @@ impl Default for PubSubRouter {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn slow_consumer_is_disconnected() {
+        let router = PubSubRouter::new();
+        let sub = router.subscribe(vec!["room".to_string()]).unwrap();
+
+        // Capacity-1 channel that is never drained, so it fills immediately.
+        let (tx, _rx) = mpsc::channel::<Message>(1);
+        router.register_connection(sub.subscriber_id.clone(), tx);
+
+        // First publish fills the single slot; the next finds it full and
+        // disconnects the slow subscriber rather than buffering without bound.
+        for _ in 0..3 {
+            let _ = router.publish("room", serde_json::json!({ "n": 1 }), None);
+        }
+
+        assert!(
+            router.get_stats().slow_consumers_dropped >= 1,
+            "slow subscriber should have been dropped"
+        );
+    }
 
     #[test]
     fn test_exact_subscription() {

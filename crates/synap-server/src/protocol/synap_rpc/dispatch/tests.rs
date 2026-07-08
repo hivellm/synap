@@ -1419,7 +1419,7 @@ async fn test_pubsub_server_push_delivers_to_registered_channel() {
     };
 
     // Register an mpsc channel for this subscriber (simulates the connection layer)
-    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    let (tx, mut rx) = mpsc::channel::<Message>(crate::core::pubsub::SUBSCRIBER_CHANNEL_CAPACITY);
     state
         .pubsub_router
         .as_ref()

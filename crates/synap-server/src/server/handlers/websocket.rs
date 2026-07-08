@@ -467,8 +467,8 @@ pub(super) async fn handle_pubsub_socket(
         crate::monitoring::ClientInfo::new(client_id.clone(), client_addr, connected_at);
     client_list_manager.add(client_info).await;
 
-    // Create channel for receiving messages
-    let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+    // Create bounded channel for receiving messages (slow-consumer protection).
+    let (tx, mut rx) = mpsc::channel::<Message>(crate::core::pubsub::SUBSCRIBER_CHANNEL_CAPACITY);
 
     // Register connection
     pubsub_router.register_connection(subscriber_id.clone(), tx);

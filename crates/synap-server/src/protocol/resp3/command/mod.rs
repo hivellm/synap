@@ -1132,7 +1132,8 @@ mod tests {
         let subscriber_id = sub_result.subscriber_id;
 
         // Register mpsc channel to simulate the connection layer
-        let (tx, mut rx) = mpsc::unbounded_channel::<Message>();
+        let (tx, mut rx) =
+            mpsc::channel::<Message>(crate::core::pubsub::SUBSCRIBER_CHANNEL_CAPACITY);
         state
             .pubsub_router
             .as_ref()

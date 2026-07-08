@@ -208,8 +208,9 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
                     });
                     if let (Some(sub_id), Some(router)) = (sub_id, state.pubsub_router.as_ref()) {
                         let router = Arc::clone(router);
-                        let (push_tx, mut push_rx) =
-                            tokio::sync::mpsc::unbounded_channel::<PubSubMessage>();
+                        let (push_tx, mut push_rx) = tokio::sync::mpsc::channel::<PubSubMessage>(
+                            crate::core::pubsub::SUBSCRIBER_CHANNEL_CAPACITY,
+                        );
                         router.register_connection(sub_id, push_tx);
                         let tx_push = tx.clone();
                         tokio::spawn(async move {
