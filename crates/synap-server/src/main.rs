@@ -297,17 +297,10 @@ async fn main() -> Result<()> {
     let persistence = if config.persistence.enabled {
         match PersistenceLayer::new(config.persistence.clone()).await {
             Ok(layer) => {
-                let layer = Arc::new(layer);
-
-                // Start background snapshot task
-                layer.clone().start_snapshot_task(
-                    kv_store.clone(),
-                    queue_manager.clone(),
-                    stream_manager.clone(),
-                );
-
                 info!("Persistence layer initialized (WAL + Snapshots)");
-                Some(layer)
+                // The background snapshot task is started later, once every
+                // store (hash/list/set/sorted-set) has been constructed.
+                Some(Arc::new(layer))
             }
             Err(e) => {
                 warn!("Failed to initialize persistence: {}", e);
@@ -336,6 +329,20 @@ async fn main() -> Result<()> {
     let sorted_set_store = _sorted_set_store_recovered
         .unwrap_or_else(|| Arc::new(synap_server::core::SortedSetStore::new()));
     info!("Sorted set store initialized");
+
+    // Now that every store exists, start the background snapshot task so that
+    // hash/list/set/sorted-set state is captured alongside KV/queue/stream.
+    if let Some(ref layer) = persistence {
+        layer.clone().start_snapshot_task(
+            kv_store.clone(),
+            Some(hash_store.clone()),
+            Some(list_store.clone()),
+            Some(set_store.clone()),
+            Some(sorted_set_store.clone()),
+            queue_manager.clone(),
+            stream_manager.clone(),
+        );
+    }
 
     // Create HyperLogLog store
     use synap_server::core::HyperLogLogStore;

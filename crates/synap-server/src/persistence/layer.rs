@@ -1,6 +1,8 @@
 use super::types::{FsyncMode, Operation, PersistenceConfig};
 use super::{AsyncWAL, SnapshotManager};
-use crate::core::{KVStore, QueueManager, StreamManager};
+use crate::core::{
+    HashStore, KVStore, ListStore, QueueManager, SetStore, SortedSetStore, StreamManager,
+};
 use parking_lot::RwLock;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -405,35 +407,32 @@ impl PersistenceLayer {
         Ok(())
     }
 
-    /// Log a Stream PUBLISH operation
+    /// Stream publishes are intentionally NOT written to the KV WAL.
+    ///
+    /// Streams are durable through their dedicated `StreamPersistence` and are
+    /// captured in periodic snapshots (the v3 stream section). Recovery never
+    /// replayed `Operation::StreamPublish` from the KV WAL — logging it here was
+    /// dead weight that could diverge from the real stream state (audit M-014).
+    /// Kept as a no-op so existing call sites need no change; the WAL variant is
+    /// retained only so recovery can skip entries in pre-existing WAL files.
     pub async fn log_stream_publish(
         &self,
-        room: String,
-        event_type: String,
-        payload: Vec<u8>,
+        _room: String,
+        _event_type: String,
+        _payload: Vec<u8>,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::StreamPublish {
-            room,
-            event_type,
-            payload,
-        };
-
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
         Ok(())
     }
 
     /// Create a snapshot if conditions are met
+    #[allow(clippy::too_many_arguments)]
     pub async fn maybe_snapshot(
         &self,
         kv_store: &KVStore,
+        hash_store: Option<&HashStore>,
+        list_store: Option<&ListStore>,
+        set_store: Option<&SetStore>,
+        sorted_set_store: Option<&SortedSetStore>,
         queue_manager: Option<&QueueManager>,
         stream_manager: Option<&StreamManager>,
     ) -> super::types::Result<()> {
@@ -457,7 +456,16 @@ impl PersistenceLayer {
             let wal_offset = self.wal.current_offset();
 
             self.snapshot_mgr
-                .create_snapshot(kv_store, queue_manager, stream_manager, wal_offset)
+                .create_snapshot(
+                    kv_store,
+                    hash_store,
+                    list_store,
+                    set_store,
+                    sorted_set_store,
+                    queue_manager,
+                    stream_manager,
+                    wal_offset,
+                )
                 .await?;
 
             // Reset counters
@@ -469,9 +477,14 @@ impl PersistenceLayer {
     }
 
     /// Start background snapshot task
+    #[allow(clippy::too_many_arguments)]
     pub fn start_snapshot_task(
         self: Arc<Self>,
         kv_store: Arc<KVStore>,
+        hash_store: Option<Arc<HashStore>>,
+        list_store: Option<Arc<ListStore>>,
+        set_store: Option<Arc<SetStore>>,
+        sorted_set_store: Option<Arc<SortedSetStore>>,
         queue_manager: Option<Arc<QueueManager>>,
         stream_manager: Option<Arc<StreamManager>>,
     ) -> tokio::task::JoinHandle<()> {
@@ -484,8 +497,12 @@ impl PersistenceLayer {
                 if let Err(e) = self
                     .maybe_snapshot(
                         &kv_store,
-                        queue_manager.as_ref().map(|q| q.as_ref()),
-                        stream_manager.as_ref().map(|s| s.as_ref()),
+                        hash_store.as_deref(),
+                        list_store.as_deref(),
+                        set_store.as_deref(),
+                        sorted_set_store.as_deref(),
+                        queue_manager.as_deref(),
+                        stream_manager.as_deref(),
                     )
                     .await
                 {

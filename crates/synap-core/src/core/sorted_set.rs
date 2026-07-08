@@ -467,6 +467,23 @@ pub struct SortedSetStore {
 }
 
 impl SortedSetStore {
+    /// Dump every sorted set (key -> Vec<(member, score)>) across all shards, for snapshotting.
+    pub fn dump(&self) -> HashMap<String, Vec<(Vec<u8>, f64)>> {
+        let mut out = HashMap::new();
+        for shard in self.shards.iter() {
+            let guard = shard.read();
+            for (key, v) in guard.iter() {
+                let members = v
+                    .members_with_scores()
+                    .into_iter()
+                    .map(|sm| (sm.member, sm.score))
+                    .collect();
+                out.insert(key.clone(), members);
+            }
+        }
+        out
+    }
+
     /// Create a new sorted set store
     pub fn new() -> Self {
         let shards: Vec<_> = (0..64)

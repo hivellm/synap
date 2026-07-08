@@ -156,6 +156,18 @@ pub struct HashStats {
 }
 
 impl HashStore {
+    /// Dump every hash (key -> field -> value) across all shards, for snapshotting.
+    pub fn dump(&self) -> HashMap<String, HashMap<String, Vec<u8>>> {
+        let mut out = HashMap::new();
+        for shard in self.shards.iter() {
+            let guard = shard.data.read();
+            for (key, hv) in guard.iter() {
+                out.insert(key.clone(), hv.fields.clone());
+            }
+        }
+        out
+    }
+
     /// Create new hash store
     pub fn new() -> Self {
         // Initialize 64 shards

@@ -102,9 +102,17 @@ pub async fn recover(
                 }
             }
 
+            // Restore Hash store
+            let hashes = HashStore::new();
+            for (key, fields) in snapshot.hash_data {
+                for (field, value) in fields {
+                    hashes.hset(&key, &field, value)?;
+                }
+            }
+
             (
                 kv,
-                Some(HashStore::new()),
+                Some(hashes),
                 Some(lists),
                 Some(sets),
                 Some(sorted_sets),

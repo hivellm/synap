@@ -262,6 +262,8 @@ pub struct Snapshot {
     pub set_data: HashMap<String, crate::core::SetValue>, // Key -> Set
     #[serde(default)]
     pub sorted_set_data: HashMap<String, Vec<(Vec<u8>, f64)>>, // Key -> Vec<(member, score)>
+    #[serde(default)]
+    pub hash_data: HashMap<String, HashMap<String, Vec<u8>>>, // Key -> field -> value
 }
 
 /// Stream event for snapshot (simplified from stream::StreamEvent)

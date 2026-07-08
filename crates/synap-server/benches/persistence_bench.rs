@@ -78,7 +78,7 @@ fn bench_snapshot_memory(c: &mut Criterion) {
 
                     let snapshot_mgr = SnapshotManager::new(snapshot_config);
                     snapshot_mgr
-                        .create_snapshot(&store, None, None, 0)
+                        .create_snapshot(&store, None, None, None, None, None, None, 0)
                         .await
                         .unwrap()
                 });
@@ -112,7 +112,7 @@ fn bench_snapshot_load(c: &mut Criterion) {
 
         let snapshot_mgr = SnapshotManager::new(snapshot_config);
         snapshot_mgr
-            .create_snapshot(&store, None, None, 0)
+            .create_snapshot(&store, None, None, None, None, None, None, 0)
             .await
             .unwrap();
     });
@@ -153,7 +153,7 @@ fn bench_recovery(c: &mut Criterion) {
         snapshot_config.directory = PathBuf::from("./target/bench_recovery");
         let snapshot_mgr = SnapshotManager::new(snapshot_config);
         snapshot_mgr
-            .create_snapshot(&store, None, None, 0)
+            .create_snapshot(&store, None, None, None, None, None, None, 0)
             .await
             .unwrap();
 

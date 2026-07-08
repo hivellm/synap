@@ -168,6 +168,18 @@ impl Default for SetStore {
 }
 
 impl SetStore {
+    /// Dump every set (key -> SetValue) across all shards, for snapshotting.
+    pub fn dump(&self) -> HashMap<String, SetValue> {
+        let mut out = HashMap::new();
+        for shard in self.shards.iter() {
+            let guard = shard.read();
+            for (key, v) in guard.iter() {
+                out.insert(key.clone(), v.clone());
+            }
+        }
+        out
+    }
+
     /// Create new set store
     pub fn new() -> Self {
         let mut shards = Vec::with_capacity(SHARD_COUNT);

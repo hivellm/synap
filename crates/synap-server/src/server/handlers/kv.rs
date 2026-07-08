@@ -230,6 +230,10 @@ pub async fn trigger_snapshot(
         persistence
             .maybe_snapshot(
                 &state.kv_store,
+                Some(state.hash_store.as_ref()),
+                Some(state.list_store.as_ref()),
+                Some(state.set_store.as_ref()),
+                Some(state.sorted_set_store.as_ref()),
                 state.queue_manager.as_deref(),
                 state.stream_manager.as_deref(),
             )

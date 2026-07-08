@@ -319,7 +319,7 @@ fn bench_snapshot_creation(c: &mut Criterion) {
                 b.iter(|| {
                     rt.block_on(async {
                         persistence
-                            .maybe_snapshot(black_box(&*kv), None, None)
+                            .maybe_snapshot(black_box(&*kv), None, None, None, None, None, None)
                             .await
                             .ok();
                     })

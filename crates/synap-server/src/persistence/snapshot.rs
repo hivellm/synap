@@ -2,6 +2,9 @@ use super::types::{PersistenceError, Result, Snapshot, SnapshotConfig, StreamEve
 use crate::core::kv_store::KVStore;
 use crate::core::queue::{QueueManager, QueueMessage};
 use crate::core::stream::StreamManager;
+use crate::core::{HashStore, ListStore, SetStore, SortedSetStore};
+use serde::Serialize;
+use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -9,7 +12,10 @@ use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tracing::{debug, info, warn};
 
-const SNAPSHOT_VERSION: u8 = 2; // Version 2 with streaming format
+/// v2 = kv + queue + stream. v3 (current) also persists hash/list/set/sorted-set.
+const SNAPSHOT_VERSION: u8 = 3;
+const SNAPSHOT_MAGIC: &[u8; 8] = b"SYNAP003";
+const SNAPSHOT_MAGIC_V2: &[u8; 8] = b"SYNAP002";
 
 /// Snapshot manager for periodic state dumps with streaming support
 pub struct SnapshotManager {
@@ -23,9 +29,14 @@ impl SnapshotManager {
     }
 
     /// Create a snapshot using streaming serialization (O(1) memory usage)
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_snapshot(
         &self,
         kv_store: &KVStore,
+        hash_store: Option<&HashStore>,
+        list_store: Option<&ListStore>,
+        set_store: Option<&SetStore>,
+        sorted_set_store: Option<&SortedSetStore>,
         queue_manager: Option<&QueueManager>,
         stream_manager: Option<&StreamManager>,
         wal_offset: u64,
@@ -48,8 +59,8 @@ impl SnapshotManager {
         let mut checksum = CRC64::new();
 
         // Write header: magic + version + timestamp + wal_offset
-        writer.write_all(b"SYNAP002").await?;
-        checksum.update(b"SYNAP002");
+        writer.write_all(SNAPSHOT_MAGIC).await?;
+        checksum.update(SNAPSHOT_MAGIC);
 
         writer.write_u8(SNAPSHOT_VERSION).await?;
         checksum.update(&[SNAPSHOT_VERSION]);
@@ -184,6 +195,35 @@ impl SnapshotManager {
             }
         }
 
+        // Stream hash / list / set / sorted-set data (v3+).
+        let hash_data = match hash_store {
+            Some(hs) => hs.dump(),
+            None => HashMap::new(),
+        };
+        debug!("Streaming {} hashes", hash_data.len());
+        write_map_section(&mut writer, &mut checksum, &hash_data).await?;
+
+        let list_data = match list_store {
+            Some(ls) => ls.dump(),
+            None => HashMap::new(),
+        };
+        debug!("Streaming {} lists", list_data.len());
+        write_map_section(&mut writer, &mut checksum, &list_data).await?;
+
+        let set_data = match set_store {
+            Some(ss) => ss.dump(),
+            None => HashMap::new(),
+        };
+        debug!("Streaming {} sets", set_data.len());
+        write_map_section(&mut writer, &mut checksum, &set_data).await?;
+
+        let sorted_set_data = match sorted_set_store {
+            Some(zs) => zs.dump(),
+            None => HashMap::new(),
+        };
+        debug!("Streaming {} sorted sets", sorted_set_data.len());
+        write_map_section(&mut writer, &mut checksum, &sorted_set_data).await?;
+
         // Write checksum at end
         let final_checksum = checksum.finalize();
         writer.write_u64(final_checksum).await?;
@@ -228,16 +268,21 @@ impl SnapshotManager {
         reader.read_exact(&mut magic).await?;
         checksum.update(&magic);
 
-        if &magic != b"SYNAP002" {
-            // Unknown / older on-disk format.
+        // v3 (SNAPSHOT_MAGIC) carries the hash/list/set/sorted-set sections;
+        // v2 (SNAPSHOT_MAGIC_V2) does not. Any other magic is unreadable.
+        let has_collections = if &magic == SNAPSHOT_MAGIC {
+            true
+        } else if &magic == SNAPSHOT_MAGIC_V2 {
+            false
+        } else {
             return Err(PersistenceError::SnapshotCorrupted(latest.clone()));
-        }
+        };
 
         let version = reader.read_u8().await?;
         checksum.update(&[version]);
-        if version != SNAPSHOT_VERSION {
+        if version != 2 && version != SNAPSHOT_VERSION {
             warn!(
-                "Snapshot version mismatch: expected {}, got {}",
+                "Unsupported snapshot version: expected 2 or {}, got {}",
                 SNAPSHOT_VERSION, version
             );
             return Err(PersistenceError::SnapshotCorrupted(latest.clone()));
@@ -339,6 +384,22 @@ impl SnapshotManager {
             stream_data.insert(room_name, events);
         }
 
+        // Read hash / list / set / sorted-set sections (v3+; absent in v2).
+        let (hash_data, list_data, set_data, sorted_set_data) = if has_collections {
+            let hash_data = read_map_section(&mut reader, &mut checksum).await?;
+            let list_data = read_map_section(&mut reader, &mut checksum).await?;
+            let set_data = read_map_section(&mut reader, &mut checksum).await?;
+            let sorted_set_data = read_map_section(&mut reader, &mut checksum).await?;
+            (hash_data, list_data, set_data, sorted_set_data)
+        } else {
+            (
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+                HashMap::new(),
+            )
+        };
+
         // Verify integrity: the trailing CRC64 must match the running digest.
         let stored_checksum = reader.read_u64().await?;
         let computed_checksum = checksum.finalize();
@@ -366,9 +427,10 @@ impl SnapshotManager {
             kv_data,
             queue_data,
             stream_data,
-            list_data: HashMap::new(), // Empty for now, will be populated from WAL replay
-            set_data: HashMap::new(),  // Empty for now, will be populated from WAL replay
-            sorted_set_data: HashMap::new(), // Empty for now, will be populated from WAL replay
+            list_data,
+            set_data,
+            sorted_set_data,
+            hash_data,
         };
 
         Ok(Some((snapshot, latest.clone())))
@@ -446,6 +508,71 @@ pub struct SnapshotStats {
     pub count: usize,
     pub total_size_bytes: u64,
     pub latest: Option<PathBuf>,
+}
+
+/// Write a `HashMap<String, V>` section: count (u64), then per entry the UTF-8
+/// key (u32 length-prefixed) and the bincode-encoded value (u32 length-prefixed).
+/// The running CRC64 is fed the same bytes the reader will accumulate.
+async fn write_map_section<W, V>(
+    writer: &mut W,
+    checksum: &mut CRC64,
+    map: &HashMap<String, V>,
+) -> std::io::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+    V: Serialize,
+{
+    let count = map.len() as u64;
+    writer.write_u64(count).await?;
+    checksum.update(&count.to_le_bytes());
+    for (key, value) in map {
+        let key_bytes = key.as_bytes();
+        let key_len = key_bytes.len() as u32;
+        writer.write_u32(key_len).await?;
+        checksum.update(&key_len.to_le_bytes());
+        writer.write_all(key_bytes).await?;
+        checksum.update(key_bytes);
+
+        let data = bincode::serde::encode_to_vec(value, bincode::config::legacy())
+            .map_err(std::io::Error::other)?;
+        let data_len = data.len() as u32;
+        writer.write_u32(data_len).await?;
+        checksum.update(&data_len.to_le_bytes());
+        writer.write_all(&data).await?;
+        checksum.update(&data);
+    }
+    Ok(())
+}
+
+/// Read a section written by [`write_map_section`], updating `checksum` with the
+/// same byte sequence so the trailing digest can be verified.
+async fn read_map_section<R, V>(reader: &mut R, checksum: &mut CRC64) -> Result<HashMap<String, V>>
+where
+    R: AsyncReadExt + Unpin,
+    V: DeserializeOwned,
+{
+    let count = reader.read_u64().await?;
+    checksum.update(&count.to_le_bytes());
+    let mut out = HashMap::new();
+    for _ in 0..count {
+        let key_len = reader.read_u32().await?;
+        checksum.update(&key_len.to_le_bytes());
+        let mut key_bytes = vec![0u8; key_len as usize];
+        reader.read_exact(&mut key_bytes).await?;
+        checksum.update(&key_bytes);
+        let key = String::from_utf8(key_bytes)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+
+        let data_len = reader.read_u32().await?;
+        checksum.update(&data_len.to_le_bytes());
+        let mut data = vec![0u8; data_len as usize];
+        reader.read_exact(&mut data).await?;
+        checksum.update(&data);
+        let (value, _) = bincode::serde::decode_from_slice(&data, bincode::config::legacy())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        out.insert(key, value);
+    }
+    Ok(out)
 }
 
 // CRC64 implementation for streaming checksum

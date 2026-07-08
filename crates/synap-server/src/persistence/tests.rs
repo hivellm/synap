@@ -1,5 +1,5 @@
 use super::*;
-use crate::core::{KVConfig, KVStore, QueueConfig};
+use crate::core::{HashStore, KVConfig, KVStore, ListStore, QueueConfig, SetStore, SortedSetStore};
 
 #[tokio::test]
 async fn test_wal_append_and_replay() {
@@ -172,7 +172,7 @@ async fn test_snapshot_create_and_load() {
 
     // Create snapshot
     let snapshot_path = snapshot_mgr
-        .create_snapshot(&kv_store, None, None, 42)
+        .create_snapshot(&kv_store, None, None, None, None, None, None, 42)
         .await
         .unwrap();
 
@@ -181,7 +181,7 @@ async fn test_snapshot_create_and_load() {
     // Load snapshot
     let (snapshot, _path) = snapshot_mgr.load_latest().await.unwrap().unwrap();
 
-    assert_eq!(snapshot.version, 2); // Updated to version 2 (streaming format)
+    assert_eq!(snapshot.version, 3); // v3 adds hash/list/set/sorted-set sections
     assert_eq!(snapshot.wal_offset, 42);
     assert_eq!(snapshot.kv_data.len(), 2);
     assert_eq!(snapshot.kv_data.get("key1").unwrap(), b"value1");
@@ -215,7 +215,7 @@ async fn test_snapshot_rejects_corrupted_checksum() {
         .unwrap();
 
     let path = snapshot_mgr
-        .create_snapshot(&kv_store, None, None, 7)
+        .create_snapshot(&kv_store, None, None, None, None, None, None, 7)
         .await
         .unwrap();
 
@@ -231,6 +231,78 @@ async fn test_snapshot_rejects_corrupted_checksum() {
         matches!(result, Err(types::PersistenceError::SnapshotCorrupted(_))),
         "expected SnapshotCorrupted, got {result:?}"
     );
+
+    let _ = tokio::fs::remove_dir_all(&snapshot_dir).await;
+}
+
+#[tokio::test]
+async fn test_snapshot_roundtrip_all_datatypes() {
+    use std::path::PathBuf;
+
+    let snapshot_dir = PathBuf::from("/tmp/test_snapshot_all_types_dir");
+    let _ = tokio::fs::remove_dir_all(&snapshot_dir).await;
+
+    let config = types::SnapshotConfig {
+        enabled: true,
+        directory: snapshot_dir.clone(),
+        interval_secs: 300,
+        operation_threshold: 10_000,
+        max_snapshots: 5,
+        compression: false,
+    };
+    let snapshot_mgr = SnapshotManager::new(config);
+
+    // Populate one key in each datatype.
+    let kv_store = KVStore::new(KVConfig::default());
+    kv_store.set("kvk", b"kvv".to_vec(), None).await.unwrap();
+
+    let hash_store = HashStore::new();
+    hash_store.hset("h", "f1", b"v1".to_vec()).unwrap();
+    hash_store.hset("h", "f2", b"v2".to_vec()).unwrap();
+
+    let list_store = ListStore::new();
+    list_store
+        .rpush("l", vec![b"a".to_vec(), b"b".to_vec()], false)
+        .unwrap();
+
+    let set_store = SetStore::new();
+    set_store
+        .sadd("s", vec![b"m1".to_vec(), b"m2".to_vec()])
+        .unwrap();
+
+    let sorted_set_store = SortedSetStore::new();
+    let opts = crate::core::sorted_set::ZAddOptions::default();
+    sorted_set_store.zadd("z", b"zm".to_vec(), 1.5, &opts);
+
+    // Snapshot every datatype, then reload from disk.
+    snapshot_mgr
+        .create_snapshot(
+            &kv_store,
+            Some(&hash_store),
+            Some(&list_store),
+            Some(&set_store),
+            Some(&sorted_set_store),
+            None,
+            None,
+            99,
+        )
+        .await
+        .unwrap();
+
+    let (snapshot, _path) = snapshot_mgr.load_latest().await.unwrap().unwrap();
+
+    assert_eq!(snapshot.version, 3);
+    assert_eq!(snapshot.wal_offset, 99);
+    assert_eq!(snapshot.kv_data.get("kvk").unwrap(), b"kvv");
+    let h = snapshot.hash_data.get("h").unwrap();
+    assert_eq!(h.get("f1").unwrap(), b"v1");
+    assert_eq!(h.get("f2").unwrap(), b"v2");
+    assert_eq!(snapshot.list_data.get("l").unwrap().elements.len(), 2);
+    assert_eq!(snapshot.set_data.get("s").unwrap().members.len(), 2);
+    let z = snapshot.sorted_set_data.get("z").unwrap();
+    assert_eq!(z.len(), 1);
+    assert_eq!(z[0].0, b"zm");
+    assert!((z[0].1 - 1.5).abs() < 1e-9);
 
     let _ = tokio::fs::remove_dir_all(&snapshot_dir).await;
 }
@@ -262,7 +334,7 @@ async fn test_snapshot_cleanup_old() {
             .unwrap();
 
         snapshot_mgr
-            .create_snapshot(&kv_store, None, None, i)
+            .create_snapshot(&kv_store, None, None, None, None, None, None, i)
             .await
             .unwrap();
 

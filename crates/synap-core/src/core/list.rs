@@ -306,6 +306,18 @@ impl Default for ListStore {
 }
 
 impl ListStore {
+    /// Dump every list (key -> ListValue) across all shards, for snapshotting.
+    pub fn dump(&self) -> HashMap<String, ListValue> {
+        let mut out = HashMap::new();
+        for shard in self.shards.iter() {
+            let guard = shard.read();
+            for (key, v) in guard.iter() {
+                out.insert(key.clone(), v.clone());
+            }
+        }
+        out
+    }
+
     /// Create new list store
     pub fn new() -> Self {
         let mut shards = Vec::with_capacity(SHARD_COUNT);

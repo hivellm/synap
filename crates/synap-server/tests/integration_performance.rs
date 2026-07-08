@@ -229,7 +229,7 @@ async fn test_streaming_snapshot_memory() {
 
     // Create snapshot
     let snapshot_path = snapshot_mgr
-        .create_snapshot(&store, None, None, 0)
+        .create_snapshot(&store, None, None, None, None, None, None, 0)
         .await
         .unwrap();
 
@@ -268,7 +268,7 @@ async fn test_full_persistence_recovery() {
 
     let snapshot_mgr = synap_server::persistence::SnapshotManager::new(snapshot_config.clone());
     let snapshot_path = snapshot_mgr
-        .create_snapshot(&store, None, None, 0)
+        .create_snapshot(&store, None, None, None, None, None, None, 0)
         .await
         .unwrap();
 
