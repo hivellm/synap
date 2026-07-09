@@ -30,10 +30,26 @@ Both binary listeners enforce authentication when `config.auth` requires it
 When auth is disabled, `user_manager` is `None` and connections start
 authenticated (no behaviour change for local/dev use).
 
-## Not yet enforced
+## Per-command ACL on the binary protocols (phase6h)
 
-Fine-grained per-command ACL on the binary protocols (restricting *which*
-commands an authenticated non-admin may run, matching the HTTP surface) is
-tracked as a follow-up (`phase6h`). Today an authenticated user may run any
-command on the binary protocols; the HTTP API already enforces per-resource
-permissions.
+After authentication, both the RESP3 and SynapRPC dispatchers gate
+**destructive and administrative commands behind admin**: an authenticated
+non-admin user issuing one of them is denied with `NOPERM`. The gated set
+(`auth::command_requires_admin`) is:
+
+- keyspace/database wipes — `FLUSHALL`, `FLUSHDB`, `SWAPDB`
+- server admin/config — `CONFIG`, `SHUTDOWN`, `DEBUG`, `RESET`, `SAVE`,
+  `BGSAVE`, `BGREWRITEAOF`, `LASTSAVE`, `FAILOVER`, `SLAVEOF`, `REPLICAOF`,
+  `ACL`, `MODULE`
+- script-cache management — `SCRIPT.FLUSH`, `SCRIPT.KILL` (running a script is
+  not admin)
+- cluster administration — `CLUSTER`
+
+The connection tracks the resolved `User` from AUTH and checks `is_admin` before
+executing these commands. **When authentication is disabled** the binary ports
+are trusted (loopback by default, per phase6 bind hardening) and no restriction
+is applied.
+
+Finer-grained per-resource ACL (e.g. read/write on a specific key pattern,
+matching the HTTP surface's `require_permission`) beyond the admin gate remains
+a potential future refinement; the admin gate covers the dangerous commands.

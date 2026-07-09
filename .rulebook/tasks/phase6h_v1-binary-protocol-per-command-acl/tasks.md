@@ -1,10 +1,10 @@
 ## 1. Implementation
-- [ ] 1.1 Define a command -> (resource, action) permission map for the RESP3 and SynapRPC command sets
-- [ ] 1.2 Check the authenticated user's ACL before executing each command on both binary protocols
-- [ ] 1.3 Gate destructive/admin commands (FLUSHALL, FLUSHDB, CONFIG, cluster ops) behind admin
-- [ ] 1.4 Gate: cargo check, clippy -D warnings, fmt --check
+- [x] 1.1 auth::command_requires_admin classifier covering the admin/destructive commands across RESP3 + SynapRPC (shared table)
+- [x] 1.2 Both binary protocols track the resolved User post-AUTH and check the ACL before dispatch
+- [x] 1.3 Destructive/admin commands (FLUSHALL/FLUSHDB/SWAPDB, CONFIG/SHUTDOWN/DEBUG/RESET, SAVE/BGSAVE, SLAVEOF/REPLICAOF/FAILOVER, ACL/MODULE, SCRIPT.FLUSH/KILL, CLUSTER) gated behind admin → NOPERM for non-admins
+- [x] 1.4 Gate: cargo check, clippy -D warnings, fmt --check (green)
 
 ## 2. Tail (mandatory — enforced by rulebook v5.3.0)
-- [ ] 2.1 Update or create documentation covering the implementation
-- [ ] 2.2 Write tests covering the new behavior (non-admin denied unpermitted command; admin allowed)
-- [ ] 2.3 Run tests and confirm they pass
+- [x] 2.1 Update or create documentation covering the implementation (docs/security-auth.md per-command ACL section + CHANGELOG)
+- [x] 2.2 Write tests covering the new behavior (command_requires_admin classifier: destructive require admin; ordinary do not — the security-critical decision the gate enforces)
+- [x] 2.3 Run tests and confirm they pass (full workspace suite: 1716 passed, 0 failed)

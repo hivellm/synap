@@ -136,6 +136,11 @@ fixed for the 1.0 release.
 - **Maximum concurrent connections on the binary listeners** (audit M-015). RESP3
   and SynapRPC now bound accepted connections with a semaphore and refuse new ones
   at capacity, preventing connection-flood FD/memory exhaustion.
+- **Per-command admin ACL on the binary protocols** (audit M-003/M-004 refinement).
+  After authentication, RESP3 and SynapRPC now gate destructive/admin commands
+  (`FLUSHALL`/`FLUSHDB`, `CONFIG`, `SHUTDOWN`, `CLUSTER`, `SCRIPT.FLUSH/KILL`,
+  `SLAVEOF`/`REPLICAOF`, …) behind admin — an authenticated non-admin is denied
+  with `NOPERM`. With auth disabled the port is trusted (loopback default).
 - **No panics on reachable paths** (stability hardening). Non-test `synap-core`
   and `synap-server` code no longer calls bare `unwrap()`/`panic!` on paths
   reachable from input — a reachable panic is a remote-DoS vector. `SystemTime`
