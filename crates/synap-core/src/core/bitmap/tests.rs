@@ -608,3 +608,102 @@ fn test_bitfield_32bit_values() {
     bitmap.bitfield_set(64, 32, true, -2147483648).unwrap();
     assert_eq!(bitmap.bitfield_get(64, 32, true).unwrap(), -2147483648);
 }
+
+#[test]
+fn test_store_setbit_getbit_bitcount_bitpos() {
+    let store = BitmapStore::new();
+    assert_eq!(store.setbit("b", 7, 1).unwrap(), 0);
+    assert_eq!(store.getbit("b", 7).unwrap(), 1);
+    assert_eq!(store.getbit("b", 100).unwrap(), 0);
+
+    store.setbit("b", 0, 1).unwrap();
+    store.setbit("b", 3, 1).unwrap();
+    assert_eq!(store.bitcount("b", None, None).unwrap(), 3);
+    // start/end are bit offsets: [0,7] covers the first byte's 3 set bits.
+    assert_eq!(store.bitcount("b", Some(0), Some(7)).unwrap(), 3);
+    assert_eq!(store.bitcount("b", Some(1), Some(2)).unwrap(), 0);
+
+    // First set bit and first clear bit.
+    assert_eq!(store.bitpos("b", 1, None, None).unwrap(), Some(0));
+    assert_eq!(store.bitpos("b", 0, None, None).unwrap(), Some(1));
+}
+
+#[test]
+fn test_store_bitop_variants() {
+    let store = BitmapStore::new();
+    // a = 1100, b = 1010 (bits 0,1 and 0,2)
+    store.setbit("a", 0, 1).unwrap();
+    store.setbit("a", 1, 1).unwrap();
+    store.setbit("b", 0, 1).unwrap();
+    store.setbit("b", 2, 1).unwrap();
+
+    let srcs = vec!["a".to_string(), "b".to_string()];
+    store.bitop(BitmapOperation::And, "and", &srcs).unwrap();
+    assert_eq!(store.getbit("and", 0).unwrap(), 1);
+    assert_eq!(store.getbit("and", 1).unwrap(), 0);
+
+    store.bitop(BitmapOperation::Or, "or", &srcs).unwrap();
+    assert_eq!(store.getbit("or", 2).unwrap(), 1);
+
+    store.bitop(BitmapOperation::Xor, "xor", &srcs).unwrap();
+    assert_eq!(store.getbit("xor", 0).unwrap(), 0);
+    assert_eq!(store.getbit("xor", 1).unwrap(), 1);
+
+    store
+        .bitop(BitmapOperation::Not, "not", &["a".to_string()])
+        .unwrap();
+    assert_eq!(store.getbit("not", 0).unwrap(), 0);
+
+    // Empty source list is an error.
+    assert!(store.bitop(BitmapOperation::And, "x", &[]).is_err());
+}
+
+#[test]
+fn test_store_bitfield_and_stats() {
+    let store = BitmapStore::new();
+    let ops = vec![
+        BitfieldOperation::Set {
+            offset: 0,
+            width: 8,
+            signed: false,
+            value: 200,
+        },
+        BitfieldOperation::Get {
+            offset: 0,
+            width: 8,
+            signed: false,
+        },
+        BitfieldOperation::IncrBy {
+            offset: 0,
+            width: 8,
+            signed: false,
+            increment: 100,
+            overflow: BitfieldOverflow::Sat,
+        },
+    ];
+    let results = store.bitfield("bf", &ops).unwrap();
+    assert_eq!(results[0].value, 0); // old value before Set
+    assert_eq!(results[1].value, 200); // Get
+    assert_eq!(results[2].value, 255); // saturated at u8 max
+
+    let stats = store.stats();
+    assert!(stats.total_bitmaps >= 1);
+}
+
+#[test]
+fn test_bitfield_overflow_wrap_and_fail() {
+    let mut bm = BitmapValue::new(None);
+    bm.bitfield_set(0, 8, false, 255).unwrap();
+    // Wrap: 255 + 1 -> 0
+    assert_eq!(
+        bm.bitfield_incrby(0, 8, false, 1, BitfieldOverflow::Wrap)
+            .unwrap(),
+        0
+    );
+    // Fail: set to 255 again then overflow returns an error.
+    bm.bitfield_set(0, 8, false, 255).unwrap();
+    assert!(
+        bm.bitfield_incrby(0, 8, false, 1, BitfieldOverflow::Fail)
+            .is_err()
+    );
+}

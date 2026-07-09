@@ -720,4 +720,88 @@ mod tests {
             hash_store.hget("dest", "field1").unwrap()
         );
     }
+
+    #[allow(clippy::type_complexity)]
+    fn full_manager() -> (
+        Arc<KVStore>,
+        Arc<HashStore>,
+        Arc<ListStore>,
+        Arc<SetStore>,
+        Arc<SortedSetStore>,
+        KeyManager,
+    ) {
+        let kv = Arc::new(KVStore::new(KVConfig::default()));
+        let hash = Arc::new(HashStore::new());
+        let list = Arc::new(ListStore::new());
+        let set = Arc::new(SetStore::new());
+        let zset = Arc::new(SortedSetStore::new());
+        let mgr = KeyManager::new(
+            kv.clone(),
+            hash.clone(),
+            list.clone(),
+            set.clone(),
+            zset.clone(),
+        );
+        (kv, hash, list, set, zset, mgr)
+    }
+
+    #[tokio::test]
+    async fn test_key_type_zset_and_none_variants() {
+        let (kv, _h, list, set, zset, mgr) = full_manager();
+        list.rpush("l", vec![b"a".to_vec()], false).unwrap();
+        set.sadd("s", vec![b"m".to_vec()]).unwrap();
+        zset.zadd(
+            "z",
+            b"m".to_vec(),
+            1.0,
+            &crate::core::ZAddOptions::default(),
+        );
+        assert_eq!(mgr.key_type("l").await.unwrap(), KeyType::List);
+        assert_eq!(mgr.key_type("s").await.unwrap(), KeyType::Set);
+        assert_eq!(mgr.key_type("z").await.unwrap(), KeyType::SortedSet);
+        assert_eq!(KeyType::List.as_str(), "list");
+        assert!(!mgr.exists("nope").await.unwrap());
+        kv.set("k", b"v".to_vec(), None).await.unwrap();
+        assert!(mgr.exists("k").await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_rename_and_copy_collection_types() {
+        let (_kv, _h, list, set, zset, mgr) = full_manager();
+        list.rpush("l", vec![b"a".to_vec(), b"b".to_vec()], false)
+            .unwrap();
+        set.sadd("s", vec![b"m".to_vec()]).unwrap();
+        zset.zadd(
+            "z",
+            b"m".to_vec(),
+            5.0,
+            &crate::core::ZAddOptions::default(),
+        );
+
+        mgr.rename("l", "l2").await.unwrap();
+        assert!(!list.exists("l"));
+        assert_eq!(list.llen("l2").unwrap(), 2);
+
+        mgr.copy("s", "s2", false).await.unwrap();
+        assert!(set.sismember("s2", b"m".to_vec()).unwrap());
+
+        mgr.copy("z", "z2", false).await.unwrap();
+        assert_eq!(zset.zscore("z2", b"m"), Some(5.0));
+
+        // COPY without replace fails when the destination exists.
+        assert!(!mgr.copy("z", "z2", false).await.unwrap());
+        // With replace it overwrites.
+        assert!(mgr.copy("z", "z2", true).await.unwrap());
+
+        // Renaming a missing source errors.
+        assert!(mgr.rename("missing", "x").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_randomkey() {
+        let (kv, _h, _l, _s, _z, mgr) = full_manager();
+        assert_eq!(mgr.randomkey().await.unwrap(), None);
+        kv.set("only", b"v".to_vec(), None).await.unwrap();
+        assert_eq!(mgr.randomkey().await.unwrap(), Some("only".to_string()));
+    }
 }
