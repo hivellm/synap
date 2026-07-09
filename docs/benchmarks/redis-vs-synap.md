@@ -1,5 +1,35 @@
 # Redis 7 vs Synap — Comparison Benchmark Results
 
+> ## ⚠️ These numbers are stale (v0.9.0, HTTP/JSON transport). See v1.0 methodology below.
+>
+> The tables in this document were produced on **0.9.0 over the HTTP/JSON
+> transport** — before the RESP3 and SynapRPC binary listeners existed. They are
+> kept for history but **do not represent v1.0**. v1.0 should be measured over
+> the binary protocols.
+>
+> ### v1.0 benchmark methodology (phase7)
+>
+> Two measurement paths, same host, Synap built `--release`:
+>
+> 1. **RESP3 vs Redis 7 via `redis-benchmark`** (apples-to-apples, both over RESP):
+>    ```bash
+>    # Synap (RESP3 listener on 6379 by default; set host 0.0.0.0 or use loopback)
+>    ./target/release/synap-server --config config/config.yml &
+>    redis-benchmark -h 127.0.0.1 -p 6379 -t get,set,incr,lpush,lrange,sadd -n 100000 -P 1
+>    redis-benchmark -h 127.0.0.1 -p 6379 -t get,set,incr,lpush,lrange,sadd -n 100000 -P 16
+>    # Redis 7 on the same host, same two runs on its port
+>    redis-benchmark -h 127.0.0.1 -p <redis_port> -t get,set,incr,lpush,lrange,sadd -n 100000 -P 1
+>    redis-benchmark ... -P 16
+>    ```
+>    `-P 1` isolates per-op latency; `-P 16` exercises the pipeline-aware flush.
+> 2. **Native SynapRPC** via the in-repo harness: `cargo bench --bench redis_vs_synap`.
+>
+> **Execution status: DEFERRED.** `redis-benchmark`/`redis-server` are not
+> available in the current (Windows) environment and Redis is not native to
+> Windows, so the live head-to-head has not been run here. Tracked as a follow-up
+> to run in a Redis-equipped environment (WSL/Docker/Linux). The methodology and
+> harness above are ready to execute as-is.
+
 **Date**: 2026-04-08  
 **Synap version**: 0.9.0 (local release build, port 15502)  
 **Redis version**: 7-alpine (Docker `project-v-redis-1`, port 6379)  
