@@ -1,5 +1,13 @@
 use anyhow::Result;
 use clap::Parser;
+
+/// Opt-in global allocator. Built with `--features mimalloc`, mimalloc replaces
+/// the system allocator process-wide — typically lower fragmentation and faster
+/// alloc/free on the KV hot paths. Off by default (system allocator).
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
