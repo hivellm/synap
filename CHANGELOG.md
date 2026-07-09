@@ -136,6 +136,11 @@ fixed for the 1.0 release.
 - **Maximum concurrent connections on the binary listeners** (audit M-015). RESP3
   and SynapRPC now bound accepted connections with a semaphore and refuse new ones
   at capacity, preventing connection-flood FD/memory exhaustion.
+- **Idle-connection timeout + configurable network limits** (hardening beyond
+  M-015). The binary listeners close a connection that sends nothing within
+  `network.idle_timeout_secs` (default 300; slow-loris resistance) and expose
+  `network.max_connections` (default 10 000) as a config knob. Defaults preserve
+  prior behavior.
 - **Per-command admin ACL on the binary protocols** (audit M-003/M-004 refinement).
   After authentication, RESP3 and SynapRPC now gate destructive/admin commands
   (`FLUSHALL`/`FLUSHDB`, `CONFIG`, `SHUTDOWN`, `CLUSTER`, `SCRIPT.FLUSH/KILL`,
