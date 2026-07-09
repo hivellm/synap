@@ -83,6 +83,85 @@ impl PersistenceLayer {
         Ok(())
     }
 
+    /// Log an entire committed transaction as one atomic unit (audit M-010).
+    ///
+    /// Each [`CommittedWrite`](crate::core::CommittedWrite) is mapped to its
+    /// persistence [`Operation`], every op is propagated to replicas (so the
+    /// transaction is replicated, decoupled from the WAL), and the whole set is
+    /// appended to the WAL as a single atomic batch — so a MULTI/EXEC survives a
+    /// crash all-or-nothing rather than as interleavable single appends. With
+    /// persistence disabled the ops are still replicated (no WAL append).
+    pub async fn log_transaction(
+        &self,
+        writes: &[crate::core::CommittedWrite],
+    ) -> super::types::Result<()> {
+        if writes.is_empty() {
+            return Ok(());
+        }
+
+        let ops: Vec<Operation> = writes
+            .iter()
+            .map(Self::committed_write_to_operation)
+            .collect();
+
+        // Propagate to replicas first (decoupled from the WAL, phase6j).
+        for op in &ops {
+            self.maybe_replicate(op);
+        }
+
+        if let Some(wal) = &self.wal {
+            wal.append_batch(ops).await?;
+            *self.operations_since_snapshot.write() += writes.len();
+        }
+
+        Ok(())
+    }
+
+    /// Map a committed transaction effect to its durable persistence operation.
+    fn committed_write_to_operation(write: &crate::core::CommittedWrite) -> Operation {
+        use crate::core::CommittedWrite as Cw;
+        match write {
+            Cw::KvSet { key, value, ttl } => Operation::KVSet {
+                key: key.clone(),
+                value: value.clone(),
+                ttl: *ttl,
+            },
+            Cw::KvDel { keys } => Operation::KVDel { keys: keys.clone() },
+            Cw::HashSet { key, field, value } => Operation::HashSet {
+                key: key.clone(),
+                field: field.clone(),
+                value: value.clone(),
+            },
+            Cw::HashDel { key, fields } => Operation::HashDel {
+                key: key.clone(),
+                fields: fields.clone(),
+            },
+            Cw::HashIncrBy { key, field, delta } => Operation::HashIncrBy {
+                key: key.clone(),
+                field: field.clone(),
+                increment: *delta,
+            },
+            Cw::ListPush { key, values, left } => Operation::ListPush {
+                key: key.clone(),
+                values: values.clone(),
+                left: *left,
+            },
+            Cw::ListPop { key, left } => Operation::ListPop {
+                key: key.clone(),
+                count: 1,
+                left: *left,
+            },
+            Cw::SetAdd { key, members } => Operation::SetAdd {
+                key: key.clone(),
+                members: members.clone(),
+            },
+            Cw::SetRem { key, members } => Operation::SetRem {
+                key: key.clone(),
+                members: members.clone(),
+            },
+        }
+    }
+
     /// Returns true when the WAL fsync mode is Always (sync durability).
     ///
     /// When true, the SET handler must log to WAL BEFORE writing to memory.

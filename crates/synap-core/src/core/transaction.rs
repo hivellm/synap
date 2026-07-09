@@ -73,6 +73,58 @@ pub enum TransactionCommand {
     },
 }
 
+/// The durable effect of a committed transaction command.
+///
+/// `execute_commands` emits one of these per executed command so the caller
+/// (the `synap-server` persistence/replication layer, which `synap-core` cannot
+/// depend on — DAG: core→server is forbidden) can log and replicate the exact
+/// effect. Non-deterministic commands are resolved to their concrete result:
+/// `KVIncr` becomes a `KvSet` carrying the *resulting* value (mirroring how the
+/// non-transactional INCR handler logs), so replicas and the WAL never diverge
+/// from the master (audit M-010).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommittedWrite {
+    KvSet {
+        key: String,
+        value: Vec<u8>,
+        ttl: Option<u64>,
+    },
+    KvDel {
+        keys: Vec<String>,
+    },
+    HashSet {
+        key: String,
+        field: String,
+        value: Vec<u8>,
+    },
+    HashDel {
+        key: String,
+        fields: Vec<String>,
+    },
+    HashIncrBy {
+        key: String,
+        field: String,
+        delta: i64,
+    },
+    ListPush {
+        key: String,
+        values: Vec<Vec<u8>>,
+        left: bool,
+    },
+    ListPop {
+        key: String,
+        left: bool,
+    },
+    SetAdd {
+        key: String,
+        members: Vec<Vec<u8>>,
+    },
+    SetRem {
+        key: String,
+        members: Vec<Vec<u8>>,
+    },
+}
+
 /// Watched key version info (stored at WATCH time)
 #[derive(Debug, Clone, Copy)]
 pub struct WatchedKeyVersion {
@@ -325,8 +377,15 @@ impl TransactionManager {
     }
 
     /// Execute transaction (EXEC)
-    /// Returns Ok(Some(results)) on success, Ok(None) if watched keys changed
-    pub async fn exec(&self, client_id: &str) -> Result<Option<Vec<serde_json::Value>>> {
+    ///
+    /// Returns `Ok(Some((results, writes)))` on success — `writes` is the list of
+    /// durable effects the caller must persist and replicate (audit M-010) — or
+    /// `Ok(None)` if watched keys changed (the transaction is aborted).
+    #[allow(clippy::type_complexity)]
+    pub async fn exec(
+        &self,
+        client_id: &str,
+    ) -> Result<Option<(Vec<serde_json::Value>, Vec<CommittedWrite>)>> {
         debug!("EXEC client_id={}", client_id);
 
         // Remove transaction from map first (atomic)
@@ -351,14 +410,21 @@ impl TransactionManager {
         let keys_to_lock = transaction.get_keys_to_lock();
 
         if keys_to_lock.is_empty() {
-            return Ok(Some(Vec::new()));
+            return Ok(Some((Vec::new(), Vec::new())));
         }
 
+        // Hold the per-key locks for the union of touched keys across the whole
+        // command execution, so a non-transactional writer to any of those keys
+        // is ordered entirely before or after the EXEC — never interleaved
+        // between its commands (audit M-010 isolation). Acquired in sorted order
+        // (BTreeSet) to prevent deadlock. execute_commands calls the *_unlocked
+        // store methods to avoid re-entrant deadlock on these same locks.
+        let _key_guards = self.kv_store.key_locks().lock_keys(&keys_to_lock).await;
+
         // Execute the queued commands. The EXEC lock above guarantees no other
-        // transaction runs concurrently and the WATCH check-and-apply is atomic.
-        // Isolation against non-transactional concurrent writers is a separate
-        // refinement (per-key locking), tracked as a follow-up.
-        let results = self.execute_commands(&transaction.commands).await?;
+        // transaction runs concurrently and the WATCH check-and-apply is atomic;
+        // the per-key guards above isolate against non-transactional writers.
+        let (results, writes) = self.execute_commands(&transaction.commands).await?;
 
         // Update key versions for modified keys
         let now = SystemTime::now()
@@ -376,7 +442,7 @@ impl TransactionManager {
             version.modified_at = now;
         }
 
-        Ok(Some(results))
+        Ok(Some((results, writes)))
     }
 
     /// Check if any watched keys have changed since WATCH
@@ -408,58 +474,109 @@ impl TransactionManager {
         Ok(false)
     }
 
-    /// Execute all commands in the transaction
+    /// Execute all commands in the transaction.
+    ///
+    /// Returns the per-command JSON results *and* the durable [`CommittedWrite`]
+    /// effects so the caller can persist and replicate the transaction (audit
+    /// M-010). A command that fails aborts the whole EXEC via `?` — the writes
+    /// accumulated so far are discarded with the error.
     async fn execute_commands(
         &self,
         commands: &[TransactionCommand],
-    ) -> Result<Vec<serde_json::Value>> {
+    ) -> Result<(Vec<serde_json::Value>, Vec<CommittedWrite>)> {
         let mut results = Vec::new();
+        let mut writes = Vec::new();
 
         for cmd in commands {
             let result = match cmd {
                 TransactionCommand::KVSet { key, value, ttl } => {
-                    self.kv_store.set(key, value.clone(), *ttl).await?;
+                    // `*_unlocked`: EXEC already holds the per-key locks for the
+                    // whole key set, so re-locking here would deadlock.
+                    self.kv_store
+                        .set_unlocked(key.clone(), value.clone(), *ttl)
+                        .await?;
+                    writes.push(CommittedWrite::KvSet {
+                        key: key.clone(),
+                        value: value.clone(),
+                        ttl: *ttl,
+                    });
                     serde_json::json!({"ok": true})
                 }
                 TransactionCommand::KVDel { keys } => {
                     let mut deleted = 0;
                     for key in keys {
-                        if self.kv_store.delete(key).await? {
+                        if self.kv_store.delete_unlocked(key).await? {
                             deleted += 1;
                         }
                     }
+                    writes.push(CommittedWrite::KvDel { keys: keys.clone() });
                     serde_json::json!({"deleted": deleted})
                 }
                 TransactionCommand::KVIncr { key, delta } => {
-                    let value = if *delta >= 0 {
-                        self.kv_store.incr(key, *delta).await?
-                    } else {
-                        self.kv_store.decr(key, -*delta).await?
-                    };
+                    // `incr_unlocked` handles a negative delta (DECR) too.
+                    let value = self.kv_store.incr_unlocked(key, *delta).await?;
+                    // INCR has no persistence Operation of its own; log the
+                    // resulting value as a SET, exactly as the non-transactional
+                    // INCR handler does, so replay/replication is deterministic.
+                    writes.push(CommittedWrite::KvSet {
+                        key: key.clone(),
+                        value: value.to_string().into_bytes(),
+                        ttl: None,
+                    });
                     serde_json::json!({"value": value})
                 }
                 TransactionCommand::HashSet { key, field, value } => {
                     self.hash_store.hset(key, field, value.clone())?;
+                    writes.push(CommittedWrite::HashSet {
+                        key: key.clone(),
+                        field: field.clone(),
+                        value: value.clone(),
+                    });
                     serde_json::json!({"ok": true})
                 }
                 TransactionCommand::HashDel { key, fields } => {
                     let deleted = self.hash_store.hdel(key, fields)?;
+                    writes.push(CommittedWrite::HashDel {
+                        key: key.clone(),
+                        fields: fields.clone(),
+                    });
                     serde_json::json!({"deleted": deleted})
                 }
                 TransactionCommand::HashIncrBy { key, field, delta } => {
                     let value = self.hash_store.hincrby(key, field, *delta)?;
+                    writes.push(CommittedWrite::HashIncrBy {
+                        key: key.clone(),
+                        field: field.clone(),
+                        delta: *delta,
+                    });
                     serde_json::json!({"value": value})
                 }
                 TransactionCommand::ListLPush { key, values } => {
                     let length = self.list_store.lpush(key, values.clone(), false)?;
+                    writes.push(CommittedWrite::ListPush {
+                        key: key.clone(),
+                        values: values.clone(),
+                        left: true,
+                    });
                     serde_json::json!({"length": length})
                 }
                 TransactionCommand::ListRPush { key, values } => {
                     let length = self.list_store.rpush(key, values.clone(), false)?;
+                    writes.push(CommittedWrite::ListPush {
+                        key: key.clone(),
+                        values: values.clone(),
+                        left: false,
+                    });
                     serde_json::json!({"length": length})
                 }
                 TransactionCommand::ListLPop { key } => {
                     let values = self.list_store.lpop(key, Some(1))?;
+                    if !values.is_empty() {
+                        writes.push(CommittedWrite::ListPop {
+                            key: key.clone(),
+                            left: true,
+                        });
+                    }
                     serde_json::json!(
                         values
                             .into_iter()
@@ -469,6 +586,12 @@ impl TransactionManager {
                 }
                 TransactionCommand::ListRPop { key } => {
                     let values = self.list_store.rpop(key, Some(1))?;
+                    if !values.is_empty() {
+                        writes.push(CommittedWrite::ListPop {
+                            key: key.clone(),
+                            left: false,
+                        });
+                    }
                     serde_json::json!(
                         values
                             .into_iter()
@@ -478,10 +601,18 @@ impl TransactionManager {
                 }
                 TransactionCommand::SetAdd { key, members } => {
                     let added = self.set_store.sadd(key, members.clone())?;
+                    writes.push(CommittedWrite::SetAdd {
+                        key: key.clone(),
+                        members: members.clone(),
+                    });
                     serde_json::json!({"added": added})
                 }
                 TransactionCommand::SetRem { key, members } => {
                     let removed = self.set_store.srem(key, members.clone())?;
+                    writes.push(CommittedWrite::SetRem {
+                        key: key.clone(),
+                        members: members.clone(),
+                    });
                     serde_json::json!({"removed": removed})
                 }
             };
@@ -489,7 +620,7 @@ impl TransactionManager {
             results.push(result);
         }
 
-        Ok(results)
+        Ok((results, writes))
     }
 
     /// Get current transaction for a client (if any)
@@ -626,7 +757,7 @@ mod tests {
         // Test exec with empty transaction
         manager.multi(client_id.clone()).unwrap();
         let result = manager.exec(&client_id).await.unwrap();
-        assert_eq!(result, Some(Vec::new()));
+        assert_eq!(result, Some((Vec::new(), Vec::new())));
     }
 
     #[tokio::test]

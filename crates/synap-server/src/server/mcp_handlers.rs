@@ -966,13 +966,21 @@ async fn handle_transaction_exec(
         .await
         .map_err(|e| ErrorData::internal_error(format!("Transaction exec failed: {}", e), None))?
     {
-        Some(results) => Ok(CallToolResult::success(vec![ContentBlock::text(
-            json!({
-                "success": true,
-                "results": results
-            })
-            .to_string(),
-        )])),
+        Some((results, writes)) => {
+            // Persist + replicate the whole transaction atomically (audit M-010).
+            if let Some(ref persistence) = state.persistence {
+                if let Err(e) = persistence.log_transaction(&writes).await {
+                    tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
+                }
+            }
+            Ok(CallToolResult::success(vec![ContentBlock::text(
+                json!({
+                    "success": true,
+                    "results": results
+                })
+                .to_string(),
+            )]))
+        }
         None => Ok(CallToolResult::success(vec![ContentBlock::text(
             json!({
                 "aborted": true,

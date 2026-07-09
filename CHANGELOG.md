@@ -120,6 +120,17 @@ fixed for the 1.0 release.
 - **MULTI/EXEC is atomic** (audit M-008). EXEC now runs under a serialized lock and
   the WATCH check-and-apply is one atomic step, so concurrent transactions cannot
   interleave and optimistic-concurrency guarantees hold.
+- **MULTI/EXEC is durable, replicated, and isolated** (audit M-010). A committed
+  transaction is now logged to the WAL as one atomic batch (single group-commit
+  fsync) and propagated to replicas through the shared persistence hook — a
+  committed EXEC survives a crash all-or-nothing and reaches replicas, whereas
+  before it executed only in memory (lost on crash, never replicated).
+  Non-deterministic commands are recorded as their concrete effect (INCR → the
+  resulting SET) so replicas/WAL never diverge. EXEC is also isolated from
+  non-transactional writers via a sharded per-key lock (`KeyLockManager`) shared
+  by the KV store and the transaction manager: a plain `SET k` during an EXEC
+  touching `k` is ordered entirely before or after it, never interleaved. See
+  `docs/transactions.md`.
 - **Dead stream-WAL path removed** (audit M-014). Stream operations were logged to
   the WAL but their replay was a no-op; the redundant logging is dropped (streams
   persist via their own path).

@@ -8,17 +8,28 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
 use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, info, warn};
 
-/// Operation to be written with completion notification
-struct WriteOperation {
-    operation: Operation,
-    response_tx: oneshot::Sender<Result<u64>>,
+/// A request submitted to the background writer.
+enum WriteRequest {
+    /// A single operation with its completion notification.
+    Single {
+        operation: Operation,
+        response_tx: oneshot::Sender<Result<u64>>,
+    },
+    /// A group of operations that MUST be written contiguously and confirmed as a
+    /// unit — used to log a MULTI/EXEC transaction atomically (audit M-010). The
+    /// writer emits every op back-to-back within one drain, so no other write
+    /// interleaves between them, and confirms once with all assigned offsets.
+    Batch {
+        operations: Vec<Operation>,
+        response_tx: oneshot::Sender<Result<Vec<u64>>>,
+    },
 }
 
 /// Asynchronous Write-Ahead Log with group commit optimization
 /// Batches multiple operations before fsyncing for 10-100x better throughput
 #[derive(Clone)]
 pub struct AsyncWAL {
-    writer_tx: mpsc::UnboundedSender<WriteOperation>,
+    writer_tx: mpsc::UnboundedSender<WriteRequest>,
     current_offset: Arc<AtomicU64>,
 }
 
@@ -113,27 +124,27 @@ impl AsyncWAL {
     /// Background writer loop with group commit optimization
     async fn writer_loop(
         mut writer: BufWriter<File>,
-        mut rx: mpsc::UnboundedReceiver<WriteOperation>,
+        mut rx: mpsc::UnboundedReceiver<WriteRequest>,
         current_offset: Arc<AtomicU64>,
         config: WALConfig,
     ) {
         const MAX_BATCH_SIZE: usize = 1000;
         let batch_timeout = Duration::from_millis(10);
 
-        let mut batch: Vec<WriteOperation> = Vec::with_capacity(MAX_BATCH_SIZE);
+        let mut batch: Vec<WriteRequest> = Vec::with_capacity(MAX_BATCH_SIZE);
         let mut last_fsync = std::time::Instant::now();
 
         loop {
-            // Collect operations for batching
+            // Collect requests for group commit
             tokio::select! {
-                // Receive first operation (blocking)
-                Some(op) = rx.recv() => {
-                    batch.push(op);
+                // Receive first request (blocking)
+                Some(req) = rx.recv() => {
+                    batch.push(req);
 
                     // Try to fill batch (non-blocking)
                     while batch.len() < MAX_BATCH_SIZE {
                         match rx.try_recv() {
-                            Ok(op) => batch.push(op),
+                            Ok(req) => batch.push(req),
                             Err(_) => break,
                         }
                     }
@@ -148,32 +159,44 @@ impl AsyncWAL {
             }
 
             if !batch.is_empty() {
-                // Write all entries in batch
-                let mut responses = Vec::with_capacity(batch.len());
+                // Each request produces exactly one response (a single offset, or
+                // the vector of offsets for a batch). A `Batch` request's ops are
+                // written back-to-back here, so they land contiguously in the WAL.
+                enum Pending {
+                    Single(oneshot::Sender<Result<u64>>, Result<u64>),
+                    Batch(oneshot::Sender<Result<Vec<u64>>>, Result<Vec<u64>>),
+                }
+                let mut responses: Vec<Pending> = Vec::with_capacity(batch.len());
 
-                for WriteOperation {
-                    operation,
-                    response_tx,
-                } in batch.drain(..)
-                {
-                    let offset = current_offset.fetch_add(1, Ordering::SeqCst);
-
-                    let entry = WALEntry {
-                        offset,
-                        timestamp: SystemTime::now()
-                            .duration_since(SystemTime::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs(),
-                        operation,
-                    };
-
-                    // Serialize and write
-                    match Self::write_entry(&mut writer, &entry).await {
-                        Ok(_) => {
-                            responses.push((response_tx, Ok(offset)));
+                for request in batch.drain(..) {
+                    match request {
+                        WriteRequest::Single {
+                            operation,
+                            response_tx,
+                        } => {
+                            let result = Self::write_one(&mut writer, &current_offset, operation)
+                                .await
+                                .map(|(offset, _)| offset);
+                            responses.push(Pending::Single(response_tx, result));
                         }
-                        Err(e) => {
-                            responses.push((response_tx, Err(e)));
+                        WriteRequest::Batch {
+                            operations,
+                            response_tx,
+                        } => {
+                            let mut offsets = Vec::with_capacity(operations.len());
+                            let mut batch_result = Ok(());
+                            for operation in operations {
+                                match Self::write_one(&mut writer, &current_offset, operation).await
+                                {
+                                    Ok((offset, _)) => offsets.push(offset),
+                                    Err(e) => {
+                                        batch_result = Err(e);
+                                        break;
+                                    }
+                                }
+                            }
+                            let result = batch_result.map(|_| offsets);
+                            responses.push(Pending::Batch(response_tx, result));
                         }
                     }
                 }
@@ -196,17 +219,45 @@ impl AsyncWAL {
                         warn!("WAL fsync failed: {}", e);
                     }
                     last_fsync = std::time::Instant::now();
-                    debug!("Group commit: {} operations fsynced", responses.len());
+                    debug!("Group commit: {} requests fsynced", responses.len());
                 }
 
                 // Send responses back
-                for (tx, result) in responses {
-                    let _ = tx.send(result);
+                for pending in responses {
+                    match pending {
+                        Pending::Single(tx, result) => {
+                            let _ = tx.send(result);
+                        }
+                        Pending::Batch(tx, result) => {
+                            let _ = tx.send(result);
+                        }
+                    }
                 }
             }
         }
 
         info!("Async WAL writer loop terminated");
+    }
+
+    /// Assign the next offset, build the entry, and write it to the buffer.
+    /// Returns the assigned offset (and unit) or the write error.
+    async fn write_one(
+        writer: &mut BufWriter<File>,
+        current_offset: &Arc<AtomicU64>,
+        operation: Operation,
+    ) -> Result<(u64, ())> {
+        let offset = current_offset.fetch_add(1, Ordering::SeqCst);
+        let entry = WALEntry {
+            offset,
+            timestamp: SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            operation,
+        };
+        Self::write_entry(writer, &entry)
+            .await
+            .map(|_| (offset, ()))
     }
 
     /// Write a single entry to the writer
@@ -227,12 +278,12 @@ impl AsyncWAL {
     pub async fn append(&self, operation: Operation) -> Result<u64> {
         let (tx, rx) = oneshot::channel();
 
-        let write_op = WriteOperation {
+        let request = WriteRequest::Single {
             operation,
             response_tx: tx,
         };
 
-        self.writer_tx.send(write_op).map_err(|_| {
+        self.writer_tx.send(request).map_err(|_| {
             PersistenceError::IOError(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,
                 "WAL writer channel closed",
@@ -240,6 +291,40 @@ impl AsyncWAL {
         })?;
 
         // Wait for write confirmation
+        rx.await.map_err(|_| {
+            PersistenceError::IOError(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "WAL writer response channel closed",
+            ))
+        })?
+    }
+
+    /// Append a group of operations as one atomic unit (audit M-010).
+    ///
+    /// All operations are written contiguously by the background writer and a
+    /// single confirmation is returned once they are durably recorded (subject to
+    /// the configured fsync mode), so a MULTI/EXEC is logged as a unit rather than
+    /// as interleavable single appends. Returns the assigned offsets in order. An
+    /// empty batch is a no-op.
+    pub async fn append_batch(&self, operations: Vec<Operation>) -> Result<Vec<u64>> {
+        if operations.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let (tx, rx) = oneshot::channel();
+
+        let request = WriteRequest::Batch {
+            operations,
+            response_tx: tx,
+        };
+
+        self.writer_tx.send(request).map_err(|_| {
+            PersistenceError::IOError(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "WAL writer channel closed",
+            ))
+        })?;
+
         rx.await.map_err(|_| {
             PersistenceError::IOError(std::io::Error::new(
                 std::io::ErrorKind::BrokenPipe,

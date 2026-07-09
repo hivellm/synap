@@ -612,12 +612,20 @@ pub(super) async fn cmd_exec(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         None => return Resp3Value::Error("ERR client_id must be a string".into()),
     };
     match state.transaction_manager.exec(&client_id).await {
-        Ok(Some(results)) => Resp3Value::Array(
-            results
-                .into_iter()
-                .map(|v| Resp3Value::BulkString(v.to_string().into_bytes()))
-                .collect(),
-        ),
+        Ok(Some((results, writes))) => {
+            // Persist + replicate the whole transaction atomically (audit M-010).
+            if let Some(ref persistence) = state.persistence {
+                if let Err(e) = persistence.log_transaction(&writes).await {
+                    tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
+                }
+            }
+            Resp3Value::Array(
+                results
+                    .into_iter()
+                    .map(|v| Resp3Value::BulkString(v.to_string().into_bytes()))
+                    .collect(),
+            )
+        }
         Ok(None) => Resp3Value::Null,
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }

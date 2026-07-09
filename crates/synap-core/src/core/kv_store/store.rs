@@ -37,6 +37,11 @@ pub struct KVStore {
     /// brokers) and KV deltas are reflected into it, so evicting KV frees the
     /// budget for every datatype.
     mem: Option<crate::core::GlobalMemory>,
+    /// Per-key lock registry shared with the `TransactionManager` so a MULTI/EXEC
+    /// is isolated from non-transactional writers to the same keys (audit M-010).
+    /// Single-key writes take the key's lock; EXEC holds its whole key set and
+    /// calls the `*_unlocked` methods to avoid re-entrant deadlock.
+    key_locks: Arc<crate::core::KeyLockManager>,
 }
 
 impl KVStore {
@@ -53,6 +58,13 @@ impl KVStore {
         mem.register(Arc::clone(&self.stats.total_memory_bytes));
         self.mem = Some(mem);
         self
+    }
+
+    /// Shared per-key lock registry (audit M-010). The `TransactionManager`
+    /// acquires the union of a transaction's keys through this so EXEC is
+    /// isolated from non-transactional writers.
+    pub fn key_locks(&self) -> &Arc<crate::core::KeyLockManager> {
+        &self.key_locks
     }
 
     /// Current effective accounted usage and cap in bytes — the shared budget
@@ -92,6 +104,7 @@ impl KVStore {
             cluster_topology: None,
             cluster_migration: None,
             mem: None,
+            key_locks: Arc::new(crate::core::KeyLockManager::new()),
         }
     }
 
@@ -124,6 +137,7 @@ impl KVStore {
             cluster_topology: Some(topology),
             cluster_migration: migration,
             mem: None,
+            key_locks: Arc::new(crate::core::KeyLockManager::new()),
         }
     }
 
@@ -219,6 +233,20 @@ impl KVStore {
         ttl_secs: Option<u64>,
     ) -> Result<()> {
         let key: String = key.into();
+        // Isolate this write against an in-flight EXEC touching the same key
+        // (audit M-010). EXEC calls `set_unlocked` while holding the lock itself.
+        let _guard = self.key_locks.lock_key(&key).await;
+        self.set_unlocked(key, value, ttl_secs).await
+    }
+
+    /// SET body without the per-key lock. Callers MUST already hold the key's
+    /// lock (the public `set`, or `TransactionManager::exec` for its key set).
+    pub(crate) async fn set_unlocked(
+        &self,
+        key: String,
+        value: Vec<u8>,
+        ttl_secs: Option<u64>,
+    ) -> Result<()> {
         debug!("SET key={}, size={}, ttl={:?}", key, value.len(), ttl_secs);
 
         // Check cluster routing (returns error if key doesn't belong to this node)
@@ -534,6 +562,14 @@ impl KVStore {
 
     /// Delete a key
     pub async fn delete(&self, key: &str) -> Result<bool> {
+        // Isolate against an in-flight EXEC on the same key (audit M-010).
+        let _guard = self.key_locks.lock_key(key).await;
+        self.delete_unlocked(key).await
+    }
+
+    /// DELETE body without the per-key lock. Callers MUST already hold the key's
+    /// lock (the public `delete`, or `TransactionManager::exec`).
+    pub(crate) async fn delete_unlocked(&self, key: &str) -> Result<bool> {
         debug!("DELETE key={}", key);
 
         // Check cluster routing (returns error if key doesn't belong to this node)
@@ -602,6 +638,15 @@ impl KVStore {
     /// Preserves the TTL of the existing entry (S-16 fix). Uses `checked_add`
     /// and returns an error on overflow rather than wrapping.
     pub async fn incr(&self, key: &str, amount: i64) -> Result<i64> {
+        // Isolate against an in-flight EXEC on the same key (audit M-010).
+        let _guard = self.key_locks.lock_key(key).await;
+        self.incr_unlocked(key, amount).await
+    }
+
+    /// INCR body without the per-key lock. Handles negative `amount` (DECR too).
+    /// Callers MUST already hold the key's lock (the public `incr`/`decr`, or
+    /// `TransactionManager::exec`).
+    pub(crate) async fn incr_unlocked(&self, key: &str, amount: i64) -> Result<i64> {
         debug!("INCR key={}, amount={}", key, amount);
 
         let shard = self.get_shard(key);
@@ -1417,6 +1462,9 @@ impl KVStore {
     /// Returns the old value, or None if key didn't exist
     pub async fn getset(&self, key: &str, value: Vec<u8>) -> Result<Option<Vec<u8>>> {
         debug!("GETSET key={}, value_size={}", key, value.len());
+
+        // Isolate against an in-flight EXEC on the same key (audit M-010).
+        let _guard = self.key_locks.lock_key(key).await;
 
         let shard = self.get_shard(key);
         let mut data = shard.data.write();

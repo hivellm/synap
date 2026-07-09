@@ -817,20 +817,25 @@ pub(super) async fn run(
         "EXEC" => {
             // EXEC client_id
             let client_id = arg_str(args, 0)?;
-            state
-                .transaction_manager
-                .exec(&client_id)
-                .await
-                .map(|opt| match opt {
-                    None => SynapValue::Null, // watched key changed — transaction aborted
-                    Some(results) => SynapValue::Array(
+            match state.transaction_manager.exec(&client_id).await {
+                // watched key changed — transaction aborted
+                Ok(None) => Ok(SynapValue::Null),
+                Ok(Some((results, writes))) => {
+                    // Persist + replicate the whole transaction atomically (M-010).
+                    if let Some(ref persistence) = state.persistence {
+                        if let Err(e) = persistence.log_transaction(&writes).await {
+                            tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
+                        }
+                    }
+                    Ok(SynapValue::Array(
                         results
                             .into_iter()
                             .map(|v| SynapValue::Str(serde_json::to_string(&v).unwrap_or_default()))
                             .collect(),
-                    ),
-                })
-                .map_err(|e| e.to_string())
+                    ))
+                }
+                Err(e) => Err(e.to_string()),
+            }
         }
         "DISCARD" => {
             // DISCARD client_id

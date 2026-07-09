@@ -1126,7 +1126,16 @@ pub async fn transaction_exec(
 
     debug!("REST EXEC client_id={}", client_id);
     match state.transaction_manager.exec(client_id).await? {
-        Some(results) => Ok(Json(ExecResponse::Success { results })),
+        Some((results, writes)) => {
+            // Persist + replicate the whole transaction as one atomic unit
+            // (audit M-010).
+            if let Some(ref persistence) = state.persistence {
+                if let Err(e) = persistence.log_transaction(&writes).await {
+                    error!("Failed to log EXEC transaction to WAL: {}", e);
+                }
+            }
+            Ok(Json(ExecResponse::Success { results }))
+        }
         None => Ok(Json(ExecResponse::Aborted { aborted: true })),
     }
 }
