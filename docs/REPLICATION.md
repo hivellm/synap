@@ -1,9 +1,30 @@
 # Replication System
 
-**Status**: ✅ **Production Ready** - Complete TCP implementation with 67 tests  
-**Version**: 0.3.0-rc1  
-**Test Coverage**: 67/68 tests (98.5% passing, 1 ignored)  
-**Last Updated**: October 22, 2025
+**Status**: ⚠️ **Wired for v1.0, partial** — see "Wiring status" below.
+**Last Updated**: 2026-07-08
+
+---
+
+## Wiring status (v1.0, audit M-005)
+
+The replication engine (TCP master/replica, sync, backlog) was implemented and
+unit-tested, but until v1.0 it was **never instantiated by the running server** —
+`--role master` accepted the flag yet spawned no listener and replicated nothing.
+
+As of v1.0 (`main.rs`) the node is constructed from config on startup and
+self-runs; the master is handed to the persistence layer, which propagates every
+logged operation (all datatypes) to replicas. See [replication.md wiring
+notes](replication.md) and the code in `crates/synap-server/src/replication/`.
+
+**Current limitations (tracked in phase6j):**
+- The replica applies KV + stream ops; hash/list/set/sorted-set/queue apply on the
+  replica is not yet implemented (the master already *propagates* them).
+- Propagation piggybacks on the persistence log, so replication requires
+  `persistence.enabled = true`.
+- Replication status is not yet exposed in INFO.
+
+The sections below describe the design, configuration and usage, which remain
+accurate.
 
 ---
 

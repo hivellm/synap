@@ -22,23 +22,11 @@
 |--------|------|----------|-------------|
 | ⬚ | phase6_v1-stability-hardening | 0/11 | v1 stability hardening |
 
-## phase6c
-
-| Status | Task | Progress | Description |
-|--------|------|----------|-------------|
-| ⬚ | phase6c_v1-network-dos-limits | 0/11 | v1 network dos limits |
-
 ## phase6d
 
 | Status | Task | Progress | Description |
 |--------|------|----------|-------------|
 | ⬚ | phase6d_v1-transaction-atomicity | 0/9 | v1 transaction atomicity |
-
-## phase6e
-
-| Status | Task | Progress | Description |
-|--------|------|----------|-------------|
-| ⬚ | phase6e_v1-replication-wiring | 0/10 | v1 replication wiring |
 
 ## phase6f
 
@@ -57,6 +45,18 @@
 | Status | Task | Progress | Description |
 |--------|------|----------|-------------|
 | ⬚ | phase6h_v1-binary-protocol-per-command-acl | 0/7 | v1 binary protocol per command acl |
+
+## phase6i
+
+| Status | Task | Progress | Description |
+|--------|------|----------|-------------|
+| ⬚ | phase6i_v1-connection-idle-timeout-and-configurable-limits | 0/8 | v1 connection idle timeout and configurable limits |
+
+## phase6j
+
+| Status | Task | Progress | Description |
+|--------|------|----------|-------------|
+| ⬚ | phase6j_v1-replica-datatype-apply-and-decouple | 0/8 | v1 replica datatype apply and decouple |
 
 ## phase7
 
