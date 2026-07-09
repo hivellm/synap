@@ -167,11 +167,14 @@ impl Room {
 
     /// Consume events starting from an offset
     fn consume(&mut self, subscriber_id: &str, from_offset: u64, limit: usize) -> Vec<StreamEvent> {
-        // Find events from offset
+        // Offsets are contiguous in the ring buffer (buffer[i].offset == min_offset + i),
+        // so seek straight to the first requested index instead of scanning the whole
+        // buffer (audit M-016: O(limit) rather than O(buffer)).
+        let start_idx =
+            (from_offset.saturating_sub(self.min_offset) as usize).min(self.buffer.len());
         let events: Vec<StreamEvent> = self
             .buffer
-            .iter()
-            .filter(|evt| evt.offset >= from_offset)
+            .range(start_idx..)
             .take(limit)
             .cloned()
             .collect();
