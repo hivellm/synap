@@ -99,6 +99,13 @@ fixed for the 1.0 release.
 
 ### Fixed
 
+- **`maxmemory` accounts for all datatypes** (audit M-018). The budget tracked
+  only the KV store, so collections/brokers could blow far past the limit. A
+  shared `GlobalMemory` budget now sums KV + Hash/List/Set/SortedSet/Stream/Queue;
+  KV eviction/refusal consults the true total and Hash/List/Set grow-writes are
+  refused over the cap. Per-datatype accounting is exposed as
+  `synap_datatype_memory_bytes`. (The read-path copy-avoidance half — `Arc<[u8]>`
+  values — is tracked separately.) See `docs/memory-accounting.md`.
 - **Snapshot CRC64 is verified on load** (audit M-002). The checksum was written
   but read into a discarded binding; a corrupt/torn snapshot loaded silently. The
   digest is now recomputed on load and the snapshot rejected on mismatch.
