@@ -96,7 +96,6 @@ impl QueueMessage {
 #[derive(Debug, Clone)]
 struct PendingMessage {
     message: Arc<QueueMessage>,
-    #[allow(dead_code)]
     consumer_id: ConsumerId,
     ack_deadline: u32, // Unix timestamp for compact storage
 }
@@ -161,6 +160,10 @@ struct Queue {
     /// message with the same deadline (guards against acked/requeued messages).
     deadlines: BinaryHeap<Reverse<(u32, MessageId)>>,
     dead_letter: VecDeque<Arc<QueueMessage>>,
+    /// Number of in-flight (unacked) messages per consumer. A consumer is
+    /// "active" while it holds at least one such message; this backs an honest
+    /// `stats.consumers` instead of the previous hardcoded 1.
+    active_consumers: HashMap<ConsumerId, u32>,
     stats: QueueStats,
     config: QueueConfig,
 }
@@ -173,9 +176,22 @@ impl Queue {
             pending: HashMap::new(),
             deadlines: BinaryHeap::new(),
             dead_letter: VecDeque::new(),
+            active_consumers: HashMap::new(),
             stats: QueueStats::default(),
             config,
         }
+    }
+
+    /// Decrement a consumer's in-flight count, dropping it from the active set
+    /// when it reaches zero, and refresh `stats.consumers`.
+    fn release_consumer(&mut self, consumer_id: &str) {
+        if let Some(count) = self.active_consumers.get_mut(consumer_id) {
+            *count -= 1;
+            if *count == 0 {
+                self.active_consumers.remove(consumer_id);
+            }
+        }
+        self.stats.consumers = self.active_consumers.len();
     }
 
     /// Add message to queue (sorted by priority)
@@ -209,17 +225,19 @@ impl Queue {
             // Add to pending with Arc reference
             let pending = PendingMessage::new(
                 Arc::clone(&message_arc),
-                consumer_id,
+                consumer_id.clone(),
                 self.config.ack_deadline_secs,
             );
             let deadline = pending.ack_deadline;
             self.pending.insert(message_id.clone(), pending);
             // Track the deadline for O(expired) sweeping instead of O(pending).
             self.deadlines.push(Reverse((deadline, message_id)));
+            // Mark the consumer active while it holds this unacked message.
+            *self.active_consumers.entry(consumer_id).or_insert(0) += 1;
 
             self.stats.consumed += 1;
             self.stats.depth = self.messages.len();
-            self.stats.consumers = 1; // Simplified for now
+            self.stats.consumers = self.active_consumers.len();
 
             // Return cloned message (Arc deref + clone)
             Some((*message_arc).clone())
@@ -230,8 +248,9 @@ impl Queue {
 
     /// Acknowledge message
     fn ack(&mut self, message_id: &str) -> Result<()> {
-        if self.pending.remove(message_id).is_some() {
+        if let Some(pending) = self.pending.remove(message_id) {
             self.stats.acked += 1;
+            self.release_consumer(&pending.consumer_id);
             Ok(())
         } else {
             Err(SynapError::MessageNotFound(message_id.to_string()))
@@ -241,6 +260,9 @@ impl Queue {
     /// Negative acknowledge (requeue or dead letter)
     fn nack(&mut self, message_id: &str, requeue: bool) -> Result<()> {
         if let Some(pending) = self.pending.remove(message_id) {
+            // The consumer no longer holds this message (requeued or dead-lettered).
+            self.release_consumer(&pending.consumer_id);
+
             // Get mutable copy of the message
             let message_ref = &pending.message;
             let mut message = (**message_ref).clone();
@@ -716,6 +738,52 @@ mod tests {
         assert_eq!(queue.pending.len(), 1);
         assert_eq!(queue.messages.len(), 0);
         assert_eq!(queue.stats.nacked, 0);
+    }
+
+    // ============ ACTIVE-CONSUMER COUNT TESTS (M-013) ============
+
+    #[tokio::test]
+    async fn test_active_consumer_count_is_honest() {
+        let manager = QueueManager::new(QueueConfig::default());
+        manager.create_queue("q", None).await.unwrap();
+        for i in 0..2u8 {
+            manager.publish("q", vec![i], None, None).await.unwrap();
+        }
+
+        // Nobody consuming yet.
+        assert_eq!(manager.stats("q").await.unwrap().consumers, 0);
+
+        let m1 = manager.consume("q", "c1").await.unwrap().unwrap();
+        assert_eq!(manager.stats("q").await.unwrap().consumers, 1);
+
+        let m2 = manager.consume("q", "c2").await.unwrap().unwrap();
+        assert_eq!(manager.stats("q").await.unwrap().consumers, 2);
+
+        // Each ACK releases its consumer.
+        manager.ack("q", &m1.id).await.unwrap();
+        assert_eq!(manager.stats("q").await.unwrap().consumers, 1);
+        manager.ack("q", &m2.id).await.unwrap();
+        assert_eq!(manager.stats("q").await.unwrap().consumers, 0);
+    }
+
+    #[tokio::test]
+    async fn test_same_consumer_counts_once() {
+        let manager = QueueManager::new(QueueConfig::default());
+        manager.create_queue("q", None).await.unwrap();
+        for i in 0..2u8 {
+            manager.publish("q", vec![i], None, None).await.unwrap();
+        }
+
+        let a = manager.consume("q", "c1").await.unwrap().unwrap();
+        let b = manager.consume("q", "c1").await.unwrap().unwrap();
+        // One distinct consumer holding two in-flight messages.
+        assert_eq!(manager.stats("q").await.unwrap().consumers, 1);
+
+        manager.ack("q", &a.id).await.unwrap();
+        // Still active: it holds the second message.
+        assert_eq!(manager.stats("q").await.unwrap().consumers, 1);
+        manager.ack("q", &b.id).await.unwrap();
+        assert_eq!(manager.stats("q").await.unwrap().consumers, 0);
     }
 
     #[tokio::test]
