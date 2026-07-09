@@ -11,4 +11,4 @@
 ## 2. Tail (mandatory — enforced by rulebook v5.3.0)
 - [x] 2.1 Documentation covering the implementation (docs/broker-retention-and-prefetch.md)
 - [x] 2.2 Write tests covering the new behavior (retention hard-cap protection + drop count; O(1) consume seek; prefetch throttle + fair dispatch; deadline expiry without global stall)
-- [ ] 2.3 Run tests and confirm they pass
+- [x] 2.3 Run tests and confirm they pass (full workspace suite: 1708 passed, 0 failed)
