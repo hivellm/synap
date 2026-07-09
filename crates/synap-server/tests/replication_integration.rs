@@ -478,7 +478,11 @@ async fn test_replica_auto_reconnect() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "Complex concurrent test - flaky timing"]
+// A replica joining mid-write-stream reliably misses in-flight writes, so this
+// fails deterministically (not merely "flaky"). Kept ignored until the
+// snapshot→stream handoff is gap-free — tracked in hivellm/synap#234. The body
+// below already uses deterministic poll-until-synced so it is ready to re-enable.
+#[ignore = "replica join-mid-stream sync gap — tracked in hivellm/synap#234"]
 async fn test_concurrent_writes_during_sync() {
     let (master, master_kv, master_addr) = create_master().await;
 
@@ -514,8 +518,17 @@ async fn test_concurrent_writes_during_sync() {
     // Wait for writes to complete
     write_task.await.unwrap();
 
-    // Wait for sync
-    sleep(Duration::from_secs(2)).await;
+    // Wait for sync deterministically: poll until the replica has caught up to
+    // all 500 keys, or a generous deadline elapses. This replaces a fixed 2 s
+    // sleep that was flaky under load (the previous reason for #[ignore]).
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        let count = replica_kv.keys().await.unwrap().len();
+        if count >= 500 || std::time::Instant::now() >= deadline {
+            break;
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
 
     // Verify replica received significant data
     let key_count = replica_kv.keys().await.unwrap().len();
