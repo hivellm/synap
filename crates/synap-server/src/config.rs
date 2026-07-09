@@ -214,8 +214,8 @@ impl Default for McpConfig {
 /// Redis-compatible RESP3 TCP listener configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Resp3Config {
-    /// Enable the RESP3 listener (default: false).
-    #[serde(default)]
+    /// Enable the RESP3 listener (default: true, matching `Default`).
+    #[serde(default = "default_true")]
     pub enabled: bool,
     /// TCP port the RESP3 listener binds to (default: 6379).
     #[serde(default = "default_resp3_port")]
@@ -246,13 +246,14 @@ impl Default for Resp3Config {
 /// Native binary SynapRPC TCP listener configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SynapRpcConfig {
-    /// Enable the SynapRPC listener (default: false).
-    #[serde(default)]
+    /// Enable the SynapRPC listener (default: true, matching `Default`).
+    #[serde(default = "default_true")]
     pub enabled: bool,
     /// TCP port the SynapRPC listener binds to (default: 15501).
     #[serde(default = "default_synap_rpc_port")]
     pub port: u16,
-    /// Host/IP to bind (default: "0.0.0.0").
+    /// Host/IP to bind (default: "127.0.0.1" — loopback only for safety;
+    /// set to "0.0.0.0" to expose on all interfaces).
     #[serde(default = "default_synap_rpc_host")]
     pub host: String,
 }
@@ -262,7 +263,7 @@ fn default_synap_rpc_port() -> u16 {
 }
 
 fn default_synap_rpc_host() -> String {
-    "0.0.0.0".to_string()
+    "127.0.0.1".to_string()
 }
 
 impl Default for SynapRpcConfig {
@@ -362,5 +363,30 @@ impl ServerConfig {
     /// Get server address
     pub fn server_addr(&self) -> String {
         format!("{}:{}", self.server.host, self.server.port)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resp3_enabled_default_is_consistent() {
+        // Deserializing with the field omitted must agree with `Default` (M-013:
+        // previously serde said false while Default said true).
+        let from_empty: Resp3Config = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(from_empty.enabled, Resp3Config::default().enabled);
+        assert!(from_empty.enabled);
+        assert_eq!(from_empty.host, "127.0.0.1");
+    }
+
+    #[test]
+    fn synap_rpc_defaults_are_loopback_and_consistent() {
+        let from_empty: SynapRpcConfig = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(from_empty.enabled, SynapRpcConfig::default().enabled);
+        assert!(from_empty.enabled);
+        // M-014: binds to loopback by default, matching RESP3.
+        assert_eq!(from_empty.host, "127.0.0.1");
+        assert_eq!(SynapRpcConfig::default().host, "127.0.0.1");
     }
 }
