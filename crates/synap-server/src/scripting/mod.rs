@@ -868,3 +868,162 @@ fn apply_sandbox(lua: &Lua) -> Result<(), SynapError> {
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{HashStore, KVConfig, KVStore, ListStore, SetStore, SortedSetStore};
+
+    fn ctx() -> ScriptExecContext {
+        ScriptExecContext {
+            kv_store: Arc::new(KVStore::new(KVConfig::default())),
+            hash_store: Arc::new(HashStore::new()),
+            list_store: Arc::new(ListStore::new()),
+            set_store: Arc::new(SetStore::new()),
+            sorted_set_store: Arc::new(SortedSetStore::new()),
+        }
+    }
+
+    async fn eval(mgr: &ScriptManager, c: ScriptExecContext, src: &str) -> serde_json::Value {
+        mgr.eval(c, src, vec![], vec![], None).await.unwrap().0
+    }
+
+    #[tokio::test]
+    async fn eval_returns_lua_literals() {
+        let mgr = ScriptManager::new(Duration::from_secs(5));
+        assert_eq!(eval(&mgr, ctx(), "return 42").await, serde_json::json!(42));
+        assert_eq!(
+            eval(&mgr, ctx(), "return 'hi'").await,
+            serde_json::json!("hi")
+        );
+        assert_eq!(
+            eval(&mgr, ctx(), "return true").await,
+            serde_json::json!(true)
+        );
+        assert_eq!(
+            eval(&mgr, ctx(), "return {1, 2, 3}").await,
+            serde_json::json!([1, 2, 3])
+        );
+        // nil returns JSON null.
+        assert_eq!(
+            eval(&mgr, ctx(), "return nil").await,
+            serde_json::Value::Null
+        );
+    }
+
+    #[tokio::test]
+    async fn eval_uses_keys_and_argv() {
+        let mgr = ScriptManager::new(Duration::from_secs(5));
+        let c = ctx();
+        let (val, _sha) = mgr
+            .eval(
+                c,
+                "return KEYS[1] .. '=' .. ARGV[1]",
+                vec!["k".to_string()],
+                vec!["v".to_string()],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(val, serde_json::json!("k=v"));
+    }
+
+    #[tokio::test]
+    async fn eval_bridges_redis_call_kv() {
+        let mgr = ScriptManager::new(Duration::from_secs(5));
+        let c = ctx();
+        let kv = c.kv_store.clone();
+        let (val, _) = mgr
+            .eval(
+                c,
+                r#"
+                    redis.call('SET', KEYS[1], ARGV[1])
+                    redis.call('INCR', KEYS[2])
+                    redis.call('INCR', KEYS[2])
+                    return redis.call('GET', KEYS[1])
+                "#,
+                vec!["name".to_string(), "counter".to_string()],
+                vec!["synap".to_string()],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(val, serde_json::json!("synap"));
+        assert_eq!(kv.get("counter").await.unwrap(), Some(b"2".to_vec()));
+        assert_eq!(kv.get("name").await.unwrap(), Some(b"synap".to_vec()));
+    }
+
+    #[tokio::test]
+    async fn eval_bridges_redis_call_collections() {
+        let mgr = ScriptManager::new(Duration::from_secs(5));
+        let c = ctx();
+        let (val, _) = mgr
+            .eval(
+                c,
+                r#"
+                    redis.call('HSET', 'h', 'f', 'v')
+                    redis.call('RPUSH', 'l', 'a', 'b')
+                    redis.call('SADD', 's', 'm')
+                    redis.call('ZADD', 'z', '1', 'm')
+                    return {
+                        redis.call('HGET', 'h', 'f'),
+                        redis.call('LLEN', 'l'),
+                        redis.call('SCARD', 's'),
+                        redis.call('ZCARD', 'z'),
+                    }
+                "#,
+                vec![],
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(val[0], serde_json::json!("v"));
+        assert_eq!(val[1], serde_json::json!(2));
+        assert_eq!(val[2], serde_json::json!(1));
+        assert_eq!(val[3], serde_json::json!(1));
+    }
+
+    #[tokio::test]
+    async fn evalsha_unknown_hash_is_noscript() {
+        let mgr = ScriptManager::new(Duration::from_secs(5));
+        let err = mgr
+            .evalsha(ctx(), "deadbeef", vec![], vec![], None)
+            .await
+            .unwrap_err();
+        assert!(format!("{err}").contains("NOSCRIPT"));
+    }
+
+    #[tokio::test]
+    async fn load_exists_flush_kill() {
+        let mgr = ScriptManager::new(Duration::from_secs(5));
+        let sha = mgr.load_script("return 1");
+        assert_eq!(sha.len(), 40); // SHA-1 hex
+        assert_eq!(
+            mgr.script_exists(&[sha.clone(), "nope".to_string()]),
+            vec![true, false]
+        );
+
+        // A loaded script is runnable by its sha.
+        let v = mgr
+            .evalsha(ctx(), &sha, vec![], vec![], None)
+            .await
+            .unwrap();
+        assert_eq!(v, serde_json::json!(1));
+
+        assert!(mgr.flush() >= 1);
+        assert_eq!(mgr.script_exists(&[sha]), vec![false]);
+        // Nothing running → kill returns false.
+        assert!(!mgr.kill_running());
+    }
+
+    #[tokio::test]
+    async fn sandbox_blocks_dangerous_globals() {
+        let mgr = ScriptManager::new(Duration::from_secs(5));
+        // os/io are removed by the sandbox → indexing them errors.
+        let err = mgr
+            .eval(ctx(), "return os.time()", vec![], vec![], None)
+            .await;
+        assert!(err.is_err());
+    }
+}

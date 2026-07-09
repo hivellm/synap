@@ -736,4 +736,43 @@ mod tests {
         // Should contain Prometheus format (may be empty if no metrics recorded)
         assert!(!metrics.is_empty() || metrics.contains("# HELP"));
     }
+
+    #[test]
+    fn test_all_recording_functions_are_exposed() {
+        // Exercise every record/set/gauge helper so the metric families register
+        // and appear in the exposition output.
+        record_stream_op("room", "publish", "success");
+        record_stream_event("room", "evt");
+        record_pubsub_op("publish", "success");
+        record_pubsub_message("topic");
+        record_http_request("GET", "/api/kv", 200, 0.003);
+        update_replication_lag("replica-1", 5);
+        record_replication_op("write", "success", 1024);
+        set_process_metrics(1_000_000, 2_000_000, 12.5);
+        set_host_metrics(500, 1000, 0.1, 0.2, 0.3);
+        set_datatype_memory("hash", 4096);
+        set_stream_gauges("room", 10, 9, 2);
+        set_partition_gauges("topic", "0", 100, 99);
+        set_consumer_group_members("g", "topic", 3);
+        set_queue_gauges("q", 7, 1);
+        record_resp3_command("GET", true, 0.001);
+        resp3_connection_open();
+        resp3_bytes(64, 128);
+        resp3_connection_close();
+        record_synap_rpc_command("GET", true, 0.001);
+        synap_rpc_connection_open();
+        synap_rpc_frame_sizes(32, 48);
+        synap_rpc_connection_close();
+
+        // reset then repopulate broker gauges (scrape-time snapshot pattern).
+        reset_broker_gauges();
+        set_stream_gauges("room", 1, 0, 1);
+        set_datatype_memory("hash", 4096);
+
+        let out = encode_metrics().unwrap();
+        assert!(out.contains("synap_http_requests_total"));
+        assert!(out.contains("synap_resp3_commands_total"));
+        assert!(out.contains("synap_process_memory_bytes"));
+        assert!(out.contains("synap_datatype_memory_bytes"));
+    }
 }
