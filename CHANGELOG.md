@@ -7,6 +7,95 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+The **v1.0.0 hardening line**: a `crates/` workspace restructure plus a deep
+security / durability / correctness / performance audit (findings M-001…M-018)
+fixed ahead of the 1.0 tag. Version baseline is `1.0.0-rc.1`.
+
+### Added
+
+- **Streams: retention bounded by committed consumer offset** (audit M-012).
+  On overflow, streams previously evicted the oldest event regardless of
+  consumer progress, silently losing unread data. Events the slowest tracked
+  consumer has not read are now protected: the room buffer grows up to a new
+  `max_unread_buffer_size` hard cap (default 10× the soft `max_buffer_size`)
+  instead of dropping them, and any forced drop at the cap is surfaced via
+  `RoomStats.dropped` (a real lagging-consumer loss signal, not steady-state
+  noise). With no subscribers the room stays a plain ring buffer. See
+  `docs/broker-retention-and-prefetch.md`.
+- **Queues: per-consumer prefetch/QoS with fair dispatch** (audit M-013). A new
+  per-queue `prefetch_limit` caps how many unacked messages a single consumer
+  may hold; a consumer at its limit is throttled until it acks, which in the
+  pull model also yields fair dispatch (its share flows to other consumers).
+  `0` = unlimited (default). Configurable globally (`queue.prefetch_limit`) and
+  per-queue at creation. The reported consumer count is now the real number of
+  consumers holding in-flight messages instead of a hardcoded `1`.
+- **Replication is actually wired into the running server** (audit M-005).
+  `MasterNode`/`ReplicaNode` are now instantiated from config and writes are
+  propagated to replicas; previously the replication flags were accepted but no
+  node was ever constructed and no write was replicated.
+- **Snapshots persist all datatypes** (audit M-001). Point-in-time snapshots now
+  include Hash, List, Set and Sorted-Set sections (previously only KV/Queue/
+  Stream), so those collections survive a restart.
+
+### Changed
+
+- **Workspace restructured into `crates/`** (Vectorizer/Nexus layout): first-party
+  crates `synap-core`, `synap-protocol`, `synap-server`, `synap-cli`,
+  `synap-migrate` under `crates/`, with the Rust SDK at `sdks/rust`. The pure
+  wire layer was extracted into `synap-protocol` and the in-memory data engine
+  into `synap-core` (a leaf crate with no server/protocol dependencies).
+- **Config files moved into `config/`** for organization; build references
+  (Dockerfile, docker-compose, release workflow, macOS build script) updated.
+- **Listener defaults made consistent and safe** (config hardening). `Resp3Config`
+  and `SynapRpcConfig` `enabled` defaults now agree between serde and `Default`,
+  and the SynapRPC listener binds loopback (`127.0.0.1`) by default like RESP3
+  instead of `0.0.0.0`.
+- Version baseline set to `1.0.0-rc.1`; dependencies bumped (sysinfo 0.39,
+  mlua 0.12, rmcp 2.1, plus batched TS SDK and tower-http/CI bumps).
+
+### Performance
+
+- **O(1) stream consume seek** (audit M-016). Consuming from an offset now indexes
+  straight into the ring buffer (`offset − min_offset`) instead of linearly
+  scanning the whole buffer on every poll.
+- **O(expired) queue ACK-deadline sweep** (audit M-017). The deadline checker used
+  to take a single global write lock over all queues once per second and scan
+  every pending entry; it now uses a per-queue min-heap of deadlines and touches
+  only entries that have actually expired.
+
+### Fixed
+
+- **Snapshot CRC64 is verified on load** (audit M-002). The checksum was written
+  but read into a discarded binding; a corrupt/torn snapshot loaded silently. The
+  digest is now recomputed on load and the snapshot rejected on mismatch.
+- **MULTI/EXEC is atomic** (audit M-008). EXEC now runs under a serialized lock and
+  the WATCH check-and-apply is one atomic step, so concurrent transactions cannot
+  interleave and optimistic-concurrency guarantees hold.
+- **Dead stream-WAL path removed** (audit M-014). Stream operations were logged to
+  the WAL but their replay was a no-op; the redundant logging is dropped (streams
+  persist via their own path).
+
+### Security
+
+- **Authentication enforced on the RESP3 and SynapRPC listeners** (audit M-003,
+  M-004). RESP3 auth was stubbed to always-authenticated and SynapRPC had no auth
+  at all — any client on the port could run `FLUSHALL`/`KEYS`. Both now gate
+  commands behind AUTH and reject unauthenticated access when auth is required.
+- **Passwords hashed with bcrypt and compared in constant time** (audit M-009),
+  replacing unsalted single-round SHA-512 with a timing-observable `==`. Legacy
+  SHA-512 hashes still verify and are transparently rehashed to bcrypt on next
+  login.
+- **Parsers cap allocation from client-controlled sizes** (audit M-006, M-007).
+  The RESP3 parser and SynapRPC frame reader allocated attacker-controlled sizes
+  (multi-GB) with no ceiling; bulk/aggregate/line and frame lengths are now bounded
+  before allocation to prevent OOM DoS.
+- **Bounded pub/sub per-subscriber channel** (audit M-011). A slow/stuck subscriber
+  could grow an unbounded channel until OOM; channels are now bounded and slow
+  consumers are disconnected, with a dropped-message stat.
+- **Maximum concurrent connections on the binary listeners** (audit M-015). RESP3
+  and SynapRPC now bound accepted connections with a semaphore and refuse new ones
+  at capacity, preventing connection-flood FD/memory exhaustion.
+
 ## [0.13.0] - 2026-07-01
 
 ### Added
