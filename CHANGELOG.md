@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-09
+
 The **v1.0.0 hardening line**: a `crates/` workspace restructure plus a deep
 security / durability / correctness / performance audit (findings M-001…M-018)
-fixed ahead of the 1.0 tag. Version baseline is `1.0.0-rc.1`.
+fixed for the 1.0 release.
 
 ### Added
 
