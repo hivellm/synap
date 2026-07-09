@@ -19,7 +19,7 @@
 >
 > **Still open**, each with a decision recorded in this phase:
 > - Memory-accounting drift (F-006) → tracked in phase6g (memory accounting).
-> - MGET/MSET sequential (F-007) → parallelized by shard in phase7.
+> - MGET/MSET (F-007) → shard-grouped (one lock per shard), benchmarked in phase7; true cross-core parallelism deferred.
 > - Allocator (part of F-011) → opt-in `mimalloc` feature flag in phase7.
 > - Blocking ops / PSUBSCRIBE / SCAN cursors / IO threads (F-008/9/10/F-011) →
 >   ship/defer decisions recorded below and in per-item follow-up tasks.
@@ -85,7 +85,7 @@ evidence; deferred items link to a follow-up task created before phase7 archived
 | RESP3 + pipelining (F-001/F-002) | **Shipped 1.0** | RESP3 listener + pipeline-aware flush |
 | Eviction, 6 policies (F-003) | **Shipped 1.0** | approximated-LRU sampling |
 | Lock-free GET (F-004) | **Shipped 1.0** | `AtomicU32` LRU |
-| Parallel MGET/MSET (F-007) | **Shipped 1.0** | grouped by shard (phase7) |
+| Shard-grouped MGET/MSET (F-007) | **Shipped 1.0** (partial) | one lock per shard, not per key; uncontended latency ~parity (measured, `kv_bench mget_vs_sequential`); true cross-core parallelism post-1.0 |
 | Opt-in `mimalloc` allocator (F-011a) | **Shipped 1.0** | `--features mimalloc` |
 | Memory-accounting drift (F-006) | **Deferred** | large cross-datatype refactor → phase6g |
 | Blocking ops BLPOP/BRPOP/BZPOPMIN (F-008) | **Post-1.0** | needs a client-wait/notify mechanism; clients can poll meanwhile |

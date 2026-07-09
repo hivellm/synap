@@ -15,7 +15,7 @@ Each finding has: title, evidence (file:line), impact, priority, estimated effor
 > | F-004 Write lock on GET | ✅ RESOLVED | `AtomicU32` LRU fast path (`kv_store/store.rs`) |
 > | F-005 `handlers.rs` 11,595 lines | 🔶 PARTIAL | Split into `crates/` + sub-modules; handler file still large |
 > | F-006 Memory stats drift | ⬜ OPEN | tracked in phase6g (memory accounting, audit M-018) |
-> | F-007 MGET/MSET sequential | ✅ RESOLVED | parallelized by shard (phase7) |
+> | F-007 MGET/MSET sequential | 🔶 PARTIAL | shard-grouped (one lock per shard, not per key) — reduces lock churn under contention; uncontended single-thread latency is ~parity (bucketing overhead offsets lock savings — measured). True cross-core parallelism deferred |
 > | F-008 No blocking ops (BLPOP…) | ⬜ DEFERRED | ship/defer decision in phase7; post-1.0 follow-up task |
 > | F-009 No PSUBSCRIBE | ⬜ DEFERRED | ship/defer decision in phase7; post-1.0 follow-up task |
 > | F-010 SCAN cursors only on KV | ⬜ DEFERRED | ship/defer decision in phase7; post-1.0 follow-up task |

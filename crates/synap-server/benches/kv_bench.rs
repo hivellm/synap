@@ -277,6 +277,51 @@ fn bench_shard_distribution(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark: MGET (shard-grouped) vs a naive sequential per-key baseline.
+///
+/// Demonstrates the shard-bucketing win (F-007): `mget` acquires one read lock
+/// per shard for the whole batch, whereas the sequential baseline acquires a
+/// lock per key.
+fn bench_mget_vs_sequential(c: &mut Criterion) {
+    let mut group = c.benchmark_group("mget_vs_sequential");
+    group.sample_size(200);
+
+    let rt = Runtime::new().unwrap();
+    let store = KVStore::new(KVConfig::default());
+
+    // Pre-populate 10K keys spread across the 64 shards.
+    rt.block_on(async {
+        for i in 0..10_000 {
+            store
+                .set(&format!("key_{i}"), vec![0u8; 64], None)
+                .await
+                .unwrap();
+        }
+    });
+
+    // 1000 keys fetched in one batch.
+    let keys: Vec<String> = (0..1000).map(|i| format!("key_{i}")).collect();
+    group.throughput(Throughput::Elements(1000));
+
+    // Baseline: sequential single-key gets (one lock acquisition per key).
+    group.bench_function("sequential_1000", |b| {
+        b.to_async(&rt).iter(|| async {
+            for key in &keys {
+                let _ = black_box(store.get(key).await);
+            }
+        });
+    });
+
+    // Grouped: one mget — one read lock per shard for the whole batch.
+    group.bench_function("mget_1000", |b| {
+        b.to_async(&rt).iter(|| async {
+            let _ = black_box(store.mget(black_box(&keys)).await);
+        });
+    });
+
+    group.finish();
+}
+
 criterion_group!(
     benches,
     bench_stored_value_memory,
@@ -286,6 +331,7 @@ criterion_group!(
     bench_ttl_cleanup,
     bench_memory_footprint,
     bench_shard_distribution,
+    bench_mget_vs_sequential,
 );
 
 criterion_main!(benches);
