@@ -680,6 +680,58 @@ mod tests {
     use super::*;
 
     #[test]
+    fn hash_counts_toward_and_respects_shared_budget() {
+        use crate::core::GlobalMemory;
+        let gm = GlobalMemory::new(1000); // 1000-byte cap
+        let store = HashStore::new().with_global_memory(gm.clone());
+
+        // Write ~1225 bytes (12 fields × ~102 B + key). Under the cap the
+        // counter is still 0 (refreshed periodically), so these are admitted.
+        for i in 0..12 {
+            store.hset("h", &format!("f{i}"), vec![0u8; 100]).unwrap();
+        }
+
+        // Recompute the accounted total from actual contents.
+        store.refresh_memory();
+        assert!(
+            gm.used() > 1000,
+            "hash data must count toward the shared budget, used={}",
+            gm.used()
+        );
+
+        // A further grow write is now refused (over the shared cap).
+        let err = store.hset("h", "f_new", vec![0u8; 100]);
+        assert!(
+            matches!(err, Err(SynapError::MemoryLimitExceeded)),
+            "over-budget hash write must be refused, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn budget_is_shared_across_datatypes() {
+        use crate::core::{GlobalMemory, KVConfig, KVStore};
+        let gm = GlobalMemory::new(2000);
+        let kv = KVStore::new(KVConfig::default()).with_global_memory(gm.clone());
+        let hash = HashStore::new().with_global_memory(gm.clone());
+
+        // Fill most of the budget with KV data (KV accounts live).
+        kv.set("k", vec![0u8; 1900], None).await.unwrap();
+        assert!(
+            gm.used() >= 1900,
+            "KV should occupy the budget: {}",
+            gm.used()
+        );
+
+        // A hash write that would push past the shared cap is refused, even
+        // though the hash store itself is nearly empty (audit M-018).
+        let err = hash.hset("h", "f", vec![0u8; 500]);
+        assert!(
+            matches!(err, Err(SynapError::MemoryLimitExceeded)),
+            "hash write must see KV's usage via the shared budget, got {err:?}"
+        );
+    }
+
+    #[test]
     fn test_hset_hget() {
         let store = HashStore::new();
 

@@ -193,6 +193,11 @@ async fn main() -> Result<()> {
     let kv_config = config.to_kv_config();
     let queue_config = config.to_queue_config();
 
+    // Shared cross-datatype memory budget (audit M-018): every store registers
+    // its byte counter so `maxmemory` accounts for KV + collections + brokers,
+    // and KV eviction/refusal responds to the true total.
+    let global_mem = synap_server::core::GlobalMemory::new(kv_config.max_memory_mb * 1024 * 1024);
+
     #[allow(clippy::type_complexity)]
     let (
         kv_store,
@@ -216,12 +221,12 @@ async fn main() -> Result<()> {
             Ok((kv, hs, ls, ss, zs, qm, offset)) => {
                 info!("Recovery successful, WAL offset: {}", offset);
                 (
-                    Arc::new(kv),
-                    hs.map(Arc::new),
-                    ls.map(Arc::new),
-                    ss.map(Arc::new),
-                    zs.map(Arc::new),
-                    qm.map(Arc::new),
+                    Arc::new(kv.with_global_memory(global_mem.clone())),
+                    hs.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
+                    ls.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
+                    ss.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
+                    zs.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
+                    qm.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
                     offset,
                 )
             }
@@ -245,13 +250,23 @@ async fn main() -> Result<()> {
     } else {
         info!("Persistence disabled, starting fresh");
         (
-            Arc::new(KVStore::new(kv_config.clone())),
-            Some(Arc::new(HashStore::new())),
-            Some(Arc::new(ListStore::new())),
-            Some(Arc::new(SetStore::new())),
-            Some(Arc::new(SortedSetStore::new())),
+            Arc::new(KVStore::new(kv_config.clone()).with_global_memory(global_mem.clone())),
+            Some(Arc::new(
+                HashStore::new().with_global_memory(global_mem.clone()),
+            )),
+            Some(Arc::new(
+                ListStore::new().with_global_memory(global_mem.clone()),
+            )),
+            Some(Arc::new(
+                SetStore::new().with_global_memory(global_mem.clone()),
+            )),
+            Some(Arc::new(
+                SortedSetStore::new().with_global_memory(global_mem.clone()),
+            )),
             if config.queue.enabled {
-                Some(Arc::new(QueueManager::new(queue_config.clone())))
+                Some(Arc::new(
+                    QueueManager::new(queue_config.clone()).with_global_memory(global_mem.clone()),
+                ))
             } else {
                 None
             },
@@ -272,7 +287,9 @@ async fn main() -> Result<()> {
 
     // Initialize stream manager (enabled by default for now)
     let stream_manager = {
-        let stream_mgr = Arc::new(StreamManager::new(StreamConfig::default()));
+        let stream_mgr = Arc::new(
+            StreamManager::new(StreamConfig::default()).with_global_memory(global_mem.clone()),
+        );
         stream_mgr.clone().start_compaction_task();
         info!("Event Stream system enabled");
         Some(stream_mgr)
@@ -371,24 +388,59 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Use recovered hash store
+    // Use recovered hash store (fallback shares the cross-datatype budget too).
     let hash_store: Arc<synap_server::core::HashStore> =
-        hash_store_recovered.unwrap_or_else(|| Arc::new(synap_server::core::HashStore::new()));
+        hash_store_recovered.unwrap_or_else(|| {
+            Arc::new(synap_server::core::HashStore::new().with_global_memory(global_mem.clone()))
+        });
     info!("Hash store initialized");
 
     // Use recovered list store
     let list_store: Arc<synap_server::core::ListStore> =
-        list_store_recovered.unwrap_or_else(|| Arc::new(synap_server::core::ListStore::new()));
+        list_store_recovered.unwrap_or_else(|| {
+            Arc::new(synap_server::core::ListStore::new().with_global_memory(global_mem.clone()))
+        });
     info!("List store initialized");
 
-    // Create set store
-    let set_store = Arc::new(synap_server::core::SetStore::new());
+    // Create set store (always fresh here — wire the shared budget).
+    let set_store =
+        Arc::new(synap_server::core::SetStore::new().with_global_memory(global_mem.clone()));
     info!("Set store initialized");
 
     // Use sorted set store (fresh or recovered)
-    let sorted_set_store = _sorted_set_store_recovered
-        .unwrap_or_else(|| Arc::new(synap_server::core::SortedSetStore::new()));
+    let sorted_set_store = _sorted_set_store_recovered.unwrap_or_else(|| {
+        Arc::new(synap_server::core::SortedSetStore::new().with_global_memory(global_mem.clone()))
+    });
     info!("Sorted set store initialized");
+
+    // Periodically recompute collection/broker memory into the shared budget so
+    // `maxmemory` reflects all datatypes (audit M-018). KV updates its counter
+    // live; the others are recomputed on an interval (drift-free, no fragile
+    // per-mutation deltas).
+    {
+        let hs = hash_store.clone();
+        let ls = list_store.clone();
+        let sts = set_store.clone();
+        let zs = sorted_set_store.clone();
+        let sm = stream_manager.clone();
+        let qm = queue_manager.clone();
+        tokio::spawn(async move {
+            let mut ticker = tokio::time::interval(Duration::from_millis(500));
+            loop {
+                ticker.tick().await;
+                hs.refresh_memory();
+                ls.refresh_memory();
+                sts.refresh_memory();
+                zs.refresh_memory();
+                if let Some(ref s) = sm {
+                    s.refresh_memory();
+                }
+                if let Some(ref q) = qm {
+                    q.refresh_memory();
+                }
+            }
+        });
+    }
 
     // Now that every store exists, start the background snapshot task so that
     // hash/list/set/sorted-set state is captured alongside KV/queue/stream.
