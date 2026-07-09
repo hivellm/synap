@@ -45,7 +45,9 @@ impl Default for ClusterConfig {
         Self {
             enabled: false,
             node_id: None,
-            node_address: "127.0.0.1:15502".parse().unwrap(),
+            node_address: "127.0.0.1:15502"
+                .parse()
+                .expect("hardcoded default socket address is valid"),
             seed_nodes: Vec::new(),
             cluster_port: 15502,
             node_timeout_ms: 5000,

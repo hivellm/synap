@@ -83,7 +83,7 @@ impl StreamEvent {
             data,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs(),
             metadata: HashMap::new(),
         }
@@ -260,7 +260,7 @@ impl Room {
 
         let cutoff_time = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs()
             .saturating_sub(self.config.retention_secs);
 

@@ -170,15 +170,10 @@ impl HashStore {
 
     /// Create new hash store
     pub fn new() -> Self {
-        // Initialize 64 shards
-        let mut shards: Vec<Arc<HashShard>> = Vec::with_capacity(SHARD_COUNT);
-        for _ in 0..SHARD_COUNT {
-            shards.push(Arc::new(HashShard::new()));
-        }
-
-        let shards_array: [Arc<HashShard>; SHARD_COUNT] = shards
-            .try_into()
-            .unwrap_or_else(|_| panic!("Failed to convert Vec to array"));
+        // Build the fixed-size shard array directly — no fallible Vec→array
+        // conversion, so no panic on a length that is proven correct.
+        let shards_array: [Arc<HashShard>; SHARD_COUNT] =
+            std::array::from_fn(|_| Arc::new(HashShard::new()));
 
         Self {
             shards: Arc::new(shards_array),
@@ -214,7 +209,9 @@ impl HashStore {
             data.remove(key);
             let new_hash = HashValue::new(None);
             data.insert(key.to_string(), new_hash);
-            let hash = data.get_mut(key).unwrap();
+            let hash = data
+                .get_mut(key)
+                .expect("key was just inserted on the line above");
             let created = hash.set_field(field.to_string(), value);
 
             // Update stats

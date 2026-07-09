@@ -105,7 +105,7 @@ impl Transaction {
             watched_keys: HashMap::new(),
             started_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs(),
         }
     }
@@ -286,7 +286,7 @@ impl TransactionManager {
         let key_versions = self.key_versions.read();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
 
         let mut watched = Vec::new();
@@ -363,7 +363,7 @@ impl TransactionManager {
         // Update key versions for modified keys
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
 
         let mut key_versions = self.key_versions.write();
@@ -520,7 +520,7 @@ impl TransactionManager {
         let mut key_versions = self.key_versions.write();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
         let version = key_versions.entry(key.to_string()).or_insert(KeyVersion {
             version: 0,

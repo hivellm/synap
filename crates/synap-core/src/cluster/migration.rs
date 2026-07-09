@@ -168,7 +168,7 @@ impl SlotMigrationManager {
             total_keys: 0,
             started_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs(),
             completed_at: None,
         };
@@ -219,7 +219,7 @@ impl SlotMigrationManager {
             migration.completed_at = Some(
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_default()
                     .as_secs(),
             );
 
@@ -449,7 +449,7 @@ impl SlotMigrationManager {
                         migration.completed_at = Some(
                             SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
-                                .unwrap()
+                                .unwrap_or_default()
                                 .as_secs(),
                         );
                         info!("Migration marked as complete for slot {}", slot);

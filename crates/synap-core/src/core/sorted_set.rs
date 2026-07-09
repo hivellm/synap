@@ -124,7 +124,7 @@ impl SortedSetValue {
     fn current_timestamp() -> u32 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs() as u32
     }
 
@@ -486,12 +486,10 @@ impl SortedSetStore {
 
     /// Create a new sorted set store
     pub fn new() -> Self {
-        let shards: Vec<_> = (0..64)
-            .map(|_| Arc::new(RwLock::new(HashMap::new())))
-            .collect();
-
         Self {
-            shards: shards.try_into().unwrap(),
+            // Build the fixed-size shard array directly — no fallible Vec→array
+            // conversion, so no panic on a length that is proven correct.
+            shards: std::array::from_fn(|_| Arc::new(RwLock::new(HashMap::new()))),
         }
     }
 

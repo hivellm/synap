@@ -178,7 +178,9 @@ impl ClusterTopology {
             // Create node (simplified - real implementation would need addresses)
             let node = ClusterNode {
                 id: node_id.clone(),
-                address: "127.0.0.1:15502".parse().unwrap(),
+                address: "127.0.0.1:15502"
+                    .parse()
+                    .expect("hardcoded default socket address is valid"),
                 state: ClusterState::Connected,
                 slots: vec![slot_range],
                 master_id: None,

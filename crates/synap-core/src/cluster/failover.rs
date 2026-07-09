@@ -101,7 +101,7 @@ impl ClusterFailover {
             promoting_replica_id: replica_id.to_string(),
             started_at: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs(),
             completed_at: None,
         };
@@ -124,7 +124,7 @@ impl ClusterFailover {
             failover.completed_at = Some(
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_default()
                     .as_secs(),
             );
 
@@ -188,7 +188,7 @@ impl ClusterFailover {
         let mut failed_nodes = Vec::new();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
 
         for (node_id, node) in nodes {

@@ -382,7 +382,7 @@ impl ClusterDiscovery {
 
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
 
         // Send PING command
@@ -572,7 +572,7 @@ mod tests {
 
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
 
         // Handle PONG should not panic

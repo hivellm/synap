@@ -115,7 +115,7 @@ impl RaftNode {
         let last_heartbeat = Arc::new(RwLock::new(
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs(),
         ));
 
@@ -205,7 +205,7 @@ impl RaftNode {
             *state = RaftState::Follower;
             *last_heartbeat = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs();
 
             debug!("Received heartbeat from {} in term {}", leader_id, term);
@@ -237,7 +237,7 @@ impl RaftNode {
                     let last_hb = *last_heartbeat.read();
                     let now = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
-                        .unwrap()
+                        .unwrap_or_default()
                         .as_secs();
 
                     // If follower and haven't received heartbeat, become candidate
@@ -287,7 +287,7 @@ impl RaftNode {
                                 *state = RaftState::Follower;
                                 *last_heartbeat = SystemTime::now()
                                     .duration_since(UNIX_EPOCH)
-                                    .unwrap()
+                                    .unwrap_or_default()
                                     .as_secs();
                             }
                         }

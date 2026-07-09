@@ -117,7 +117,7 @@ impl PartitionEvent {
             data,
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs(),
             size_bytes,
             metadata: HashMap::new(),
@@ -211,7 +211,7 @@ impl Partition {
             RetentionPolicy::Time { retention_secs } => {
                 let cutoff = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
-                    .unwrap()
+                    .unwrap_or_default()
                     .as_secs()
                     .saturating_sub(retention_secs);
 
@@ -231,7 +231,7 @@ impl Partition {
                 if let Some(secs) = retention_secs {
                     let cutoff = SystemTime::now()
                         .duration_since(UNIX_EPOCH)
-                        .unwrap()
+                        .unwrap_or_default()
                         .as_secs()
                         .saturating_sub(secs);
                     self.compact_by_time(cutoff);

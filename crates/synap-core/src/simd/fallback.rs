@@ -11,7 +11,11 @@ pub fn popcount_slice(bytes: &[u8]) -> u64 {
     let chunks = bytes.chunks_exact(8);
     let remainder = chunks.remainder();
     for chunk in chunks {
-        let v = u64::from_ne_bytes(chunk.try_into().unwrap());
+        let v = u64::from_ne_bytes(
+            chunk
+                .try_into()
+                .expect("chunks_exact(8) always yields 8-byte chunks"),
+        );
         count += v.count_ones() as u64;
     }
     for &b in remainder {

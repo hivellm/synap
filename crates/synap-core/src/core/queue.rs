@@ -335,8 +335,10 @@ impl Queue {
                 // Earliest deadline is still in the future — nothing expired.
                 break;
             }
-            // Safe: we just peeked `Some`.
-            let Reverse((deadline, id)) = self.deadlines.pop().unwrap();
+            let Reverse((deadline, id)) = self
+                .deadlines
+                .pop()
+                .expect("peek returned Some in the loop condition");
             // Honor the expiry only if it still matches a live pending message
             // with this exact deadline; otherwise it is a stale entry.
             match self.pending.get(&id) {
