@@ -13,6 +13,24 @@ The **v1.0.0 hardening line**: a `crates/` workspace restructure plus a deep
 security / durability / correctness / performance audit (findings M-001…M-018)
 fixed for the 1.0 release.
 
+### Migration guide
+
+- **Workspace split into `crates/` (breaking for Rust library consumers).** The
+  monolithic `synap-server` crate was split into `synap-core` (in-memory data
+  engine), `synap-protocol` (RESP3 + SynapRPC wire types/codecs), and
+  `synap-server` (HTTP/WS/MCP + dispatch). Rust code that imported
+  `synap_server::core::*` or `synap_server::protocol::*` should move to
+  `synap_core::*` / `synap_protocol::*`. The old paths still resolve via umbrella
+  re-exports kept on `synap_server` for the transition, so existing imports keep
+  compiling — but new code should depend on the focused crates directly. The
+  Rust SDK (`synap-sdk`) now shares `synap-protocol`'s wire types (no public API
+  change).
+- **SynapRPC default bind moved to loopback (config migration).** The SynapRPC
+  listener now defaults to `127.0.0.1` (matching RESP3) instead of `0.0.0.0`. If
+  you relied on the binary protocol being reachable from other hosts, set
+  `synap_rpc.host: "0.0.0.0"` explicitly (and enable auth). The shipped
+  `config/config.yml` binds both binary listeners to loopback by default.
+
 ### Added
 
 - **Streams: retention bounded by committed consumer offset** (audit M-012).
