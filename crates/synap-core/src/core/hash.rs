@@ -987,4 +987,68 @@ mod tests {
         assert!(stats.hget_count >= 1);
         assert!(stats.total_fields >= 2);
     }
+
+    #[test]
+    fn test_hmset_hmget_hkeys_hvals_hgetall() {
+        let store = HashStore::new();
+        let mut fields = HashMap::new();
+        fields.insert("f1".to_string(), b"v1".to_vec());
+        fields.insert("f2".to_string(), b"v2".to_vec());
+        store.hmset("h", fields).unwrap();
+
+        assert_eq!(store.hlen("h").unwrap(), 2);
+        assert_eq!(
+            store
+                .hmget("h", &["f1".to_string(), "missing".to_string()])
+                .unwrap(),
+            vec![Some(b"v1".to_vec()), None]
+        );
+        let mut keys = store.hkeys("h").unwrap();
+        keys.sort();
+        assert_eq!(keys, vec!["f1".to_string(), "f2".to_string()]);
+        assert_eq!(store.hvals("h").unwrap().len(), 2);
+        assert_eq!(store.hgetall("h").unwrap().len(), 2);
+        assert!(store.hexists("h", "f1").unwrap());
+        assert!(!store.hexists("h", "nope").unwrap());
+    }
+
+    #[test]
+    fn test_hincrby_float_and_hsetnx() {
+        let store = HashStore::new();
+        assert_eq!(store.hincrby("h", "n", 5).unwrap(), 5);
+        assert_eq!(store.hincrby("h", "n", -2).unwrap(), 3);
+        let f = store.hincrbyfloat("h", "f", 1.5).unwrap();
+        assert!((f - 1.5).abs() < 1e-9);
+
+        // HSETNX only sets when the field is absent.
+        assert!(store.hsetnx("h", "new", b"a".to_vec()).unwrap());
+        assert!(!store.hsetnx("h", "new", b"b".to_vec()).unwrap());
+        assert_eq!(store.hget("h", "new").unwrap(), Some(b"a".to_vec()));
+    }
+
+    #[test]
+    fn test_hdel_and_clear() {
+        let store = HashStore::new();
+        store.hset("h", "a", b"1".to_vec()).unwrap();
+        store.hset("h", "b", b"2".to_vec()).unwrap();
+        assert_eq!(store.hdel("h", &["a".to_string()]).unwrap(), 1);
+        assert_eq!(store.hlen("h").unwrap(), 1);
+        store.clear();
+        assert_eq!(store.hlen("h").unwrap(), 0);
+    }
+
+    #[test]
+    fn test_value_helpers() {
+        let mut v = HashValue::new(None);
+        assert!(v.is_empty());
+        assert!(v.set_field("a".to_string(), b"1".to_vec()));
+        assert!(!v.set_field("a".to_string(), b"2".to_vec())); // update, not new
+        assert_eq!(v.len(), 1);
+        assert!(v.has_field("a"));
+        assert_eq!(v.get_field("a"), Some(&b"2".to_vec()));
+        assert_eq!(v.field_names(), vec!["a".to_string()]);
+        assert_eq!(v.values(), vec![b"2".to_vec()]);
+        assert_eq!(v.delete_fields(&["a".to_string()]), 1);
+        assert!(v.is_empty());
+    }
 }

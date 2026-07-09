@@ -1066,4 +1066,169 @@ mod tests {
         assert_eq!(store.zcard("zset1"), 1);
         assert_eq!(store.zscore("zset1", b"member1"), Some(1.0));
     }
+
+    fn seed(store: &SortedSetStore, key: &str, pairs: &[(&str, f64)]) {
+        let opts = ZAddOptions::default();
+        for (m, s) in pairs {
+            store.zadd(key, m.as_bytes().to_vec(), *s, &opts);
+        }
+    }
+
+    #[test]
+    fn test_zadd_option_flags() {
+        let store = SortedSetStore::new();
+        let nx = ZAddOptions {
+            nx: true,
+            ..Default::default()
+        };
+        store.zadd("z", b"a".to_vec(), 1.0, &nx);
+        // NX must not overwrite an existing member.
+        store.zadd("z", b"a".to_vec(), 9.0, &nx);
+        assert_eq!(store.zscore("z", b"a"), Some(1.0));
+
+        // XX only updates existing members.
+        let xx = ZAddOptions {
+            xx: true,
+            ..Default::default()
+        };
+        store.zadd("z", b"new".to_vec(), 5.0, &xx);
+        assert_eq!(store.zscore("z", b"new"), None);
+        store.zadd("z", b"a".to_vec(), 2.0, &xx);
+        assert_eq!(store.zscore("z", b"a"), Some(2.0));
+
+        // GT only raises, LT only lowers.
+        let gt = ZAddOptions {
+            gt: true,
+            ..Default::default()
+        };
+        store.zadd("z", b"a".to_vec(), 1.0, &gt); // lower → ignored
+        assert_eq!(store.zscore("z", b"a"), Some(2.0));
+        store.zadd("z", b"a".to_vec(), 10.0, &gt); // higher → applied
+        assert_eq!(store.zscore("z", b"a"), Some(10.0));
+        let lt = ZAddOptions {
+            lt: true,
+            ..Default::default()
+        };
+        store.zadd("z", b"a".to_vec(), 3.0, &lt);
+        assert_eq!(store.zscore("z", b"a"), Some(3.0));
+
+        // INCR increments instead of replacing.
+        let incr = ZAddOptions {
+            incr: true,
+            ..Default::default()
+        };
+        store.zadd("z", b"a".to_vec(), 2.0, &incr);
+        assert_eq!(store.zscore("z", b"a"), Some(5.0));
+    }
+
+    #[test]
+    fn test_range_and_rank_queries() {
+        let store = SortedSetStore::new();
+        seed(
+            &store,
+            "z",
+            &[("a", 1.0), ("b", 2.0), ("c", 3.0), ("d", 4.0)],
+        );
+
+        let fwd = store.zrange("z", 0, -1, true);
+        assert_eq!(
+            fwd.iter().map(|m| m.member.clone()).collect::<Vec<_>>(),
+            vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec(), b"d".to_vec()]
+        );
+        let rev = store.zrevrange("z", 0, 1, false);
+        assert_eq!(rev[0].member, b"d".to_vec());
+        assert_eq!(rev[1].member, b"c".to_vec());
+
+        assert_eq!(store.zrank("z", b"c"), Some(2));
+        assert_eq!(store.zrevrank("z", b"c"), Some(1));
+        assert_eq!(store.zrank("z", b"missing"), None);
+
+        assert_eq!(store.zcount("z", 2.0, 3.0), 2);
+        let by_score = store.zrangebyscore("z", 2.0, 3.0, false);
+        assert_eq!(by_score.len(), 2);
+
+        assert_eq!(
+            store.zmscore("z", &[b"a".to_vec(), b"x".to_vec()]),
+            vec![Some(1.0), None]
+        );
+    }
+
+    #[test]
+    fn test_pop_and_remove_ranges() {
+        let store = SortedSetStore::new();
+        seed(
+            &store,
+            "z",
+            &[("a", 1.0), ("b", 2.0), ("c", 3.0), ("d", 4.0)],
+        );
+
+        let min = store.zpopmin("z", 1);
+        assert_eq!(min[0].member, b"a".to_vec());
+        let max = store.zpopmax("z", 1);
+        assert_eq!(max[0].member, b"d".to_vec());
+        // b, c remain.
+        assert_eq!(store.zcard("z"), 2);
+
+        assert_eq!(store.zremrangebyrank("z", 0, 0), 1); // removes b
+        assert_eq!(store.zscore("z", b"b"), None);
+
+        seed(&store, "z2", &[("a", 1.0), ("b", 2.0), ("c", 3.0)]);
+        assert_eq!(store.zremrangebyscore("z2", 2.0, 3.0), 2);
+        assert_eq!(store.zcard("z2"), 1);
+    }
+
+    #[test]
+    fn test_incrby_rem_delete_and_stats() {
+        let store = SortedSetStore::new();
+        seed(&store, "z", &[("a", 1.0), ("b", 2.0)]);
+        assert_eq!(store.zincrby("z", b"a".to_vec(), 4.5), 5.5);
+        assert_eq!(store.zrem("z", &[b"b".to_vec()]), 1);
+
+        let stats = store.stats();
+        assert_eq!(stats.total_keys, 1);
+        assert_eq!(stats.total_members, 1);
+        assert!(store.memory_bytes() > 0);
+        store.refresh_memory();
+
+        assert!(store.delete("z"));
+        assert!(!store.delete("z"));
+        assert_eq!(store.zcard("z"), 0);
+    }
+
+    #[test]
+    fn test_store_set_operations() {
+        let store = SortedSetStore::new();
+        seed(&store, "z1", &[("a", 1.0), ("b", 2.0), ("c", 3.0)]);
+        seed(&store, "z2", &[("b", 10.0), ("c", 20.0), ("d", 30.0)]);
+
+        // INTERSTORE with SUM aggregate.
+        let n = store.zinterstore("zi", &["z1", "z2"], None, Aggregate::Sum);
+        assert_eq!(n, 2); // b, c
+        assert_eq!(store.zscore("zi", b"b"), Some(12.0));
+
+        // UNIONSTORE with weights and MAX aggregate.
+        let n = store.zunionstore("zu", &["z1", "z2"], Some(&[1.0, 2.0]), Aggregate::Max);
+        assert_eq!(n, 4);
+        // b: max(2*1, 10*2) = 20
+        assert_eq!(store.zscore("zu", b"b"), Some(20.0));
+
+        // DIFFSTORE keeps members of z1 not in z2.
+        let n = store.zdiffstore("zd", &["z1", "z2"]);
+        assert_eq!(n, 1);
+        assert_eq!(store.zscore("zd", b"a"), Some(1.0));
+    }
+
+    #[test]
+    fn test_value_ttl_helpers() {
+        let mut v = SortedSetValue::with_ttl(3600);
+        assert!(!v.is_expired());
+        assert!(v.ttl().is_some());
+        v.persist();
+        assert_eq!(v.ttl(), None);
+        v.set_ttl(60);
+        assert!(v.ttl().is_some());
+
+        let expired = SortedSetValue::with_ttl(0);
+        assert!(expired.is_expired());
+    }
 }

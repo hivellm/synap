@@ -846,4 +846,91 @@ mod tests {
         assert!(members.contains(&b"b".to_vec()));
         assert!(members.contains(&b"c".to_vec()));
     }
+
+    fn seeded() -> SetStore {
+        let store = SetStore::new();
+        store
+            .sadd("s1", vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()])
+            .unwrap();
+        store
+            .sadd("s2", vec![b"b".to_vec(), b"c".to_vec(), b"d".to_vec()])
+            .unwrap();
+        store
+    }
+
+    #[test]
+    fn test_scard_spop_srandmember() {
+        let store = seeded();
+        assert_eq!(store.scard("s1").unwrap(), 3);
+
+        let popped = store.spop("s1", Some(2)).unwrap();
+        assert_eq!(popped.len(), 2);
+        assert_eq!(store.scard("s1").unwrap(), 1);
+
+        // SRANDMEMBER does not remove members.
+        let rnd = store.srandmember("s2", Some(2)).unwrap();
+        assert_eq!(rnd.len(), 2);
+        assert_eq!(store.scard("s2").unwrap(), 3);
+        // Count larger than cardinality returns all distinct members.
+        let all = store.srandmember("s2", Some(10)).unwrap();
+        assert_eq!(all.len(), 3);
+    }
+
+    #[test]
+    fn test_smove_between_sets() {
+        let store = seeded();
+        assert!(store.smove("s1", "s2", b"a".to_vec()).unwrap());
+        assert!(!store.sismember("s1", b"a".to_vec()).unwrap());
+        assert!(store.sismember("s2", b"a".to_vec()).unwrap());
+        // Moving a non-member returns false.
+        assert!(!store.smove("s1", "s2", b"nope".to_vec()).unwrap());
+    }
+
+    #[test]
+    fn test_set_algebra_readonly() {
+        let store = seeded();
+        let keys = vec!["s1".to_string(), "s2".to_string()];
+
+        let mut inter = store.sinter(&keys).unwrap();
+        inter.sort();
+        assert_eq!(inter, vec![b"b".to_vec(), b"c".to_vec()]);
+
+        let union = store.sunion(&keys).unwrap();
+        assert_eq!(union.len(), 4);
+
+        let diff = store.sdiff(&keys).unwrap();
+        assert_eq!(diff, vec![b"a".to_vec()]);
+    }
+
+    #[test]
+    fn test_set_algebra_store_stats_delete() {
+        let store = seeded();
+        let keys = vec!["s1".to_string(), "s2".to_string()];
+
+        assert_eq!(store.sinterstore("i", &keys).unwrap(), 2);
+        assert_eq!(store.sunionstore("u", &keys).unwrap(), 4);
+        assert_eq!(store.sdiffstore("d", &keys).unwrap(), 1);
+
+        let stats = store.stats();
+        assert!(stats.total_sets >= 2);
+        store.refresh_memory();
+        assert!(store.memory_bytes() > 0);
+
+        assert!(store.delete("s1").unwrap());
+        assert!(!store.exists("s1"));
+        assert!(!store.delete("s1").unwrap());
+    }
+
+    #[test]
+    fn test_value_helpers() {
+        let mut v = SetValue::new(None);
+        assert!(v.is_empty());
+        assert_eq!(v.add(vec![b"x".to_vec(), b"y".to_vec(), b"x".to_vec()]), 2);
+        assert_eq!(v.len(), 2);
+        assert!(v.is_member(b"x"));
+        assert_eq!(v.remove(&[b"x".to_vec()]), 1);
+        let popped = v.pop(1);
+        assert_eq!(popped.len(), 1);
+        assert!(v.is_empty());
+    }
 }

@@ -1359,4 +1359,119 @@ mod tests {
         let result = store.brpoplpush("source", "dest", Some(1)).await;
         assert!(matches!(result, Err(SynapError::Timeout)));
     }
+
+    #[test]
+    fn test_index_set_and_range_edge_cases() {
+        let store = ListStore::new();
+        store
+            .rpush(
+                "l",
+                vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec(), b"d".to_vec()],
+                false,
+            )
+            .unwrap();
+
+        // Negative and out-of-range indices.
+        assert_eq!(store.lindex("l", -1).unwrap(), b"d".to_vec());
+        assert!(store.lindex("l", 99).is_err());
+        assert_eq!(
+            store.lrange("l", -2, -1).unwrap(),
+            vec![b"c".to_vec(), b"d".to_vec()]
+        );
+        // start > stop yields an empty range.
+        assert!(store.lrange("l", 3, 1).unwrap().is_empty());
+
+        store.lset("l", 0, b"A".to_vec()).unwrap();
+        assert_eq!(store.lindex("l", 0).unwrap(), b"A".to_vec());
+        assert!(store.lset("l", 99, b"z".to_vec()).is_err());
+
+        assert_eq!(store.llen("l").unwrap(), 4);
+        assert_eq!(store.lpos("l", b"c".to_vec()).unwrap(), Some(2));
+        assert_eq!(store.lpos("l", b"zzz".to_vec()).unwrap(), None);
+    }
+
+    #[test]
+    fn test_trim_rem_insert() {
+        let store = ListStore::new();
+        store
+            .rpush(
+                "l",
+                vec![
+                    b"a".to_vec(),
+                    b"b".to_vec(),
+                    b"a".to_vec(),
+                    b"c".to_vec(),
+                    b"a".to_vec(),
+                ],
+                false,
+            )
+            .unwrap();
+
+        // Remove 2 occurrences of "a" from head.
+        assert_eq!(store.lrem("l", 2, b"a".to_vec()).unwrap(), 2);
+        // Remove 1 occurrence from tail.
+        assert_eq!(store.lrem("l", -1, b"a".to_vec()).unwrap(), 1);
+        assert_eq!(
+            store.lrange("l", 0, -1).unwrap(),
+            vec![b"b".to_vec(), b"c".to_vec()]
+        );
+
+        store
+            .linsert("l", true, b"c".to_vec(), b"x".to_vec())
+            .unwrap();
+        assert_eq!(
+            store.lrange("l", 0, -1).unwrap(),
+            vec![b"b".to_vec(), b"x".to_vec(), b"c".to_vec()]
+        );
+
+        store.ltrim("l", 1, 2).unwrap();
+        assert_eq!(
+            store.lrange("l", 0, -1).unwrap(),
+            vec![b"x".to_vec(), b"c".to_vec()]
+        );
+    }
+
+    #[test]
+    fn test_pop_count_and_only_if_exists() {
+        let store = ListStore::new();
+        // only_if_exists on a missing key does nothing.
+        assert_eq!(
+            store.lpush("missing", vec![b"a".to_vec()], true).unwrap(),
+            0
+        );
+        assert!(!store.exists("missing"));
+
+        store
+            .rpush(
+                "l",
+                vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()],
+                false,
+            )
+            .unwrap();
+        assert_eq!(
+            store.lpop("l", Some(2)).unwrap(),
+            vec![b"a".to_vec(), b"b".to_vec()]
+        );
+        assert_eq!(store.rpop("l", Some(5)).unwrap(), vec![b"c".to_vec()]);
+        // Empty list is removed.
+        assert!(!store.exists("l"));
+    }
+
+    #[test]
+    fn test_stats_delete_and_memory() {
+        let store = ListStore::new();
+        store.rpush("a", vec![b"1".to_vec()], false).unwrap();
+        store
+            .rpush("b", vec![b"2".to_vec(), b"3".to_vec()], false)
+            .unwrap();
+
+        let stats = store.stats();
+        assert_eq!(stats.total_lists, 2);
+        assert_eq!(stats.total_elements, 3);
+        store.refresh_memory();
+
+        assert!(store.delete("a").unwrap());
+        assert!(!store.delete("a").unwrap());
+        assert!(store.exists("b"));
+    }
 }
