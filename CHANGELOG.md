@@ -52,7 +52,15 @@ fixed for the 1.0 release.
 - **Replication is actually wired into the running server** (audit M-005).
   `MasterNode`/`ReplicaNode` are now instantiated from config and writes are
   propagated to replicas; previously the replication flags were accepted but no
-  node was ever constructed and no write was replicated.
+  node was ever constructed and no write was replicated. A replica converges to
+  the master for **every datatype** — KV, hash, list, set, sorted-set, queue and
+  stream — by applying each `Operation` through the same shared applier the WAL
+  recovery path uses, so the two can't diverge. Replication is **decoupled from
+  the WAL**: a shared record hook always forwards writes to replicas and only
+  logs to the WAL when persistence is enabled, so a master replicates even with
+  `persistence.enabled = false`. `INFO replication` now reports the live role,
+  connected replica count, offset, and (on a replica) master link status and
+  lag. See `docs/replication.md`.
 - **Snapshots persist all datatypes** (audit M-001). Point-in-time snapshots now
   include Hash, List, Set and Sorted-Set sections (previously only KV/Queue/
   Stream), so those collections survive a restart.

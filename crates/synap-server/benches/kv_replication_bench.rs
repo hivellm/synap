@@ -63,7 +63,9 @@ async fn create_replica(master_addr: std::net::SocketAddr) -> Arc<ReplicaNode> {
     };
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let replica = ReplicaNode::new(config, kv, None).await.unwrap();
+    let replica = ReplicaNode::new(config, kv, None, None, None, None, None, None)
+        .await
+        .unwrap();
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 

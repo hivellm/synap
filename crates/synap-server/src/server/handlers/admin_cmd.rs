@@ -39,7 +39,7 @@ pub(super) async fn handle_info_cmd(
     }
 
     if section == InfoSection::All || section == InfoSection::Replication {
-        let repl_info = ReplicationInfo::collect().await;
+        let repl_info = ReplicationInfo::collect(state.replication.as_ref()).await;
         response["replication"] = serde_json::to_value(repl_info)
             .map_err(|e| SynapError::SerializationError(e.to_string()))?;
     }

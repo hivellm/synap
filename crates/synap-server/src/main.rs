@@ -322,7 +322,7 @@ async fn main() -> Result<()> {
     // handed to the persistence layer so every logged write is propagated to
     // replicas; the replica keeps itself alive via its own background loop.
     let replication_master = if config.replication.enabled {
-        use synap_server::replication::{MasterNode, ReplicaNode};
+        use synap_server::replication::MasterNode;
         match config.replication.role {
             NodeRole::Master if config.replication.replica_listen_address.is_some() => {
                 match MasterNode::new(
@@ -343,20 +343,8 @@ async fn main() -> Result<()> {
                 }
             }
             NodeRole::Replica if config.replication.master_address.is_some() => {
-                match ReplicaNode::new(
-                    config.replication.clone(),
-                    kv_store.clone(),
-                    stream_manager.clone(),
-                )
-                .await
-                {
-                    Ok(_replica) => {
-                        info!("Replication replica node started (background sync loop running)");
-                    }
-                    Err(e) => {
-                        warn!("Failed to start replication replica: {}", e);
-                    }
-                }
+                // The replica node is created after all datatype stores exist
+                // (below), so it can converge every datatype, not just KV.
                 None
             }
             _ => None,
@@ -365,8 +353,20 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Create persistence layer if enabled
-    let persistence = if config.persistence.enabled {
+    // Live replication handle for INFO/metrics (phase6j item 1.4). The master
+    // handle is known now; the replica handle is filled in below once its
+    // datatype stores exist.
+    let mut replication_handle: Option<synap_server::replication::ReplicationHandle> =
+        replication_master
+            .clone()
+            .map(synap_server::replication::ReplicationHandle::Master);
+
+    // Create the persistence layer when persistence is enabled OR a replication
+    // master is present. The layer is the shared propagate hook: even with
+    // persistence disabled, a master must still forward every write to replicas
+    // (phase6j — replication decoupled from the WAL). A replication-only layer
+    // opens no WAL file.
+    let persistence = if config.persistence.enabled || replication_master.is_some() {
         match PersistenceLayer::new_with_replication(
             config.persistence.clone(),
             replication_master.clone(),
@@ -454,6 +454,39 @@ async fn main() -> Result<()> {
             queue_manager.clone(),
             stream_manager.clone(),
         );
+    }
+
+    // Start the replication replica node now that every datatype store exists,
+    // so the background sync loop converges KV *and* all collections/broker
+    // datatypes (audit M-005) — not just KV. The master arm is handled above.
+    if config.replication.enabled
+        && config.replication.role == NodeRole::Replica
+        && config.replication.master_address.is_some()
+    {
+        match synap_server::replication::ReplicaNode::new(
+            config.replication.clone(),
+            kv_store.clone(),
+            stream_manager.clone(),
+            Some(hash_store.clone()),
+            Some(list_store.clone()),
+            Some(set_store.clone()),
+            Some(sorted_set_store.clone()),
+            queue_manager.clone(),
+        )
+        .await
+        {
+            Ok(replica) => {
+                info!(
+                    "Replication replica node started (background sync loop running, all datatypes)"
+                );
+                replication_handle = Some(synap_server::replication::ReplicationHandle::Replica(
+                    replica,
+                ));
+            }
+            Err(e) => {
+                warn!("Failed to start replication replica: {}", e);
+            }
+        }
     }
 
     // Create HyperLogLog store
@@ -642,6 +675,7 @@ async fn main() -> Result<()> {
             None
         },
         require_auth: config.auth.enabled && config.auth.require_auth,
+        replication: replication_handle,
     };
 
     // Initialize Prometheus metrics

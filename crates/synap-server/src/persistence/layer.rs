@@ -11,14 +11,17 @@ use tracing::info;
 /// Persistence layer that wraps operations with WAL logging
 /// Uses AsyncWAL for high-throughput group commit optimization
 pub struct PersistenceLayer {
-    wal: Arc<AsyncWAL>,
+    /// WAL sink — present only when persistence + WAL are enabled. A layer built
+    /// purely to propagate to replicas (persistence disabled) carries `None`, so
+    /// no WAL file is created (phase6j decoupling).
+    wal: Option<Arc<AsyncWAL>>,
     snapshot_mgr: Arc<SnapshotManager>,
     config: PersistenceConfig,
     last_snapshot: Arc<RwLock<Instant>>,
     operations_since_snapshot: Arc<RwLock<usize>>,
-    /// When set (master role), every logged operation is also propagated to
-    /// connected replicas (audit M-005). Replication piggybacks on the
-    /// persistence log, so it currently requires persistence to be enabled.
+    /// When set (master role), every recorded operation is also propagated to
+    /// connected replicas (audit M-005). Propagation is decoupled from the WAL
+    /// so a master replicates even when persistence is disabled (phase6j).
     replication_master: Option<Arc<crate::replication::MasterNode>>,
 }
 
@@ -28,17 +31,25 @@ impl PersistenceLayer {
         Self::new_with_replication(config, None).await
     }
 
-    /// Create a persistence layer that also propagates each logged operation to
+    /// Create a persistence layer that also propagates each recorded operation to
     /// replicas through the given master node.
+    ///
+    /// The WAL is opened only when persistence and WAL are both enabled. When the
+    /// layer exists solely to feed a replication master (persistence disabled),
+    /// no WAL file is created — operations are still propagated to replicas.
     pub async fn new_with_replication(
         config: PersistenceConfig,
         replication_master: Option<Arc<crate::replication::MasterNode>>,
     ) -> super::types::Result<Self> {
-        let wal = AsyncWAL::open(config.wal.clone()).await?;
+        let wal = if config.enabled && config.wal.enabled {
+            Some(Arc::new(AsyncWAL::open(config.wal.clone()).await?))
+        } else {
+            None
+        };
         let snapshot_mgr = SnapshotManager::new(config.snapshot.clone());
 
         Ok(Self {
-            wal: Arc::new(wal),
+            wal,
             snapshot_mgr: Arc::new(snapshot_mgr),
             config,
             last_snapshot: Arc::new(RwLock::new(Instant::now())),
@@ -52,6 +63,24 @@ impl PersistenceLayer {
         if let Some(master) = &self.replication_master {
             master.replicate(operation.clone());
         }
+    }
+
+    /// Record an operation: propagate to replicas (always) and append to the WAL
+    /// (only when a WAL sink is present).
+    ///
+    /// This is the single shared hook behind every `log_*` method. Propagation
+    /// happens first and unconditionally so replication does not depend on
+    /// persistence being enabled (phase6j); WAL logging follows when durable
+    /// persistence is active.
+    async fn record(&self, operation: Operation) -> super::types::Result<()> {
+        self.maybe_replicate(&operation);
+
+        if let Some(wal) = &self.wal {
+            wal.append(operation).await?;
+            *self.operations_since_snapshot.write() += 1;
+        }
+
+        Ok(())
     }
 
     /// Returns true when the WAL fsync mode is Always (sync durability).
@@ -72,38 +101,12 @@ impl PersistenceLayer {
         value: Vec<u8>,
         ttl: Option<u64>,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::KVSet { key, value, ttl };
-
-        // AsyncWAL batches this automatically
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        // Track operations for snapshot threshold
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::KVSet { key, value, ttl }).await
     }
 
     /// Log a KV DELETE operation
     pub async fn log_kv_del(&self, keys: Vec<String>) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::KVDel { keys };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::KVDel { keys }).await
     }
 
     /// Log a KV RENAME operation
@@ -112,22 +115,11 @@ impl PersistenceLayer {
         source: String,
         destination: String,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::KVRename {
+        self.record(Operation::KVRename {
             source,
             destination,
-        };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        })
+        .await
     }
 
     /// Log a Hash SET operation
@@ -137,36 +129,12 @@ impl PersistenceLayer {
         field: String,
         value: Vec<u8>,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::HashSet { key, field, value };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::HashSet { key, field, value }).await
     }
 
     /// Log a Hash DELETE operation
     pub async fn log_hash_del(&self, key: String, fields: Vec<String>) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::HashDel { key, fields };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::HashDel { key, fields }).await
     }
 
     /// Log a Hash INCREMENT operation
@@ -176,23 +144,12 @@ impl PersistenceLayer {
         field: String,
         increment: i64,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::HashIncrBy {
+        self.record(Operation::HashIncrBy {
             key,
             field,
             increment,
-        };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        })
+        .await
     }
 
     /// Log a Hash INCREMENT BY FLOAT operation
@@ -202,23 +159,12 @@ impl PersistenceLayer {
         field: String,
         increment: f64,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::HashIncrByFloat {
+        self.record(Operation::HashIncrByFloat {
             key,
             field,
             increment,
-        };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        })
+        .await
     }
 
     /// Log a List PUSH operation
@@ -228,19 +174,7 @@ impl PersistenceLayer {
         values: Vec<Vec<u8>>,
         left: bool,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ListPush { key, values, left };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::ListPush { key, values, left }).await
     }
 
     /// Log a List POP operation
@@ -250,19 +184,7 @@ impl PersistenceLayer {
         count: usize,
         left: bool,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ListPop { key, count, left };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::ListPop { key, count, left }).await
     }
 
     /// Log a List SET operation
@@ -272,19 +194,7 @@ impl PersistenceLayer {
         index: i64,
         value: Vec<u8>,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ListSet { key, index, value };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::ListSet { key, index, value }).await
     }
 
     /// Log a List TRIM operation
@@ -294,19 +204,7 @@ impl PersistenceLayer {
         start: i64,
         stop: i64,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ListTrim { key, start, stop };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::ListTrim { key, start, stop }).await
     }
 
     /// Log a List REMOVE operation
@@ -316,19 +214,7 @@ impl PersistenceLayer {
         count: i64,
         value: Vec<u8>,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ListRem { key, count, value };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::ListRem { key, count, value }).await
     }
 
     /// Log a List INSERT operation
@@ -339,24 +225,13 @@ impl PersistenceLayer {
         pivot: Vec<u8>,
         value: Vec<u8>,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ListInsert {
+        self.record(Operation::ListInsert {
             key,
             before,
             pivot,
             value,
-        };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        })
+        .await
     }
 
     /// Log a List RPOPLPUSH operation
@@ -365,22 +240,11 @@ impl PersistenceLayer {
         source: String,
         destination: String,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ListRpoplpush {
+        self.record(Operation::ListRpoplpush {
             source,
             destination,
-        };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        })
+        .await
     }
 
     /// Log a Queue PUBLISH operation
@@ -389,19 +253,8 @@ impl PersistenceLayer {
         queue: String,
         message: crate::core::queue::QueueMessage,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::QueuePublish { queue, message };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::QueuePublish { queue, message })
+            .await
     }
 
     /// Log a Queue ACK operation
@@ -410,16 +263,7 @@ impl PersistenceLayer {
         queue: String,
         message_id: String,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::QueueAck { queue, message_id };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        Ok(())
+        self.record(Operation::QueueAck { queue, message_id }).await
     }
 
     /// Log a Queue NACK operation
@@ -429,20 +273,12 @@ impl PersistenceLayer {
         message_id: String,
         requeue: bool,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::QueueNack {
+        self.record(Operation::QueueNack {
             queue,
             message_id,
             requeue,
-        };
-
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        Ok(())
+        })
+        .await
     }
 
     /// Stream publishes are intentionally NOT written to the KV WAL.
@@ -491,7 +327,8 @@ impl PersistenceLayer {
         if should_snapshot {
             info!("Creating periodic snapshot");
 
-            let wal_offset = self.wal.current_offset();
+            // A WAL-less layer (persistence disabled) has no offset to record.
+            let wal_offset = self.wal.as_ref().map(|w| w.current_offset()).unwrap_or(0);
 
             self.snapshot_mgr
                 .create_snapshot(
@@ -556,18 +393,7 @@ impl PersistenceLayer {
         key: String,
         members: Vec<Vec<u8>>,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::SetAdd { key, members };
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::SetAdd { key, members }).await
     }
 
     /// Log a Set REMOVE operation (SREM)
@@ -576,18 +402,7 @@ impl PersistenceLayer {
         key: String,
         members: Vec<Vec<u8>>,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::SetRem { key, members };
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::SetRem { key, members }).await
     }
 
     /// Log a Set MOVE operation (SMOVE)
@@ -597,22 +412,12 @@ impl PersistenceLayer {
         destination: String,
         member: Vec<u8>,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::SetMove {
+        self.record(Operation::SetMove {
             source,
             destination,
             member,
-        };
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        })
+        .await
     }
 
     /// Log a Set INTER STORE operation (SINTERSTORE)
@@ -621,18 +426,8 @@ impl PersistenceLayer {
         destination: String,
         keys: Vec<String>,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::SetInterStore { destination, keys };
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::SetInterStore { destination, keys })
+            .await
     }
 
     /// Log a Set UNION STORE operation (SUNIONSTORE)
@@ -641,18 +436,8 @@ impl PersistenceLayer {
         destination: String,
         keys: Vec<String>,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::SetUnionStore { destination, keys };
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::SetUnionStore { destination, keys })
+            .await
     }
 
     /// Log a Set DIFF STORE operation (SDIFFSTORE)
@@ -661,18 +446,8 @@ impl PersistenceLayer {
         destination: String,
         keys: Vec<String>,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::SetDiffStore { destination, keys };
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::SetDiffStore { destination, keys })
+            .await
     }
 
     /// Log a Sorted Set ADD operation (ZADD)
@@ -687,11 +462,7 @@ impl PersistenceLayer {
         gt: bool,
         lt: bool,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ZAdd {
+        self.record(Operation::ZAdd {
             key,
             member,
             score,
@@ -699,30 +470,13 @@ impl PersistenceLayer {
             xx,
             gt,
             lt,
-        };
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        })
+        .await
     }
 
     /// Log a Sorted Set REMOVE operation (ZREM)
     pub async fn log_zrem(&self, key: String, members: Vec<Vec<u8>>) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ZRem { key, members };
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::ZRem { key, members }).await
     }
 
     /// Log a Sorted Set INCREMENT BY operation (ZINCRBY)
@@ -732,22 +486,12 @@ impl PersistenceLayer {
         member: Vec<u8>,
         increment: f64,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ZIncrBy {
+        self.record(Operation::ZIncrBy {
             key,
             member,
             increment,
-        };
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        })
+        .await
     }
 
     /// Log a Sorted Set REMOVE RANGE BY RANK operation (ZREMRANGEBYRANK)
@@ -757,18 +501,8 @@ impl PersistenceLayer {
         start: i64,
         stop: i64,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ZRemRangeByRank { key, start, stop };
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::ZRemRangeByRank { key, start, stop })
+            .await
     }
 
     /// Log a Sorted Set REMOVE RANGE BY SCORE operation (ZREMRANGEBYSCORE)
@@ -778,18 +512,8 @@ impl PersistenceLayer {
         min: f64,
         max: f64,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ZRemRangeByScore { key, min, max };
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::ZRemRangeByScore { key, min, max })
+            .await
     }
 
     /// Log a Sorted Set INTER STORE operation (ZINTERSTORE)
@@ -800,23 +524,13 @@ impl PersistenceLayer {
         weights: Option<Vec<f64>>,
         aggregate: String,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ZInterStore {
+        self.record(Operation::ZInterStore {
             destination,
             keys,
             weights,
             aggregate,
-        };
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        })
+        .await
     }
 
     /// Log a Sorted Set UNION STORE operation (ZUNIONSTORE)
@@ -827,23 +541,13 @@ impl PersistenceLayer {
         weights: Option<Vec<f64>>,
         aggregate: String,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ZUnionStore {
+        self.record(Operation::ZUnionStore {
             destination,
             keys,
             weights,
             aggregate,
-        };
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        })
+        .await
     }
 
     /// Log a Sorted Set DIFF STORE operation (ZDIFFSTORE)
@@ -852,18 +556,8 @@ impl PersistenceLayer {
         destination: String,
         keys: Vec<String>,
     ) -> super::types::Result<()> {
-        if !self.config.enabled || !self.config.wal.enabled {
-            return Ok(());
-        }
-
-        let operation = Operation::ZDiffStore { destination, keys };
-        self.maybe_replicate(&operation);
-        self.wal.append(operation).await?;
-
-        let mut ops = self.operations_since_snapshot.write();
-        *ops += 1;
-
-        Ok(())
+        self.record(Operation::ZDiffStore { destination, keys })
+            .await
     }
 
     /// No explicit flush needed with AsyncWAL (group commit handles it)

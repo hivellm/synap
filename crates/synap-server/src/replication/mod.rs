@@ -28,5 +28,18 @@ pub use types::{
     NodeRole, ReplicationCommand, ReplicationError, ReplicationResult, ReplicationStats,
 };
 
+use std::sync::Arc;
+
+/// A live handle to this node's replication role, stored in `AppState` so INFO
+/// and metrics can report real replication status — role, connected replicas,
+/// offset, and lag — instead of hardcoded placeholders (phase6j item 1.4).
+#[derive(Clone)]
+pub enum ReplicationHandle {
+    /// This node accepts writes and fans them out to replicas.
+    Master(Arc<MasterNode>),
+    /// This node is read-only and applies operations streamed from a master.
+    Replica(Arc<ReplicaNode>),
+}
+
 #[cfg(test)]
 mod tests;

@@ -70,6 +70,7 @@ async fn spawn_test_server() -> (String, tokio::sync::oneshot::Sender<()>) {
         hub_client: None,
         user_manager: None,
         require_auth: false,
+        replication: None,
     };
 
     let user_manager = Arc::new(UserManager::new());

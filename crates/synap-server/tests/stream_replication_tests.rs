@@ -66,9 +66,18 @@ async fn create_stream_replica(
     let kv = Arc::new(KVStore::new(KVConfig::default()));
     let stream_mgr = Arc::new(StreamManager::new(StreamConfig::default()));
 
-    let replica = ReplicaNode::new(config, Arc::clone(&kv), Some(Arc::clone(&stream_mgr)))
-        .await
-        .unwrap();
+    let replica = ReplicaNode::new(
+        config,
+        Arc::clone(&kv),
+        Some(Arc::clone(&stream_mgr)),
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     sleep(Duration::from_millis(50)).await;
 

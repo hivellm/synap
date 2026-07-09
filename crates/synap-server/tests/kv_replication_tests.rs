@@ -50,7 +50,7 @@ async fn create_kv_replica(master_addr: std::net::SocketAddr) -> (Arc<ReplicaNod
     };
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let replica = ReplicaNode::new(config, Arc::clone(&kv), None)
+    let replica = ReplicaNode::new(config, Arc::clone(&kv), None, None, None, None, None, None)
         .await
         .unwrap();
 

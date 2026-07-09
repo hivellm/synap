@@ -57,6 +57,7 @@ fn make_state() -> AppState {
         hub_client: None,
         user_manager: None,
         require_auth: false,
+        replication: None,
     }
 }
 

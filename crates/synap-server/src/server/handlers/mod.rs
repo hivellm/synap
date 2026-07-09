@@ -91,6 +91,9 @@ pub struct AppState {
     pub user_manager: Option<Arc<crate::auth::UserManager>>,
     /// When true, the binary protocols reject commands until a successful AUTH.
     pub require_auth: bool,
+    /// Live replication role handle, so INFO/metrics report real status. `None`
+    /// when replication is disabled (phase6j item 1.4).
+    pub replication: Option<crate::replication::ReplicationHandle>,
 }
 
 // Request/Response types for REST API

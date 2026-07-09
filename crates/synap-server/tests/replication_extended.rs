@@ -107,7 +107,9 @@ async fn test_replica_stats() {
     config.auto_reconnect = false;
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let replica = ReplicaNode::new(config, kv, None).await.unwrap();
+    let replica = ReplicaNode::new(config, kv, None, None, None, None, None, None)
+        .await
+        .unwrap();
 
     let stats = replica.stats().await;
     assert_eq!(stats.replica_offset, 0);
@@ -125,7 +127,9 @@ async fn test_replica_lag_calculation() {
     config.auto_reconnect = false;
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let replica = ReplicaNode::new(config, kv, None).await.unwrap();
+    let replica = ReplicaNode::new(config, kv, None, None, None, None, None, None)
+        .await
+        .unwrap();
 
     // Initially no lag
     assert_eq!(replica.lag(), 0);

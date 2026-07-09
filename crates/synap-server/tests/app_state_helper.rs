@@ -63,5 +63,6 @@ pub fn create_test_app_state_with_stores(
         hub_client: None,
         user_manager: None,
         require_auth: false,
+        replication: None,
     }
 }

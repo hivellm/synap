@@ -2,8 +2,9 @@ use super::config::ReplicationConfig;
 use super::types::{
     ReplicationCommand, ReplicationError, ReplicationOperation, ReplicationResult, ReplicationStats,
 };
-use crate::core::{KVStore, StreamManager};
-use crate::persistence::types::Operation;
+use crate::core::{
+    HashStore, KVStore, ListStore, QueueManager, SetStore, SortedSetStore, StreamManager,
+};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -25,6 +26,13 @@ pub struct ReplicaNode {
     config: ReplicationConfig,
     kv_store: Arc<KVStore>,
     stream_manager: Option<Arc<StreamManager>>,
+    // All datatype stores, so a replica converges to the master for every
+    // datatype rather than only KV + stream (audit M-005 completion, phase6j).
+    hash_store: Option<Arc<HashStore>>,
+    list_store: Option<Arc<ListStore>>,
+    set_store: Option<Arc<SetStore>>,
+    sorted_set_store: Option<Arc<SortedSetStore>>,
+    queue_manager: Option<Arc<QueueManager>>,
 
     /// Current offset (last applied operation)
     current_offset: Arc<AtomicU64>,
@@ -44,10 +52,16 @@ pub struct ReplicaNode {
 
 impl ReplicaNode {
     /// Create a new replica node
+    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: ReplicationConfig,
         kv_store: Arc<KVStore>,
         stream_manager: Option<Arc<StreamManager>>,
+        hash_store: Option<Arc<HashStore>>,
+        list_store: Option<Arc<ListStore>>,
+        set_store: Option<Arc<SetStore>>,
+        sorted_set_store: Option<Arc<SortedSetStore>>,
+        queue_manager: Option<Arc<QueueManager>>,
     ) -> ReplicationResult<Arc<Self>> {
         if !config.is_replica() {
             return Err(ReplicationError::NotReplica);
@@ -62,6 +76,11 @@ impl ReplicaNode {
             config,
             kv_store,
             stream_manager,
+            hash_store,
+            list_store,
+            set_store,
+            sorted_set_store,
+            queue_manager,
             current_offset: Arc::new(AtomicU64::new(0)),
             master_offset: Arc::new(AtomicU64::new(0)),
             last_heartbeat: Arc::new(AtomicU64::new(0)),
@@ -285,34 +304,25 @@ impl ReplicaNode {
             // Continue anyway (idempotent operations)
         }
 
-        // Apply operation based on type
-        match &op.operation {
-            Operation::KVSet { key, value, ttl } => {
-                let _ = self.kv_store.set(key.clone(), value.clone(), *ttl).await; // S-12
-            }
-            Operation::KVDel { keys } => {
-                let _ = self.kv_store.mdel(keys).await;
-            }
-            Operation::StreamPublish {
-                room,
-                event_type,
-                payload,
-            } => {
-                if let Some(sm) = &self.stream_manager {
-                    // Idempotent room creation (synap#165): never errors
-                    // when the room already exists, so we don't need to
-                    // discard a spurious "already exists" Err on every
-                    // subsequent replication of the same room.
-                    let _ = sm.get_or_create_room(room).await;
-                    let _ = sm.publish(room, event_type, payload.clone()).await;
-                } else {
-                    debug!("Skipping stream operation (no stream manager)");
-                }
-            }
-            _ => {
-                // Other operations (Queue, etc.) would be handled here
-                debug!("Skipping unsupported operation");
-            }
+        // Apply via the shared applier so the replica converges to the master
+        // for EVERY datatype, not just KV + stream (audit M-005 completion,
+        // phase6j). Streams are applied on the replica (Some(stream_manager)).
+        if let Err(e) = crate::persistence::apply::apply_operation(
+            op.operation.clone(),
+            &self.kv_store,
+            self.hash_store.as_deref(),
+            self.list_store.as_deref(),
+            self.set_store.as_deref(),
+            self.sorted_set_store.as_deref(),
+            self.queue_manager.as_deref(),
+            self.stream_manager.as_deref(),
+        )
+        .await
+        {
+            warn!(
+                "Failed to apply replicated operation at offset {}: {}",
+                op.offset, e
+            );
         }
 
         // Update offset
@@ -389,6 +399,7 @@ impl ReplicaNode {
 mod tests {
     use super::*;
     use crate::core::KVConfig;
+    use crate::persistence::types::Operation;
 
     #[tokio::test]
     async fn test_replica_initialization() {
@@ -399,7 +410,7 @@ mod tests {
         config.auto_reconnect = false; // Don't actually connect in test
 
         let kv = Arc::new(KVStore::new(KVConfig::default()));
-        let replica = ReplicaNode::new(config, kv, None).await;
+        let replica = ReplicaNode::new(config, kv, None, None, None, None, None, None).await;
 
         assert!(replica.is_ok());
     }
@@ -413,7 +424,9 @@ mod tests {
         config.auto_reconnect = false;
 
         let kv = Arc::new(KVStore::new(KVConfig::default()));
-        let replica = ReplicaNode::new(config, kv.clone(), None).await.unwrap();
+        let replica = ReplicaNode::new(config, kv.clone(), None, None, None, None, None, None)
+            .await
+            .unwrap();
 
         // Apply SET operation
         let op = ReplicationOperation {

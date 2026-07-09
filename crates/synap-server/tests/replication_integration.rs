@@ -60,7 +60,7 @@ async fn create_replica(
     config.reconnect_delay_ms = 100; // Fast reconnect for testing
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let replica = ReplicaNode::new(config, Arc::clone(&kv), None)
+    let replica = ReplicaNode::new(config, Arc::clone(&kv), None, None, None, None, None, None)
         .await
         .unwrap();
 

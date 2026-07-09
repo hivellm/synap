@@ -1,3 +1,4 @@
+pub mod apply;
 pub mod layer;
 pub mod queue_persistence;
 pub mod recovery;

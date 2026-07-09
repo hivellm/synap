@@ -64,6 +64,7 @@ async fn spawn_test_server() -> String {
         hub_client: None,
         user_manager: None,
         require_auth: false,
+        replication: None,
     };
     let user_manager = Arc::new(UserManager::new());
     let api_key_manager = Arc::new(ApiKeyManager::new());

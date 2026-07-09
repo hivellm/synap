@@ -77,6 +77,7 @@ async fn spawn_test_server_with_auth(
         hub_client: None,
         user_manager: None,
         require_auth: false,
+        replication: None,
     };
 
     // Create user manager and API key manager

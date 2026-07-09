@@ -246,6 +246,7 @@ mod tests {
             hub_client: None,
             user_manager: None,
             require_auth: false,
+            replication: None,
         }
     }
 

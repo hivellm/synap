@@ -67,9 +67,18 @@ async fn test_replica_initialization() {
     replica_config.auto_reconnect = false; // Don't actually connect
 
     let replica_kv = Arc::new(KVStore::new(KVConfig::default()));
-    let replica = ReplicaNode::new(replica_config, replica_kv, None)
-        .await
-        .unwrap();
+    let replica = ReplicaNode::new(
+        replica_config,
+        replica_kv,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert!(!replica.is_connected());
     assert_eq!(replica.current_offset(), 0);

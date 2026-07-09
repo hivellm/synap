@@ -247,17 +247,61 @@ pub struct ReplicationInfo {
     pub repl_backlog_active: u32,
     #[serde(rename = "repl_backlog_size")]
     pub repl_backlog_size: usize,
+    /// Replica-only: link state to the master ("up"/"down"). Omitted for a master.
+    #[serde(rename = "master_link_status", skip_serializing_if = "Option::is_none")]
+    pub master_link_status: Option<String>,
+    /// Replica-only: operations this replica is behind the master.
+    #[serde(rename = "slave_repl_lag", skip_serializing_if = "Option::is_none")]
+    pub slave_repl_lag: Option<u64>,
 }
 
 impl ReplicationInfo {
-    /// Collect replication information (horizontally scaled in future)
-    pub async fn collect() -> Self {
-        Self {
-            role: "master".to_string(),
-            connected_slaves: 0,
-            master_repl_offset: 0,
-            repl_backlog_active: 0,
-            repl_backlog_size: 0,
+    /// Collect replication information from the live replication handle.
+    ///
+    /// With no handle (replication disabled) the node reports as a standalone
+    /// master with no replicas. A master reports its connected replica count and
+    /// replication-log offset; a replica reports its link status, applied offset,
+    /// and lag behind the master (phase6j item 1.4).
+    pub async fn collect(handle: Option<&crate::replication::ReplicationHandle>) -> Self {
+        use crate::replication::ReplicationHandle;
+
+        match handle {
+            Some(ReplicationHandle::Master(master)) => {
+                let slaves = master.list_replicas().len() as u32;
+                let offset = master.replication_offset();
+                Self {
+                    role: "master".to_string(),
+                    connected_slaves: slaves,
+                    master_repl_offset: offset,
+                    repl_backlog_active: u32::from(slaves > 0),
+                    repl_backlog_size: offset as usize,
+                    master_link_status: None,
+                    slave_repl_lag: None,
+                }
+            }
+            Some(ReplicationHandle::Replica(replica)) => {
+                let stats = replica.stats().await;
+                Self {
+                    role: "slave".to_string(),
+                    connected_slaves: 0,
+                    master_repl_offset: stats.replica_offset,
+                    repl_backlog_active: u32::from(stats.connected),
+                    repl_backlog_size: stats.replica_offset as usize,
+                    master_link_status: Some(
+                        if stats.connected { "up" } else { "down" }.to_string(),
+                    ),
+                    slave_repl_lag: Some(stats.lag_operations),
+                }
+            }
+            None => Self {
+                role: "master".to_string(),
+                connected_slaves: 0,
+                master_repl_offset: 0,
+                repl_backlog_active: 0,
+                repl_backlog_size: 0,
+                master_link_status: None,
+                slave_repl_lag: None,
+            },
         }
     }
 }
