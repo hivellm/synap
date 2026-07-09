@@ -190,7 +190,9 @@ pub async fn pubsub_stats(
     })?;
 
     let stats = pubsub_router.get_stats();
-    Ok(Json(serde_json::to_value(stats).unwrap()))
+    Ok(Json(
+        serde_json::to_value(stats).expect("pubsub stats struct serializes to JSON"),
+    ))
 }
 
 /// GET /pubsub/topics - List all topics
@@ -260,7 +262,9 @@ pub async fn pubsub_topic_info(
         crate::hub::MultiTenant::scope_topic(hub_ctx.as_ref().map(|c| c.user_id()), &topic);
 
     match pubsub_router.get_topic_info(&scoped_topic) {
-        Some(info) => Ok(Json(serde_json::to_value(info).unwrap())),
+        Some(info) => Ok(Json(
+            serde_json::to_value(info).expect("topic info struct serializes to JSON"),
+        )),
         None => Err(Json(serde_json::json!({
             "error": "Topic not found"
         }))),

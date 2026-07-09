@@ -42,7 +42,7 @@ lazy_static! {
         "synap_kv_operations_total",
         "Total number of KV operations by type",
         &["operation", "status"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// KV operation latency in seconds
     pub static ref KV_OP_DURATION: HistogramVec = register_histogram_vec!(
@@ -50,21 +50,21 @@ lazy_static! {
         "KV operation latency in seconds",
         &["operation"],
         vec![0.00001, 0.0001, 0.001, 0.01, 0.1, 1.0]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Current number of keys in store
     pub static ref KV_KEYS_TOTAL: IntGaugeVec = register_int_gauge_vec!(
         "synap_kv_keys_total",
         "Current number of keys in KV store",
         &["shard"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Memory usage in bytes
     pub static ref KV_MEMORY_BYTES: IntGaugeVec = register_int_gauge_vec!(
         "synap_kv_memory_bytes",
         "Memory usage of KV store in bytes",
         &["type"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     // ============================================================================
     // Queue Metrics
@@ -75,14 +75,14 @@ lazy_static! {
         "synap_queue_operations_total",
         "Total number of queue operations",
         &["queue", "operation", "status"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Queue depth (pending messages)
     pub static ref QUEUE_DEPTH: IntGaugeVec = register_int_gauge_vec!(
         "synap_queue_depth",
         "Number of pending messages in queue",
         &["queue"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Queue operation latency
     pub static ref QUEUE_OP_DURATION: HistogramVec = register_histogram_vec!(
@@ -90,14 +90,14 @@ lazy_static! {
         "Queue operation latency in seconds",
         &["queue", "operation"],
         vec![0.0001, 0.001, 0.01, 0.1, 1.0, 10.0]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Messages in DLQ
     pub static ref QUEUE_DLQ_TOTAL: IntGaugeVec = register_int_gauge_vec!(
         "synap_queue_dlq_messages",
         "Number of messages in dead letter queue",
         &["queue"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     // ============================================================================
     // Stream Metrics
@@ -108,28 +108,28 @@ lazy_static! {
         "synap_stream_operations_total",
         "Total number of stream operations",
         &["room", "operation", "status"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Stream events published
     pub static ref STREAM_EVENTS_TOTAL: IntCounterVec = register_int_counter_vec!(
         "synap_stream_events_total",
         "Total number of events published to streams",
         &["room", "event_type"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Active subscribers
     pub static ref STREAM_SUBSCRIBERS: IntGaugeVec = register_int_gauge_vec!(
         "synap_stream_subscribers",
         "Number of active subscribers per stream",
         &["room"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Stream buffer size
     pub static ref STREAM_BUFFER_SIZE: IntGaugeVec = register_int_gauge_vec!(
         "synap_stream_buffer_size",
         "Number of events in stream buffer",
         &["room"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     // ============================================================================
     // Pub/Sub Metrics
@@ -140,21 +140,21 @@ lazy_static! {
         "synap_pubsub_operations_total",
         "Total number of pub/sub operations",
         &["operation", "status"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Messages published to topics
     pub static ref PUBSUB_MESSAGES_TOTAL: IntCounterVec = register_int_counter_vec!(
         "synap_pubsub_messages_total",
         "Total messages published to topics",
         &["topic"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Active subscriptions
     pub static ref PUBSUB_SUBSCRIPTIONS: IntGaugeVec = register_int_gauge_vec!(
         "synap_pubsub_subscriptions",
         "Number of active subscriptions",
         &["topic"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     // ============================================================================
     // Replication Metrics
@@ -165,21 +165,21 @@ lazy_static! {
         "synap_replication_lag_operations",
         "Replication lag in number of operations",
         &["replica_id"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Replication throughput
     pub static ref REPL_OPS_TOTAL: IntCounterVec = register_int_counter_vec!(
         "synap_replication_operations_total",
         "Total replication operations",
         &["type", "status"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Bytes transferred in replication
     pub static ref REPL_BYTES_TOTAL: IntCounterVec = register_int_counter_vec!(
         "synap_replication_bytes_total",
         "Total bytes transferred in replication",
         &["direction"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     // ============================================================================
     // HTTP Server Metrics
@@ -190,7 +190,7 @@ lazy_static! {
         "synap_http_requests_total",
         "Total HTTP requests",
         &["method", "path", "status"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// HTTP request duration
     pub static ref HTTP_REQUEST_DURATION: HistogramVec = register_histogram_vec!(
@@ -198,14 +198,14 @@ lazy_static! {
         "HTTP request latency in seconds",
         &["method", "path"],
         vec![0.001, 0.01, 0.1, 1.0, 10.0]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Active connections
     pub static ref HTTP_CONNECTIONS: IntGaugeVec = register_int_gauge_vec!(
         "synap_http_connections",
         "Number of active HTTP connections",
         &["type"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     // ============================================================================
     // RESP3 TCP Protocol Metrics
@@ -216,7 +216,7 @@ lazy_static! {
         "synap_resp3_commands_total",
         "Total RESP3 commands processed",
         &["command", "status"]  // status: ok | err
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// RESP3 command latency from parse-complete to response-sent.
     pub static ref RESP3_COMMAND_DURATION: HistogramVec = register_histogram_vec!(
@@ -224,28 +224,28 @@ lazy_static! {
         "RESP3 command dispatch latency in seconds",
         &["command"],
         PROTOCOL_LATENCY_BUCKETS.to_vec()
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Currently open RESP3 TCP connections.
     pub static ref RESP3_CONNECTIONS: IntGaugeVec = register_int_gauge_vec!(
         "synap_resp3_connections",
         "Active RESP3 TCP connections",
         &["state"]  // state: active
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Bytes received from RESP3 clients.
     pub static ref RESP3_BYTES_READ: IntCounterVec = register_int_counter_vec!(
         "synap_resp3_bytes_read_total",
         "Total bytes read from RESP3 clients",
         &[]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Bytes sent to RESP3 clients.
     pub static ref RESP3_BYTES_WRITTEN: IntCounterVec = register_int_counter_vec!(
         "synap_resp3_bytes_written_total",
         "Total bytes written to RESP3 clients",
         &[]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     // ============================================================================
     // SynapRPC Binary Protocol Metrics
@@ -256,7 +256,7 @@ lazy_static! {
         "synap_rpc_commands_total",
         "Total SynapRPC commands processed",
         &["command", "status"]  // status: ok | err
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// SynapRPC command latency from frame-received to frame-sent.
     pub static ref SYNAP_RPC_COMMAND_DURATION: HistogramVec = register_histogram_vec!(
@@ -264,14 +264,14 @@ lazy_static! {
         "SynapRPC command dispatch latency in seconds",
         &["command"],
         PROTOCOL_LATENCY_BUCKETS.to_vec()
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Currently open SynapRPC TCP connections.
     pub static ref SYNAP_RPC_CONNECTIONS: IntGaugeVec = register_int_gauge_vec!(
         "synap_rpc_connections",
         "Active SynapRPC TCP connections",
         &["state"]  // state: active
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Incoming SynapRPC frame sizes in bytes.
     pub static ref SYNAP_RPC_FRAME_SIZE_IN: HistogramVec = register_histogram_vec!(
@@ -279,7 +279,7 @@ lazy_static! {
         "SynapRPC incoming frame sizes in bytes",
         &[],
         vec![64.0, 128.0, 256.0, 512.0, 1024.0, 4096.0, 16384.0, 65536.0]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Outgoing SynapRPC frame sizes in bytes.
     pub static ref SYNAP_RPC_FRAME_SIZE_OUT: HistogramVec = register_histogram_vec!(
@@ -287,7 +287,7 @@ lazy_static! {
         "SynapRPC outgoing frame sizes in bytes",
         &[],
         vec![64.0, 128.0, 256.0, 512.0, 1024.0, 4096.0, 16384.0, 65536.0]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     // ============================================================================
     // System Metrics
@@ -299,7 +299,7 @@ lazy_static! {
         "synap_process_memory_bytes",
         "Memory usage of the Synap process in bytes (rss/virtual)",
         &["type"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// CPU usage of the Synap process as a percentage (100 = one full core).
     /// `core`: "process".  Populated from a per-process sampler, NOT host load.
@@ -307,7 +307,7 @@ lazy_static! {
         "synap_process_cpu_usage_percent",
         "CPU usage of the Synap process as a percentage (100 = one core)",
         &["core"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     // ============================================================================
     // Host Metrics (whole machine — distinct from the per-process gauges above)
@@ -318,14 +318,14 @@ lazy_static! {
         "synap_host_memory_bytes",
         "Host machine memory in bytes (used/total)",
         &["type"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Host load average * 100. `window`: "1min" | "5min" | "15min".
     pub static ref HOST_LOAD_AVERAGE: IntGaugeVec = register_int_gauge_vec!(
         "synap_host_load_average",
         "Host load average multiplied by 100 (1min/5min/15min)",
         &["window"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     // ============================================================================
     // Broker State Gauges (populated live on each /metrics scrape)
@@ -336,42 +336,42 @@ lazy_static! {
         "synap_stream_last_offset",
         "Last published offset per stream/room",
         &["room"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Number of events currently buffered in a partition.
     pub static ref PARTITION_MESSAGES: IntGaugeVec = register_int_gauge_vec!(
         "synap_partition_messages",
         "Number of events currently buffered per topic partition",
         &["topic", "partition"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// High-water-mark (last published offset) per topic partition.
     pub static ref PARTITION_END_OFFSET: IntGaugeVec = register_int_gauge_vec!(
         "synap_partition_end_offset",
         "High-water-mark (last published offset) per topic partition",
         &["topic", "partition"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Active members in a consumer group.
     pub static ref CONSUMER_GROUP_MEMBERS: IntGaugeVec = register_int_gauge_vec!(
         "synap_consumer_group_members",
         "Number of active members per consumer group",
         &["group", "topic"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Last committed (acked) offset per consumer group + partition.
     pub static ref CONSUMER_GROUP_COMMITTED_OFFSET: IntGaugeVec = register_int_gauge_vec!(
         "synap_consumer_group_committed_offset",
         "Last committed (acked) offset per consumer group and partition",
         &["group", "topic", "partition"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 
     /// Consumer lag = partition high-water-mark − committed offset.
     pub static ref CONSUMER_GROUP_LAG: IntGaugeVec = register_int_gauge_vec!(
         "synap_consumer_group_lag",
         "Consumer lag (end offset − committed offset) per group and partition",
         &["group", "topic", "partition"]
-    ).unwrap();
+    ).expect("metric registration uses a static, unique name");
 }
 
 /// Encode all metrics to Prometheus text format
@@ -695,7 +695,7 @@ mod tests {
         record_kv_op("get", "success", 0.001);
         record_kv_op("set", "success", 0.002);
 
-        let metrics = encode_metrics().unwrap();
+        let metrics = encode_metrics().expect("metric registration uses a static, unique name");
         assert!(metrics.contains("synap_kv_operations_total"));
         assert!(metrics.contains("synap_kv_operation_duration_seconds"));
     }
@@ -704,7 +704,7 @@ mod tests {
     fn test_record_queue_op() {
         record_queue_op("test-queue", "publish", "success", 0.005);
 
-        let metrics = encode_metrics().unwrap();
+        let metrics = encode_metrics().expect("metric registration uses a static, unique name");
         assert!(metrics.contains("synap_queue_operations_total"));
     }
 

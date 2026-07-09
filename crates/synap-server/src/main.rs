@@ -13,7 +13,7 @@ use synap_server::{
     PartitionManager, PubSubRouter, QueueManager, ScriptManager, ServerConfig, StreamConfig,
     StreamManager, create_router, init_metrics,
 };
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 #[derive(Parser, Debug)]
 #[command(name = "synap-server")]
@@ -501,7 +501,8 @@ async fn main() -> Result<()> {
 
         // Validate Hub configuration
         config.hub.validate().unwrap_or_else(|e| {
-            panic!("Invalid Hub configuration: {}", e);
+            error!("Invalid Hub configuration: {}", e);
+            std::process::exit(1);
         });
 
         // Initialize HubClient
@@ -542,7 +543,8 @@ async fn main() -> Result<()> {
                 Some(client)
             }
             Err(e) => {
-                panic!("Failed to initialize HubClient: {}", e);
+                error!("Failed to initialize HubClient: {}", e);
+                std::process::exit(1);
             }
         }
     } else {

@@ -54,7 +54,11 @@ impl FailoverManager {
         let master_config = ReplicationConfig {
             enabled: true,
             role: NodeRole::Master,
-            replica_listen_address: Some("0.0.0.0:15501".parse().unwrap()),
+            replica_listen_address: Some(
+                "0.0.0.0:15501"
+                    .parse()
+                    .expect("hardcoded socket address is valid"),
+            ),
             heartbeat_interval_ms: 1000,
             max_lag_ms: 10000,
             ..Default::default()

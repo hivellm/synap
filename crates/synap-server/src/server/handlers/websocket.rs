@@ -322,8 +322,11 @@ pub(super) async fn handle_stream_socket(
                                 }
                             }
 
-                            // Update offset to next expected event
-                            current_offset = events.last().unwrap().offset + 1;
+                            // Update offset to next expected event (events may be
+                            // empty, in which case the offset stays put).
+                            if let Some(last) = events.last() {
+                                current_offset = last.offset + 1;
+                            }
                         }
                     }
                     Err(e) => {
@@ -510,7 +513,7 @@ pub(super) async fn handle_pubsub_socket(
                     "metadata": message.metadata,
                     "timestamp": message.timestamp
                 }))
-                .unwrap();
+                .expect("a json! Value always serializes to a string");
 
                 if ws_sender
                     .send(axum::extract::ws::Message::Text(msg_json.into()))

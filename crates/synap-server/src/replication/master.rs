@@ -84,7 +84,9 @@ impl MasterNode {
         let replicas = Arc::new(RwLock::new(HashMap::new()));
 
         // Spawn listener for replica connections
-        let listen_addr = config.replica_listen_address.unwrap();
+        let listen_addr = config
+            .replica_listen_address
+            .expect("master node is only started with a configured replica_listen_address");
         let replicas_clone = Arc::clone(&replicas);
         let log_clone = Arc::clone(&replication_log);
         let kv_clone = Arc::clone(&kv_store);
@@ -578,7 +580,7 @@ impl MasterNode {
     fn current_timestamp() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs()
     }
 }

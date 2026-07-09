@@ -46,7 +46,7 @@ impl SnapshotManager {
 
         let timestamp = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs();
 
         let filename = format!("snapshot-v{}-{}.bin", SNAPSHOT_VERSION, timestamp);

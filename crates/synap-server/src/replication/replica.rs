@@ -83,7 +83,10 @@ impl ReplicaNode {
 
     /// Main replication loop - connect, sync, and receive updates
     async fn replication_loop(self: Arc<Self>) {
-        let master_addr = self.config.master_address.unwrap();
+        let master_addr = self
+            .config
+            .master_address
+            .expect("replica is only started with a configured master_address");
         let reconnect_delay = Duration::from_millis(self.config.reconnect_delay_ms);
 
         info!(
@@ -377,7 +380,7 @@ impl ReplicaNode {
     fn current_timestamp() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs()
     }
 }

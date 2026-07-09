@@ -23,7 +23,7 @@ impl SlowLogEntry {
             id,
             timestamp: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
+                .unwrap_or_default()
                 .as_secs(),
             duration_us: duration.as_micros() as u64,
             command,

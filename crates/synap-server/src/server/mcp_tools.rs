@@ -71,7 +71,7 @@ fn get_kv_tools() -> Vec<Tool> {
                 "required": ["key"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Get Key-Value".to_string())
@@ -89,7 +89,7 @@ fn get_kv_tools() -> Vec<Tool> {
                 "required": ["key", "value"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Set Key-Value".to_string())
@@ -105,7 +105,7 @@ fn get_kv_tools() -> Vec<Tool> {
                 "required": ["key"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Delete Key".to_string())
@@ -131,7 +131,7 @@ fn get_kv_tools() -> Vec<Tool> {
                 "required": ["key", "value"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Append to String".to_string())
@@ -160,7 +160,7 @@ fn get_kv_tools() -> Vec<Tool> {
                 "required": ["key", "start", "end"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Get String Range".to_string())
@@ -179,7 +179,7 @@ fn get_kv_tools() -> Vec<Tool> {
                 "required": ["key"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Get String Length".to_string())
@@ -201,7 +201,7 @@ fn get_kv_tools() -> Vec<Tool> {
                 "required": ["key"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Get Key Type".to_string())
@@ -222,7 +222,7 @@ fn get_kv_tools() -> Vec<Tool> {
                 "required": ["key"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Check Key Exists".to_string())
@@ -247,7 +247,7 @@ fn get_kv_tools() -> Vec<Tool> {
                 "required": ["source", "destination"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Rename Key".to_string())
@@ -270,7 +270,7 @@ fn get_hash_tools() -> Vec<Tool> {
                 "required": ["key", "field", "value"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Set Hash Field".to_string())
@@ -287,7 +287,7 @@ fn get_hash_tools() -> Vec<Tool> {
                 "required": ["key", "field"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Get Hash Field".to_string())
@@ -303,7 +303,7 @@ fn get_hash_tools() -> Vec<Tool> {
                 "required": ["key"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Get All Hash Fields".to_string())
@@ -327,7 +327,7 @@ fn get_list_tools() -> Vec<Tool> {
                 "required": ["key", "values"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Push to List".to_string())
@@ -345,7 +345,7 @@ fn get_list_tools() -> Vec<Tool> {
                 "required": ["key"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Pop from List".to_string())
@@ -363,7 +363,7 @@ fn get_list_tools() -> Vec<Tool> {
                 "required": ["key"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Get List Range".to_string())
@@ -389,7 +389,7 @@ fn get_set_tools() -> Vec<Tool> {
                 "required": ["key", "members"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Add Set Members".to_string())
@@ -405,7 +405,7 @@ fn get_set_tools() -> Vec<Tool> {
                 "required": ["key"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Get Set Members".to_string())
@@ -425,7 +425,7 @@ fn get_set_tools() -> Vec<Tool> {
                 "required": ["keys"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Set Intersection".to_string())
@@ -448,7 +448,7 @@ fn get_queue_tools() -> Vec<Tool> {
                 "required": ["queue", "message"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Publish to Queue".to_string())
@@ -471,7 +471,7 @@ fn get_sortedset_tools() -> Vec<Tool> {
                 "required": ["key", "member", "score"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Add to Sorted Set".to_string())
@@ -490,7 +490,7 @@ fn get_sortedset_tools() -> Vec<Tool> {
                 "required": ["key"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Get Sorted Set Range".to_string())
@@ -507,7 +507,7 @@ fn get_sortedset_tools() -> Vec<Tool> {
                 "required": ["key", "member"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Get Sorted Set Rank".to_string())
@@ -554,7 +554,7 @@ fn get_transaction_tools() -> Vec<Tool> {
                 }
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Start Transaction".to_string())
@@ -575,7 +575,7 @@ fn get_transaction_tools() -> Vec<Tool> {
                 "required": ["client_id"]
             })
             .as_object()
-            .unwrap()
+            .expect("json! macro always yields an object literal")
             .clone(),
         )
         .with_title("Execute Transaction".to_string())

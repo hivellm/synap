@@ -226,15 +226,21 @@ fn add_rate_limit_headers(
 
             response.headers_mut().insert(
                 "X-RateLimit-Limit",
-                requests_per_second.to_string().parse().unwrap(),
+                requests_per_second
+                    .to_string()
+                    .parse()
+                    .expect("a numeric string is a valid header value"),
             );
             response.headers_mut().insert(
                 "X-RateLimit-Remaining",
-                remaining.to_string().parse().unwrap(),
+                remaining
+                    .to_string()
+                    .parse()
+                    .expect("a numeric string is a valid header value"),
             );
             response.headers_mut().insert(
                 "X-RateLimit-Reset",
-                "1".parse().unwrap(), // Refills every 1 second
+                "1".parse().expect("\"1\" is a valid header value"), // Refills every 1 second
             );
 
             return;
@@ -249,7 +255,7 @@ fn add_rate_limit_headers(
             .requests_per_second
             .to_string()
             .parse()
-            .unwrap(),
+            .expect("a numeric string is a valid header value"),
     );
 }
 

@@ -719,7 +719,10 @@ fn vec_bytes_to_lua(lua: &Lua, values: Vec<Vec<u8>>) -> Result<LuaValue, mlua::E
     match values.len() {
         0 => Ok(LuaValue::Nil),
         1 => {
-            let value = values.into_iter().next().unwrap();
+            let value = values
+                .into_iter()
+                .next()
+                .expect("match arm guarantees exactly one element");
             Ok(LuaValue::String(lua.create_string(value)?))
         }
         _ => {

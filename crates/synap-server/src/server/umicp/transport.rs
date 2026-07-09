@@ -108,7 +108,7 @@ pub async fn umicp_discover_handler(State(state): State<UmicpState>) -> Json<ser
     // Operations are already serializable OperationSchema structs
     let operations_json: Vec<serde_json::Value> = operations
         .iter()
-        .map(|op| serde_json::to_value(op).unwrap())
+        .map(|op| serde_json::to_value(op).expect("OperationSchema serializes to JSON"))
         .collect();
 
     Json(json!({

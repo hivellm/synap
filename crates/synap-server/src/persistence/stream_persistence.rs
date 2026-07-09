@@ -115,7 +115,9 @@ impl StreamPersistence {
                                         event.room.clone(),
                                         BufWriter::with_capacity(64 * 1024, file),
                                     );
-                                    room_writers.get_mut(&event.room).unwrap()
+                                    room_writers
+                                        .get_mut(&event.room)
+                                        .expect("writer for event.room was just inserted above")
                                 }
                                 Err(e) => {
                                     let _ = response_tx.send(Err(e.into()));
@@ -329,7 +331,7 @@ impl StreamPersistence {
     fn current_timestamp() -> u64 {
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
+            .unwrap_or_default()
             .as_secs()
     }
 }
