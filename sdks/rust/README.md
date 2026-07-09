@@ -169,6 +169,30 @@ client.pubsub().subscribe(vec!["news.*"], |msg| async move {
 client.pubsub().publish("news.breaking", serde_json::json!({"title": "Hello"})).await?;
 ```
 
+### Wire types (single source of truth)
+
+The SynapRPC wire types and frame codec are **not** redefined in the SDK. The
+transport layer imports them directly from the [`synap-protocol`](../../crates/synap-protocol)
+crate that the server also uses:
+
+- `synap_protocol::synap_rpc::SynapValue` — the dynamically-typed wire value
+  (`Null`/`Bool`/`Int`/`Float`/`Bytes`/`Str`/`Array`/`Map`), aliased internally as
+  `WireValue`.
+- `synap_protocol::synap_rpc::{Request, Response}` — the request/response frames.
+- `synap_protocol::synap_rpc::codec` — the length-prefixed MessagePack framing.
+
+A server-side change to the wire format therefore reaches the SDK at **compile
+time** instead of drifting silently. These types are crate-internal, so this is
+not part of the SDK's public API — your code keeps using the ergonomic manager
+methods (`client.kv()`, `client.queue()`, …).
+
+**Intentional divergence — client-side response DTOs.** The domain types in
+`synap_sdk::types` (`Message`, `QueueStats`, `Event`, `StreamStats`,
+`PubSubMessage`, `KVStats`, `HyperLogLogStats`) are deliberately *not* shared:
+they are ergonomic client-facing response shapes deserialized from the JSON
+normalization layer (with RESP3 string-or-number coercion), not raw wire frames.
+They are kept in the SDK on purpose.
+
 ### End-to-end test suite
 
 A real-server E2E suite covers all three transports plus cross-transport
