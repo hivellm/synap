@@ -87,8 +87,10 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
     let mut writer = Resp3Writer::new(write_half);
 
     // When auth is required the connection starts unauthenticated and must issue
-    // a successful AUTH before any command is accepted.
+    // a successful AUTH before any command is accepted. `auth_user` holds the
+    // resolved user once authenticated, for per-command ACL (phase6h).
     let mut authenticated = !state.require_auth;
+    let mut auth_user: Option<crate::auth::User> = None;
 
     loop {
         let value = match parse_from_reader(&mut reader).await? {
@@ -146,17 +148,20 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
             };
 
             match creds {
-                Some((user, password)) if check_auth(&state, user, password).await => {
-                    authenticated = true;
-                    writer.write_ok().await?;
-                }
-                Some(_) => {
-                    writer
-                        .write_error(
-                            "WRONGPASS invalid username-password pair or user is disabled.",
-                        )
-                        .await?;
-                }
+                Some((user, password)) => match check_auth(&state, user, password).await {
+                    Some(u) => {
+                        auth_user = Some(u);
+                        authenticated = true;
+                        writer.write_ok().await?;
+                    }
+                    None => {
+                        writer
+                            .write_error(
+                                "WRONGPASS invalid username-password pair or user is disabled.",
+                            )
+                            .await?;
+                    }
+                },
                 None => {
                     writer.write_error("ERR password must be a string").await?;
                 }
@@ -198,6 +203,20 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
             writer.write(&hello_response).await?;
             writer.flush().await?;
             continue;
+        }
+
+        // Per-command ACL (phase6h): destructive/admin commands require an admin
+        // user when auth is enforced. With auth disabled the binary port is
+        // trusted (loopback by default), so no restriction is applied.
+        if state.require_auth && crate::auth::command_requires_admin(&cmd_upper) {
+            let is_admin = auth_user.as_ref().map(|u| u.is_admin).unwrap_or(false);
+            if !is_admin {
+                writer
+                    .write_error("NOPERM this command requires admin privileges")
+                    .await?;
+                writer.flush().await?;
+                continue;
+            }
         }
 
         // ── Dispatch with timing ─────────────────────────────────────────────
@@ -257,9 +276,10 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
 /// Return `true` if the username/password pair authenticates against the
 /// configured user manager. Returns `false` when no user manager is present
 /// (callers only reach this path when `require_auth` is set).
-async fn check_auth(state: &AppState, username: &str, password: &str) -> bool {
+/// Authenticate and return the resolved user on success (for per-command ACL).
+async fn check_auth(state: &AppState, username: &str, password: &str) -> Option<crate::auth::User> {
     match &state.user_manager {
-        Some(um) => um.authenticate(username, password).is_ok(),
-        None => false,
+        Some(um) => um.authenticate(username, password).ok(),
+        None => None,
     }
 }

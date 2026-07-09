@@ -20,7 +20,7 @@ pub use mcp_context::{clear_auth_context, get_auth_context, set_auth_context, wi
 pub use middleware::AuthMiddleware;
 pub use password_validation::{PasswordRequirements, validate_password, validate_password_strict};
 pub use permission_checker::*;
-pub use permissions::{Action, Permission, Role};
+pub use permissions::{Action, Permission, Role, command_requires_admin};
 pub use user::{User, UserManager};
 
 use crate::core::SynapError;

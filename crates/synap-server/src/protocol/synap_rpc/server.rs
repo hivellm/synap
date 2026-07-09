@@ -140,9 +140,11 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
     // Shared state — Arc so each request task can clone it cheaply.
     let state = Arc::new(state);
 
-    // Per-connection auth flag. The read loop is sequential, so AUTH and the
-    // gate check below serialize ahead of the per-request tasks.
+    // Per-connection auth flag + resolved user (for per-command ACL, phase6h).
+    // The read loop is sequential, so AUTH and the gate checks below serialize
+    // ahead of the per-request tasks.
     let mut authenticated = !state.require_auth;
+    let mut auth_user: Option<crate::auth::User> = None;
 
     // Read loop — one task per request for concurrency.
     loop {
@@ -171,12 +173,13 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
                 },
                 _ => None,
             };
-            let ok = matches!(
-                (&creds, &state.user_manager),
-                (Some((u, p)), Some(um)) if um.authenticate(u, p).is_ok()
-            );
-            let response = if ok {
+            let resolved = match (&creds, &state.user_manager) {
+                (Some((u, p)), Some(um)) => um.authenticate(u, p).ok(),
+                _ => None,
+            };
+            let response = if let Some(user) = resolved {
                 authenticated = true;
+                auth_user = Some(user);
                 Response::ok(req.id, SynapValue::Str("OK".into()))
             } else {
                 Response::err(
@@ -193,6 +196,20 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
             let response = Response::err(req.id, "NOAUTH Authentication required.".to_string());
             let _ = tx.send((response, command, 0.0, in_bytes)).await;
             continue;
+        }
+
+        // Per-command ACL (phase6h): destructive/admin commands require an admin
+        // user when auth is enforced. With auth disabled the port is trusted.
+        if state.require_auth && crate::auth::command_requires_admin(&req.command) {
+            let is_admin = auth_user.as_ref().map(|u| u.is_admin).unwrap_or(false);
+            if !is_admin {
+                let response = Response::err(
+                    req.id,
+                    "NOPERM this command requires admin privileges".to_string(),
+                );
+                let _ = tx.send((response, command, 0.0, in_bytes)).await;
+                continue;
+            }
         }
 
         let state = Arc::clone(&state);

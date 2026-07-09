@@ -215,6 +215,55 @@ impl Permission {
     }
 }
 
+/// True if `cmd` is a destructive or administrative command that only an admin
+/// user may run (audit M-003/M-004 ACL refinement, phase6h). Used by the RESP3
+/// and SynapRPC dispatchers to gate these behind admin after authentication —
+/// an authenticated non-admin is denied. `cmd` is matched case-insensitively.
+pub fn command_requires_admin(cmd: &str) -> bool {
+    // Compare upper-cased; callers usually pass an already-upper command.
+    let c = cmd.to_ascii_uppercase();
+    matches!(
+        c.as_str(),
+        // Whole-keyspace / database wipes.
+        "FLUSHALL" | "FLUSHDB" | "SWAPDB"
+        // Server administration / configuration.
+        | "CONFIG" | "SHUTDOWN" | "DEBUG" | "RESET" | "SAVE" | "BGSAVE"
+        | "BGREWRITEAOF" | "LASTSAVE" | "FAILOVER" | "SLAVEOF" | "REPLICAOF"
+        | "ACL" | "MODULE"
+        // Scripting cache management (running scripts is not admin; flushing/
+        // killing the shared cache is).
+        | "SCRIPT.FLUSH" | "SCRIPT.KILL"
+        // Cluster administration.
+        | "CLUSTER"
+    )
+}
+
+#[cfg(test)]
+mod command_acl_tests {
+    use super::command_requires_admin;
+
+    #[test]
+    fn destructive_commands_require_admin() {
+        for c in [
+            "FLUSHALL",
+            "flushdb",
+            "CONFIG",
+            "SHUTDOWN",
+            "SCRIPT.FLUSH",
+            "CLUSTER",
+        ] {
+            assert!(command_requires_admin(c), "{c} should require admin");
+        }
+    }
+
+    #[test]
+    fn ordinary_commands_do_not_require_admin() {
+        for c in ["GET", "SET", "HSET", "LPUSH", "SADD", "PING", "SCRIPT.LOAD"] {
+            assert!(!command_requires_admin(c), "{c} should not require admin");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
