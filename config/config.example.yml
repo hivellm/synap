@@ -1,0 +1,214 @@
+# Synap Server Configuration Example
+# Copy this file to config.yml and adjust as needed
+
+# ============================================================================
+# NETWORK
+# ============================================================================
+
+server:
+  host: "0.0.0.0"
+  port: 15500
+  websocket_enabled: false
+
+# ============================================================================
+# MEMORY MANAGEMENT (Redis-compatible)
+# ============================================================================
+
+kv_store:
+  # Memory limit (Redis maxmemory equivalent)
+  # Common values:
+  #   256   -> 256MB (small cache)
+  #   1024  -> 1GB (medium cache)
+  #   4096  -> 4GB (large cache)
+  #   8192  -> 8GB (very large cache)
+  max_memory_mb: 4096
+  
+  # Eviction policy (Redis maxmemory-policy equivalent)
+  # Options: lru, lfu, ttl, none
+  eviction_policy: "lru"
+  
+  # TTL cleanup frequency
+  ttl_cleanup_interval_ms: 100
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+
+logging:
+  # Log level: trace, debug, info, warn, error
+  level: "info"
+  
+  # Log format: json, pretty
+  format: "json"
+
+# ============================================================================
+# PROTOCOLS
+# ============================================================================
+
+protocols:
+  streamable_http:
+    enabled: true
+    path: "/api/v1/command"
+  
+  rest:
+    enabled: true
+    prefix: "/kv"
+
+# ============================================================================
+# MCP (Model Context Protocol) TOOLS
+# ============================================================================
+
+# Configure which MCP tool categories to expose
+# Note: Cursor has limits on the number of MCP tools it can handle efficiently
+# Default: Only essential tools (KV + Queue = 4 tools total)
+# Maximum: All categories enabled = 16 tools
+
+mcp:
+  # KV Tools (3 tools): synap_kv_get, synap_kv_set, synap_kv_delete
+  # Essential - recommended to keep enabled
+  enable_kv_tools: true
+  
+  # Hash Tools (3 tools): synap_hash_get, synap_hash_set, synap_hash_getall
+  enable_hash_tools: false
+  
+  # List Tools (3 tools): synap_list_push, synap_list_pop, synap_list_range
+  enable_list_tools: false
+  
+  # Set Tools (3 tools): synap_set_add, synap_set_members, synap_set_inter
+  enable_set_tools: false
+  
+  # Queue Tools (1 tool): synap_queue_publish
+  # Essential - recommended to keep enabled
+  enable_queue_tools: true
+  
+  # Sorted Set Tools (3 tools): synap_sortedset_zadd, synap_sortedset_zrange, synap_sortedset_zrank
+  enable_sortedset_tools: false
+
+# Note: All functionality is available via REST API and StreamableHTTP
+# regardless of MCP tool configuration
+
+# ============================================================================
+# AUTHENTICATION & SECURITY
+# ============================================================================
+
+auth:
+  # Enable/disable authentication
+  # Default: false (disabled for development)
+  # IMPORTANT: Authentication is REQUIRED when binding to 0.0.0.0
+  enabled: false
+  
+  # Require authentication for all endpoints
+  # If false, anonymous access is allowed (with limited permissions)
+  # Default: false
+  require_auth: false
+  
+  # Root user configuration (created on first startup)
+  # CHANGE THESE IN PRODUCTION!
+  root:
+    username: "root"
+    password: "root"  # MUST be changed in production!
+    enabled: true     # Can be disabled after initial setup for security
+  
+  # Default TTL for temporary API keys (in seconds)
+  # Default: 3600 (1 hour)
+  default_key_ttl: 3600
+
+# Environment Variables (Docker):
+#   SYNAP_AUTH_ENABLED=true
+#   SYNAP_AUTH_REQUIRE_AUTH=true
+#   SYNAP_AUTH_ROOT_USERNAME=root
+#   SYNAP_AUTH_ROOT_PASSWORD=your_secure_password
+#   SYNAP_AUTH_ROOT_ENABLED=true
+#   SYNAP_AUTH_DEFAULT_KEY_TTL=3600
+
+
+# ============================================================================
+# CLUSTER MODE
+# ============================================================================
+
+# Multi-node cluster configuration for distributed deployments
+# Note: Cluster mode is designed for HiveHub.Cloud SaaS integration
+
+cluster:
+  # Enable cluster mode
+  enabled: false
+
+  # Unique node ID (auto-generated if not specified)
+  # Examples: "node-1", "us-east-1a", "prod-cluster-node-01"
+  node_id: ""
+
+  # Cluster seed nodes for discovery
+  # List at least 2-3 seed nodes for redundancy
+  seeds: []
+  # Example:
+  #   - "node1.example.com:15502"
+  #   - "node2.example.com:15502"
+  #   - "node3.example.com:15502"
+
+  # Cluster communication port (different from HTTP API port)
+  port: 15502
+
+  # Cluster bind address
+  bind_address: "0.0.0.0"
+
+  # Heartbeat interval (milliseconds)
+  heartbeat_interval_ms: 1000
+
+  # Node timeout (seconds)
+  node_timeout_secs: 5
+
+  # Gossip interval (milliseconds)
+  gossip_interval_ms: 500
+
+  # Maximum cluster size (0 = unlimited)
+  max_nodes: 100
+
+# Environment Variables (Docker):
+#   SYNAP_CLUSTER_ENABLED=true
+#   SYNAP_CLUSTER_NODE_ID=node-1
+#   SYNAP_CLUSTER_PORT=15502
+#   SYNAP_CLUSTER_SEEDS=node1:15502,node2:15502,node3:15502
+
+# ============================================================================
+# HIVEHUB.CLOUD INTEGRATION
+# ============================================================================
+
+# SaaS multi-tenancy integration for managed cloud deployments
+# When enabled, provides:
+# - User authentication via Hub access keys
+# - Per-user resource isolation (queues, streams, KV, pub/sub)
+# - Quota management and enforcement
+# - Usage tracking and reporting
+
+hub:
+  # Enable HiveHub integration
+  enabled: false
+
+  # HiveHub API base URL
+  # Production: https://api.hivehub.cloud
+  # Development: http://localhost:8080
+  api_base_url: "https://api.hivehub.cloud"
+
+  # Service API key (identifies this Synap instance to HiveHub)
+  # REQUIRED when hub.enabled = true
+  # IMPORTANT: Keep this secret - do not expose in client applications
+  service_api_key: ""
+
+  # Cache TTL for Hub API responses (seconds)
+  # Caches: user info, quotas, rate limits
+  cache_ttl_secs: 60
+
+  # Usage reporting interval (seconds)
+  # How often to send usage metrics to HiveHub API
+  usage_report_interval_secs: 300
+
+  # Enable verbose Hub logging
+  # Logs authentication, quota checks, usage reporting
+  verbose_logging: false
+
+# Environment Variables (Docker):
+#   SYNAP_HUB_ENABLED=true
+#   SYNAP_HUB_API_BASE_URL=https://api.hivehub.cloud
+#   SYNAP_HUB_SERVICE_API_KEY=your_secret_key_here
+#   SYNAP_HUB_CACHE_TTL_SECS=60
+#   SYNAP_HUB_USAGE_REPORT_INTERVAL_SECS=300

@@ -181,7 +181,7 @@ COPY --from=builder --chown=synap:synap /usr/src/synap/synap-server-binary /usr/
 RUN chmod +x /usr/local/bin/synap-server
 
 # Copy default configuration
-COPY config.yml /app/config.yml
+COPY config/config.yml /app/config.yml
 
 # Fix permissions
 RUN chown -R synap:synap /app
