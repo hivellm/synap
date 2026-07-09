@@ -28,12 +28,16 @@ pub async fn queue_create(
         &queue_name,
     );
 
-    let config = if req.max_depth.is_some() || req.ack_deadline_secs.is_some() {
+    let config = if req.max_depth.is_some()
+        || req.ack_deadline_secs.is_some()
+        || req.prefetch_limit.is_some()
+    {
         Some(crate::core::QueueConfig {
             max_depth: req.max_depth.unwrap_or(100_000),
             ack_deadline_secs: req.ack_deadline_secs.unwrap_or(30),
             default_max_retries: req.default_max_retries.unwrap_or(3),
             default_priority: req.default_priority.unwrap_or(5),
+            prefetch_limit: req.prefetch_limit.unwrap_or(0),
         })
     } else {
         None
@@ -376,17 +380,23 @@ pub(super) async fn handle_queue_create_cmd(
             .get("default_priority")
             .and_then(|d| d.as_u64())
             .map(|d| d as u8);
+        let prefetch_limit = v
+            .get("prefetch_limit")
+            .and_then(|d| d.as_u64())
+            .map(|d| d as usize);
 
         if max_depth.is_some()
             || ack_deadline_secs.is_some()
             || default_max_retries.is_some()
             || default_priority.is_some()
+            || prefetch_limit.is_some()
         {
             Some(crate::core::QueueConfig {
                 max_depth: max_depth.unwrap_or(100_000),
                 ack_deadline_secs: ack_deadline_secs.unwrap_or(30),
                 default_max_retries: default_max_retries.unwrap_or(3),
                 default_priority: default_priority.unwrap_or(5),
+                prefetch_limit: prefetch_limit.unwrap_or(0),
             })
         } else {
             None

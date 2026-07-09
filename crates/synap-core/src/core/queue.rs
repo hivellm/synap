@@ -122,6 +122,13 @@ pub struct QueueConfig {
     pub default_max_retries: u32,
     /// Default priority
     pub default_priority: u8,
+    /// Per-consumer prefetch limit (QoS): the maximum number of unacked
+    /// messages a single consumer may hold at once. A consumer already at its
+    /// limit is not handed more messages until it acks, which also yields fair
+    /// dispatch — those messages flow to other consumers instead. `0` means
+    /// unlimited (default; preserves the previous unthrottled behavior).
+    #[serde(default)]
+    pub prefetch_limit: usize,
 }
 
 impl Default for QueueConfig {
@@ -131,6 +138,7 @@ impl Default for QueueConfig {
             ack_deadline_secs: 30,
             default_max_retries: 3,
             default_priority: 5,
+            prefetch_limit: 0,
         }
     }
 }
@@ -219,6 +227,21 @@ impl Queue {
 
     /// Consume message from queue
     fn consume(&mut self, consumer_id: ConsumerId) -> Option<QueueMessage> {
+        // Enforce per-consumer prefetch/QoS: a consumer already holding its limit
+        // of unacked messages is throttled until it acks. This also produces fair
+        // dispatch — while one consumer is at its limit, the pending messages are
+        // available to other consumers instead of piling onto the fast one.
+        if self.config.prefetch_limit > 0 {
+            let in_flight = self
+                .active_consumers
+                .get(&consumer_id)
+                .copied()
+                .unwrap_or(0) as usize;
+            if in_flight >= self.config.prefetch_limit {
+                return None;
+            }
+        }
+
         if let Some(message_arc) = self.messages.pop_front() {
             let message_id = message_arc.id.clone();
 
@@ -784,6 +807,55 @@ mod tests {
         assert_eq!(manager.stats("q").await.unwrap().consumers, 1);
         manager.ack("q", &b.id).await.unwrap();
         assert_eq!(manager.stats("q").await.unwrap().consumers, 0);
+    }
+
+    // ============ PREFETCH / FAIR-DISPATCH TESTS (M-013, phase6f 1.4/1.5) ============
+
+    #[tokio::test]
+    async fn test_queue_prefetch_throttles_and_dispatches_fairly() {
+        let cfg = QueueConfig {
+            prefetch_limit: 1,
+            ..QueueConfig::default()
+        };
+        let manager = QueueManager::new(cfg);
+        manager.create_queue("q", None).await.unwrap();
+        for i in 0..3u8 {
+            manager.publish("q", vec![i], None, None).await.unwrap();
+        }
+
+        // c1 pulls one message and then hits its prefetch limit.
+        let m1 = manager.consume("q", "c1").await.unwrap();
+        assert!(m1.is_some());
+        assert!(
+            manager.consume("q", "c1").await.unwrap().is_none(),
+            "c1 at prefetch=1 must be throttled until it acks"
+        );
+
+        // Fair dispatch: c2 can still pull while c1 is throttled.
+        let m2 = manager.consume("q", "c2").await.unwrap();
+        assert!(m2.is_some());
+
+        // After c1 acks, it may pull again.
+        manager.ack("q", &m1.unwrap().id).await.unwrap();
+        assert!(manager.consume("q", "c1").await.unwrap().is_some());
+
+        // Two consumers each hold one in-flight message.
+        assert_eq!(manager.stats("q").await.unwrap().consumers, 2);
+        assert_eq!(manager.stats("q").await.unwrap().depth, 0);
+    }
+
+    #[tokio::test]
+    async fn test_queue_prefetch_zero_is_unlimited() {
+        // Default prefetch_limit = 0 preserves unthrottled pull behavior.
+        let manager = QueueManager::new(QueueConfig::default());
+        manager.create_queue("q", None).await.unwrap();
+        for i in 0..5u8 {
+            manager.publish("q", vec![i], None, None).await.unwrap();
+        }
+        for _ in 0..5 {
+            assert!(manager.consume("q", "c1").await.unwrap().is_some());
+        }
+        assert_eq!(manager.stats("q").await.unwrap().consumers, 1);
     }
 
     #[tokio::test]

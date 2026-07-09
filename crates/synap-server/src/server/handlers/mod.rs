@@ -232,6 +232,7 @@ pub struct CreateQueueRequest {
     pub ack_deadline_secs: Option<u64>,
     pub default_max_retries: Option<u32>,
     pub default_priority: Option<u8>,
+    pub prefetch_limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]

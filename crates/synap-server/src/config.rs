@@ -64,6 +64,9 @@ pub struct QueueSystemConfig {
     pub ack_deadline_secs: u64,
     pub default_max_retries: u32,
     pub default_priority: u8,
+    /// Per-consumer prefetch limit (QoS). 0 = unlimited (default).
+    #[serde(default)]
+    pub prefetch_limit: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -297,6 +300,7 @@ impl Default for ServerConfig {
                 ack_deadline_secs: 30,
                 default_max_retries: 3,
                 default_priority: 5,
+                prefetch_limit: 0,
             },
             logging: LoggingConfig {
                 level: "info".to_string(),
@@ -357,6 +361,7 @@ impl ServerConfig {
             ack_deadline_secs: self.queue.ack_deadline_secs,
             default_max_retries: self.queue.default_max_retries,
             default_priority: self.queue.default_priority,
+            prefetch_limit: self.queue.prefetch_limit,
         }
     }
 
