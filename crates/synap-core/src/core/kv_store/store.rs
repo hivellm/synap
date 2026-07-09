@@ -32,12 +32,40 @@ pub struct KVStore {
     cluster_topology: Option<Arc<crate::cluster::topology::ClusterTopology>>,
     /// Optional migration manager for cluster mode
     cluster_migration: Option<Arc<crate::cluster::migration::SlotMigrationManager>>,
+    /// Optional shared cross-datatype memory budget (audit M-018). When set, the
+    /// KV eviction/refusal check consults the shared total (KV + collections +
+    /// brokers) and KV deltas are reflected into it, so evicting KV frees the
+    /// budget for every datatype.
+    mem: Option<crate::core::GlobalMemory>,
 }
 
 impl KVStore {
     /// Create a new KV store with 64-way sharding
     pub fn new(config: KVConfig) -> Self {
         Self::new_with_cache(config, None)
+    }
+
+    /// Attach a shared [`GlobalMemory`](crate::core::GlobalMemory) budget so this
+    /// KV store's memory participates in the cross-datatype `maxmemory` limit.
+    /// Registers this store's live byte counter, so its existing per-mutation
+    /// updates flow into the shared total automatically.
+    pub fn with_global_memory(mut self, mem: crate::core::GlobalMemory) -> Self {
+        mem.register(Arc::clone(&self.stats.total_memory_bytes));
+        self.mem = Some(mem);
+        self
+    }
+
+    /// Current effective accounted usage and cap in bytes — the shared budget
+    /// (sum across all datatypes) when attached, otherwise this store's own
+    /// counter and configured limit.
+    fn mem_used_and_max(&self) -> (i64, i64) {
+        match &self.mem {
+            Some(m) => (m.used(), m.max_bytes()),
+            None => (
+                self.stats.total_memory_bytes.load(Ordering::Relaxed),
+                (self.config.max_memory_mb * 1024 * 1024) as i64,
+            ),
+        }
     }
 
     /// Create KV store with optional cache layer
@@ -63,6 +91,7 @@ impl KVStore {
             cache,
             cluster_topology: None,
             cluster_migration: None,
+            mem: None,
         }
     }
 
@@ -94,6 +123,7 @@ impl KVStore {
             cache,
             cluster_topology: Some(topology),
             cluster_migration: migration,
+            mem: None,
         }
     }
 
@@ -197,11 +227,11 @@ impl KVStore {
         let stored = StoredValue::new(value.clone(), ttl_secs);
         let entry_size = self.estimate_entry_size(&key, &stored);
 
-        // Check memory limits — evict if policy allows, error on noeviction.
+        // Check memory limits against the shared cross-datatype budget (audit
+        // M-018) — evict KV if policy allows, error on noeviction.
         {
-            let current_bytes = self.stats.total_memory_bytes.load(Ordering::Relaxed);
-            let max_bytes = (self.config.max_memory_mb * 1024 * 1024) as i64;
-            if current_bytes + entry_size as i64 > max_bytes {
+            let (current_bytes, max_bytes) = self.mem_used_and_max();
+            if max_bytes > 0 && current_bytes + entry_size as i64 > max_bytes {
                 if self.config.eviction_policy == EvictionPolicy::NoEviction {
                     warn!(
                         "Memory limit exceeded (noeviction): {}/{}",
@@ -211,7 +241,7 @@ impl KVStore {
                 }
                 self.evict_until_free(entry_size);
                 // Re-check after eviction.
-                let after = self.stats.total_memory_bytes.load(Ordering::Relaxed);
+                let (after, _) = self.mem_used_and_max();
                 if after + entry_size as i64 > max_bytes {
                     warn!(
                         "Memory limit exceeded after eviction: {}/{}",
@@ -295,9 +325,8 @@ impl KVStore {
         // Estimate size conservatively before building the StoredValue.
         let approx_size = key.len() + value.len() + std::mem::size_of::<StoredValue>();
         {
-            let current_bytes = self.stats.total_memory_bytes.load(Ordering::Relaxed);
-            let max_bytes = (self.config.max_memory_mb * 1024 * 1024) as i64;
-            if current_bytes + approx_size as i64 > max_bytes {
+            let (current_bytes, max_bytes) = self.mem_used_and_max();
+            if max_bytes > 0 && current_bytes + approx_size as i64 > max_bytes {
                 if self.config.eviction_policy == EvictionPolicy::NoEviction {
                     warn!(
                         "Memory limit exceeded (noeviction): {}/{}",
@@ -306,7 +335,7 @@ impl KVStore {
                     return Err(SynapError::MemoryLimitExceeded);
                 }
                 self.evict_until_free(approx_size);
-                let after = self.stats.total_memory_bytes.load(Ordering::Relaxed);
+                let (after, _) = self.mem_used_and_max();
                 if after + approx_size as i64 > max_bytes {
                     warn!(
                         "Memory limit exceeded after eviction: {}/{}",
@@ -641,9 +670,8 @@ impl KVStore {
                 .map(|(k, v)| k.len() + v.len() + std::mem::size_of::<StoredValue>())
                 .sum();
             {
-                let current = self.stats.total_memory_bytes.load(Ordering::Relaxed);
-                let max_bytes = (self.config.max_memory_mb * 1024 * 1024) as i64;
-                if current + group_size as i64 > max_bytes {
+                let (current, max_bytes) = self.mem_used_and_max();
+                if max_bytes > 0 && current + group_size as i64 > max_bytes {
                     if self.config.eviction_policy == EvictionPolicy::NoEviction {
                         return Err(SynapError::MemoryLimitExceeded);
                     }
@@ -987,7 +1015,8 @@ impl KVStore {
         use EvictionPolicy::*;
         let policy = self.config.eviction_policy;
         let sample_size = self.config.eviction_sample_size.max(1);
-        let max_bytes = (self.config.max_memory_mb * 1024 * 1024) as i64;
+        // Free against the shared cross-datatype budget when attached.
+        let (_, max_bytes) = self.mem_used_and_max();
 
         // Iterate shards round-robin until enough memory is freed or no progress made.
         let mut freed = 0i64;
@@ -997,8 +1026,8 @@ impl KVStore {
         'outer: loop {
             let before = freed;
             for shard in self.shards.iter() {
-                let current = self.stats.total_memory_bytes.load(Ordering::Relaxed);
-                if current + needed <= max_bytes {
+                let (current, _) = self.mem_used_and_max();
+                if max_bytes <= 0 || current + needed <= max_bytes {
                     break 'outer;
                 }
 

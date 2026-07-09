@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -345,7 +346,10 @@ impl KVStats {
 #[derive(Debug, Default)]
 pub struct AtomicKVStats {
     pub total_keys: AtomicI64,
-    pub total_memory_bytes: AtomicI64,
+    /// `Arc` so it can be registered with the shared cross-datatype
+    /// [`GlobalMemory`](crate::core::GlobalMemory) budget (audit M-018); derefs
+    /// to `AtomicI64`, so all `fetch_add`/`load`/`store` call sites are unchanged.
+    pub total_memory_bytes: Arc<AtomicI64>,
     pub gets: AtomicU64,
     pub sets: AtomicU64,
     pub dels: AtomicU64,

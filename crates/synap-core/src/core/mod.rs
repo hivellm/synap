@@ -8,6 +8,7 @@ pub mod hyperloglog;
 pub mod key_manager;
 pub mod kv_store;
 pub mod list;
+pub mod memory;
 pub mod partition;
 pub mod pubsub;
 pub mod queue;
@@ -32,6 +33,7 @@ pub use hyperloglog::{HyperLogLogStats, HyperLogLogStore, HyperLogLogValue};
 pub use key_manager::{KeyManager, KeyType};
 pub use kv_store::KVStore;
 pub use list::{ListStats, ListStore, ListValue};
+pub use memory::GlobalMemory;
 pub use partition::{
     CompactionResult, PartitionConfig, PartitionEvent, PartitionManager, PartitionStats,
     PartitionedTopic, RetentionPolicy,
