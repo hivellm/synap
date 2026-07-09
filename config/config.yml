@@ -181,10 +181,11 @@ protocols:
 # ----------------------------------------------------------------------------
 # Enables a raw TCP socket that speaks the Redis RESP3 wire protocol.
 # Any Redis client (redis-cli, redis-rs, ioredis, etc.) can connect directly.
-# Bind to 127.0.0.1 unless you intend to expose it on the network.
+# Safe by default: bound to loopback. Set host to "0.0.0.0" (and enable auth)
+# only when you intend to expose it on the network.
 resp3:
   enabled: true
-  host: "0.0.0.0"
+  host: "127.0.0.1"
   port: 6379
 
 # ----------------------------------------------------------------------------
@@ -193,9 +194,11 @@ resp3:
 # Enables a raw TCP socket using the SynapRPC binary protocol:
 # 4-byte LE length prefix + MessagePack body.
 # Use the Synap SDK clients to connect; not compatible with Redis tooling.
+# Safe by default: bound to loopback. Set host to "0.0.0.0" (and enable auth)
+# only when you intend to expose it on the network.
 synap_rpc:
   enabled: true
-  host: "0.0.0.0"
+  host: "127.0.0.1"
   port: 15501
 
 # ----------------------------------------------------------------------------

@@ -104,6 +104,14 @@ fixed for the 1.0 release.
 - **Maximum concurrent connections on the binary listeners** (audit M-015). RESP3
   and SynapRPC now bound accepted connections with a semaphore and refuse new ones
   at capacity, preventing connection-flood FD/memory exhaustion.
+- **No panics on reachable paths** (stability hardening). Non-test `synap-core`
+  and `synap-server` code no longer calls bare `unwrap()`/`panic!` on paths
+  reachable from input — a reachable panic is a remote-DoS vector. `SystemTime`
+  reads fall back to `0` instead of crashing on a bad clock; fixed-size arrays are
+  built with `std::array::from_fn`; startup config errors log and exit cleanly
+  instead of panicking; every remaining call carries a documented invariant. The
+  13 outstanding `TODO`/`FIXME` markers were replaced with tracked issues
+  ([#230](https://github.com/hivellm/synap/issues/230)–[#233](https://github.com/hivellm/synap/issues/233)).
 
 ## [0.13.0] - 2026-07-01
 
