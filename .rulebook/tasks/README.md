@@ -4,12 +4,6 @@
 
 **Total**: 8 tasks | **Completed**: 0 | **In Progress**: 0 | **Pending**: 8
 
-## phase6g
-
-| Status | Task | Progress | Description |
-|--------|------|----------|-------------|
-| ⬚ | phase6g_v1-memory-accounting | 0/9 | v1 memory accounting |
-
 ## phase6h
 
 | Status | Task | Progress | Description |
@@ -44,6 +38,7 @@
 
 | Status | Task | Progress | Description |
 |--------|------|----------|-------------|
+| ⬚ | phase9_kv-shared-buffer-reads | 0/7 | kv shared buffer reads |
 | ⬚ | phase9_redis-benchmark-live-run | 0/8 | redis benchmark live run |
 | ⬚ | phase9_redis-parity-feature-backlog | 0/8 | redis parity feature backlog |
 
