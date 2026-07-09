@@ -222,4 +222,21 @@ pub async fn update_broker_metrics(state: &AppState) {
             }
         }
     }
+
+    // ── Per-datatype memory toward the shared maxmemory budget (audit M-018).
+    //    The sum is the total the eviction/refusal path uses. ──
+    crate::metrics::set_datatype_memory(
+        "kv",
+        state.kv_store.stats().await.total_memory_bytes.max(0),
+    );
+    crate::metrics::set_datatype_memory("hash", state.hash_store.memory_bytes() as i64);
+    crate::metrics::set_datatype_memory("list", state.list_store.memory_bytes() as i64);
+    crate::metrics::set_datatype_memory("set", state.set_store.memory_bytes() as i64);
+    crate::metrics::set_datatype_memory("sorted_set", state.sorted_set_store.memory_bytes() as i64);
+    if let Some(sm) = &state.stream_manager {
+        crate::metrics::set_datatype_memory("stream", sm.memory_bytes() as i64);
+    }
+    if let Some(qm) = &state.queue_manager {
+        crate::metrics::set_datatype_memory("queue", qm.memory_bytes() as i64);
+    }
 }

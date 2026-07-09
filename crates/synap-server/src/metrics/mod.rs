@@ -66,6 +66,14 @@ lazy_static! {
         &["type"]
     ).expect("metric registration uses a static, unique name");
 
+    /// Accounted memory per datatype toward the shared `maxmemory` budget (audit
+    /// M-018). The sum across datatypes is the total the eviction/refusal path uses.
+    pub static ref DATATYPE_MEMORY_BYTES: IntGaugeVec = register_int_gauge_vec!(
+        "synap_datatype_memory_bytes",
+        "Accounted memory in bytes per datatype toward the shared maxmemory budget",
+        &["datatype"]
+    ).expect("metric registration uses a static, unique name");
+
     // ============================================================================
     // Queue Metrics
     // ============================================================================
@@ -499,6 +507,14 @@ pub fn reset_broker_gauges() {
     CONSUMER_GROUP_LAG.reset();
     QUEUE_DEPTH.reset();
     QUEUE_DLQ_TOTAL.reset();
+    DATATYPE_MEMORY_BYTES.reset();
+}
+
+/// Set the accounted memory (bytes) for one datatype (audit M-018).
+pub fn set_datatype_memory(datatype: &str, bytes: i64) {
+    DATATYPE_MEMORY_BYTES
+        .with_label_values(&[datatype])
+        .set(bytes);
 }
 
 /// Set the live gauges for one stream/room.
