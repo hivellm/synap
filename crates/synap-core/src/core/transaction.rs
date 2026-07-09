@@ -860,4 +860,188 @@ mod tests {
         // Executing without transaction should fail
         assert!(manager.exec(&client_id).await.is_err());
     }
+
+    fn make_manager() -> (
+        Arc<KVStore>,
+        Arc<HashStore>,
+        Arc<ListStore>,
+        Arc<SetStore>,
+        TransactionManager,
+    ) {
+        let kv = Arc::new(KVStore::new(super::super::types::KVConfig::default()));
+        let hash = Arc::new(HashStore::new());
+        let list = Arc::new(ListStore::new());
+        let set = Arc::new(SetStore::new());
+        let zset = Arc::new(SortedSetStore::new());
+        let manager = TransactionManager::new(
+            Arc::clone(&kv),
+            Arc::clone(&hash),
+            Arc::clone(&list),
+            Arc::clone(&set),
+            zset,
+        );
+        (kv, hash, list, set, manager)
+    }
+
+    /// EXEC executes every command family, applies each to its store, and returns
+    /// the exact durable [`CommittedWrite`] effects (audit M-010, phase6k) — with
+    /// INCR resolved to its resulting SET.
+    #[tokio::test]
+    async fn test_exec_returns_committed_writes_for_all_datatypes() {
+        let (kv, hash, list, set, manager) = make_manager();
+        let cid = "cid";
+        manager.multi(cid.to_string()).unwrap();
+
+        let queue = |cmd| {
+            manager
+                .queue_command_if_transaction(cid, cmd)
+                .expect("queue");
+        };
+        queue(TransactionCommand::KVSet {
+            key: "k1".into(),
+            value: b"v1".to_vec(),
+            ttl: None,
+        });
+        queue(TransactionCommand::KVIncr {
+            key: "counter".into(),
+            delta: 5,
+        });
+        queue(TransactionCommand::KVDel {
+            keys: vec!["k1".into()],
+        });
+        queue(TransactionCommand::HashSet {
+            key: "h".into(),
+            field: "f".into(),
+            value: b"hv".to_vec(),
+        });
+        queue(TransactionCommand::HashDel {
+            key: "h".into(),
+            fields: vec!["gone".into()],
+        });
+        queue(TransactionCommand::HashIncrBy {
+            key: "hc".into(),
+            field: "n".into(),
+            delta: 3,
+        });
+        queue(TransactionCommand::ListRPush {
+            key: "l".into(),
+            values: vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()],
+        });
+        queue(TransactionCommand::ListLPop { key: "l".into() });
+        queue(TransactionCommand::ListRPop { key: "l".into() });
+        queue(TransactionCommand::SetAdd {
+            key: "s".into(),
+            members: vec![b"m1".to_vec(), b"m2".to_vec()],
+        });
+        queue(TransactionCommand::SetRem {
+            key: "s".into(),
+            members: vec![b"m1".to_vec()],
+        });
+
+        let (results, writes) = manager.exec(cid).await.unwrap().expect("committed");
+        assert_eq!(results.len(), 11);
+
+        let expected = vec![
+            CommittedWrite::KvSet {
+                key: "k1".into(),
+                value: b"v1".to_vec(),
+                ttl: None,
+            },
+            // INCR resolved to the resulting SET.
+            CommittedWrite::KvSet {
+                key: "counter".into(),
+                value: b"5".to_vec(),
+                ttl: None,
+            },
+            CommittedWrite::KvDel {
+                keys: vec!["k1".into()],
+            },
+            CommittedWrite::HashSet {
+                key: "h".into(),
+                field: "f".into(),
+                value: b"hv".to_vec(),
+            },
+            CommittedWrite::HashDel {
+                key: "h".into(),
+                fields: vec!["gone".into()],
+            },
+            CommittedWrite::HashIncrBy {
+                key: "hc".into(),
+                field: "n".into(),
+                delta: 3,
+            },
+            CommittedWrite::ListPush {
+                key: "l".into(),
+                values: vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()],
+                left: false,
+            },
+            CommittedWrite::ListPop {
+                key: "l".into(),
+                left: true,
+            },
+            CommittedWrite::ListPop {
+                key: "l".into(),
+                left: false,
+            },
+            CommittedWrite::SetAdd {
+                key: "s".into(),
+                members: vec![b"m1".to_vec(), b"m2".to_vec()],
+            },
+            CommittedWrite::SetRem {
+                key: "s".into(),
+                members: vec![b"m1".to_vec()],
+            },
+        ];
+        assert_eq!(writes, expected);
+
+        // Effects actually applied to the stores.
+        assert_eq!(kv.get("k1").await.unwrap(), None); // set then deleted
+        assert_eq!(kv.get("counter").await.unwrap(), Some(b"5".to_vec()));
+        assert_eq!(hash.hget("h", "f").unwrap(), Some(b"hv".to_vec()));
+        assert_eq!(list.lrange("l", 0, -1).unwrap(), vec![b"b".to_vec()]); // a,c popped
+        assert!(set.sismember("s", b"m2".to_vec()).unwrap());
+        assert!(!set.sismember("s", b"m1".to_vec()).unwrap());
+    }
+
+    /// A failing command (LPOP on a missing list) aborts the whole EXEC with an
+    /// error rather than committing a partial transaction.
+    #[tokio::test]
+    async fn test_exec_errors_when_a_command_fails() {
+        let (_kv, _hash, _list, _set, manager) = make_manager();
+        let cid = "cid";
+        manager.multi(cid.to_string()).unwrap();
+        manager
+            .queue_command_if_transaction(
+                cid,
+                TransactionCommand::ListLPop {
+                    key: "missing".into(),
+                },
+            )
+            .unwrap();
+        assert!(manager.exec(cid).await.is_err());
+    }
+
+    /// EXEC aborts (returns None, no writes) when a watched key changed.
+    #[tokio::test]
+    async fn test_exec_aborts_when_watched_key_changed() {
+        let (_kv, _hash, _list, _set, manager) = make_manager();
+        let cid = "cid";
+        manager.multi(cid.to_string()).unwrap();
+        manager.watch(cid, vec!["w".into()]).unwrap();
+        manager
+            .queue_command_if_transaction(
+                cid,
+                TransactionCommand::KVSet {
+                    key: "w".into(),
+                    value: b"x".to_vec(),
+                    ttl: None,
+                },
+            )
+            .unwrap();
+
+        // Simulate a concurrent write bumping the watched key's version.
+        manager.update_key_version("w");
+
+        assert!(manager.exec(cid).await.unwrap().is_none());
+    }
 }

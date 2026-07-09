@@ -645,3 +645,248 @@ impl PersistenceLayer {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{CommittedWrite, KVConfig, QueueConfig};
+    use std::path::PathBuf;
+
+    fn all_committed_writes() -> Vec<CommittedWrite> {
+        vec![
+            CommittedWrite::KvSet {
+                key: "k".into(),
+                value: b"v".to_vec(),
+                ttl: Some(60),
+            },
+            CommittedWrite::KvDel {
+                keys: vec!["k2".into()],
+            },
+            CommittedWrite::HashSet {
+                key: "h".into(),
+                field: "f".into(),
+                value: b"hv".to_vec(),
+            },
+            CommittedWrite::HashDel {
+                key: "h".into(),
+                fields: vec!["f2".into()],
+            },
+            CommittedWrite::HashIncrBy {
+                key: "h".into(),
+                field: "n".into(),
+                delta: 2,
+            },
+            CommittedWrite::ListPush {
+                key: "l".into(),
+                values: vec![b"a".to_vec()],
+                left: true,
+            },
+            CommittedWrite::ListPop {
+                key: "l".into(),
+                left: false,
+            },
+            CommittedWrite::SetAdd {
+                key: "s".into(),
+                members: vec![b"m".to_vec()],
+            },
+            CommittedWrite::SetRem {
+                key: "s".into(),
+                members: vec![b"m".to_vec()],
+            },
+        ]
+    }
+
+    /// Every `log_*` method routes through `record()` (propagate + WAL append).
+    /// Exercises the full delegating surface refactored in phase6j.
+    #[tokio::test]
+    async fn all_log_methods_route_through_record() {
+        let dir = "./target/layer_logall_test";
+        let _ = std::fs::remove_dir_all(dir);
+        std::fs::create_dir_all(format!("{dir}/snap")).unwrap();
+
+        let mut config = PersistenceConfig::default();
+        config.enabled = true;
+        config.wal.enabled = true;
+        config.wal.path = PathBuf::from(format!("{dir}/wal.log"));
+        config.snapshot.enabled = false;
+        config.snapshot.directory = PathBuf::from(format!("{dir}/snap"));
+        let layer = PersistenceLayer::new(config).await.unwrap();
+
+        assert!(!layer.is_sync_durability()); // default Periodic fsync
+
+        layer
+            .log_kv_set("k".into(), b"v".to_vec(), None)
+            .await
+            .unwrap();
+        layer.log_kv_del(vec!["k".into()]).await.unwrap();
+        layer.log_kv_rename("a".into(), "b".into()).await.unwrap();
+        layer
+            .log_hash_set("h".into(), "f".into(), b"v".to_vec())
+            .await
+            .unwrap();
+        layer
+            .log_hash_del("h".into(), vec!["f".into()])
+            .await
+            .unwrap();
+        layer
+            .log_hash_incrby("h".into(), "n".into(), 1)
+            .await
+            .unwrap();
+        layer
+            .log_hash_incrbyfloat("h".into(), "n".into(), 1.5)
+            .await
+            .unwrap();
+        layer
+            .log_list_push("l".into(), vec![b"a".to_vec()], true)
+            .await
+            .unwrap();
+        layer.log_list_pop("l".into(), 1, false).await.unwrap();
+        layer
+            .log_list_set("l".into(), 0, b"x".to_vec())
+            .await
+            .unwrap();
+        layer.log_list_trim("l".into(), 0, 1).await.unwrap();
+        layer
+            .log_list_rem("l".into(), 1, b"x".to_vec())
+            .await
+            .unwrap();
+        layer
+            .log_list_insert("l".into(), true, b"p".to_vec(), b"v".to_vec())
+            .await
+            .unwrap();
+        layer
+            .log_list_rpoplpush("l".into(), "l2".into())
+            .await
+            .unwrap();
+        let msg = crate::core::queue::QueueMessage::new(b"p".to_vec(), 0, 3);
+        layer.log_queue_publish("q".into(), msg).await.unwrap();
+        layer.log_queue_ack("q".into(), "id".into()).await.unwrap();
+        layer
+            .log_queue_nack("q".into(), "id".into(), true)
+            .await
+            .unwrap();
+        layer
+            .log_stream_publish("r".into(), "e".into(), b"d".to_vec())
+            .await
+            .unwrap();
+        layer
+            .log_set_add("s".into(), vec![b"m".to_vec()])
+            .await
+            .unwrap();
+        layer
+            .log_set_rem("s".into(), vec![b"m".to_vec()])
+            .await
+            .unwrap();
+        layer
+            .log_set_move("s".into(), "s2".into(), b"m".to_vec())
+            .await
+            .unwrap();
+        layer
+            .log_set_interstore("d".into(), vec!["s".into()])
+            .await
+            .unwrap();
+        layer
+            .log_set_unionstore("d".into(), vec!["s".into()])
+            .await
+            .unwrap();
+        layer
+            .log_set_diffstore("d".into(), vec!["s".into()])
+            .await
+            .unwrap();
+        layer
+            .log_zadd("z".into(), b"m".to_vec(), 1.0, false, false, false, false)
+            .await
+            .unwrap();
+        layer
+            .log_zrem("z".into(), vec![b"m".to_vec()])
+            .await
+            .unwrap();
+        layer
+            .log_zincrby("z".into(), b"m".to_vec(), 1.0)
+            .await
+            .unwrap();
+        layer.log_zremrangebyrank("z".into(), 0, 1).await.unwrap();
+        layer
+            .log_zremrangebyscore("z".into(), 0.0, 1.0)
+            .await
+            .unwrap();
+        layer
+            .log_zinterstore("d".into(), vec!["z".into()], None, "sum".into())
+            .await
+            .unwrap();
+        layer
+            .log_zunionstore("d".into(), vec!["z".into()], Some(vec![1.0]), "max".into())
+            .await
+            .unwrap();
+        layer
+            .log_zdiffstore("d".into(), vec!["z".into()])
+            .await
+            .unwrap();
+        layer.flush().await.unwrap();
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// `log_transaction` maps every `CommittedWrite` variant to an operation. With
+    /// persistence disabled it takes the no-WAL path (still succeeds).
+    #[tokio::test]
+    async fn log_transaction_maps_all_variants_without_wal() {
+        let mut config = PersistenceConfig::default();
+        config.enabled = false;
+        let layer = PersistenceLayer::new(config).await.unwrap();
+
+        // Empty batch is a no-op.
+        layer.log_transaction(&[]).await.unwrap();
+        // All variants map cleanly.
+        layer
+            .log_transaction(&all_committed_writes())
+            .await
+            .unwrap();
+    }
+
+    /// A transaction logged with WAL enabled is recovered as its effects.
+    #[tokio::test]
+    async fn log_transaction_is_durable_and_recovers() {
+        let dir = "./target/layer_txn_test";
+        let _ = std::fs::remove_dir_all(dir);
+        std::fs::create_dir_all(format!("{dir}/snap")).unwrap();
+
+        let mut config = PersistenceConfig::default();
+        config.enabled = true;
+        config.wal.enabled = true;
+        config.wal.fsync_mode = FsyncMode::Always;
+        config.wal.path = PathBuf::from(format!("{dir}/wal.log"));
+        config.snapshot.enabled = false;
+        config.snapshot.directory = PathBuf::from(format!("{dir}/snap"));
+
+        {
+            let layer = PersistenceLayer::new(config.clone()).await.unwrap();
+            layer
+                .log_transaction(&[
+                    CommittedWrite::KvSet {
+                        key: "tk".into(),
+                        value: b"tv".to_vec(),
+                        ttl: None,
+                    },
+                    CommittedWrite::HashSet {
+                        key: "th".into(),
+                        field: "f".into(),
+                        value: b"hv".to_vec(),
+                    },
+                ])
+                .await
+                .unwrap();
+            drop(layer);
+            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        }
+
+        let (kv, hash, _l, _s, _z, _q, _off) =
+            crate::persistence::recover(&config, KVConfig::default(), QueueConfig::default())
+                .await
+                .unwrap();
+        assert_eq!(kv.get("tk").await.unwrap(), Some(b"tv".to_vec()));
+        assert_eq!(hash.unwrap().hget("th", "f").unwrap(), Some(b"hv".to_vec()));
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}

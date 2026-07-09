@@ -358,3 +358,75 @@ fn format_bytes(bytes: usize) -> String {
         format!("{:.2}{}", size, UNITS[unit_idx])
     }
 }
+
+#[cfg(test)]
+mod replication_info_tests {
+    use super::*;
+    use crate::core::{KVConfig, KVStore, StreamConfig, StreamManager};
+    use crate::replication::{
+        MasterNode, NodeRole, ReplicaNode, ReplicationConfig, ReplicationHandle,
+    };
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU16, Ordering};
+
+    static PORT: AtomicU16 = AtomicU16::new(39500);
+
+    /// With no replication handle a node reports as a standalone master.
+    #[tokio::test]
+    async fn collect_none_reports_standalone_master() {
+        let info = ReplicationInfo::collect(None).await;
+        assert_eq!(info.role, "master");
+        assert_eq!(info.connected_slaves, 0);
+        assert_eq!(info.repl_backlog_active, 0);
+        assert!(info.master_link_status.is_none());
+        assert!(info.slave_repl_lag.is_none());
+    }
+
+    /// A master handle reports role master with its live replica count / offset.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn collect_master_reports_role_and_zero_slaves() {
+        let port = PORT.fetch_add(1, Ordering::SeqCst);
+        let addr = format!("127.0.0.1:{port}").parse().unwrap();
+        let config = ReplicationConfig {
+            enabled: true,
+            role: NodeRole::Master,
+            replica_listen_address: Some(addr),
+            heartbeat_interval_ms: 100,
+            ..Default::default()
+        };
+        let kv = Arc::new(KVStore::new(KVConfig::default()));
+        let stream = Arc::new(StreamManager::new(StreamConfig::default()));
+        let master = Arc::new(MasterNode::new(config, kv, Some(stream)).await.unwrap());
+
+        let handle = ReplicationHandle::Master(master);
+        let info = ReplicationInfo::collect(Some(&handle)).await;
+        assert_eq!(info.role, "master");
+        assert_eq!(info.connected_slaves, 0);
+        assert!(info.master_link_status.is_none());
+    }
+
+    /// A replica handle reports role slave and, when not connected, link "down".
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn collect_replica_reports_role_and_link_status() {
+        let port = PORT.fetch_add(1, Ordering::SeqCst);
+        let master_addr = format!("127.0.0.1:{port}").parse().unwrap();
+        let config = ReplicationConfig {
+            enabled: true,
+            role: NodeRole::Replica,
+            master_address: Some(master_addr),
+            auto_reconnect: false, // no master running — stays disconnected
+            ..Default::default()
+        };
+        let kv = Arc::new(KVStore::new(KVConfig::default()));
+        let replica = ReplicaNode::new(config, kv, None, None, None, None, None, None)
+            .await
+            .unwrap();
+
+        let handle = ReplicationHandle::Replica(replica);
+        let info = ReplicationInfo::collect(Some(&handle)).await;
+        assert_eq!(info.role, "slave");
+        assert_eq!(info.connected_slaves, 0);
+        assert_eq!(info.master_link_status.as_deref(), Some("down"));
+        assert_eq!(info.slave_repl_lag, Some(0));
+    }
+}

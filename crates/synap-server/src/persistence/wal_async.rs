@@ -392,3 +392,110 @@ impl AsyncWAL {
         Ok(entries)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wal_config(dir: &str) -> WALConfig {
+        WALConfig {
+            enabled: true,
+            path: PathBuf::from(format!("{dir}/test.wal")),
+            fsync_mode: FsyncMode::Always,
+            ..Default::default()
+        }
+    }
+
+    /// `append_batch` writes every op contiguously and returns their offsets; a
+    /// later replay sees exactly those entries (audit M-010 transaction WAL unit).
+    #[tokio::test]
+    async fn append_batch_writes_all_and_replays() {
+        let dir = "./target/wal_batch_test";
+        let _ = std::fs::remove_dir_all(dir);
+        std::fs::create_dir_all(dir).unwrap();
+        let config = wal_config(dir);
+
+        let wal = AsyncWAL::open(config.clone()).await.unwrap();
+
+        // Empty batch is a no-op.
+        assert!(wal.append_batch(vec![]).await.unwrap().is_empty());
+
+        let ops = vec![
+            Operation::KVSet {
+                key: "a".into(),
+                value: b"1".to_vec(),
+                ttl: None,
+            },
+            Operation::KVSet {
+                key: "b".into(),
+                value: b"2".to_vec(),
+                ttl: None,
+            },
+            Operation::KVDel {
+                keys: vec!["a".into()],
+            },
+        ];
+        let offsets = wal.append_batch(ops).await.unwrap();
+        assert_eq!(offsets.len(), 3);
+        // Offsets are contiguous and ascending.
+        assert_eq!(offsets[1], offsets[0] + 1);
+        assert_eq!(offsets[2], offsets[1] + 1);
+
+        // A single append after the batch continues the offset sequence.
+        let single = wal
+            .append(Operation::KVSet {
+                key: "c".into(),
+                value: b"3".to_vec(),
+                ttl: None,
+            })
+            .await
+            .unwrap();
+        assert_eq!(single, offsets[2] + 1);
+
+        let entries = wal.replay(&config.path, 0).await.unwrap();
+        assert_eq!(entries.len(), 4);
+
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The writer's group-commit path handles every fsync mode (Periodic/Never
+    /// branches, refactored for the batch API in phase6k).
+    #[tokio::test]
+    async fn append_honors_periodic_and_never_fsync_modes() {
+        for (name, mode) in [
+            ("periodic", FsyncMode::Periodic),
+            ("never", FsyncMode::Never),
+        ] {
+            let dir = format!("./target/wal_fsync_{name}");
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            let config = WALConfig {
+                enabled: true,
+                path: PathBuf::from(format!("{dir}/test.wal")),
+                fsync_mode: mode,
+                fsync_interval_ms: 0, // force the Periodic fsync branch to fire
+                ..Default::default()
+            };
+            let wal = AsyncWAL::open(config.clone()).await.unwrap();
+            // Both the single and batch paths run through the writer's should_fsync
+            // match for this mode and return their assigned offsets. (Never does not
+            // flush to disk, so we don't assert a replay here.)
+            let o1 = wal
+                .append(Operation::KVSet {
+                    key: "k".into(),
+                    value: b"v".to_vec(),
+                    ttl: None,
+                })
+                .await
+                .unwrap();
+            let o2 = wal
+                .append_batch(vec![Operation::KVDel {
+                    keys: vec!["k".into()],
+                }])
+                .await
+                .unwrap();
+            assert_eq!(o2, vec![o1 + 1]);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+}
