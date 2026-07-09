@@ -359,6 +359,9 @@ impl Queue {
 pub struct QueueManager {
     queues: Arc<RwLock<HashMap<String, Queue>>>,
     default_config: QueueConfig,
+    /// Registered contribution to the shared cross-datatype budget (audit M-018).
+    mem_bytes: Arc<std::sync::atomic::AtomicI64>,
+    mem_attached: bool,
 }
 
 impl QueueManager {
@@ -368,6 +371,42 @@ impl QueueManager {
         Self {
             queues: Arc::new(RwLock::new(HashMap::new())),
             default_config: config,
+            mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            mem_attached: false,
+        }
+    }
+
+    /// Attach the shared cross-datatype memory budget (audit M-018). Queues are
+    /// already depth-capped, so they contribute to the accounted total (subject
+    /// to eviction/refusal on other write paths) via `refresh_memory`.
+    pub fn with_global_memory(mut self, mem: crate::core::GlobalMemory) -> Self {
+        mem.register(Arc::clone(&self.mem_bytes));
+        self.mem_attached = true;
+        self
+    }
+
+    /// Total queued + dead-letter message-payload bytes across all queues.
+    pub fn memory_bytes(&self) -> usize {
+        let mut total = 0usize;
+        for (name, q) in self.queues.read().iter() {
+            total += name.len();
+            for m in q.messages.iter() {
+                total += m.payload.len();
+            }
+            for m in q.dead_letter.iter() {
+                total += m.payload.len();
+            }
+        }
+        total
+    }
+
+    /// Recompute this manager's accounted memory into its registered counter.
+    pub fn refresh_memory(&self) {
+        if self.mem_attached {
+            self.mem_bytes.store(
+                self.memory_bytes() as i64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
         }
     }
 

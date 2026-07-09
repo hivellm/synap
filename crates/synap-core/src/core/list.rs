@@ -297,6 +297,9 @@ pub struct ListStore {
     /// Broadcast channel for notifying blocked waiters
     /// Key: list key
     notify_tx: Arc<RwLock<HashMap<String, broadcast::Sender<()>>>>,
+    /// Shared cross-datatype memory budget (audit M-018).
+    mem: Option<crate::core::GlobalMemory>,
+    mem_bytes: Arc<std::sync::atomic::AtomicI64>,
 }
 
 impl Default for ListStore {
@@ -329,7 +332,50 @@ impl ListStore {
             shards,
             stats: Arc::new(RwLock::new(ListStats::default())),
             notify_tx: Arc::new(RwLock::new(HashMap::new())),
+            mem: None,
+            mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
+    }
+
+    /// Attach the shared cross-datatype memory budget (audit M-018).
+    pub fn with_global_memory(mut self, mem: crate::core::GlobalMemory) -> Self {
+        mem.register(Arc::clone(&self.mem_bytes));
+        self.mem = Some(mem);
+        self
+    }
+
+    /// Total payload bytes currently held (keys + element values across shards).
+    pub fn memory_bytes(&self) -> usize {
+        let mut total = 0usize;
+        for shard in self.shards.iter() {
+            for (key, v) in shard.read().iter() {
+                total += key.len();
+                for e in v.elements.iter() {
+                    total += e.len();
+                }
+            }
+        }
+        total
+    }
+
+    /// Recompute this store's accounted memory into its registered counter.
+    pub fn refresh_memory(&self) {
+        if self.mem.is_some() {
+            self.mem_bytes.store(
+                self.memory_bytes() as i64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+    }
+
+    /// Refuse a growing write when the shared budget is already over the cap.
+    fn check_admit(&self, incoming: usize) -> Result<()> {
+        if let Some(m) = &self.mem {
+            if m.would_exceed(incoming as i64) {
+                return Err(SynapError::MemoryLimitExceeded);
+            }
+        }
+        Ok(())
     }
 
     /// Get shard index for key
@@ -362,6 +408,7 @@ impl ListStore {
 
     /// LPUSH - Push element(s) to left (front)
     pub fn lpush(&self, key: &str, values: Vec<Vec<u8>>, only_if_exists: bool) -> Result<usize> {
+        self.check_admit(values.iter().map(|v| v.len()).sum())?;
         let shard = self.shard(key);
         let mut map = shard.write();
 
@@ -397,6 +444,7 @@ impl ListStore {
 
     /// RPUSH - Push element(s) to right (back)
     pub fn rpush(&self, key: &str, values: Vec<Vec<u8>>, only_if_exists: bool) -> Result<usize> {
+        self.check_admit(values.iter().map(|v| v.len()).sum())?;
         let shard = self.shard(key);
         let mut map = shard.write();
 

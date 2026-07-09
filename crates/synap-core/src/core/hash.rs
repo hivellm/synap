@@ -142,6 +142,11 @@ impl HashShard {
 pub struct HashStore {
     shards: Arc<[Arc<HashShard>; SHARD_COUNT]>,
     stats: Arc<RwLock<HashStats>>,
+    /// Shared cross-datatype memory budget (audit M-018). When attached, `mem_bytes`
+    /// (this store's registered contribution) is refreshed by `refresh_memory` and
+    /// grow writes are refused once the shared total is over the cap.
+    mem: Option<crate::core::GlobalMemory>,
+    mem_bytes: Arc<std::sync::atomic::AtomicI64>,
 }
 
 /// Statistics for hash operations
@@ -178,7 +183,53 @@ impl HashStore {
         Self {
             shards: Arc::new(shards_array),
             stats: Arc::new(RwLock::new(HashStats::default())),
+            mem: None,
+            mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
         }
+    }
+
+    /// Attach the shared cross-datatype memory budget (audit M-018).
+    pub fn with_global_memory(mut self, mem: crate::core::GlobalMemory) -> Self {
+        mem.register(Arc::clone(&self.mem_bytes));
+        self.mem = Some(mem);
+        self
+    }
+
+    /// Total payload bytes currently held (field keys + values across all shards).
+    /// Used to refresh this store's contribution to the shared budget.
+    pub fn memory_bytes(&self) -> usize {
+        let mut total = 0usize;
+        for shard in self.shards.iter() {
+            for (key, hv) in shard.data.read().iter() {
+                total += key.len();
+                for (f, v) in hv.fields.iter() {
+                    total += f.len() + v.len();
+                }
+            }
+        }
+        total
+    }
+
+    /// Recompute this store's accounted memory into its registered counter.
+    /// Called periodically by the server so the shared `maxmemory` total stays
+    /// current without per-mutation bookkeeping.
+    pub fn refresh_memory(&self) {
+        if self.mem.is_some() {
+            self.mem_bytes.store(
+                self.memory_bytes() as i64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+    }
+
+    /// Refuse a growing write when the shared budget is already over the cap.
+    fn check_admit(&self, incoming: usize) -> Result<()> {
+        if let Some(m) = &self.mem {
+            if m.would_exceed(incoming as i64) {
+                return Err(SynapError::MemoryLimitExceeded);
+            }
+        }
+        Ok(())
     }
 
     /// Get shard index for a key using CRC32
@@ -196,6 +247,7 @@ impl HashStore {
     /// HSET - Set field value in hash
     /// Returns true if field was created, false if updated
     pub fn hset(&self, key: &str, field: &str, value: Vec<u8>) -> Result<bool> {
+        self.check_admit(field.len() + value.len())?;
         let shard = self.shard_for_key(key);
         let mut data = shard.data.write();
 
@@ -406,6 +458,7 @@ impl HashStore {
 
     /// HMSET - Set multiple fields atomically
     pub fn hmset(&self, key: &str, fields: HashMap<String, Vec<u8>>) -> Result<()> {
+        self.check_admit(fields.iter().map(|(f, v)| f.len() + v.len()).sum())?;
         let shard = self.shard_for_key(key);
         let mut data = shard.data.write();
 
@@ -561,6 +614,7 @@ impl HashStore {
     /// HSETNX - Set field value only if field does not exist
     /// Returns true if field was created, false if already exists
     pub fn hsetnx(&self, key: &str, field: &str, value: Vec<u8>) -> Result<bool> {
+        self.check_admit(field.len() + value.len())?;
         let shard = self.shard_for_key(key);
         let mut data = shard.data.write();
 

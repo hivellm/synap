@@ -282,6 +282,9 @@ impl Room {
 pub struct StreamManager {
     rooms: Arc<RwLock<HashMap<String, Room>>>,
     config: StreamConfig,
+    /// Registered contribution to the shared cross-datatype budget (audit M-018).
+    mem_bytes: Arc<std::sync::atomic::AtomicI64>,
+    mem_attached: bool,
 }
 
 impl StreamManager {
@@ -290,6 +293,39 @@ impl StreamManager {
         Self {
             rooms: Arc::new(RwLock::new(HashMap::new())),
             config,
+            mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            mem_attached: false,
+        }
+    }
+
+    /// Attach the shared cross-datatype memory budget (audit M-018). Streams are
+    /// already count-capped per room, so they contribute to the accounted total
+    /// (subject to eviction/refusal on other write paths) via `refresh_memory`.
+    pub fn with_global_memory(mut self, mem: crate::core::GlobalMemory) -> Self {
+        mem.register(Arc::clone(&self.mem_bytes));
+        self.mem_attached = true;
+        self
+    }
+
+    /// Total buffered event-payload bytes across all rooms.
+    pub fn memory_bytes(&self) -> usize {
+        let mut total = 0usize;
+        for (name, room) in self.rooms.read().iter() {
+            total += name.len();
+            for evt in room.buffer.iter() {
+                total += evt.data.len();
+            }
+        }
+        total
+    }
+
+    /// Recompute this manager's accounted memory into its registered counter.
+    pub fn refresh_memory(&self) {
+        if self.mem_attached {
+            self.mem_bytes.store(
+                self.memory_bytes() as i64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
         }
     }
 

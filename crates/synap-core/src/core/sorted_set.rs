@@ -464,6 +464,9 @@ pub enum Aggregate {
 /// Sorted Set store with 64-way sharding
 pub struct SortedSetStore {
     shards: [Arc<RwLock<HashMap<String, SortedSetValue>>>; 64],
+    /// Shared cross-datatype memory budget (audit M-018).
+    mem: Option<crate::core::GlobalMemory>,
+    mem_bytes: Arc<std::sync::atomic::AtomicI64>,
 }
 
 impl SortedSetStore {
@@ -490,6 +493,44 @@ impl SortedSetStore {
             // Build the fixed-size shard array directly — no fallible Vec→array
             // conversion, so no panic on a length that is proven correct.
             shards: std::array::from_fn(|_| Arc::new(RwLock::new(HashMap::new()))),
+            mem: None,
+            mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+        }
+    }
+
+    /// Attach the shared cross-datatype memory budget (audit M-018).
+    pub fn with_global_memory(mut self, mem: crate::core::GlobalMemory) -> Self {
+        mem.register(Arc::clone(&self.mem_bytes));
+        self.mem = Some(mem);
+        self
+    }
+
+    /// Total payload bytes currently held (keys + members + 8B/score across shards).
+    pub fn memory_bytes(&self) -> usize {
+        let mut total = 0usize;
+        for shard in self.shards.iter() {
+            for (key, v) in shard.read().iter() {
+                total += key.len();
+                for sm in v.members_with_scores() {
+                    total += sm.member.len() + std::mem::size_of::<f64>();
+                }
+            }
+        }
+        total
+    }
+
+    /// Recompute this store's accounted memory into its registered counter.
+    ///
+    /// Note: `zadd` returns `(usize, usize)` rather than `Result`, so the
+    /// sorted-set store contributes to the shared `maxmemory` total (and is thus
+    /// subject to eviction/refusal on the other write paths) but does not itself
+    /// reject a `zadd` when over budget.
+    pub fn refresh_memory(&self) {
+        if self.mem.is_some() {
+            self.mem_bytes.store(
+                self.memory_bytes() as i64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
         }
     }
 
