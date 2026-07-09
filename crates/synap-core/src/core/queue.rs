@@ -1,7 +1,8 @@
 use super::error::{Result, SynapError};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap, VecDeque};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, info};
@@ -109,10 +110,6 @@ impl PendingMessage {
             ack_deadline: now.saturating_add(ack_deadline_secs as u32),
         }
     }
-
-    fn is_expired(&self) -> bool {
-        current_timestamp() >= self.ack_deadline
-    }
 }
 
 /// Queue configuration
@@ -157,6 +154,12 @@ struct Queue {
     name: String,
     messages: VecDeque<Arc<QueueMessage>>,
     pending: HashMap<MessageId, PendingMessage>,
+    /// Min-heap of `(ack_deadline, message_id)` ordered by earliest deadline
+    /// first. Lets the deadline checker inspect only entries that have actually
+    /// expired instead of scanning every pending message. Entries are removed
+    /// lazily: a popped entry is honored only if it still matches a live pending
+    /// message with the same deadline (guards against acked/requeued messages).
+    deadlines: BinaryHeap<Reverse<(u32, MessageId)>>,
     dead_letter: VecDeque<Arc<QueueMessage>>,
     stats: QueueStats,
     config: QueueConfig,
@@ -168,6 +171,7 @@ impl Queue {
             name,
             messages: VecDeque::new(),
             pending: HashMap::new(),
+            deadlines: BinaryHeap::new(),
             dead_letter: VecDeque::new(),
             stats: QueueStats::default(),
             config,
@@ -203,14 +207,15 @@ impl Queue {
             let message_id = message_arc.id.clone();
 
             // Add to pending with Arc reference
-            self.pending.insert(
-                message_id,
-                PendingMessage::new(
-                    Arc::clone(&message_arc),
-                    consumer_id,
-                    self.config.ack_deadline_secs,
-                ),
+            let pending = PendingMessage::new(
+                Arc::clone(&message_arc),
+                consumer_id,
+                self.config.ack_deadline_secs,
             );
+            let deadline = pending.ack_deadline;
+            self.pending.insert(message_id.clone(), pending);
+            // Track the deadline for O(expired) sweeping instead of O(pending).
+            self.deadlines.push(Reverse((deadline, message_id)));
 
             self.stats.consumed += 1;
             self.stats.depth = self.messages.len();
@@ -270,16 +275,32 @@ impl Queue {
         }
     }
 
-    /// Check for expired pending messages
+    /// Check for expired pending messages.
+    ///
+    /// Pops the deadline heap only while the earliest deadline is in the past,
+    /// so an idle sweep costs a single peek rather than a scan of every pending
+    /// message. Stale heap entries (message already acked, or requeued and
+    /// re-consumed with a fresh deadline) are discarded on pop.
     fn check_expired_pending(&mut self) {
-        let expired: Vec<String> = self
-            .pending
-            .iter()
-            .filter(|(_, p)| p.is_expired())
-            .map(|(id, _)| id.clone())
-            .collect();
+        let now = current_timestamp();
+        let mut to_requeue: Vec<MessageId> = Vec::new();
 
-        for message_id in expired {
+        while let Some(Reverse((deadline, _))) = self.deadlines.peek() {
+            if *deadline > now {
+                // Earliest deadline is still in the future — nothing expired.
+                break;
+            }
+            // Safe: we just peeked `Some`.
+            let Reverse((deadline, id)) = self.deadlines.pop().unwrap();
+            // Honor the expiry only if it still matches a live pending message
+            // with this exact deadline; otherwise it is a stale entry.
+            match self.pending.get(&id) {
+                Some(p) if p.ack_deadline == deadline => to_requeue.push(id),
+                _ => {}
+            }
+        }
+
+        for message_id in to_requeue {
             debug!("Message {} ACK deadline expired, requeuing", message_id);
             let _ = self.nack(&message_id, true);
         }
@@ -625,6 +646,76 @@ mod tests {
         // Verify queue is empty
         let message = manager.consume("dlq_queue", "c1").await.unwrap();
         assert!(message.is_none());
+    }
+
+    // ==================== DEADLINE SWEEP TESTS (M-017) ====================
+
+    fn queue_with_deadline(secs: u64) -> Queue {
+        Queue::new(
+            "dl".to_string(),
+            QueueConfig {
+                ack_deadline_secs: secs,
+                ..QueueConfig::default()
+            },
+        )
+    }
+
+    #[test]
+    fn test_deadline_requeue_expired() {
+        // ack_deadline_secs = 0 → deadline == now, so it is immediately due.
+        let mut queue = queue_with_deadline(0);
+        queue
+            .publish(QueueMessage::new(b"job".to_vec(), 5, 3))
+            .unwrap();
+
+        let consumed = queue.consume("c1".to_string()).unwrap();
+        assert_eq!(queue.pending.len(), 1);
+        assert_eq!(queue.messages.len(), 0);
+
+        queue.check_expired_pending();
+
+        // Expired message is requeued: back in `messages`, out of `pending`.
+        assert_eq!(queue.pending.len(), 0);
+        assert_eq!(queue.messages.len(), 1);
+        assert_eq!(queue.messages[0].id, consumed.id);
+        assert_eq!(queue.stats.nacked, 1);
+    }
+
+    #[test]
+    fn test_deadline_skips_acked_stale_entry() {
+        let mut queue = queue_with_deadline(0);
+        let id = queue
+            .publish(QueueMessage::new(b"job".to_vec(), 5, 3))
+            .unwrap();
+
+        queue.consume("c1".to_string()).unwrap();
+        queue.ack(&id).unwrap();
+        // Heap still holds a stale (deadline, id) entry for the acked message.
+        assert!(!queue.deadlines.is_empty());
+
+        queue.check_expired_pending();
+
+        // Stale entry is discarded, not requeued (no phantom message reappears).
+        assert_eq!(queue.messages.len(), 0);
+        assert_eq!(queue.pending.len(), 0);
+        assert_eq!(queue.stats.nacked, 0);
+        assert!(queue.deadlines.is_empty());
+    }
+
+    #[test]
+    fn test_deadline_keeps_unexpired() {
+        let mut queue = queue_with_deadline(1000);
+        queue
+            .publish(QueueMessage::new(b"job".to_vec(), 5, 3))
+            .unwrap();
+        queue.consume("c1".to_string()).unwrap();
+
+        queue.check_expired_pending();
+
+        // Deadline far in the future → message stays in-flight.
+        assert_eq!(queue.pending.len(), 1);
+        assert_eq!(queue.messages.len(), 0);
+        assert_eq!(queue.stats.nacked, 0);
     }
 
     #[tokio::test]
