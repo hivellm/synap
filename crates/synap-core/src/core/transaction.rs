@@ -206,6 +206,9 @@ pub struct TransactionManager {
     set_store: Arc<SetStore>,
     #[allow(dead_code)] // Reserved for future SortedSet transaction operations
     sorted_set_store: Arc<SortedSetStore>,
+    /// Serializes EXEC so two transactions cannot interleave and the WATCH
+    /// check-and-apply happens as one atomic critical section (audit M-008).
+    exec_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl TransactionManager {
@@ -226,6 +229,7 @@ impl TransactionManager {
             list_store: _list_store,
             set_store: _set_store,
             sorted_set_store: _sorted_set_store,
+            exec_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -333,6 +337,10 @@ impl TransactionManager {
             })?
         };
 
+        // Serialize the whole check-and-apply: hold the EXEC lock so no other
+        // transaction interleaves and the WATCH check is atomic with execution.
+        let _exec_guard = self.exec_lock.lock().await;
+
         // Check if watched keys have changed
         if self.check_watched_keys_changed(&transaction).await? {
             debug!("EXEC aborted: watched keys changed");
@@ -346,9 +354,10 @@ impl TransactionManager {
             return Ok(Some(Vec::new()));
         }
 
-        // Execute commands atomically
-        // Note: For simplicity, we'll use a single lock on all keys
-        // In production, you'd use sorted locks per key to avoid deadlocks
+        // Execute the queued commands. The EXEC lock above guarantees no other
+        // transaction runs concurrently and the WATCH check-and-apply is atomic.
+        // Isolation against non-transactional concurrent writers is a separate
+        // refinement (per-key locking), tracked as a follow-up.
         let results = self.execute_commands(&transaction.commands).await?;
 
         // Update key versions for modified keys
