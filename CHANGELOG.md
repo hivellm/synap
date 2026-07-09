@@ -46,6 +46,13 @@ fixed for the 1.0 release.
   `synap-migrate` under `crates/`, with the Rust SDK at `sdks/rust`. The pure
   wire layer was extracted into `synap-protocol` and the in-memory data engine
   into `synap-core` (a leaf crate with no server/protocol dependencies).
+- **Rust SDK shares one wire-type source of truth** with the server. The SDK's
+  internal `WireValue`/`RpcRequest`/`RpcResponse` copies are gone — it now uses
+  `synap_protocol::synap_rpc::{SynapValue, Request, Response}` and the shared
+  frame codec, so a server-side wire change reaches the SDK at compile time
+  instead of drifting silently. `SynapValue` gained `as_float`/`is_null`/`to_json`
+  accessors (previously SDK-local). No public SDK API change (the wire types were
+  crate-internal); wire bytes are unchanged.
 - **Config files moved into `config/`** for organization; build references
   (Dockerfile, docker-compose, release workflow, macOS build script) updated.
 - **Listener defaults made consistent and safe** (config hardening). `Resp3Config`

@@ -1,6 +1,7 @@
 //! SynapRPC wire types — shared between client and server.
 
 use serde::{Deserialize, Serialize};
+use serde_json::{Value, json};
 
 /// A dynamically-typed value that can cross the SynapRPC wire.
 ///
@@ -44,6 +45,55 @@ impl SynapValue {
         match self {
             Self::Int(i) => Some(*i),
             _ => None,
+        }
+    }
+
+    /// Convenience: extract f64, also parsing a numeric `Str` (RESP3 returns
+    /// scalars as strings).
+    pub fn as_float(&self) -> Option<f64> {
+        match self {
+            Self::Float(f) => Some(*f),
+            Self::Str(s) => s.parse().ok(),
+            _ => None,
+        }
+    }
+
+    /// True if this is the `Null` variant.
+    pub fn is_null(&self) -> bool {
+        matches!(self, Self::Null)
+    }
+
+    /// Convert to a `serde_json::Value` for the JSON-facing transports/clients.
+    ///
+    /// `Bytes` decode as UTF-8 when valid, otherwise as a lowercase hex string;
+    /// `Map`s become objects keyed by their string keys (non-string keys are
+    /// dropped, since JSON object keys must be strings).
+    pub fn to_json(&self) -> Value {
+        match self {
+            Self::Null => Value::Null,
+            Self::Bool(b) => json!(b),
+            Self::Int(i) => json!(i),
+            Self::Float(f) => json!(f),
+            Self::Bytes(b) => {
+                if let Ok(s) = std::str::from_utf8(b) {
+                    json!(s)
+                } else {
+                    json!(
+                        b.iter()
+                            .map(|byte| format!("{:02x}", byte))
+                            .collect::<String>()
+                    )
+                }
+            }
+            Self::Str(s) => json!(s),
+            Self::Array(arr) => Value::Array(arr.iter().map(Self::to_json).collect()),
+            Self::Map(pairs) => {
+                let obj: serde_json::Map<String, Value> = pairs
+                    .iter()
+                    .filter_map(|(k, v)| k.as_str().map(|s| (s.to_string(), v.to_json())))
+                    .collect();
+                Value::Object(obj)
+            }
         }
     }
 }
@@ -147,6 +197,32 @@ mod tests {
             let decoded: SynapValue = rmp_serde::from_slice(&encoded).expect("decode");
             assert_eq!(v, decoded);
         }
+    }
+
+    #[test]
+    fn accessor_helpers() {
+        assert_eq!(SynapValue::Float(3.125).as_float(), Some(3.125));
+        assert_eq!(SynapValue::Str("2.5".into()).as_float(), Some(2.5));
+        assert_eq!(SynapValue::Str("nope".into()).as_float(), None);
+        assert_eq!(SynapValue::Int(1).as_float(), None);
+
+        assert!(SynapValue::Null.is_null());
+        assert!(!SynapValue::Int(0).is_null());
+    }
+
+    #[test]
+    fn to_json_variants() {
+        assert_eq!(SynapValue::Null.to_json(), Value::Null);
+        assert_eq!(SynapValue::Bool(true).to_json(), json!(true));
+        assert_eq!(SynapValue::Int(42).to_json(), json!(42));
+        assert_eq!(SynapValue::Str("hi".into()).to_json(), json!("hi"));
+        // UTF-8 bytes decode as a string.
+        assert_eq!(SynapValue::Bytes(b"hi".to_vec()).to_json(), json!("hi"));
+        // Non-UTF-8 bytes fall back to lowercase hex.
+        assert_eq!(SynapValue::Bytes(vec![0xff, 0x00]).to_json(), json!("ff00"));
+        // Map becomes an object keyed by string keys.
+        let m = SynapValue::Map(vec![(SynapValue::Str("k".into()), SynapValue::Int(1))]);
+        assert_eq!(m.to_json(), json!({"k": 1}));
     }
 
     #[test]
