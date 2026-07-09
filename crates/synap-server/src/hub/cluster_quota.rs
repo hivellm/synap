@@ -173,8 +173,8 @@ impl ClusterQuotaManager {
 
     /// Fetch quota from master node (replica nodes)
     async fn fetch_from_master(&self, user_id: Uuid) -> Result<CachedQuota, String> {
-        // TODO: Implement inter-node RPC to query master for quota
-        // For now, return a permissive default
+        // Inter-node RPC to query the master for quota is not yet implemented —
+        // tracked in hivellm/synap#231. For now, return a permissive default.
         Ok(CachedQuota {
             user_id,
             storage_limit: u64::MAX,
@@ -267,8 +267,9 @@ impl ClusterQuotaManager {
 
     /// Send deltas to master node (replica nodes)
     async fn send_deltas_to_master(&self) -> Result<(), String> {
-        // TODO: Implement inter-node RPC to send deltas to master
-        // For now, just clear pending deltas (they would be lost)
+        // Inter-node RPC to send deltas to the master is not yet implemented —
+        // tracked in hivellm/synap#231. For now, just clear pending deltas
+        // (they would be lost).
         self.pending_deltas.write().clear();
         Ok(())
     }

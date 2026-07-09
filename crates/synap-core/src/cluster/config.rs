@@ -63,7 +63,7 @@ impl Default for ClusterConfig {
 impl ClusterConfig {
     /// Create cluster config from environment/config file
     pub fn from_env() -> Self {
-        // TODO: Load from environment variables or config file
+        // Load from environment variables or config file (tracked in hivellm/synap#233)
         Self::default()
     }
 

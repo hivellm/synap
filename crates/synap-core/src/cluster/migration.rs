@@ -438,7 +438,7 @@ impl SlotMigrationManager {
                     if let Some(migration) = migrations.get_mut(&slot) {
                         migration.state = MigrationState::Failed;
                         info!("Migration cancelled for slot {}", slot);
-                        // TODO: Implement rollback (restore keys if needed)
+                        // Implement rollback (restore keys if needed) (tracked in hivellm/synap#233)
                     }
                 }
                 MigrationCommand::Complete { slot } => {

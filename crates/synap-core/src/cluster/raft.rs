@@ -249,7 +249,7 @@ impl RaftNode {
                         *state.write() = RaftState::Candidate;
                         *voted_for.write() = Some(node_id.clone());
 
-                        // TODO: Request votes from other nodes
+                        // Request votes from other nodes (tracked in hivellm/synap#233)
                         // For now, if single node, become leader immediately
                         *state.write() = RaftState::Leader;
                         info!("Elected as leader: node {} term {}", node_id, *term);
@@ -259,7 +259,7 @@ impl RaftNode {
                     // If leader, send heartbeats
                     if *state.read() == RaftState::Leader {
                         debug!("Sending heartbeat as leader: node {}", node_id);
-                        // TODO: Send heartbeats to followers
+                        // Send heartbeats to followers (tracked in hivellm/synap#233)
                     }
                 }
                 Some(cmd) = raft_rx.recv() => {

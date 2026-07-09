@@ -156,7 +156,7 @@ impl ClusterFailover {
             match cmd {
                 FailoverCommand::DetectFailure { node_id } => {
                     warn!("Node failure detected: {}", node_id);
-                    // TODO: Implement failure detection logic
+                    // Implement failure detection logic (tracked in hivellm/synap#233)
                     // 1. Check if node is really down
                     // 2. Find replicas for this node
                     // 3. Initiate failover
@@ -169,7 +169,7 @@ impl ClusterFailover {
                         "Promoting replica {} to replace {}",
                         replica_id, failed_node_id
                     );
-                    // TODO: Implement replica promotion
+                    // Implement replica promotion (tracked in hivellm/synap#233)
                     // 1. Update node state to master
                     // 2. Reassign slots from failed node
                     // 3. Notify cluster of changes

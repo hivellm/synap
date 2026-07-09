@@ -96,9 +96,8 @@ impl HubClient {
         // Cache miss - validate with Hub API
         debug!("Access key validation cache miss - calling Hub API");
 
-        // TODO: Call Hub SDK to validate access key
-        // For now, return error as the SDK doesn't have this method yet
-        // Once implemented in HiveHub:
+        // Access-key validation against the Hub SDK is not yet available —
+        // tracked in hivellm/synap#230. Once implemented in HiveHub:
         // let validation = self.sdk_client.access_keys().validate(access_key).await?;
 
         Err(SynapError::InternalServerError(
@@ -117,7 +116,8 @@ impl HubClient {
         // Cache miss - fetch from Hub API
         debug!("Quota cache miss for user {} - fetching from Hub", user_id);
 
-        // TODO: Implement quota fetching from Hub
+        // Quota fetching from the Hub is not yet available — tracked in
+        // hivellm/synap#230.
         // let response = self.sdk_client.synap().get_user_quota(user_id).await?;
 
         Err(SynapError::InternalServerError(
@@ -125,7 +125,7 @@ impl HubClient {
         ))
     }
 
-    // TODO: Implement quota checking once HiveHub API is available
+    // Quota checking awaits the HiveHub API — tracked in hivellm/synap#230.
     //     /// Check quota before resource creation
     //     pub async fn check_quota_for_resource(
     //         &self,

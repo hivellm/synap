@@ -572,8 +572,8 @@ async fn main() -> Result<()> {
         transaction_manager,
         script_manager,
         client_list_manager,
-        cluster_topology: None, // TODO: Initialize cluster topology from config
-        cluster_migration: None, // TODO: Initialize cluster migration from config
+        cluster_topology: None, // init from config — tracked in hivellm/synap#232
+        cluster_migration: None, // init from config — tracked in hivellm/synap#232
 
         hub_client,
         user_manager: if config.auth.enabled {
