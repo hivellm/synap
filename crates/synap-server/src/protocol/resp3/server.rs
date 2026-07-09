@@ -93,7 +93,13 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
     loop {
         let value = match parse_from_reader(&mut reader).await? {
             Some(v) => v,
-            None => break, // clean EOF
+            None => {
+                // Deliver any responses deferred by the pipeline-aware flush
+                // before closing (client may have half-closed its write side
+                // while waiting to read the batch).
+                writer.flush().await?;
+                break; // clean EOF
+            }
         };
 
         // Unwrap inline commands (from redis-cli / telnet).
@@ -206,7 +212,15 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
         // Write response and measure bytes.
         let before_write = writer.bytes_written();
         writer.write(&response).await?;
-        writer.flush().await?;
+        // Pipeline-aware flush: only flush once the client's already-buffered
+        // commands are drained, so a pipelined batch (e.g. redis-benchmark -P N)
+        // is written in a single syscall instead of one flush per command. When
+        // the buffer still holds more commands we defer the flush and loop to
+        // process them; the next parse consumes from the buffer without awaiting
+        // the socket, so a client waiting on responses can never deadlock.
+        if reader.buffer().is_empty() {
+            writer.flush().await?;
+        }
         let written = writer.bytes_written() - before_write;
 
         // Record metrics.
