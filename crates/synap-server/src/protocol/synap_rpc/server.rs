@@ -44,12 +44,15 @@ fn rpc_str(v: &SynapValue) -> Option<String> {
 /// Spawn the SynapRPC TCP listener on `addr`.
 ///
 /// Returns immediately; the listener runs as a background task.
-pub async fn spawn_synap_rpc_listener(state: AppState, addr: SocketAddr) -> std::io::Result<()> {
+pub async fn spawn_synap_rpc_listener(
+    state: AppState,
+    addr: SocketAddr,
+    idle_timeout: std::time::Duration,
+    max_connections: usize,
+) -> std::io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     tracing::info!("SynapRPC server listening on {addr}");
-    let limiter = Arc::new(tokio::sync::Semaphore::new(
-        crate::protocol::resp3::server::MAX_CONNECTIONS,
-    ));
+    let limiter = Arc::new(tokio::sync::Semaphore::new(max_connections));
 
     tokio::spawn(async move {
         loop {
@@ -71,7 +74,7 @@ pub async fn spawn_synap_rpc_listener(state: AppState, addr: SocketAddr) -> std:
                         let _permit = permit; // released when this connection ends
                         let span = tracing::info_span!("rpc.conn", peer = %peer);
                         let _guard = span.enter();
-                        if let Err(e) = handle_connection(stream, state).await {
+                        if let Err(e) = handle_connection(stream, state, idle_timeout).await {
                             tracing::debug!(peer = %peer, error = %e, "SynapRPC connection error");
                         }
                         metrics::synap_rpc_connection_close();
@@ -88,7 +91,11 @@ pub async fn spawn_synap_rpc_listener(state: AppState, addr: SocketAddr) -> std:
     Ok(())
 }
 
-async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Result<()> {
+async fn handle_connection(
+    stream: TcpStream,
+    state: AppState,
+    idle_timeout: std::time::Duration,
+) -> std::io::Result<()> {
     let peer = stream.peer_addr()?;
     let (read_half, write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
@@ -148,8 +155,20 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
 
     // Read loop — one task per request for concurrency.
     loop {
-        // Read raw frame bytes so we can measure the incoming size.
-        let req = match read_request(&mut reader).await {
+        // Read the next frame, bounded by the idle timeout (slow-loris
+        // resistance, phase6i). A zero timeout disables the bound.
+        let read = if idle_timeout.is_zero() {
+            read_request(&mut reader).await
+        } else {
+            match tokio::time::timeout(idle_timeout, read_request(&mut reader)).await {
+                Ok(r) => r,
+                Err(_) => {
+                    tracing::debug!(peer = %peer, "SynapRPC idle timeout, closing connection");
+                    break;
+                }
+            }
+        };
+        let req = match read {
             Ok(r) => r,
             Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break, // clean EOF
             Err(e) => {

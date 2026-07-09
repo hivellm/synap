@@ -647,13 +647,17 @@ async fn main() -> Result<()> {
     // Initialize Prometheus metrics
     init_metrics();
 
+    // Shared network limits for the binary listeners (phase6i).
+    let idle_timeout = Duration::from_secs(config.network.idle_timeout_secs);
+    let max_connections = config.network.max_connections;
+
     // Spawn optional RESP3 TCP listener (Redis-compatible protocol).
     if config.resp3.enabled {
         use synap_server::protocol::resp3::server::spawn_resp3_listener;
         let resp3_addr: SocketAddr = format!("{}:{}", config.resp3.host, config.resp3.port)
             .parse()
             .expect("invalid resp3 bind address");
-        spawn_resp3_listener(app_state.clone(), resp3_addr).await?;
+        spawn_resp3_listener(app_state.clone(), resp3_addr, idle_timeout, max_connections).await?;
         info!("RESP3 listener started on {resp3_addr}");
     }
 
@@ -663,7 +667,8 @@ async fn main() -> Result<()> {
         let rpc_addr: SocketAddr = format!("{}:{}", config.synap_rpc.host, config.synap_rpc.port)
             .parse()
             .expect("invalid synap_rpc bind address");
-        spawn_synap_rpc_listener(app_state.clone(), rpc_addr).await?;
+        spawn_synap_rpc_listener(app_state.clone(), rpc_addr, idle_timeout, max_connections)
+            .await?;
         info!("SynapRPC listener started on {rpc_addr}");
     }
 

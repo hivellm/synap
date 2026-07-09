@@ -202,6 +202,17 @@ synap_rpc:
   port: 15501
 
 # ----------------------------------------------------------------------------
+# Network limits (shared by the RESP3 and SynapRPC binary listeners)
+# ----------------------------------------------------------------------------
+network:
+  # Close a connection that sends nothing within this many seconds (slow-loris
+  # resistance). Set to 0 to disable the idle timeout.
+  idle_timeout_secs: 300
+  # Maximum concurrent connections per binary listener; new connections beyond
+  # this are refused.
+  max_connections: 10000
+
+# ----------------------------------------------------------------------------
 # MCP (Model Context Protocol) Tools
 # ----------------------------------------------------------------------------
 # Configure which MCP tool categories to expose

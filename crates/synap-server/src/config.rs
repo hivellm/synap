@@ -36,6 +36,40 @@ pub struct ServerConfig {
     /// Native binary SynapRPC TCP listener
     #[serde(default)]
     pub synap_rpc: SynapRpcConfig,
+
+    /// Network resource limits shared by the binary listeners
+    #[serde(default)]
+    pub network: NetworkConfig,
+}
+
+/// Configurable network resource limits for the binary listeners (phase6i).
+/// Defaults preserve the phase6c hard-coded behavior.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetworkConfig {
+    /// Close a connection that sends nothing within this many seconds
+    /// (slow-loris resistance). 0 disables the idle timeout.
+    #[serde(default = "default_idle_timeout_secs")]
+    pub idle_timeout_secs: u64,
+    /// Maximum concurrent connections per binary listener.
+    #[serde(default = "default_max_connections")]
+    pub max_connections: usize,
+}
+
+fn default_idle_timeout_secs() -> u64 {
+    300 // 5 minutes
+}
+
+fn default_max_connections() -> usize {
+    10_000
+}
+
+impl Default for NetworkConfig {
+    fn default() -> Self {
+        Self {
+            idle_timeout_secs: default_idle_timeout_secs(),
+            max_connections: default_max_connections(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -330,6 +364,7 @@ impl Default for ServerConfig {
 
             resp3: Resp3Config::default(),
             synap_rpc: SynapRpcConfig::default(),
+            network: NetworkConfig::default(),
         }
     }
 }
@@ -393,5 +428,17 @@ mod tests {
         // M-014: binds to loopback by default, matching RESP3.
         assert_eq!(from_empty.host, "127.0.0.1");
         assert_eq!(SynapRpcConfig::default().host, "127.0.0.1");
+    }
+
+    #[test]
+    fn network_limits_default_to_phase6c_values() {
+        // Omitted network block → defaults preserve prior behavior (phase6i).
+        let from_empty: NetworkConfig = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(from_empty.idle_timeout_secs, 300);
+        assert_eq!(from_empty.max_connections, 10_000);
+        // Operator overrides are honored, incl. partial blocks.
+        let partial: NetworkConfig = serde_yaml::from_str("max_connections: 50").unwrap();
+        assert_eq!(partial.max_connections, 50);
+        assert_eq!(partial.idle_timeout_secs, 300); // default preserved
     }
 }

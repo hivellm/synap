@@ -32,10 +32,15 @@ pub const MAX_CONNECTIONS: usize = 10_000;
 /// Spawn the RESP3 TCP listener on `addr`.
 ///
 /// Returns immediately; the listener runs as a background task.
-pub async fn spawn_resp3_listener(state: AppState, addr: SocketAddr) -> std::io::Result<()> {
+pub async fn spawn_resp3_listener(
+    state: AppState,
+    addr: SocketAddr,
+    idle_timeout: std::time::Duration,
+    max_connections: usize,
+) -> std::io::Result<()> {
     let listener = TcpListener::bind(addr).await?;
     tracing::info!("RESP3 server listening on {addr}");
-    let limiter = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+    let limiter = Arc::new(Semaphore::new(max_connections));
 
     tokio::spawn(async move {
         loop {
@@ -57,7 +62,7 @@ pub async fn spawn_resp3_listener(state: AppState, addr: SocketAddr) -> std::io:
                         let _permit = permit; // released when this connection ends
                         let span = tracing::info_span!("resp3.conn", peer = %peer);
                         let _guard = span.enter();
-                        if let Err(e) = handle_connection(stream, state).await {
+                        if let Err(e) = handle_connection(stream, state, idle_timeout).await {
                             tracing::debug!(peer = %peer, error = %e, "RESP3 connection error");
                         }
                         metrics::resp3_connection_close();
@@ -74,7 +79,11 @@ pub async fn spawn_resp3_listener(state: AppState, addr: SocketAddr) -> std::io:
     Ok(())
 }
 
-async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Result<()> {
+async fn handle_connection(
+    stream: TcpStream,
+    state: AppState,
+    idle_timeout: std::time::Duration,
+) -> std::io::Result<()> {
     use tokio::io::BufReader;
 
     use super::command::dispatch;
@@ -93,7 +102,20 @@ async fn handle_connection(stream: TcpStream, state: AppState) -> std::io::Resul
     let mut auth_user: Option<crate::auth::User> = None;
 
     loop {
-        let value = match parse_from_reader(&mut reader).await? {
+        // Read the next frame, bounded by the idle timeout (slow-loris
+        // resistance, phase6i). A zero timeout disables the bound.
+        let read_result = if idle_timeout.is_zero() {
+            parse_from_reader(&mut reader).await
+        } else {
+            match tokio::time::timeout(idle_timeout, parse_from_reader(&mut reader)).await {
+                Ok(r) => r,
+                Err(_) => {
+                    tracing::debug!(peer = %peer, "RESP3 idle timeout, closing connection");
+                    break;
+                }
+            }
+        };
+        let value = match read_result? {
             Some(v) => v,
             None => {
                 // Deliver any responses deferred by the pipeline-aware flush

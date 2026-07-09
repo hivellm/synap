@@ -22,9 +22,26 @@ compile-time constants; making them configurable is tracked in `phase6i`.
 - **Max connections**: once the listener's semaphore has no free permits, new
   connections are refused (dropped) until an existing connection closes.
 
-## Follow-ups (phase6i)
+## Idle timeout & configurable limits (phase6i)
 
-- Idle-connection timeout (close connections that send nothing, bounding
-  slow-loris even within the connection cap).
-- Surface all of the above in `config.rs` with the defaults shown here so
-  operators can tune them per deployment.
+The binary listeners (RESP3 and SynapRPC) now enforce a **configurable idle
+timeout** and expose the **max-connections** cap via config:
+
+```yaml
+network:
+  idle_timeout_secs: 300   # close a connection idle this long (0 = disabled)
+  max_connections: 10000   # per binary listener; new connections refused beyond
+```
+
+- **Idle timeout** bounds slow-loris even within the connection cap: a client
+  that connects and sends nothing is closed after `idle_timeout_secs`, freeing
+  its connection permit. Implemented by wrapping each per-connection read in a
+  `tokio::time::timeout`.
+- **max_connections** replaces the previous hard-coded `MAX_CONNECTIONS`; setting
+  it lower lets an operator refuse connections sooner.
+- Defaults preserve the phase6c behavior (5-minute idle, 10 000 connections).
+
+The parser/codec caps (`MAX_BULK_LEN`, `MAX_AGGREGATE_LEN`, `MAX_LINE_LEN`,
+`MAX_FRAME_SIZE`) and the per-subscriber pub/sub buffer remain hard-coded at their
+safe defaults — they are security bounds rather than tuning knobs, and live in the
+shared `synap-protocol` / `synap-core` crates.
