@@ -78,8 +78,8 @@ fn write_test_config() -> NamedTempFile {
         .nth(2)
         .expect("workspace root")
         .to_path_buf();
-    let base_cfg = std::fs::read_to_string(workspace.join("config.yml"))
-        .expect("config.yml not found in workspace root");
+    let base_cfg = std::fs::read_to_string(workspace.join("config").join("config.yml"))
+        .expect("config/config.yml not found in workspace root");
 
     // Patch ports and bind to loopback only, using simple string replace on YAML values.
     let patched = base_cfg
