@@ -91,6 +91,12 @@ pub struct RoomStats {
     pub total_published: u64,
     /// Total messages consumed (all time)
     pub total_consumed: u64,
+    /// Events evicted from the ring buffer while still unread by the slowest
+    /// tracked subscriber (audit M-012). Normal recycling of already-consumed
+    /// events is not counted; a non-zero value means a lagging consumer lost
+    /// data. Full durability (disk spill) is tracked separately in phase6f.
+    #[serde(default)]
+    pub dropped: u64,
 }
 
 /// Subscriber information
@@ -131,6 +137,7 @@ impl Room {
                 subscriber_count: 0,
                 total_published: 0,
                 total_consumed: 0,
+                dropped: 0,
             },
             name,
             buffer: VecDeque::with_capacity(config.max_buffer_size),
@@ -153,9 +160,18 @@ impl Room {
         self.stats.message_count = self.buffer.len();
         self.stats.max_offset = self.next_offset - 1;
 
-        // Compact if needed
+        // Evict oldest events when over capacity. An eviction is only real data
+        // loss if the slowest tracked subscriber has not consumed the event yet
+        // (offset >= its last_offset); recycling already-read events is normal
+        // and not counted (audit M-012).
+        let slowest_unread = self.subscribers.values().map(|s| s.last_offset).min();
         while self.buffer.len() > self.config.max_buffer_size {
             if let Some(evt) = self.buffer.pop_front() {
+                if let Some(slowest) = slowest_unread {
+                    if evt.offset >= slowest {
+                        self.stats.dropped += 1;
+                    }
+                }
                 self.min_offset = evt.offset + 1;
             }
         }
@@ -557,5 +573,51 @@ mod tests {
 
         let stats = manager.room_stats("broadcast").await.unwrap();
         assert_eq!(stats.subscriber_count, 3);
+    }
+
+    // ==================== DROP ACCOUNTING TESTS (M-012) ====================
+
+    fn small_room() -> Room {
+        Room::new(
+            "r".to_string(),
+            StreamConfig {
+                max_buffer_size: 2,
+                retention_secs: 0,
+                auto_compact: false,
+                compact_interval_secs: 60,
+            },
+        )
+    }
+
+    #[test]
+    fn test_stream_no_drop_without_subscribers() {
+        // With no tracked subscriber, ring-buffer recycling is not data loss.
+        let mut room = small_room();
+        for i in 0..5 {
+            room.publish(StreamEvent::new("r".to_string(), "e".to_string(), vec![i]));
+        }
+        assert_eq!(room.buffer.len(), 2); // capacity enforced
+        assert_eq!(room.stats().dropped, 0); // but nothing counted as lost
+    }
+
+    #[test]
+    fn test_stream_counts_unread_eviction_for_lagging_subscriber() {
+        let mut room = small_room();
+
+        // Publish e0, then a subscriber reads only up to offset 0 (last_offset=1).
+        room.publish(StreamEvent::new("r".to_string(), "e".to_string(), vec![0]));
+        let got = room.consume("s", 0, 1);
+        assert_eq!(got.len(), 1);
+
+        // Publish e1..e4 without the subscriber catching up. Evictions of events
+        // at offset >= 1 (unread by "s") count as loss; evicting the already-read
+        // offset 0 does not.
+        for i in 1..=4 {
+            room.publish(StreamEvent::new("r".to_string(), "e".to_string(), vec![i]));
+        }
+
+        // Evicted: off0 (read, not counted), off1 and off2 (unread) -> dropped == 2.
+        assert_eq!(room.stats().dropped, 2);
+        assert_eq!(room.buffer.len(), 2);
     }
 }
