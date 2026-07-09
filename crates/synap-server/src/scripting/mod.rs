@@ -1026,4 +1026,55 @@ mod tests {
             .await;
         assert!(err.is_err());
     }
+
+    #[tokio::test]
+    async fn eval_bridges_remaining_redis_commands() {
+        let mgr = ScriptManager::new(Duration::from_secs(5));
+        let c = ctx();
+        // Exercise the less-common redis.call arms: expiry/ttl/persist on KV,
+        // hash field ops, list pops, set membership, and sorted-set range/rank.
+        let (val, _) = mgr
+            .eval(
+                c,
+                r#"
+                    redis.call('SET', 'k', 'v')
+                    redis.call('EXPIRE', 'k', '100')
+                    local t = redis.call('TTL', 'k')
+                    redis.call('PERSIST', 'k')
+                    local ex = redis.call('EXISTS', 'k')
+                    redis.call('DEL', 'k')
+
+                    redis.call('HSET', 'h', 'f', '1')
+                    redis.call('HEXISTS', 'h', 'f')
+                    redis.call('HDEL', 'h', 'f')
+
+                    redis.call('RPUSH', 'l', 'a', 'b', 'c')
+                    redis.call('LPOP', 'l')
+                    redis.call('RPOP', 'l')
+
+                    redis.call('SADD', 's', 'm1', 'm2')
+                    redis.call('SISMEMBER', 's', 'm1')
+                    redis.call('SREM', 's', 'm1')
+
+                    redis.call('ZADD', 'z', '1', 'a', '2', 'b', '3', 'c')
+                    redis.call('ZINCRBY', 'z', '5', 'a')
+                    redis.call('ZCOUNT', 'z', '0', '10')
+                    redis.call('ZRANK', 'z', 'b')
+                    redis.call('ZSCORE', 'z', 'a')
+                    local r = redis.call('ZRANGE', 'z', '0', '-1')
+                    redis.call('ZPOPMIN', 'z')
+                    redis.call('ZREMRANGEBYRANK', 'z', '0', '0')
+                    return {t, ex, #r}
+                "#,
+                vec![],
+                vec![],
+                None,
+            )
+            .await
+            .unwrap();
+        // TTL was set to ~100 then key existed before delete.
+        assert!(val[0].as_i64().unwrap() > 0);
+        assert_eq!(val[1], serde_json::json!(1));
+        assert_eq!(val[2], serde_json::json!(3)); // ZRANGE returned 3 members
+    }
 }
