@@ -15,8 +15,19 @@ use uuid::Uuid;
 /// Event stream configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StreamConfig {
-    /// Maximum messages per room buffer
+    /// Soft target size: the buffer is trimmed back toward this many events by
+    /// evicting events the slowest tracked consumer has already read.
     pub max_buffer_size: usize,
+    /// Hard ceiling on buffered events, including those still unread by the
+    /// slowest tracked consumer. The buffer is allowed to grow past
+    /// `max_buffer_size` (up to this cap) rather than silently drop unread
+    /// events; only when it would exceed this cap are unread events shed, and
+    /// that loss is surfaced via `RoomStats.dropped` (audit M-012). Values
+    /// below `max_buffer_size` are treated as `max_buffer_size` (plain ring
+    /// buffer). With no subscribers there is nothing to protect, so the buffer
+    /// behaves as a ring buffer at `max_buffer_size`.
+    #[serde(default = "default_max_unread_buffer_size")]
+    pub max_unread_buffer_size: usize,
     /// Retention time in seconds (0 = infinite)
     pub retention_secs: u64,
     /// Enable automatic compaction
@@ -25,11 +36,16 @@ pub struct StreamConfig {
     pub compact_interval_secs: u64,
 }
 
+fn default_max_unread_buffer_size() -> usize {
+    100_000 // 10x the default soft buffer: a wide consumer-lag window, still bounded
+}
+
 impl Default for StreamConfig {
     fn default() -> Self {
         Self {
             max_buffer_size: 10_000, // 10K messages per room
-            retention_secs: 3600,    // 1 hour default retention
+            max_unread_buffer_size: default_max_unread_buffer_size(),
+            retention_secs: 3600, // 1 hour default retention
             auto_compact: true,
             compact_interval_secs: 60, // Compact every minute
         }
@@ -160,17 +176,32 @@ impl Room {
         self.stats.message_count = self.buffer.len();
         self.stats.max_offset = self.next_offset - 1;
 
-        // Evict oldest events when over capacity. An eviction is only real data
-        // loss if the slowest tracked subscriber has not consumed the event yet
-        // (offset >= its last_offset); recycling already-read events is normal
-        // and not counted (audit M-012).
-        let slowest_unread = self.subscribers.values().map(|s| s.last_offset).min();
+        // Retention (audit M-012): trim back toward `max_buffer_size` by evicting
+        // events the slowest tracked consumer has already read. Events it has not
+        // read yet (offset >= its committed offset) are protected — the buffer is
+        // allowed to grow up to `max_unread_buffer_size` rather than lose them
+        // silently. Only when it would exceed that hard cap is an unread event
+        // shed, and that real loss is counted in `stats.dropped`. With no tracked
+        // subscribers there is nothing to protect: plain ring buffer.
+        let slowest_committed = self.subscribers.values().map(|s| s.last_offset).min();
+        let hard_cap = self
+            .config
+            .max_unread_buffer_size
+            .max(self.config.max_buffer_size);
         while self.buffer.len() > self.config.max_buffer_size {
+            let oldest_offset = match self.buffer.front() {
+                Some(evt) => evt.offset,
+                None => break,
+            };
+            let is_unread = slowest_committed.is_some_and(|c| oldest_offset >= c);
+            if is_unread && self.buffer.len() <= hard_cap {
+                // Protect unread data; let the buffer grow (bounded by hard_cap).
+                break;
+            }
             if let Some(evt) = self.buffer.pop_front() {
-                if let Some(slowest) = slowest_unread {
-                    if evt.offset >= slowest {
-                        self.stats.dropped += 1;
-                    }
+                if is_unread {
+                    // Forced drop of unread data at the hard cap — real loss.
+                    self.stats.dropped += 1;
                 }
                 self.min_offset = evt.offset + 1;
             }
@@ -577,16 +608,22 @@ mod tests {
 
     // ==================== DROP ACCOUNTING TESTS (M-012) ====================
 
-    fn small_room() -> Room {
+    fn room_with(max_buffer_size: usize, max_unread_buffer_size: usize) -> Room {
         Room::new(
             "r".to_string(),
             StreamConfig {
-                max_buffer_size: 2,
+                max_buffer_size,
+                max_unread_buffer_size,
                 retention_secs: 0,
                 auto_compact: false,
                 compact_interval_secs: 60,
             },
         )
+    }
+
+    // Plain ring buffer: hard cap == soft size, so unread events are not protected.
+    fn small_room() -> Room {
+        room_with(2, 2)
     }
 
     #[test]
@@ -619,5 +656,42 @@ mod tests {
         // Evicted: off0 (read, not counted), off1 and off2 (unread) -> dropped == 2.
         assert_eq!(room.stats().dropped, 2);
         assert_eq!(room.buffer.len(), 2);
+    }
+
+    #[test]
+    fn test_stream_retains_unread_up_to_hard_cap() {
+        // Soft size 2, hard cap 5: unread events are protected (buffer grows to 5)
+        // instead of being dropped, until the hard cap forces a single eviction.
+        let mut room = room_with(2, 5);
+
+        // Publish e0, subscriber reads only up to offset 0 (committed = 1).
+        room.publish(StreamEvent::new("r".to_string(), "e".to_string(), vec![0]));
+        assert_eq!(room.consume("s", 0, 1).len(), 1);
+
+        // Publish e1..e6 without the subscriber catching up.
+        for i in 1..=6u8 {
+            room.publish(StreamEvent::new("r".to_string(), "e".to_string(), vec![i]));
+        }
+
+        // Read e0 is evicted (not counted); unread events are retained up to the
+        // hard cap of 5, and exactly one unread event (e1) is shed when the 6th
+        // unread event would exceed the cap.
+        assert_eq!(room.buffer.len(), 5);
+        assert_eq!(room.stats().dropped, 1);
+        // The oldest retained event is e2 (e0 recycled, e1 dropped at the cap).
+        assert_eq!(room.buffer.front().unwrap().offset, 2);
+        assert_eq!(room.stats().min_offset, 2);
+    }
+
+    #[test]
+    fn test_stream_no_protection_without_subscribers_even_with_hard_cap() {
+        // A wide hard cap must not make an unsubscribed room grow: nobody to
+        // protect, so it stays a ring buffer at the soft size.
+        let mut room = room_with(2, 100);
+        for i in 0..10u8 {
+            room.publish(StreamEvent::new("r".to_string(), "e".to_string(), vec![i]));
+        }
+        assert_eq!(room.buffer.len(), 2);
+        assert_eq!(room.stats().dropped, 0);
     }
 }
