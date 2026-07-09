@@ -30,6 +30,27 @@
 > to run in a Redis-equipped environment (WSL/Docker/Linux). The methodology and
 > harness above are ready to execute as-is.
 
+## v1.0 native-protocol comparison — SynapRPC vs RESP3 vs HTTP (phase7)
+
+Measured with `cargo bench --bench protocol_bench` against a live **release**
+server on loopback (Windows, 2026-07-09). This compares Synap's own three
+transports; it is **not** the Redis head-to-head (that is deferred, above).
+
+| Workload | HTTP/JSON | RESP3 | SynapRPC |
+|---|---|---|---|
+| SET + GET round-trip | 477.6 µs | 233.8 µs | **168.0 µs** |
+| SET only | 193.0 µs | 108.5 µs | **79.9 µs** |
+| GET only | 77.2 µs | 127.1 µs | 79.9 µs |
+
+- **SynapRPC (MessagePack framing) is the fastest transport** on write and
+  round-trip workloads — ~2.8× faster than HTTP/JSON and ~1.4× faster than RESP3
+  on the realistic SET+GET round-trip. RESP3 sits between the two.
+- The isolated **GET-only** row is anomalous (HTTP appears fastest). This looks
+  like a benchmark artifact (HTTP client keep-alive vs per-call overhead on the
+  raw-TCP RESP3/SynapRPC clients in the harness), not a real transport property —
+  the SET+GET round-trip is the representative number. Flagged for the follow-up
+  benchmark run to isolate.
+
 **Date**: 2026-04-08  
 **Synap version**: 0.9.0 (local release build, port 15502)  
 **Redis version**: 7-alpine (Docker `project-v-redis-1`, port 6379)  

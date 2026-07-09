@@ -71,6 +71,13 @@ fixed for the 1.0 release.
   to take a single global write lock over all queues once per second and scan
   every pending entry; it now uses a per-queue min-heap of deadlines and touches
   only entries that have actually expired.
+- **RESP3 pipeline-aware flushing** (F-002). The RESP3 server flushed after every
+  command; a pipelined batch (`redis-benchmark -P 16`) now writes in a single
+  syscall per pipeline instead of one flush per command (flush deferred while the
+  client's commands are still buffered). MGET/MSET remain shard-grouped (one lock
+  per shard per batch).
+- **Opt-in `mimalloc` global allocator** (F-011a). Build with `--features mimalloc`
+  to replace the system allocator process-wide; off by default.
 
 ### Fixed
 
