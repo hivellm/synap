@@ -19,6 +19,20 @@ fn shard_hasher() -> &'static RandomState {
     HASHER.get_or_init(RandomState::new)
 }
 
+/// Parse a base-10 `i64` straight from stored bytes, without an intermediate
+/// `Vec`/`String` allocation (INCR/DECR hot path).
+#[inline]
+fn parse_i64(bytes: &[u8]) -> Option<i64> {
+    std::str::from_utf8(bytes).ok()?.trim().parse::<i64>().ok()
+}
+
+/// Format an `i64` as its decimal ASCII bytes. One allocation for the owned
+/// value the store must keep (`i64::to_string` reuses the buffer via `into_bytes`).
+#[inline]
+fn int_to_bytes(n: i64) -> Vec<u8> {
+    n.to_string().into_bytes()
+}
+
 /// Key-Value store using 64-way sharded radix tries for lock-free concurrency
 /// Eliminates lock contention by distributing keys across multiple shards
 #[derive(Clone)]
@@ -714,35 +728,36 @@ impl KVStore {
         let shard = self.get_shard(key);
         let mut data = shard.data.write();
 
-        // Read current value AND preserve its TTL (expires_at)
-        let (current_value, existing_ttl_secs) = if let Some(value) = data.get(key) {
+        // Fast path: the key exists and is live — parse the integer straight from
+        // the stored bytes (no `to_vec`) and update the value in place with
+        // `set_data`, which keeps the entry's TTL/variant. This avoids the read
+        // copy and the `key.to_string()` + HashMap re-insert the naive path paid
+        // under the shard write lock (the hot-key serialization point).
+        let new_value = if let Some(value) = data.get_mut(key) {
             if value.is_expired() {
-                (0i64, None)
+                // Expired — overwrite as a fresh persistent counter (0 + amount).
+                let nv = amount;
+                value.set_data(int_to_bytes(nv));
+                nv
             } else {
-                let int_val = String::from_utf8(value.data().to_vec())
-                    .ok()
-                    .and_then(|s| s.parse::<i64>().ok())
-                    .ok_or_else(|| {
-                        SynapError::InvalidValue("Value is not a valid integer".to_string())
-                    })?;
-                // Capture remaining TTL to restore it after the write
-                let ttl = value.remaining_ttl_secs();
-                (int_val, ttl)
+                let cur = parse_i64(value.data()).ok_or_else(|| {
+                    SynapError::InvalidValue("Value is not a valid integer".to_string())
+                })?;
+                let nv = cur.checked_add(amount).ok_or_else(|| {
+                    SynapError::InvalidValue("Integer overflow on INCR/DECR".to_string())
+                })?;
+                value.set_data(int_to_bytes(nv));
+                value.update_access();
+                nv
             }
         } else {
-            (0i64, None)
+            // Missing — insert a fresh persistent counter.
+            let nv = amount;
+            let stored = StoredValue::new(int_to_bytes(nv), None);
+            shard.track_ttl(&stored, key);
+            data.insert(key.to_string(), stored);
+            nv
         };
-
-        let new_value = current_value
-            .checked_add(amount)
-            .ok_or_else(|| SynapError::InvalidValue("Integer overflow on INCR/DECR".to_string()))?;
-        let new_data = new_value.to_string().into_bytes();
-
-        // Preserve TTL: if the key had a TTL, write the new value as Expiring
-        // with the same remaining time rather than as Persistent.
-        let stored = StoredValue::new(new_data, existing_ttl_secs);
-        shard.track_ttl(&stored, key);
-        data.insert(key.to_string(), stored);
 
         self.stats.sets.fetch_add(1, Ordering::Relaxed);
 

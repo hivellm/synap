@@ -14,5 +14,5 @@
 
 | Status | Task | Progress | Description |
 |--------|------|----------|-------------|
-| 🔄 | phase12_kv-write-lock-fastpath | 0/5 | kv write lock fastpath |
+| 🔄 | phase12_redis-parity-hotpath-perf | 3/10 | redis parity hotpath perf |
 

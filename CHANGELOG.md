@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Hot command-path allocations trimmed** (phase12 Redis-parity perf). The RESP3
+  and SynapRPC dispatchers no longer allocate a `String` per command to uppercase
+  the name (a stack buffer is used); `INCR`/`DECR` parse the integer straight from
+  the stored bytes and update in place via `set_data` instead of copying the value
+  out (`to_vec`) and re-inserting under a fresh `key.to_string()` key. Measured
+  (`-P 16`): RESP3 `INCR` 480k → 800k rps (0.51 → 0.85 of Redis 7); native
+  SynapRPC `SET` 330k → 468k.
 - **KV write per-key lock is now a sharded `RwLock`, not a mutex** (phase12
   write-lock fast-path). The M-010 per-key lock only needs to exclude plain
   writers *from an EXEC*, not from each other (two `SET k` are already serialized

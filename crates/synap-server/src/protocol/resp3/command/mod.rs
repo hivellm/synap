@@ -27,12 +27,26 @@ pub async fn dispatch(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
         return Resp3Value::Error("ERR empty command".into());
     }
 
-    let cmd = match args[0].as_str() {
-        Some(s) => s.to_ascii_uppercase(),
+    // Uppercase the command name into a stack buffer instead of allocating a
+    // `String` on every command. Redis command names are short; anything longer
+    // than the buffer is an unknown command anyway, so it falls through to the
+    // error arm without an allocation.
+    let raw = match args[0].as_bytes() {
+        Some(b) => b,
         None => return Resp3Value::Error("ERR command must be a string".into()),
     };
+    let mut buf = [0u8; 32];
+    let cmd: &str = if raw.len() <= buf.len() {
+        for (i, &c) in raw.iter().enumerate() {
+            buf[i] = c.to_ascii_uppercase();
+        }
+        // Bytes came from a valid command token; ASCII-uppercasing keeps it UTF-8.
+        std::str::from_utf8(&buf[..raw.len()]).unwrap_or("")
+    } else {
+        ""
+    };
 
-    match cmd.as_str() {
+    match cmd {
         "PING" => kv::cmd_ping(args),
         "QUIT" => Resp3Value::SimpleString("OK".into()),
         "SELECT" => Resp3Value::SimpleString("OK".into()), // single DB only

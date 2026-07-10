@@ -25,14 +25,23 @@ pub async fn dispatch(state: &AppState, req: Request) -> Response {
 }
 
 async fn run(state: &AppState, command: &str, args: Vec<SynapValue>) -> Result<SynapValue, String> {
-    let cmd = command.to_ascii_uppercase();
+    // Uppercase into a stack buffer instead of allocating a `String` per command.
+    let mut buf = [0u8; 32];
+    let cmd: &str = if command.len() <= buf.len() {
+        for (i, &c) in command.as_bytes().iter().enumerate() {
+            buf[i] = c.to_ascii_uppercase();
+        }
+        std::str::from_utf8(&buf[..command.len()]).unwrap_or(command)
+    } else {
+        command
+    };
     let args = &args;
-    match cmd.as_str() {
+    match cmd {
         "PING" | "SET" | "GET" | "DEL" | "EXISTS" | "EXPIRE" | "TTL" | "PERSIST" | "INCR"
         | "INCRBY" | "DECR" | "DECRBY" | "MSET" | "MGET" | "KEYS" | "BITCOUNT" | "SETBIT"
         | "GETBIT" | "SCAN" | "APPEND" | "GETRANGE" | "SETRANGE" | "STRLEN" | "GETSET"
         | "MSETNX" | "DBSIZE" | "KVSTATS" | "FLUSHALL" | "FLUSHDB" => {
-            kv::run(state, cmd.as_str(), args).await
+            kv::run(state, cmd, args).await
         }
 
         "HSET" | "HGET" | "HDEL" | "HGETALL" | "HLEN" | "HEXISTS" | "LPUSH" | "RPUSH" | "LPOP"
@@ -40,10 +49,10 @@ async fn run(state: &AppState, command: &str, args: Vec<SynapValue>) -> Result<S
         | "ZADD" | "ZRANGE" | "ZSCORE" | "ZCARD" | "ZREM" | "PFADD" | "PFCOUNT" | "HMSET"
         | "HMGET" | "HKEYS" | "HVALS" | "PFMERGE" | "HLLSTATS" | "HSCAN" | "SSCAN" | "ZSCAN"
         | "BLPOP" | "BRPOP" | "BRPOPLPUSH" | "BZPOPMIN" | "BZPOPMAX" => {
-            collections::run(state, cmd.as_str(), args).await
+            collections::run(state, cmd, args).await
         }
 
-        _ => advanced::run(state, cmd.as_str(), args).await,
+        _ => advanced::run(state, cmd, args).await,
     }
 }
 
