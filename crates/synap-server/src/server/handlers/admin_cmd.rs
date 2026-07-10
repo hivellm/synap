@@ -52,6 +52,10 @@ pub(super) async fn handle_info_cmd(
             .map_err(|e| SynapError::SerializationError(e.to_string()))?;
     }
 
+    if section == InfoSection::All || section == InfoSection::Cluster {
+        response["cluster"] = super::kv::info_cluster_section(&state);
+    }
+
     Ok(response)
 }
 

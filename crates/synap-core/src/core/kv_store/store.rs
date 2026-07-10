@@ -50,6 +50,18 @@ impl KVStore {
         Self::new_with_cache(config, None)
     }
 
+    /// Attach cluster topology + slot-migration manager so key access is routed by
+    /// hash slot (issue #232). A no-op when both are `None` (standalone mode).
+    pub fn with_cluster(
+        mut self,
+        topology: Option<Arc<crate::cluster::topology::ClusterTopology>>,
+        migration: Option<Arc<crate::cluster::migration::SlotMigrationManager>>,
+    ) -> Self {
+        self.cluster_topology = topology;
+        self.cluster_migration = migration;
+        self
+    }
+
     /// Attach a shared [`GlobalMemory`](crate::core::GlobalMemory) budget so this
     /// KV store's memory participates in the cross-datatype `maxmemory` limit.
     /// Registers this store's live byte counter, so its existing per-mutation

@@ -40,6 +40,10 @@ pub struct ServerConfig {
     /// Network resource limits shared by the binary listeners
     #[serde(default)]
     pub network: NetworkConfig,
+
+    /// Cluster mode (disabled by default) — topology + slot migration (issue #232)
+    #[serde(default)]
+    pub cluster: crate::cluster::ClusterConfig,
 }
 
 /// Configurable network resource limits for the binary listeners (phase6i).
@@ -365,6 +369,7 @@ impl Default for ServerConfig {
             resp3: Resp3Config::default(),
             synap_rpc: SynapRpcConfig::default(),
             network: NetworkConfig::default(),
+            cluster: crate::cluster::ClusterConfig::default(),
         }
     }
 }

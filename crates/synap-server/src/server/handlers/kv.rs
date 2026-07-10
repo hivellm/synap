@@ -927,7 +927,25 @@ pub async fn info(
             .map_err(|e| SynapError::SerializationError(e.to_string()))?;
     }
 
+    if section == InfoSection::All || section == InfoSection::Cluster {
+        response["cluster"] = info_cluster_section(&state);
+    }
+
     Ok(Json(response))
+}
+
+/// Build the INFO `cluster` section from the live topology (issue #232).
+pub(crate) fn info_cluster_section(state: &AppState) -> serde_json::Value {
+    match &state.cluster_topology {
+        Some(topo) => serde_json::json!({
+            "cluster_enabled": 1,
+            "cluster_my_id": topo.my_node_id(),
+            "cluster_known_nodes": topo.get_all_nodes().len(),
+            "cluster_slots_coverage": topo.slot_coverage(),
+            "cluster_full_coverage": topo.has_full_coverage(),
+        }),
+        None => serde_json::json!({ "cluster_enabled": 0 }),
+    }
 }
 
 /// SLOWLOG endpoint - get slow query log

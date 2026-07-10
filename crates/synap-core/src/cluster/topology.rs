@@ -200,6 +200,42 @@ impl ClusterTopology {
         info!("Initialized cluster with {} nodes", node_count);
         Ok(())
     }
+
+    /// Build a topology from cluster config (issue #232). Registers THIS node
+    /// (id from config or derived from its address) as a master owning all slots,
+    /// so a single-node cluster routes every key to itself; peers discovered later
+    /// (via seed nodes / raft) extend the topology and take over slot ranges.
+    pub fn from_config(config: &super::config::ClusterConfig) -> ClusterResult<Self> {
+        let node_id = config
+            .node_id
+            .clone()
+            .unwrap_or_else(|| format!("node-{}", config.node_address));
+        let topology = Self::new(node_id.clone());
+
+        let all_slots = SlotRange::new(0, TOTAL_SLOTS - 1);
+        let node = ClusterNode {
+            id: node_id.clone(),
+            address: config.node_address,
+            state: ClusterState::Connected,
+            slots: vec![all_slots],
+            master_id: None,
+            replica_ids: Vec::new(),
+            last_ping: 0,
+            flags: NodeFlags {
+                is_master: true,
+                is_myself: true,
+                ..Default::default()
+            },
+        };
+        topology.add_node(node)?;
+        topology.assign_slots(&node_id, vec![all_slots])?;
+
+        info!(
+            "Cluster topology initialized from config: node {} owns all {} slots",
+            node_id, TOTAL_SLOTS
+        );
+        Ok(topology)
+    }
 }
 
 /// Node information (simplified for external use)

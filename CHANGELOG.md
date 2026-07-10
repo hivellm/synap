@@ -20,6 +20,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Sorted-set blocking pops `BZPOPMIN` / `BZPOPMAX`** (core) with a per-key
   notify woken by `ZADD`, mirroring the list blocking-pop mechanism.
+- **Cluster mode initializes from config** (issue #232). A `cluster:` config
+  section now builds the `ClusterTopology` + `SlotMigrationManager` and wires them
+  into the KV store (hash-slot routing) and `AppState` when `cluster.enabled`; a
+  single node owns all 16384 slots until peers join. `INFO cluster` reports the
+  node id, known nodes, and slot coverage. `ClusterConfig` fields all carry serde
+  defaults so a partial/legacy `cluster:` block still loads. Disabled by default.
 
 ## [1.0.0] - 2026-07-09
 

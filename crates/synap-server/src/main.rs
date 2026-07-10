@@ -198,6 +198,29 @@ async fn main() -> Result<()> {
     // and KV eviction/refusal responds to the true total.
     let global_mem = synap_server::core::GlobalMemory::new(kv_config.max_memory_mb * 1024 * 1024);
 
+    // Cluster mode wiring (issue #232): when enabled, build the topology + slot
+    // migration manager from config and route KV access by hash slot. Disabled by
+    // default → both None (standalone).
+    let (cluster_topology, cluster_migration) = if config.cluster.enabled {
+        use synap_server::cluster::{ClusterTopology, SlotMigrationManager};
+        match ClusterTopology::from_config(&config.cluster) {
+            Ok(topology) => {
+                info!("Cluster mode enabled");
+                let migration = Arc::new(SlotMigrationManager::new(
+                    config.cluster.migration_batch_size,
+                    config.cluster.migration_timeout(),
+                ));
+                (Some(Arc::new(topology)), Some(migration))
+            }
+            Err(e) => {
+                warn!("Cluster init failed, running standalone: {}", e);
+                (None, None)
+            }
+        }
+    } else {
+        (None, None)
+    };
+
     #[allow(clippy::type_complexity)]
     let (
         kv_store,
@@ -221,7 +244,10 @@ async fn main() -> Result<()> {
             Ok((kv, hs, ls, ss, zs, qm, offset)) => {
                 info!("Recovery successful, WAL offset: {}", offset);
                 (
-                    Arc::new(kv.with_global_memory(global_mem.clone())),
+                    Arc::new(
+                        kv.with_global_memory(global_mem.clone())
+                            .with_cluster(cluster_topology.clone(), cluster_migration.clone()),
+                    ),
                     hs.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
                     ls.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
                     ss.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
@@ -233,7 +259,10 @@ async fn main() -> Result<()> {
             Err(e) => {
                 warn!("Recovery failed: {}, starting fresh", e);
                 (
-                    Arc::new(KVStore::new(kv_config.clone())),
+                    Arc::new(
+                        KVStore::new(kv_config.clone())
+                            .with_cluster(cluster_topology.clone(), cluster_migration.clone()),
+                    ),
                     Some(Arc::new(HashStore::new())),
                     Some(Arc::new(ListStore::new())),
                     Some(Arc::new(SetStore::new())),
@@ -250,7 +279,11 @@ async fn main() -> Result<()> {
     } else {
         info!("Persistence disabled, starting fresh");
         (
-            Arc::new(KVStore::new(kv_config.clone()).with_global_memory(global_mem.clone())),
+            Arc::new(
+                KVStore::new(kv_config.clone())
+                    .with_global_memory(global_mem.clone())
+                    .with_cluster(cluster_topology.clone(), cluster_migration.clone()),
+            ),
             Some(Arc::new(
                 HashStore::new().with_global_memory(global_mem.clone()),
             )),
@@ -665,8 +698,8 @@ async fn main() -> Result<()> {
         transaction_manager,
         script_manager,
         client_list_manager,
-        cluster_topology: None, // init from config — tracked in hivellm/synap#232
-        cluster_migration: None, // init from config — tracked in hivellm/synap#232
+        cluster_topology: cluster_topology.clone(),
+        cluster_migration: cluster_migration.clone(),
 
         hub_client,
         user_manager: if config.auth.enabled {

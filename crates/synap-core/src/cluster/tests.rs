@@ -501,4 +501,52 @@ mod tests {
         // Should not panic
         assert!(!config.enabled);
     }
+
+    #[test]
+    fn test_topology_from_config_owns_all_slots() {
+        let mut config = ClusterConfig {
+            enabled: true,
+            node_id: Some("n1".to_string()),
+            ..Default::default()
+        };
+        config.node_address = "127.0.0.1:16000".parse().unwrap();
+
+        let topology = ClusterTopology::from_config(&config).unwrap();
+        assert_eq!(topology.my_node_id(), "n1");
+        // A single-node cluster owns every slot → full coverage, self-routed.
+        assert!(topology.has_full_coverage());
+        assert_eq!(topology.get_slot_owner(0).unwrap(), "n1");
+        assert_eq!(topology.get_slot_owner(TOTAL_SLOTS - 1).unwrap(), "n1");
+        assert_eq!(topology.get_all_nodes().len(), 1);
+    }
+
+    #[test]
+    fn test_topology_from_config_derives_node_id() {
+        let config = ClusterConfig {
+            enabled: true,
+            node_id: None,
+            node_address: "127.0.0.1:16001".parse().unwrap(),
+            ..Default::default()
+        };
+        let topology = ClusterTopology::from_config(&config).unwrap();
+        // Node id derived from the address when not set.
+        assert_eq!(topology.my_node_id(), "node-127.0.0.1:16001");
+    }
+
+    #[test]
+    fn test_cluster_config_partial_deserialize_uses_defaults() {
+        // A partial/legacy cluster block (only `enabled`, no node_address) must
+        // still deserialize via per-field serde defaults (issue #232 regression).
+        let cfg: ClusterConfig = serde_json::from_str(r#"{"enabled": false}"#).unwrap();
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.node_address.to_string(), "127.0.0.1:15502");
+        assert_eq!(cfg.cluster_port, 15502);
+        assert!(cfg.require_full_coverage);
+        assert_eq!(cfg.migration_batch_size, 100);
+
+        // The legacy `seeds` key aliases to seed_nodes.
+        let cfg2: ClusterConfig =
+            serde_json::from_str(r#"{"seeds": ["127.0.0.1:16005"]}"#).unwrap();
+        assert_eq!(cfg2.seed_nodes.len(), 1);
+    }
 }
