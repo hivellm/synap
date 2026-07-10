@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **KV values are stored behind a shared `Arc<[u8]>` buffer** (audit M-018 read
+  half). A read no longer copies the whole value: `KVStore::get_shared` returns
+  the shared buffer (a refcount bump), and cloning a stored value (GETSET, cache
+  fill, snapshot iteration, replication) is now cheap. `get` remains a thin
+  `Vec<u8>` wrapper. In-place mutators (APPEND/SETRANGE) copy-on-write. A new
+  `large_value_read` benchmark compares `get` vs `get_shared`. (Threading the
+  shared buffer through the RESP3/SynapRPC value enums to the wire is a follow-up.)
+
 ### Fixed
 - **Replication: replica joining mid-write-stream no longer loses writes**
   (issue #234). The master now registers a joining replica in the fan-out set

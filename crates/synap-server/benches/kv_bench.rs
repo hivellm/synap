@@ -181,6 +181,34 @@ fn bench_read_latency(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmark: large-value read — `get` (copies the value into a fresh `Vec`)
+/// vs `get_shared` (returns the shared `Arc<[u8]>`, a refcount bump). Demonstrates
+/// the read-copy elimination for large values (phase9 kv-shared-buffer-reads).
+fn bench_large_value_read(c: &mut Criterion) {
+    let mut group = c.benchmark_group("large_value_read");
+    let rt = Runtime::new().unwrap();
+    let store = KVStore::new(KVConfig::default());
+
+    for size in [4_096usize, 65_536, 1_048_576] {
+        rt.block_on(async {
+            store.set("big", vec![7u8; size], None).await.unwrap();
+        });
+        group.throughput(Throughput::Bytes(size as u64));
+
+        group.bench_with_input(BenchmarkId::new("get_copy", size), &size, |b, _| {
+            b.to_async(&rt).iter(|| async {
+                let _ = black_box(store.get("big").await.unwrap());
+            });
+        });
+        group.bench_with_input(BenchmarkId::new("get_shared", size), &size, |b, _| {
+            b.to_async(&rt).iter(|| async {
+                let _ = black_box(store.get_shared("big").await.unwrap());
+            });
+        });
+    }
+    group.finish();
+}
+
 /// Benchmark: TTL cleanup performance
 fn bench_ttl_cleanup(c: &mut Criterion) {
     let mut group = c.benchmark_group("ttl_cleanup");
@@ -328,6 +356,7 @@ criterion_group!(
     bench_concurrent_operations,
     bench_write_throughput,
     bench_read_latency,
+    bench_large_value_read,
     bench_ttl_cleanup,
     bench_memory_footprint,
     bench_shard_distribution,

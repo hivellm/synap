@@ -431,12 +431,12 @@ impl KVStore {
                 .and_then(|v| v.expires_at_ms());
             match existing_expires_at_ms {
                 Some(ms) => StoredValue::with_expires_at_ms(value.clone(), ms),
-                None => StoredValue::Persistent(value.clone()),
+                None => StoredValue::Persistent(value.clone().into()),
             }
         } else {
             match expiry {
                 Some(exp) => StoredValue::with_expiry(value.clone(), exp),
-                None => StoredValue::Persistent(value.clone()),
+                None => StoredValue::Persistent(value.clone().into()),
             }
         };
 
@@ -487,7 +487,19 @@ impl KVStore {
     }
 
     /// Get a value by key
+    /// GET returning an owned `Vec<u8>` (compatibility wrapper). Prefer
+    /// [`get_shared`](Self::get_shared) on read-heavy/large-value paths to avoid
+    /// this final copy.
     pub async fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
+        Ok(self.get_shared(key).await?.map(|a| a.to_vec()))
+    }
+
+    /// GET returning the shared `Arc<[u8]>` buffer — a read is a refcount bump,
+    /// not a full copy of the value (audit M-018 read half). The response
+    /// serializers write directly from this slice. When the optional L1 cache is
+    /// enabled a cache hit costs one copy (the cache owns `Vec<u8>`); the default
+    /// no-cache storage path is zero-copy.
+    pub async fn get_shared(&self, key: &str) -> Result<Option<Arc<[u8]>>> {
         debug!("GET key={}", key);
 
         // Check cluster routing (returns error if key doesn't belong to this node)
@@ -499,7 +511,7 @@ impl KVStore {
                 debug!("L1 Cache HIT: {}", key);
                 self.stats.gets.fetch_add(1, Ordering::Relaxed);
                 self.stats.hits.fetch_add(1, Ordering::Relaxed);
-                return Ok(Some(cached_value));
+                return Ok(Some(Arc::from(cached_value)));
             }
         }
 
@@ -520,13 +532,14 @@ impl KVStore {
                     value.update_access();
                     self.stats.hits.fetch_add(1, Ordering::Relaxed);
 
-                    let value_data = value.data().to_vec();
+                    // Zero-copy: bump the shared buffer's refcount.
+                    let value_data = value.data_arc();
                     let ttl = value.ttl_remaining();
                     drop(data);
 
-                    // Populate cache
+                    // Populate cache (the cache owns Vec<u8>, so one copy here).
                     if let Some(ref cache) = self.cache {
-                        cache.put(key.to_string(), value_data.clone(), ttl);
+                        cache.put(key.to_string(), value_data.to_vec(), ttl);
                     }
 
                     return Ok(Some(value_data));
@@ -558,11 +571,11 @@ impl KVStore {
                     // Treat as a hit.
                     value.update_access();
                     self.stats.hits.fetch_add(1, Ordering::Relaxed);
-                    let value_data = value.data().to_vec();
+                    let value_data = value.data_arc();
                     let ttl = value.ttl_remaining();
                     drop(data);
                     if let Some(ref cache) = self.cache {
-                        cache.put(key.to_string(), value_data.clone(), ttl);
+                        cache.put(key.to_string(), value_data.to_vec(), ttl);
                     }
                     return Ok(Some(value_data));
                 }
@@ -739,7 +752,7 @@ impl KVStore {
             let shard = &self.shards[idx];
             let mut data = shard.data.write();
             for (key, value) in group {
-                let stored = StoredValue::Persistent(value);
+                let stored = StoredValue::Persistent(value.into());
                 let entry_size =
                     key.len() + stored.data().len() + std::mem::size_of::<StoredValue>();
                 let old = data.insert(key, stored);
@@ -1347,10 +1360,13 @@ impl KVStore {
                 *stored_value = StoredValue::new(new_data.clone(), None);
                 new_data.len()
             } else {
-                // Append to existing
+                // Append to existing (copy-on-write: the Arc payload is immutable).
                 stored_value.update_access();
-                stored_value.data_mut().extend_from_slice(&value);
-                stored_value.data().len()
+                let mut merged = stored_value.data().to_vec();
+                merged.extend_from_slice(&value);
+                let len = merged.len();
+                stored_value.set_data(merged);
+                len
             }
         } else {
             // Key doesn't exist, create new
@@ -1435,9 +1451,9 @@ impl KVStore {
                 *stored_value = StoredValue::new(new_data.clone(), None);
                 new_data.len()
             } else {
-                // Update existing
+                // Update existing (copy-on-write: the Arc payload is immutable).
                 stored_value.update_access();
-                let bytes = stored_value.data_mut();
+                let mut bytes = stored_value.data().to_vec();
 
                 // Extend if necessary
                 let required_len = offset + value.len();
@@ -1447,7 +1463,9 @@ impl KVStore {
 
                 // Overwrite at offset
                 bytes[offset..offset + value.len()].copy_from_slice(&value);
-                bytes.len()
+                let len = bytes.len();
+                stored_value.set_data(bytes);
+                len
             }
         } else {
             // Key doesn't exist, create new with padding

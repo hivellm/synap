@@ -74,17 +74,21 @@ pub struct SetResult {
 /// **read** lock instead of a write lock — enabling fully concurrent reads.
 #[derive(Debug)]
 pub enum StoredValue {
-    /// Persistent value without TTL (24 bytes overhead only)
-    Persistent(Vec<u8>),
+    /// Persistent value without TTL.
+    ///
+    /// The payload is an `Arc<[u8]>` so a read returns a shared handle (a refcount
+    /// bump) instead of copying the whole value, and cloning a `StoredValue`
+    /// (getset, cache fill, snapshot iteration) is cheap (audit M-018 read half).
+    Persistent(Arc<[u8]>),
 
     /// Expiring value with TTL and LRU tracking.
     ///
     /// `expires_at` is a Unix timestamp in **milliseconds** (u64) to support
     /// millisecond-precision expiry (Redis PX / PXAT compatibility).
     /// `last_access` is `AtomicU32` (seconds) so GET can write it without a
-    /// write lock.
+    /// write lock. `data` is an `Arc<[u8]>` shared buffer (see `Persistent`).
     Expiring {
-        data: Vec<u8>,
+        data: Arc<[u8]>,
         expires_at: u64,        // Unix timestamp in milliseconds
         last_access: AtomicU32, // Unix timestamp in seconds for LRU
         freq: AtomicU32,        // access-frequency counter for LFU eviction
@@ -114,7 +118,7 @@ impl StoredValue {
     /// Create a new stored value using a seconds-based TTL (backward-compatible).
     pub fn new(data: Vec<u8>, ttl_secs: Option<u64>) -> Self {
         match ttl_secs {
-            None => Self::Persistent(data),
+            None => Self::Persistent(data.into()),
             Some(secs) => Self::with_expiry(data, Expiry::Seconds(secs)),
         }
     }
@@ -122,7 +126,7 @@ impl StoredValue {
     /// Create a new stored value using the rich `Expiry` enum.
     pub fn with_expiry(data: Vec<u8>, expiry: Expiry) -> Self {
         Self::Expiring {
-            data,
+            data: data.into(),
             expires_at: expiry.to_unix_ms(),
             last_access: AtomicU32::new(Self::current_timestamp_secs()),
             freq: AtomicU32::new(1),
@@ -132,7 +136,7 @@ impl StoredValue {
     /// Create a new stored value that expires at a specific absolute millisecond timestamp.
     pub fn with_expires_at_ms(data: Vec<u8>, expires_at_ms: u64) -> Self {
         Self::Expiring {
-            data,
+            data: data.into(),
             expires_at: expires_at_ms,
             last_access: AtomicU32::new(Self::current_timestamp_secs()),
             freq: AtomicU32::new(1),
@@ -251,12 +255,24 @@ impl StoredValue {
         }
     }
 
-    /// Get mutable reference to data regardless of variant.
+    /// Cheap clone of the shared payload buffer — a refcount bump, not a byte
+    /// copy. This is the zero-copy read handle threaded to the response boundary.
     #[inline]
-    pub fn data_mut(&mut self) -> &mut Vec<u8> {
+    pub fn data_arc(&self) -> Arc<[u8]> {
         match self {
-            Self::Persistent(data) => data,
-            Self::Expiring { data, .. } => data,
+            Self::Persistent(data) => Arc::clone(data),
+            Self::Expiring { data, .. } => Arc::clone(data),
+        }
+    }
+
+    /// Replace the payload with a new buffer (copy-on-write). The `Arc<[u8]>`
+    /// payload is immutable, so the rare in-place mutators (APPEND / SETRANGE)
+    /// build a fresh buffer and swap it in, preserving TTL/access for `Expiring`.
+    #[inline]
+    pub fn set_data(&mut self, new: Vec<u8>) {
+        match self {
+            Self::Persistent(data) => *data = new.into(),
+            Self::Expiring { data, .. } => *data = new.into(),
         }
     }
 
@@ -408,7 +424,7 @@ mod tests {
         let value = StoredValue::new(data.clone(), None);
 
         match &value {
-            StoredValue::Persistent(d) => assert_eq!(d, &data),
+            StoredValue::Persistent(d) => assert_eq!(&**d, data.as_slice()),
             _ => panic!("Expected Persistent variant"),
         }
 
@@ -436,7 +452,7 @@ mod tests {
     fn test_stored_value_expiration() {
         let data = vec![1, 2, 3];
         let value = StoredValue::Expiring {
-            data: data.clone(),
+            data: data.clone().into(),
             expires_at: 0, // Already expired
             last_access: AtomicU32::new(0),
             freq: AtomicU32::new(1),
@@ -495,13 +511,20 @@ mod tests {
     }
 
     #[test]
-    fn test_stored_value_data_mut() {
+    fn test_stored_value_set_data_and_arc() {
         let mut value = StoredValue::new(vec![1, 2, 3], None);
 
-        let data_mut = value.data_mut();
-        data_mut.push(4);
-
+        // Copy-on-write replacement (Arc payload is immutable).
+        let mut new = value.data().to_vec();
+        new.push(4);
+        value.set_data(new);
         assert_eq!(value.data(), &[1, 2, 3, 4]);
+
+        // data_arc shares the buffer: cloning bumps the refcount, no copy.
+        let a = value.data_arc();
+        let b = value.data_arc();
+        assert_eq!(&*a, &[1, 2, 3, 4]);
+        assert_eq!(a.as_ptr(), b.as_ptr()); // same backing allocation
     }
 
     #[test]

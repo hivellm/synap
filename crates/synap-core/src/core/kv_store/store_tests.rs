@@ -13,6 +13,35 @@ async fn test_set_get() {
 }
 
 #[tokio::test]
+async fn test_get_shared_is_zero_copy_and_consistent() {
+    let store = KVStore::new(KVConfig::default());
+    store
+        .set("k", b"shared-value".to_vec(), None)
+        .await
+        .unwrap();
+
+    // get_shared returns the shared buffer; two reads share the SAME allocation
+    // (a refcount bump, not a copy).
+    let a = store.get_shared("k").await.unwrap().unwrap();
+    let b = store.get_shared("k").await.unwrap().unwrap();
+    assert_eq!(&*a, b"shared-value");
+    assert_eq!(
+        a.as_ptr(),
+        b.as_ptr(),
+        "reads must share one backing buffer"
+    );
+
+    // The Vec-returning wrapper still yields the correct bytes.
+    assert_eq!(
+        store.get("k").await.unwrap(),
+        Some(b"shared-value".to_vec())
+    );
+
+    // Missing key.
+    assert!(store.get_shared("nope").await.unwrap().is_none());
+}
+
+#[tokio::test]
 async fn test_get_nonexistent() {
     let store = KVStore::new(KVConfig::default());
 
