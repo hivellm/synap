@@ -2,6 +2,26 @@
 
 Each finding has: title, evidence (file:line), impact, priority, estimated effort, and confidence.
 
+> ## Status as of v1.0 (2026-07-09, phase7)
+>
+> The findings below are from 2026-04-07 and describe the pre-RESP state. Current
+> status per finding:
+>
+> | Finding | Status | Evidence / where handled |
+> |---|---|---|
+> | F-001 No binary protocol (RESP) | ✅ RESOLVED | RESP3 listener (`protocol/resp3/`) + SynapRPC (`protocol/synap_rpc/`) |
+> | F-002 No pipelining | ✅ RESOLVED | RESP3 pipeline-aware flush (`resp3/server.rs`, phase7) |
+> | F-003 Eviction not implemented | ✅ RESOLVED | 6 eviction policies (phase1_implement-kv-eviction) |
+> | F-004 Write lock on GET | ✅ RESOLVED | `AtomicU32` LRU fast path (`kv_store/store.rs`) |
+> | F-005 `handlers.rs` 11,595 lines | 🔶 PARTIAL | Split into `crates/` + sub-modules; handler file still large |
+> | F-006 Memory stats drift | ⬜ OPEN | tracked in phase6g (memory accounting, audit M-018) |
+> | F-007 MGET/MSET sequential | 🔶 PARTIAL | shard-grouped (one lock per shard, not per key) — reduces lock churn under contention; uncontended single-thread latency is ~parity (bucketing overhead offsets lock savings — measured). True cross-core parallelism deferred |
+> | F-008 No blocking ops (BLPOP…) | ⬜ DEFERRED | ship/defer decision in phase7; post-1.0 follow-up task |
+> | F-009 No PSUBSCRIBE | ⬜ DEFERRED | ship/defer decision in phase7; post-1.0 follow-up task |
+> | F-010 SCAN cursors only on KV | ⬜ DEFERRED | ship/defer decision in phase7; post-1.0 follow-up task |
+> | F-011 Allocator / IO threads | 🔶 PARTIAL | allocator → opt-in `mimalloc` flag (phase7); IO threads deferred |
+> | F-012 SET hot path ~20 issues | 🔶 PARTIAL | most resolved; memory-accounting remainder in phase6g |
+
 ---
 
 ## F-001: No binary protocol (RESP)

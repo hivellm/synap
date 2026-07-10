@@ -7,6 +7,173 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-09
+
+The **v1.0.0 hardening line**: a `crates/` workspace restructure plus a deep
+security / durability / correctness / performance audit (findings M-001…M-018)
+fixed for the 1.0 release.
+
+### Migration guide
+
+- **Workspace split into `crates/` (breaking for Rust library consumers).** The
+  monolithic `synap-server` crate was split into `synap-core` (in-memory data
+  engine), `synap-protocol` (RESP3 + SynapRPC wire types/codecs), and
+  `synap-server` (HTTP/WS/MCP + dispatch). Rust code that imported
+  `synap_server::core::*` or `synap_server::protocol::*` should move to
+  `synap_core::*` / `synap_protocol::*`. The old paths still resolve via umbrella
+  re-exports kept on `synap_server` for the transition, so existing imports keep
+  compiling — but new code should depend on the focused crates directly. The
+  Rust SDK (`synap-sdk`) now shares `synap-protocol`'s wire types (no public API
+  change).
+- **SynapRPC default bind moved to loopback (config migration).** The SynapRPC
+  listener now defaults to `127.0.0.1` (matching RESP3) instead of `0.0.0.0`. If
+  you relied on the binary protocol being reachable from other hosts, set
+  `synap_rpc.host: "0.0.0.0"` explicitly (and enable auth). The shipped
+  `config/config.yml` binds both binary listeners to loopback by default.
+
+### Added
+
+- **Streams: retention bounded by committed consumer offset** (audit M-012).
+  On overflow, streams previously evicted the oldest event regardless of
+  consumer progress, silently losing unread data. Events the slowest tracked
+  consumer has not read are now protected: the room buffer grows up to a new
+  `max_unread_buffer_size` hard cap (default 10× the soft `max_buffer_size`)
+  instead of dropping them, and any forced drop at the cap is surfaced via
+  `RoomStats.dropped` (a real lagging-consumer loss signal, not steady-state
+  noise). With no subscribers the room stays a plain ring buffer. See
+  `docs/broker-retention-and-prefetch.md`.
+- **Queues: per-consumer prefetch/QoS with fair dispatch** (audit M-013). A new
+  per-queue `prefetch_limit` caps how many unacked messages a single consumer
+  may hold; a consumer at its limit is throttled until it acks, which in the
+  pull model also yields fair dispatch (its share flows to other consumers).
+  `0` = unlimited (default). Configurable globally (`queue.prefetch_limit`) and
+  per-queue at creation. The reported consumer count is now the real number of
+  consumers holding in-flight messages instead of a hardcoded `1`.
+- **Replication is actually wired into the running server** (audit M-005).
+  `MasterNode`/`ReplicaNode` are now instantiated from config and writes are
+  propagated to replicas; previously the replication flags were accepted but no
+  node was ever constructed and no write was replicated. A replica converges to
+  the master for **every datatype** — KV, hash, list, set, sorted-set, queue and
+  stream — by applying each `Operation` through the same shared applier the WAL
+  recovery path uses, so the two can't diverge. Replication is **decoupled from
+  the WAL**: a shared record hook always forwards writes to replicas and only
+  logs to the WAL when persistence is enabled, so a master replicates even with
+  `persistence.enabled = false`. `INFO replication` now reports the live role,
+  connected replica count, offset, and (on a replica) master link status and
+  lag. See `docs/replication.md`.
+- **Snapshots persist all datatypes** (audit M-001). Point-in-time snapshots now
+  include Hash, List, Set and Sorted-Set sections (previously only KV/Queue/
+  Stream), so those collections survive a restart.
+
+### Changed
+
+- **Workspace restructured into `crates/`** (Vectorizer/Nexus layout): first-party
+  crates `synap-core`, `synap-protocol`, `synap-server`, `synap-cli`,
+  `synap-migrate` under `crates/`, with the Rust SDK at `sdks/rust`. The pure
+  wire layer was extracted into `synap-protocol` and the in-memory data engine
+  into `synap-core` (a leaf crate with no server/protocol dependencies).
+- **Rust SDK shares one wire-type source of truth** with the server. The SDK's
+  internal `WireValue`/`RpcRequest`/`RpcResponse` copies are gone — it now uses
+  `synap_protocol::synap_rpc::{SynapValue, Request, Response}` and the shared
+  frame codec, so a server-side wire change reaches the SDK at compile time
+  instead of drifting silently. `SynapValue` gained `as_float`/`is_null`/`to_json`
+  accessors (previously SDK-local). No public SDK API change (the wire types were
+  crate-internal); wire bytes are unchanged.
+- **Config files moved into `config/`** for organization; build references
+  (Dockerfile, docker-compose, release workflow, macOS build script) updated.
+- **Listener defaults made consistent and safe** (config hardening). `Resp3Config`
+  and `SynapRpcConfig` `enabled` defaults now agree between serde and `Default`,
+  and the SynapRPC listener binds loopback (`127.0.0.1`) by default like RESP3
+  instead of `0.0.0.0`.
+- Version baseline set to `1.0.0-rc.1`; dependencies bumped (sysinfo 0.39,
+  mlua 0.12, rmcp 2.1, plus batched TS SDK and tower-http/CI bumps).
+
+### Performance
+
+- **O(1) stream consume seek** (audit M-016). Consuming from an offset now indexes
+  straight into the ring buffer (`offset − min_offset`) instead of linearly
+  scanning the whole buffer on every poll.
+- **O(expired) queue ACK-deadline sweep** (audit M-017). The deadline checker used
+  to take a single global write lock over all queues once per second and scan
+  every pending entry; it now uses a per-queue min-heap of deadlines and touches
+  only entries that have actually expired.
+- **RESP3 pipeline-aware flushing** (F-002). The RESP3 server flushed after every
+  command; a pipelined batch (`redis-benchmark -P 16`) now writes in a single
+  syscall per pipeline instead of one flush per command (flush deferred while the
+  client's commands are still buffered). MGET/MSET remain shard-grouped (one lock
+  per shard per batch).
+- **Opt-in `mimalloc` global allocator** (F-011a). Build with `--features mimalloc`
+  to replace the system allocator process-wide; off by default.
+
+### Fixed
+
+- **`maxmemory` accounts for all datatypes** (audit M-018). The budget tracked
+  only the KV store, so collections/brokers could blow far past the limit. A
+  shared `GlobalMemory` budget now sums KV + Hash/List/Set/SortedSet/Stream/Queue;
+  KV eviction/refusal consults the true total and Hash/List/Set grow-writes are
+  refused over the cap. Per-datatype accounting is exposed as
+  `synap_datatype_memory_bytes`. (The read-path copy-avoidance half — `Arc<[u8]>`
+  values — is tracked separately.) See `docs/memory-accounting.md`.
+- **Snapshot CRC64 is verified on load** (audit M-002). The checksum was written
+  but read into a discarded binding; a corrupt/torn snapshot loaded silently. The
+  digest is now recomputed on load and the snapshot rejected on mismatch.
+- **MULTI/EXEC is atomic** (audit M-008). EXEC now runs under a serialized lock and
+  the WATCH check-and-apply is one atomic step, so concurrent transactions cannot
+  interleave and optimistic-concurrency guarantees hold.
+- **MULTI/EXEC is durable, replicated, and isolated** (audit M-010). A committed
+  transaction is now logged to the WAL as one atomic batch (single group-commit
+  fsync) and propagated to replicas through the shared persistence hook — a
+  committed EXEC survives a crash all-or-nothing and reaches replicas, whereas
+  before it executed only in memory (lost on crash, never replicated).
+  Non-deterministic commands are recorded as their concrete effect (INCR → the
+  resulting SET) so replicas/WAL never diverge. EXEC is also isolated from
+  non-transactional writers via a sharded per-key lock (`KeyLockManager`) shared
+  by the KV store and the transaction manager: a plain `SET k` during an EXEC
+  touching `k` is ordered entirely before or after it, never interleaved. See
+  `docs/transactions.md`.
+- **Dead stream-WAL path removed** (audit M-014). Stream operations were logged to
+  the WAL but their replay was a no-op; the redundant logging is dropped (streams
+  persist via their own path).
+
+### Security
+
+- **Authentication enforced on the RESP3 and SynapRPC listeners** (audit M-003,
+  M-004). RESP3 auth was stubbed to always-authenticated and SynapRPC had no auth
+  at all — any client on the port could run `FLUSHALL`/`KEYS`. Both now gate
+  commands behind AUTH and reject unauthenticated access when auth is required.
+- **Passwords hashed with bcrypt and compared in constant time** (audit M-009),
+  replacing unsalted single-round SHA-512 with a timing-observable `==`. Legacy
+  SHA-512 hashes still verify and are transparently rehashed to bcrypt on next
+  login.
+- **Parsers cap allocation from client-controlled sizes** (audit M-006, M-007).
+  The RESP3 parser and SynapRPC frame reader allocated attacker-controlled sizes
+  (multi-GB) with no ceiling; bulk/aggregate/line and frame lengths are now bounded
+  before allocation to prevent OOM DoS.
+- **Bounded pub/sub per-subscriber channel** (audit M-011). A slow/stuck subscriber
+  could grow an unbounded channel until OOM; channels are now bounded and slow
+  consumers are disconnected, with a dropped-message stat.
+- **Maximum concurrent connections on the binary listeners** (audit M-015). RESP3
+  and SynapRPC now bound accepted connections with a semaphore and refuse new ones
+  at capacity, preventing connection-flood FD/memory exhaustion.
+- **Idle-connection timeout + configurable network limits** (hardening beyond
+  M-015). The binary listeners close a connection that sends nothing within
+  `network.idle_timeout_secs` (default 300; slow-loris resistance) and expose
+  `network.max_connections` (default 10 000) as a config knob. Defaults preserve
+  prior behavior.
+- **Per-command admin ACL on the binary protocols** (audit M-003/M-004 refinement).
+  After authentication, RESP3 and SynapRPC now gate destructive/admin commands
+  (`FLUSHALL`/`FLUSHDB`, `CONFIG`, `SHUTDOWN`, `CLUSTER`, `SCRIPT.FLUSH/KILL`,
+  `SLAVEOF`/`REPLICAOF`, …) behind admin — an authenticated non-admin is denied
+  with `NOPERM`. With auth disabled the port is trusted (loopback default).
+- **No panics on reachable paths** (stability hardening). Non-test `synap-core`
+  and `synap-server` code no longer calls bare `unwrap()`/`panic!` on paths
+  reachable from input — a reachable panic is a remote-DoS vector. `SystemTime`
+  reads fall back to `0` instead of crashing on a bad clock; fixed-size arrays are
+  built with `std::array::from_fn`; startup config errors log and exit cleanly
+  instead of panicking; every remaining call carries a documented invariant. The
+  13 outstanding `TODO`/`FIXME` markers were replaced with tracked issues
+  ([#230](https://github.com/hivellm/synap/issues/230)–[#233](https://github.com/hivellm/synap/issues/233)).
+
 ## [0.13.0] - 2026-07-01
 
 ### Added

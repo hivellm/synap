@@ -1,16 +1,18 @@
 [package]
 name = "synap-sdk"
-version = "0.12.0"
-edition = "2024"
-rust-version = "1.85"
-authors = ["HiveLLM Team"]
-license = "Apache-2.0"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
 description = "Rust SDK for Synap - High-Performance In-Memory Key-Value Store & Message Broker"
-repository = "https://github.com/hivellm/synap"
+repository.workspace = true
 keywords = ["synap", "kv-store", "message-queue", "event-stream", "pubsub"]
 categories = ["database", "network-programming", "asynchronous"]
 
 [dependencies]
+# Shared wire types/codecs — path for local builds, version for crates.io publish.
+synap-protocol = { path = "../../crates/synap-protocol", version = "1.0.0" }
 tokio = { version = "1.48", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 reqwest = { version = "0.13", features = ["json", "stream"] }

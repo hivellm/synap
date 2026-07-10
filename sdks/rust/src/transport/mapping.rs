@@ -1377,3 +1377,327 @@ pub(crate) fn map_response(cmd: &str, wire: WireValue) -> Value {
         _ => wire.to_json(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// A payload carrying the union of fields the mappers read, so a single value
+    /// drives most command arms down their populated path.
+    fn rich() -> Value {
+        // Split across two literals + merge: a single json! with this many fields
+        // exceeds the macro recursion limit.
+        let mut a = json!({
+            "key": "k", "value": "v", "field": "f", "ttl": 60, "seconds": 60,
+            "prefix": "p", "pattern": "p*", "cursor": 0, "count": 2,
+            "fields": {"f1": "v1", "f2": "v2"},
+            "keys": ["k1", "k2"], "members": ["m1", "m2"], "member": "m",
+            "score": 1.5, "increment": 2, "delta": 3, "values": ["a", "b"]
+        });
+        let b = json!({
+            "value2": "v2", "index": 0, "start": 0, "stop": -1, "min": 0, "max": 10,
+            "pivot": "p", "before": true, "destination": "d", "source": "s",
+            "srckey": "s", "dstkey": "d", "queue": "q", "topic": "t", "room": "r",
+            "message": "hi", "message_id": "id", "payload": "data", "data": "data",
+            "script": "return 1", "sha": "abc", "hash": "abc", "args": ["1"],
+            "num_keys": 1, "longitude": 1.0, "latitude": 2.0, "radius": 5.0,
+            "unit": "km", "event_type": "e", "requeue": true, "with_scores": true,
+            "limit": 10, "offset": 0, "priority": 1, "max_retries": 3,
+            "elements": ["x"], "pairs": [{"key": "k1", "value": "v1"}]
+        });
+        let (ao, bo) = (a.as_object_mut().unwrap(), b.as_object().unwrap());
+        for (k, v) in bo {
+            ao.insert(k.clone(), v.clone());
+        }
+        a
+    }
+
+    const COMMANDS: &[&str] = &[
+        "kv.get",
+        "kv.set",
+        "kv.del",
+        "kv.exists",
+        "kv.incr",
+        "kv.decr",
+        "kv.keys",
+        "kv.expire",
+        "kv.ttl",
+        "kv.persist",
+        "kv.dbsize",
+        "kv.flushdb",
+        "kv.flushall",
+        "kv.mget",
+        "kv.mset",
+        "kv.mdel",
+        "kv.scan",
+        "hash.set",
+        "hash.get",
+        "hash.getall",
+        "hash.del",
+        "hash.exists",
+        "hash.keys",
+        "hash.values",
+        "hash.len",
+        "hash.mset",
+        "hash.mget",
+        "hash.incrby",
+        "hash.incrbyfloat",
+        "hash.setnx",
+        "list.lpush",
+        "list.rpush",
+        "list.lpop",
+        "list.rpop",
+        "list.range",
+        "list.len",
+        "list.index",
+        "list.set",
+        "list.trim",
+        "list.rem",
+        "list.insert",
+        "list.pos",
+        "list.rpoplpush",
+        "set.add",
+        "set.rem",
+        "set.ismember",
+        "set.members",
+        "set.card",
+        "set.pop",
+        "set.randmember",
+        "set.move",
+        "set.inter",
+        "set.union",
+        "set.interstore",
+        "set.unionstore",
+        "sortedset.zadd",
+        "sortedset.zrem",
+        "sortedset.zscore",
+        "sortedset.zcard",
+        "sortedset.zrank",
+        "sortedset.zrevrank",
+        "sortedset.zrange",
+        "sortedset.zrangebyscore",
+        "sortedset.zcount",
+        "sortedset.zincrby",
+        "sortedset.zpopmin",
+        "sortedset.zremrangebyrank",
+        "sortedset.zremrangebyscore",
+        "sortedset.zinterstore",
+        "sortedset.zunionstore",
+        "queue.create",
+        "queue.delete",
+        "queue.list",
+        "queue.publish",
+        "queue.consume",
+        "queue.ack",
+        "queue.nack",
+        "queue.stats",
+        "stream.create",
+        "stream.delete",
+        "stream.list",
+        "stream.publish",
+        "stream.consume",
+        "stream.stats",
+        "pubsub.publish",
+        "pubsub.subscribe",
+        "pubsub.unsubscribe",
+        "pubsub.topics",
+        "script.load",
+        "script.eval",
+        "script.evalsha",
+        "script.exists",
+        "script.flush",
+        "script.kill",
+        "hyperloglog.pfadd",
+        "hyperloglog.pfcount",
+        "hyperloglog.pfmerge",
+        "hyperloglog.stats",
+        "geospatial.geoadd",
+        "geospatial.geodist",
+        "geospatial.geohash",
+        "geospatial.geopos",
+        "geospatial.georadius",
+        "geospatial.georadiusbymember",
+        "geospatial.geosearch",
+        "geospatial.stats",
+        "transaction.multi",
+        "transaction.exec",
+        "transaction.discard",
+        "transaction.watch",
+        "transaction.unwatch",
+    ];
+
+    #[test]
+    fn map_command_covers_every_command() {
+        let payload = rich();
+        for cmd in COMMANDS {
+            let mapped = map_command(cmd, &payload);
+            assert!(mapped.is_some(), "no mapping for command {cmd}");
+            let (method, _args) = mapped.unwrap();
+            assert!(!method.is_empty(), "empty method for {cmd}");
+        }
+    }
+
+    #[test]
+    fn map_command_unknown_returns_none() {
+        assert!(map_command("does.not.exist", &rich()).is_none());
+        assert!(map_command("kv.unknown", &json!({})).is_none());
+    }
+
+    #[test]
+    fn map_command_exact_mappings_and_branches() {
+        // Exact method + arg mapping.
+        let (m, args) = map_command("kv.get", &json!({"key": "abc"})).unwrap();
+        assert_eq!(m, "GET");
+        assert_eq!(args.len(), 1);
+
+        // SET without TTL vs with TTL (EX suffix).
+        let (_, no_ttl) = map_command("kv.set", &json!({"key": "k", "value": "v"})).unwrap();
+        assert_eq!(no_ttl.len(), 2);
+        let (_, with_ttl) =
+            map_command("kv.set", &json!({"key": "k", "value": "v", "ttl": 30})).unwrap();
+        assert_eq!(with_ttl.len(), 4);
+
+        // KEYS with and without prefix.
+        let (_, star) = map_command("kv.keys", &json!({})).unwrap();
+        assert!(matches!(&star[0], WireValue::Str(s) if s == "*"));
+        let (_, pref) = map_command("kv.keys", &json!({"prefix": "user"})).unwrap();
+        assert!(matches!(&pref[0], WireValue::Str(s) if s == "user*"));
+
+        // HSET multi-field via object form.
+        let (m, args) =
+            map_command("hash.mset", &json!({"key": "h", "fields": {"a": "1"}})).unwrap();
+        assert_eq!(m, "HSET");
+        assert!(args.len() >= 3);
+    }
+
+    const RESPONSE_CMDS: &[&str] = &[
+        "kv.get",
+        "kv.set",
+        "kv.del",
+        "kv.exists",
+        "kv.incr",
+        "kv.expire",
+        "kv.ttl",
+        "kv.persist",
+        "kv.dbsize",
+        "kv.flushdb",
+        "kv.keys",
+        "kv.mget",
+        "kv.mset",
+        "kv.mdel",
+        "kv.scan",
+        "hash.get",
+        "hash.getall",
+        "hash.del",
+        "hash.exists",
+        "hash.keys",
+        "hash.values",
+        "hash.len",
+        "hash.mget",
+        "hash.mset",
+        "hash.set",
+        "hash.setnx",
+        "hash.incrby",
+        "hash.incrbyfloat",
+        "list.lpush",
+        "list.range",
+        "list.len",
+        "list.index",
+        "list.set",
+        "list.pos",
+        "list.rem",
+        "list.insert",
+        "list.lpop",
+        "list.rpoplpush",
+        "set.add",
+        "set.rem",
+        "set.ismember",
+        "set.members",
+        "set.card",
+        "set.inter",
+        "set.move",
+        "set.interstore",
+        "sortedset.zadd",
+        "sortedset.zrem",
+        "sortedset.zscore",
+        "sortedset.zcard",
+        "sortedset.zrank",
+        "sortedset.zcount",
+        "sortedset.zincrby",
+        "sortedset.zrange",
+        "sortedset.zpopmin",
+        "sortedset.zinterstore",
+        "queue.create",
+        "queue.publish",
+        "queue.consume",
+        "queue.ack",
+        "queue.list",
+        "queue.stats",
+        "stream.create",
+        "stream.publish",
+        "stream.consume",
+        "stream.list",
+        "stream.stats",
+        "pubsub.publish",
+        "pubsub.subscribe",
+        "pubsub.unsubscribe",
+        "pubsub.topics",
+        "script.load",
+        "script.eval",
+        "script.exists",
+        "script.flush",
+        "script.kill",
+        "hyperloglog.pfadd",
+        "hyperloglog.pfcount",
+        "hyperloglog.pfmerge",
+        "geospatial.geoadd",
+        "geospatial.geodist",
+        "geospatial.geohash",
+        "geospatial.geopos",
+        "transaction.multi",
+        "transaction.exec",
+    ];
+
+    #[test]
+    fn map_response_handles_all_shapes() {
+        // Drive each response arm with several wire shapes; it must always return
+        // a JSON value without panicking.
+        let shapes = [
+            WireValue::Null,
+            WireValue::Int(1),
+            WireValue::Bool(true),
+            WireValue::Float(1.5),
+            WireValue::Str("ok".into()),
+            WireValue::Bytes(b"bytes".to_vec()),
+            WireValue::Array(vec![
+                WireValue::Str("a".into()),
+                WireValue::Int(2),
+                WireValue::Bytes(b"c".to_vec()),
+            ]),
+            WireValue::Map(vec![(
+                WireValue::Str("k".into()),
+                WireValue::Str("v".into()),
+            )]),
+        ];
+        for cmd in RESPONSE_CMDS {
+            for shape in &shapes {
+                let _ = map_response(cmd, shape.clone());
+            }
+        }
+    }
+
+    #[test]
+    fn map_response_exact_conversions() {
+        // GET returns the string content of bytes.
+        assert_eq!(
+            map_response("kv.get", WireValue::Bytes(b"hello".to_vec())),
+            json!("hello")
+        );
+        // EXISTS maps an int to a bool-ish JSON.
+        let exists = map_response("kv.exists", WireValue::Int(1));
+        assert!(exists == json!(true) || exists == json!(1) || exists["exists"] == json!(true));
+        // Unknown command falls through to a generic conversion (no panic).
+        let _ = map_response("unknown.cmd", WireValue::Str("x".into()));
+    }
+}

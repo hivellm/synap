@@ -58,7 +58,7 @@ services:
       - SYNAP_AUTH_ROOT_ENABLED=${SYNAP_AUTH_ROOT_ENABLED:-true}
     volumes:
       - master_data:/data
-      - ./config-master.yml:/app/config.yml:ro
+      - ./config/config-master.yml:/app/config.yml:ro
     networks:
       - synap-network
     restart: unless-stopped
@@ -97,7 +97,7 @@ services:
       - SYNAP_AUTH_ROOT_ENABLED=${SYNAP_AUTH_ROOT_ENABLED:-true}
     volumes:
       - replica1_data:/data
-      - ./config-replica.yml:/app/config.yml:ro
+      - ./config/config-replica.yml:/app/config.yml:ro
     networks:
       - synap-network
     depends_on:
@@ -140,7 +140,7 @@ services:
       - SYNAP_AUTH_ROOT_ENABLED=${SYNAP_AUTH_ROOT_ENABLED:-true}
     volumes:
       - replica2_data:/data
-      - ./config-replica.yml:/app/config.yml:ro
+      - ./config/config-replica.yml:/app/config.yml:ro
     networks:
       - synap-network
     depends_on:
@@ -183,7 +183,7 @@ services:
       - SYNAP_AUTH_ROOT_ENABLED=${SYNAP_AUTH_ROOT_ENABLED:-true}
     volumes:
       - replica3_data:/data
-      - ./config-replica.yml:/app/config.yml:ro
+      - ./config/config-replica.yml:/app/config.yml:ro
     networks:
       - synap-network
     depends_on:

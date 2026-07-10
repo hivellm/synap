@@ -95,7 +95,7 @@ jobs:
           cp README.md dist/
           cp CHANGELOG.md dist/
           cp LICENSE dist/
-          cp config.yml dist/config.example.yml
+          cp config/config.yml dist/config.example.yml
           cd dist
           tar czf ../${{ matrix.artifact_name }}.tar.gz *
 
@@ -108,7 +108,7 @@ jobs:
           Copy-Item README.md dist\
           Copy-Item CHANGELOG.md dist\
           Copy-Item LICENSE dist\
-          Copy-Item config.yml dist\config.example.yml
+          Copy-Item config/config.yml dist\config.example.yml
           Compress-Archive -Path dist\* -DestinationPath ${{ matrix.artifact_name }}.zip
 
       - name: Upload artifacts (Unix)

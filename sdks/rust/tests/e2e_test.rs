@@ -78,8 +78,8 @@ fn write_test_config() -> NamedTempFile {
         .nth(2)
         .expect("workspace root")
         .to_path_buf();
-    let base_cfg = std::fs::read_to_string(workspace.join("config.yml"))
-        .expect("config.yml not found in workspace root");
+    let base_cfg = std::fs::read_to_string(workspace.join("config").join("config.yml"))
+        .expect("config/config.yml not found in workspace root");
 
     // Patch ports and bind to loopback only, using simple string replace on YAML values.
     let patched = base_cfg
@@ -708,4 +708,44 @@ async fn e2e_unsupported_command_raises_error() {
 
     // Cleanup
     http.kv().delete("e2e:bitmap:http").await.ok();
+}
+
+/// RESP3 pipelining: three SET commands written in a single batch must each
+/// return `+OK` in order. This exercises the server's pipeline-aware flush
+/// (it defers flushing while more commands are buffered) — the batch must not
+/// lose or reorder responses.
+#[test]
+fn resp3_pipelining_returns_all_responses_in_order() {
+    use std::io::{Read, Write};
+
+    ensure_server();
+
+    let mut sock =
+        TcpStream::connect(("127.0.0.1", RESP3_PORT)).expect("connect to RESP3 listener");
+    sock.set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("set read timeout");
+
+    // Three RESP arrays for `SET kp{1,2,3} v{1,2,3}`, concatenated into one write.
+    let pipeline = b"*3\r\n$3\r\nSET\r\n$3\r\nkp1\r\n$2\r\nv1\r\n\
+                     *3\r\n$3\r\nSET\r\n$3\r\nkp2\r\n$2\r\nv2\r\n\
+                     *3\r\n$3\r\nSET\r\n$3\r\nkp3\r\n$2\r\nv3\r\n";
+    sock.write_all(pipeline).expect("write pipelined commands");
+
+    // Expect exactly three "+OK\r\n" replies (15 bytes), in order.
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 256];
+    while buf.len() < 15 {
+        match sock.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+            Err(e) => panic!("read failed after {} bytes: {e}", buf.len()),
+        }
+    }
+
+    assert_eq!(
+        &buf,
+        b"+OK\r\n+OK\r\n+OK\r\n",
+        "pipelined SETs must each return +OK in order, got {:?}",
+        String::from_utf8_lossy(&buf)
+    );
 }

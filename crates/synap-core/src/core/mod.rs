@@ -1,0 +1,54 @@
+pub mod bitmap;
+pub mod cache;
+pub mod consumer_group;
+pub mod error;
+pub mod geospatial;
+pub mod hash;
+pub mod hyperloglog;
+pub mod key_lock;
+pub mod key_manager;
+pub mod kv_store;
+pub mod list;
+pub mod memory;
+pub mod partition;
+pub mod pubsub;
+pub mod queue;
+pub mod set;
+pub mod sorted_set;
+pub mod stream;
+pub mod transaction;
+pub mod types;
+
+pub use bitmap::{
+    BitfieldOperation, BitfieldOverflow, BitmapOperation, BitmapStats, BitmapStore, BitmapValue,
+};
+pub use cache::{CacheLayer, CacheStats};
+pub use consumer_group::{
+    AssignmentStrategy, ConsumerGroup, ConsumerGroupConfig, ConsumerGroupManager,
+    ConsumerGroupStats, ConsumerMember, GroupState,
+};
+pub use error::SynapError;
+pub use geospatial::{Coordinate, DistanceUnit, GeospatialStats, GeospatialStore};
+pub use hash::{HashStats, HashStore, HashValue};
+pub use hyperloglog::{HyperLogLogStats, HyperLogLogStore, HyperLogLogValue};
+pub use key_lock::KeyLockManager;
+pub use key_manager::{KeyManager, KeyType};
+pub use kv_store::KVStore;
+pub use list::{ListStats, ListStore, ListValue};
+pub use memory::GlobalMemory;
+pub use partition::{
+    CompactionResult, PartitionConfig, PartitionEvent, PartitionManager, PartitionStats,
+    PartitionedTopic, RetentionPolicy,
+};
+pub use pubsub::{
+    Message, MessageSender, PubSubRouter, PubSubStats, PublishResult, SubscribeResult, TopicInfo,
+};
+pub use queue::{QueueConfig, QueueManager, QueueMessage, QueueStats};
+pub use set::{SetStats, SetStore, SetValue};
+pub use sorted_set::{
+    Aggregate, OrderedFloat, ScoredMember, SortedSetStats, SortedSetStore, SortedSetValue,
+    ZAddOptions,
+};
+pub use stream::{RoomStats, StreamConfig, StreamEvent, StreamManager};
+pub use transaction::{CommittedWrite, Transaction, TransactionCommand, TransactionManager};
+pub use types::{EvictionPolicy, Expiry, KVConfig, KVStats, SetOptions, SetResult, StoredValue};

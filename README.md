@@ -170,31 +170,36 @@ Additional integration protocols:
 
 ### Source layout
 
-```
-synap-server/src/
-├── core/                  # Data store implementations
-│   ├── kv_store/          # KV store (sharded, TTL, persistence)
-│   │   ├── store.rs       # Main KVStore impl
-│   │   ├── store_tests.rs # Unit tests
-│   │   └── storage.rs     # Shard/storage primitives
-│   └── bitmap/            # Bitmap operations
-├── protocol/
-│   ├── resp3/command/     # RESP3 command dispatcher
-│   │   ├── kv.rs          # KV + bitmap + misc commands
-│   │   ├── collections.rs # Hash/List/Set/SortedSet/HLL
-│   │   └── advanced.rs    # Geo/Queue/Stream/PubSub/Tx/Script
-│   └── synap_rpc/dispatch/ # SynapRPC dispatcher (same split)
-└── server/handlers/       # HTTP REST handlers
-    ├── kv.rs · kv_cmd.rs  # Key-value REST + cmd
-    ├── hash.rs · list.rs · set.rs · sorted_set.rs
-    ├── hll.rs · bitmap.rs · geospatial.rs
-    ├── queue.rs · stream.rs · pubsub.rs
-    └── script.rs · websocket.rs · partition.rs · admin_cmd.rs
+Since v1.0.0 the workspace is split into focused crates under `crates/`
+(Vectorizer/Nexus layout). Layers go Foundation → Core → Features → Presentation;
+higher layers depend on lower, never the reverse.
 
-sdks/rust/src/transport/   # Rust SDK transport layer
-├── mod.rs                 # Types + SynapRpcTransport + Resp3Transport
-└── mapping.rs             # Command/response mappers
 ```
+crates/
+├── synap-core/src/core/     # In-memory data engine (leaf crate — no server deps)
+│   ├── kv_store/            # Sharded KV store (TTL, eviction, atomic LRU)
+│   ├── hash · list · set · sorted_set · bitmap · hyperloglog · geospatial
+│   └── queue · stream · pubsub · partition · transaction · consumer_group
+├── synap-protocol/src/      # Pure wire layer (no AppState / storage deps)
+│   ├── resp3/               # RESP3 parser + writer (Resp3Value)
+│   └── synap_rpc/           # MessagePack codec + Request/Response/SynapValue
+├── synap-server/src/        # HTTP/WS/MCP/UMICP + protocol dispatch
+│   ├── server/handlers/     # REST handlers (kv, hash, list, set, queue, stream, pubsub, …)
+│   ├── protocol/resp3/      # RESP3 listener + command dispatcher (server-side)
+│   ├── protocol/synap_rpc/  # SynapRPC listener + dispatcher
+│   ├── persistence/         # WAL (async group-commit) + snapshots
+│   ├── replication/         # master / replica
+│   └── auth/ · hub/         # users/api-keys/ACL + HiveHub.Cloud multi-tenant
+├── synap-cli/               # Command-line client
+└── synap-migrate/           # Migration utilities
+
+sdks/rust/src/               # Rust SDK — shares synap-protocol wire types
+└── transport/               # SynapRPC / RESP3 / HTTP transports + command mappers
+```
+
+> Rust library consumers: `synap_server::core::*` / `synap_server::protocol::*`
+> are now `synap_core::*` / `synap_protocol::*` (umbrella re-exports kept on
+> `synap_server` for transition). See the [CHANGELOG](CHANGELOG.md) migration guide.
 
 ## 🚀 Quick Start
 

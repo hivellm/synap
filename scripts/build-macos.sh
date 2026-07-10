@@ -39,7 +39,7 @@ TARBALL="synap-macos-${ARCH}-${VERSION}.tar.gz"
 
 tar czf "$TARBALL" \
     -C target/release synap-server \
-    -C ../.. README.md LICENSE config.example.yml
+    -C ../.. README.md LICENSE config/config.example.yml
 
 echo -e "${GREEN}Tarball created: ${CYAN}$TARBALL${NC}"
 
@@ -65,7 +65,7 @@ class Synap < Formula
     system "cargo", "install", *std_cargo_args(path: ".")
     
     # Install config
-    etc.install "config.example.yml" => "synap/config.yml"
+    etc.install "config/config.example.yml" => "synap/config.yml"
     
     # Create data directory
     (var/"lib/synap").mkpath

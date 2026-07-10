@@ -16,8 +16,7 @@ use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tokio::sync::Mutex;
 
-use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use crate::error::{Result, SynapError};
 
@@ -38,97 +37,17 @@ pub enum TransportMode {
     Http,
 }
 
-// ── Wire value type (mirrors synap_server::protocol::synap_rpc::types::SynapValue) ──
-
-/// MessagePack-serialised variant type used on the SynapRPC wire.
-///
-/// Must be kept in sync with the server's `SynapValue` enum so that
-/// `rmp_serde`'s externally-tagged encoding produces compatible bytes.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) enum WireValue {
-    Null,
-    Bool(bool),
-    Int(i64),
-    Float(f64),
-    Bytes(Vec<u8>),
-    Str(String),
-    Array(Vec<WireValue>),
-    Map(Vec<(WireValue, WireValue)>),
-}
-
-impl WireValue {
-    pub(crate) fn as_str(&self) -> Option<&str> {
-        match self {
-            Self::Str(s) => Some(s.as_str()),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn as_int(&self) -> Option<i64> {
-        match self {
-            Self::Int(i) => Some(*i),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn as_float(&self) -> Option<f64> {
-        match self {
-            Self::Float(f) => Some(*f),
-            Self::Str(s) => s.parse().ok(),
-            _ => None,
-        }
-    }
-
-    pub(crate) fn is_null(&self) -> bool {
-        matches!(self, Self::Null)
-    }
-
-    /// Convert a `WireValue` to a `serde_json::Value`.
-    pub(crate) fn to_json(&self) -> Value {
-        match self {
-            Self::Null => Value::Null,
-            Self::Bool(b) => json!(b),
-            Self::Int(i) => json!(i),
-            Self::Float(f) => json!(f),
-            Self::Bytes(b) => {
-                // Attempt UTF-8 decode; fall back to hex string.
-                if let Ok(s) = std::str::from_utf8(b) {
-                    json!(s)
-                } else {
-                    json!(
-                        b.iter()
-                            .map(|byte| format!("{:02x}", byte))
-                            .collect::<String>()
-                    )
-                }
-            }
-            Self::Str(s) => json!(s),
-            Self::Array(arr) => Value::Array(arr.iter().map(WireValue::to_json).collect()),
-            Self::Map(pairs) => {
-                let obj: serde_json::Map<String, Value> = pairs
-                    .iter()
-                    .filter_map(|(k, v)| k.as_str().map(|s| (s.to_string(), v.to_json())))
-                    .collect();
-                Value::Object(obj)
-            }
-        }
-    }
-}
-
-// ── SynapRPC wire frames ──────────────────────────────────────────────────────
-
-#[derive(Debug, Serialize, Deserialize)]
-struct RpcRequest {
-    id: u32,
-    command: String,
-    args: Vec<WireValue>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct RpcResponse {
-    id: u32,
-    result: std::result::Result<WireValue, String>,
-}
+// ── Shared wire types (single source of truth) ────────────────────────────────
+//
+// The SynapRPC value/request/response types and frame codec live in
+// `synap-protocol` and are shared verbatim with the server — no local
+// re-definition, so a server-side wire change reaches the SDK at compile time
+// instead of drifting silently. `WireValue` is kept as a crate-local alias of
+// `SynapValue` so existing call sites and the client-ergonomic accessors
+// (`as_float`/`is_null`/`to_json`, now inherent on `SynapValue`) keep working.
+pub(crate) use synap_protocol::synap_rpc::SynapValue as WireValue;
+use synap_protocol::synap_rpc::codec;
+use synap_protocol::synap_rpc::{Request as RpcRequest, Response as RpcResponse};
 
 // ── SynapRPC transport ────────────────────────────────────────────────────────
 
@@ -167,9 +86,8 @@ impl SynapRpcTransport {
             command: cmd.to_ascii_uppercase(),
             args,
         };
-        let body = rmp_serde::to_vec(&req)
+        let frame = codec::encode_frame(&req)
             .map_err(|e| SynapError::Other(format!("SynapRPC encode: {}", e)))?;
-        let len_prefix = (body.len() as u32).to_le_bytes();
 
         let mut guard = self.conn.lock().await;
 
@@ -179,10 +97,8 @@ impl SynapRpcTransport {
             }
             let stream = guard.as_mut().expect("just set");
 
-            // Write 4-byte length prefix + msgpack body.
-            if stream.write_all(&len_prefix).await.is_err()
-                || stream.write_all(&body).await.is_err()
-            {
+            // Write the length-prefixed MessagePack frame (synap-protocol codec).
+            if stream.write_all(&frame).await.is_err() {
                 *guard = None;
                 if attempt == 0 {
                     continue;
@@ -241,9 +157,8 @@ impl SynapRpcTransport {
             command: "SUBSCRIBE".to_owned(),
             args: topics.iter().map(|t| WireValue::Str(t.clone())).collect(),
         };
-        let body = rmp_serde::to_vec(&req)
+        let frame = codec::encode_frame(&req)
             .map_err(|e| SynapError::Other(format!("SynapRPC subscribe encode: {}", e)))?;
-        let len_prefix = (body.len() as u32).to_le_bytes();
 
         // Dedicated connection — not the shared `conn`.
         let mut stream = tokio::time::timeout(self.timeout, TcpStream::connect(&self.addr))
@@ -253,13 +168,9 @@ impl SynapRpcTransport {
 
         // Send SUBSCRIBE frame.
         stream
-            .write_all(&len_prefix)
+            .write_all(&frame)
             .await
-            .map_err(|_| SynapError::Other("SynapRPC subscribe write len failed".into()))?;
-        stream
-            .write_all(&body)
-            .await
-            .map_err(|_| SynapError::Other("SynapRPC subscribe write body failed".into()))?;
+            .map_err(|_| SynapError::Other("SynapRPC subscribe write failed".into()))?;
 
         // Read the initial response (subscriber_id etc.).
         let mut len_buf = [0u8; 4];

@@ -1,0 +1,33 @@
+[package]
+name = "synap-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Synap core data-structure engine: KV store, collections, streams, queues, pub/sub, cluster primitives"
+
+[lints]
+workspace = true
+
+[dependencies]
+tokio.workspace = true
+parking_lot.workspace = true
+radix_trie.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+rand.workspace = true
+compact_str.workspace = true
+lz4.workspace = true
+zstd.workspace = true
+axum.workspace = true
+ahash = "0.8"
+geohash = "0.13"
+crc32fast = "1.4"
+
+[dev-dependencies]
+tempfile = "3.15"

@@ -16,6 +16,15 @@ These override everything else. Violation = output rejected.
 7. **Follow task sequence.** Execute `tasks.md` items in the EXACT order listed. No reordering, no cherry-picking, no starting Phase N+1 before Phase N is 100% done. The list is an ORDER, not a MENU.
 8. **Execute the full task in one turn.** Never stop mid-task to ask "should I proceed?" or "want me to also...?". Make autonomous decisions within scope. Only ask for genuine ambiguity, destructive ops, or impossible tasks.
 
+## Editing Discipline (Karpathy-inspired)
+
+Behavioral guidelines that reduce common LLM coding mistakes. Adapted from [forrestchang/andrej-karpathy-skills](https://github.com/forrestchang/andrej-karpathy-skills), grounded in [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876).
+
+1. **Think before coding.** State assumptions explicitly. If multiple interpretations exist, present them — don't pick silently. If a simpler approach exists, say so. If something is unclear, stop and ask. Don't hide confusion.
+2. **Simplicity first.** Minimum code that solves the problem. No features beyond what was asked, no abstractions for single-use code, no "flexibility" that wasn't requested, no error handling for impossible scenarios. If you write 200 lines and 50 would do, rewrite.
+3. **Surgical changes.** Touch only what you must. Don't "improve" adjacent code, comments, or formatting. Don't refactor things that aren't broken. Match existing style. If you notice unrelated dead code, mention it — don't delete it. Every changed line must trace directly to the user's request.
+4. **Goal-driven execution.** Define verifiable success criteria upfront. "Add validation" → "write tests for invalid inputs, then make them pass." For multi-step tasks, state a brief plan: `[step] → verify: [check]`. Strong criteria let you loop independently; weak criteria require constant clarification.
+
 ## Critical Rules
 
 - **ALWAYS read `/.rulebook/specs/RULEBOOK.md`** before creating tasks.
@@ -73,7 +82,7 @@ If you must defer an item before archiving, you MUST create a follow-up rulebook
 After ANY implementation, execute in order:
 
 1. **Quality checks** (all must pass): type-check → lint (0 warnings) → format → tests (100%) → coverage (≥95%). Stop and fix on any failure.
-2. **Capture to memory**: `rulebook_memory_save` for decisions, patterns, gotchas, bug fixes.
+2. **Capture learnings**: `rulebook_knowledge_add` / `rulebook_learn_capture` for patterns, gotchas, and decisions.
 3. **Security audit**: `npm audit --production` (or language equivalent).
 4. **Update task**: `rulebook_task_update` + mark items `[x]`.
 5. **Update docs**: CHANGELOG (conventional commits), README if public API changed.
@@ -82,15 +91,10 @@ After ANY implementation, execute in order:
 
 **Skip steps only with explicit user permission.**
 
-## Persistent Memory
+## Session continuity
 
-Backed by Rulebook MCP server (BM25 + HNSW hybrid search). Memory persists across sessions.
-
-- **Start of session**: `rulebook_memory_search` for relevant past context.
-- **During work**: `rulebook_memory_save` for decisions, bugs, discoveries, user preferences.
-- **End of session**: `rulebook_session_end` writes a summary.
-
-3-layer search pattern: `rulebook_memory_search` (compact) → `rulebook_memory_timeline` (window) → `rulebook_memory_get` (full details).
+- **Start of session**: read `.rulebook/PLANS.md`; `rulebook_session_start` loads prior context.
+- **End of session**: `rulebook_session_end` writes a summary to `.rulebook/PLANS.md`.
 
 ## Knowledge Base
 
@@ -149,20 +153,6 @@ Avoid: emoji status tables, "Next Steps" sections, repeating the question, markd
 - **AGENT_AUTOMATION**: `/.rulebook/specs/AGENT_AUTOMATION.md`
 - **MULTI_AGENT**: `/.rulebook/specs/MULTI_AGENT.md`
 
-## Ralph Autonomous Loop
-
-5-gate quality enforcement (type-check, lint, tests, coverage, security) per iteration, fresh context per iteration, parallel story execution, plan checkpoints, learning extraction.
-
-```bash
-rulebook ralph init                    # Generate PRD from tasks
-rulebook ralph run --max-iterations 10
-rulebook ralph status / history / pause / resume
-```
-
-PRD format: `userStories` array with `id`, `title`, `description`, `acceptanceCriteria`, `priority`, `passes: boolean`, `notes`. Status tracked via `passes`, NOT enum.
-
-Iteration records in `.rulebook/ralph/history/iteration-N.json`. Status: `success` (5/5 gates), `partial` (2-4), `failed` (0-1).
-
 ## Multi-Agent Teams
 
 Requires `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1`. Background `Agent` calls **must** use a Team (`team_name` parameter) — standalone background agents can't communicate via `SendMessage`. Foreground calls and `team-lead` agents are exempt.
@@ -186,7 +176,23 @@ If this is part of a multi-project workspace, every Rulebook MCP call MUST pass 
 | Build/CI | build-engineer | sonnet |
 | Security | security-reviewer | haiku |
 
-Rules: never write code directly in main conversation — delegate. Use haiku for read-only tasks. Launch independent agents in parallel.
+### Mandatory delegation rules
+
+- **Never implement directly in the main conversation when an agent fits.** The main thread orchestrates; agents do the work.
+- **Read-only work → haiku researcher.** Cheap, isolates context.
+- **Independent work runs in parallel.** Multiple `Agent` tool-use blocks in a single message. Sequential dispatching of independent units is wrong by default.
+- **Multi-specialist work uses Teams.** Background `Agent` calls without `team_name` are blocked by the enforcement hook (see Multi-Agent Teams above).
+- **Foreground agents** when the result blocks your next step. **Background agents** only inside Teams so `SendMessage` works.
+
+### When to create a new skill or agent
+
+Lift to a skill / agent instead of repeating instructions:
+
+- **Same multi-step prompt twice in one session** → make a skill (`templates/skills/<category>/<name>/SKILL.md`).
+- **Recurring class of work across projects** → make an agent definition (`.claude/agents/<role>.md`) and add a row to the delegation table above.
+- **A workflow needs a specific persona / tool set** → agent. **A behavior modifier the user invokes on demand** → skill.
+
+Default to creating, not improvising. The template scaffolding is cheap; ad-hoc context-window churn is expensive.
 
 ## Plans & Session Continuity
 

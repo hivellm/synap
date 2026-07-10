@@ -1,9 +1,38 @@
 # Replication System
 
-**Status**: ✅ **Production Ready** - Complete TCP implementation with 67 tests  
-**Version**: 0.3.0-rc1  
-**Test Coverage**: 67/68 tests (98.5% passing, 1 ignored)  
-**Last Updated**: October 22, 2025
+**Status**: ✅ **Wired for v1.0** — full-datatype replication, decoupled from
+persistence, status surfaced in INFO. See "Wiring status" below.
+**Last Updated**: 2026-07-09
+
+---
+
+## Wiring status (v1.0, audit M-005 + phase6j)
+
+The replication engine (TCP master/replica, sync, backlog) was implemented and
+unit-tested, but until v1.0 it was **never instantiated by the running server** —
+`--role master` accepted the flag yet spawned no listener and replicated nothing.
+
+As of v1.0 (`main.rs`) the node is constructed from config on startup and
+self-runs; the master fans every write out to replicas, and a replica applies it
+through a shared applier (`persistence::apply::apply_operation`) that the WAL
+recovery path uses too — so the two never diverge.
+
+**phase6j closed the three remaining gaps:**
+- **All datatypes converge on the replica.** A replica now holds the
+  hash/list/set/sorted-set/queue stores and applies *every* `Operation` variant,
+  not just KV + stream. (End-to-end convergence tests live in
+  `tests/datatype_replication_tests.rs`.)
+- **Replication is decoupled from the WAL.** Propagation happens through a shared
+  `record()` hook that always forwards to replicas and only appends to the WAL
+  when persistence is enabled. A master therefore replicates even with
+  `persistence.enabled = false`; a replication-only persistence layer opens no
+  WAL file.
+- **Status is exposed in INFO.** The `replication` section reports the live role,
+  connected replica count, replication offset, and (on a replica) master link
+  status and lag — see [Monitoring → INFO](#info-replication-section).
+
+The sections below describe the design, configuration and usage, which remain
+accurate.
 
 ---
 
@@ -328,6 +357,46 @@ Typical lag measurements:
 ---
 
 ## Monitoring
+
+### INFO replication section
+
+`INFO replication` (and `INFO all`) reports live replication status, filled from
+the running node rather than placeholders (phase6j item 1.4).
+
+On a **master**:
+
+```json
+{
+  "role": "master",
+  "connected_slaves": 2,
+  "master_repl_offset": 152340,
+  "repl_backlog_active": 1,
+  "repl_backlog_size": 152340
+}
+```
+
+On a **replica** (adds link status and lag):
+
+```json
+{
+  "role": "slave",
+  "connected_slaves": 0,
+  "master_repl_offset": 152338,
+  "repl_backlog_active": 1,
+  "master_link_status": "up",
+  "slave_repl_lag": 2
+}
+```
+
+- `connected_slaves` — replicas currently connected to this master.
+- `master_repl_offset` — master: ops appended to the replication log; replica:
+  ops applied locally.
+- `master_link_status` — replica only: `"up"` when connected to the master,
+  `"down"` otherwise.
+- `slave_repl_lag` — replica only: operations behind the master.
+
+A standalone node (replication disabled) reports `role: "master"` with zeroed
+counters.
 
 ### Master Metrics
 
