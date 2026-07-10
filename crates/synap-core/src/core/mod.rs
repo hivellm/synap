@@ -3,6 +3,7 @@ pub mod cache;
 pub mod consumer_group;
 pub mod error;
 pub mod geospatial;
+pub mod glob;
 pub mod hash;
 pub mod hyperloglog;
 pub mod key_lock;
@@ -29,6 +30,7 @@ pub use consumer_group::{
 };
 pub use error::SynapError;
 pub use geospatial::{Coordinate, DistanceUnit, GeospatialStats, GeospatialStore};
+pub use glob::glob_match;
 pub use hash::{HashStats, HashStore, HashValue};
 pub use hyperloglog::{HyperLogLogStats, HyperLogLogStore, HyperLogLogValue};
 pub use key_lock::KeyLockManager;

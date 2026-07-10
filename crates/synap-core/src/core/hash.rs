@@ -399,6 +399,34 @@ impl HashStore {
         }
     }
 
+    /// HSCAN - cursor-based incremental scan of a hash's fields.
+    ///
+    /// `cursor` is an offset into a stably-sorted snapshot of the fields; returns
+    /// the next cursor (0 when the scan is complete) and the matched field/value
+    /// pairs within the scanned window. `pattern` is an optional glob over field
+    /// names; `count` bounds the window size (min 1).
+    #[allow(clippy::type_complexity)]
+    pub fn hscan(
+        &self,
+        key: &str,
+        cursor: u64,
+        pattern: Option<&str>,
+        count: usize,
+    ) -> Result<(u64, Vec<(String, Vec<u8>)>)> {
+        let mut fields: Vec<(String, Vec<u8>)> = self.hgetall(key)?.into_iter().collect();
+        fields.sort_by(|a, b| a.0.cmp(&b.0));
+        let total = fields.len();
+        let start = (cursor as usize).min(total);
+        let end = start.saturating_add(count.max(1)).min(total);
+        let items = fields[start..end]
+            .iter()
+            .filter(|(f, _)| pattern.is_none_or(|p| crate::core::glob_match(p, f)))
+            .cloned()
+            .collect();
+        let next = if end < total { end as u64 } else { 0 };
+        Ok((next, items))
+    }
+
     /// HKEYS - Get all field names from hash
     pub fn hkeys(&self, key: &str) -> Result<Vec<String>> {
         let shard = self.shard_for_key(key);
@@ -1050,5 +1078,35 @@ mod tests {
         assert_eq!(v.values(), vec![b"2".to_vec()]);
         assert_eq!(v.delete_fields(&["a".to_string()]), 1);
         assert!(v.is_empty());
+    }
+
+    #[test]
+    fn test_hscan_cursor_and_match() {
+        let store = HashStore::new();
+        for i in 0..5 {
+            store.hset("h", &format!("f{i}"), vec![i as u8]).unwrap();
+        }
+        // Walk the cursor with count=2 and collect every field.
+        let mut seen = Vec::new();
+        let mut cursor = 0u64;
+        loop {
+            let (next, items) = store.hscan("h", cursor, None, 2).unwrap();
+            seen.extend(items.into_iter().map(|(f, _)| f));
+            if next == 0 {
+                break;
+            }
+            cursor = next;
+        }
+        seen.sort();
+        assert_eq!(seen, vec!["f0", "f1", "f2", "f3", "f4"]);
+
+        // MATCH glob filters within the window.
+        let (_c, items) = store.hscan("h", 0, Some("f[0-1]"), 100).unwrap();
+        let mut fields: Vec<String> = items.into_iter().map(|(f, _)| f).collect();
+        fields.sort();
+        assert_eq!(fields, vec!["f0", "f1"]);
+
+        // Missing key scans as empty, cursor 0.
+        assert_eq!(store.hscan("nope", 0, None, 10).unwrap(), (0, vec![]));
     }
 }

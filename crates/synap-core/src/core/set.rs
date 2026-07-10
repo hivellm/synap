@@ -330,6 +330,35 @@ impl SetStore {
         Ok(set.members())
     }
 
+    /// SSCAN - cursor-based incremental scan of a set's members.
+    ///
+    /// `cursor` is an offset into a stably-sorted snapshot of the members; returns
+    /// the next cursor (0 when complete) and the matched members within the
+    /// window. `pattern` is an optional glob over members; `count` bounds the
+    /// window size (min 1). A missing key scans as empty.
+    pub fn sscan(
+        &self,
+        key: &str,
+        cursor: u64,
+        pattern: Option<&str>,
+        count: usize,
+    ) -> Result<(u64, Vec<Vec<u8>>)> {
+        let mut members = self.smembers(key).unwrap_or_default();
+        members.sort();
+        let total = members.len();
+        let start = (cursor as usize).min(total);
+        let end = start.saturating_add(count.max(1)).min(total);
+        let items = members[start..end]
+            .iter()
+            .filter(|m| {
+                pattern.is_none_or(|p| crate::core::glob_match(p, &String::from_utf8_lossy(m)))
+            })
+            .cloned()
+            .collect();
+        let next = if end < total { end as u64 } else { 0 };
+        Ok((next, items))
+    }
+
     /// SCARD - Get set cardinality (size)
     pub fn scard(&self, key: &str) -> Result<usize> {
         let shard = self.shard(key);
@@ -932,5 +961,46 @@ mod tests {
         let popped = v.pop(1);
         assert_eq!(popped.len(), 1);
         assert!(v.is_empty());
+    }
+
+    #[test]
+    fn test_sscan_cursor_and_match() {
+        let store = SetStore::new();
+        store
+            .sadd(
+                "s",
+                vec![
+                    b"a1".to_vec(),
+                    b"a2".to_vec(),
+                    b"b1".to_vec(),
+                    b"b2".to_vec(),
+                ],
+            )
+            .unwrap();
+
+        let mut seen = Vec::new();
+        let mut cursor = 0u64;
+        loop {
+            let (next, items) = store.sscan("s", cursor, None, 2).unwrap();
+            seen.extend(items);
+            if next == 0 {
+                break;
+            }
+            cursor = next;
+        }
+        seen.sort();
+        assert_eq!(
+            seen,
+            vec![
+                b"a1".to_vec(),
+                b"a2".to_vec(),
+                b"b1".to_vec(),
+                b"b2".to_vec()
+            ]
+        );
+
+        let (_c, items) = store.sscan("s", 0, Some("a*"), 100).unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(store.sscan("missing", 0, None, 10).unwrap(), (0, vec![]));
     }
 }

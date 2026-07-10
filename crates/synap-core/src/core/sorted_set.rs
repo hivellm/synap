@@ -1013,6 +1013,39 @@ impl SortedSetStore {
             .map(|zset| zset.zmscore(members))
             .unwrap_or_else(|| vec![None; members.len()])
     }
+
+    /// ZSCAN - cursor-based incremental scan of a sorted set's members.
+    ///
+    /// `cursor` is an offset into a member-sorted snapshot; returns the next
+    /// cursor (0 when complete) and the matched `(member, score)` pairs within
+    /// the window. `pattern` is an optional glob over members; `count` bounds the
+    /// window size (min 1).
+    pub fn zscan(
+        &self,
+        key: &str,
+        cursor: u64,
+        pattern: Option<&str>,
+        count: usize,
+    ) -> (u64, Vec<(Vec<u8>, f64)>) {
+        let mut members: Vec<(Vec<u8>, f64)> = self
+            .zrange(key, 0, -1, true)
+            .into_iter()
+            .map(|sm| (sm.member, sm.score))
+            .collect();
+        members.sort_by(|a, b| a.0.cmp(&b.0));
+        let total = members.len();
+        let start = (cursor as usize).min(total);
+        let end = start.saturating_add(count.max(1)).min(total);
+        let items = members[start..end]
+            .iter()
+            .filter(|(m, _)| {
+                pattern.is_none_or(|p| crate::core::glob_match(p, &String::from_utf8_lossy(m)))
+            })
+            .cloned()
+            .collect();
+        let next = if end < total { end as u64 } else { 0 };
+        (next, items)
+    }
 }
 
 impl Default for SortedSetStore {
@@ -1374,5 +1407,40 @@ mod tests {
         assert_eq!(k, "z");
         assert_eq!(m, b"m".to_vec());
         assert_eq!(s, 7.0);
+    }
+
+    #[test]
+    fn test_zscan_cursor_and_match() {
+        let store = SortedSetStore::new();
+        seed(
+            &store,
+            "z",
+            &[("a", 1.0), ("b", 2.0), ("c", 3.0), ("d", 4.0)],
+        );
+
+        let mut seen = Vec::new();
+        let mut cursor = 0u64;
+        loop {
+            let (next, items) = store.zscan("z", cursor, None, 2);
+            seen.extend(items);
+            if next == 0 {
+                break;
+            }
+            cursor = next;
+        }
+        seen.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            seen,
+            vec![
+                (b"a".to_vec(), 1.0),
+                (b"b".to_vec(), 2.0),
+                (b"c".to_vec(), 3.0),
+                (b"d".to_vec(), 4.0),
+            ]
+        );
+
+        let (_c, items) = store.zscan("z", 0, Some("[ab]"), 100);
+        assert_eq!(items.len(), 2);
+        assert_eq!(store.zscan("missing", 0, None, 10), (0, vec![]));
     }
 }
