@@ -437,8 +437,20 @@ impl SlotMigrationManager {
                     let mut migrations = migrations.write();
                     if let Some(migration) = migrations.get_mut(&slot) {
                         migration.state = MigrationState::Failed;
-                        info!("Migration cancelled for slot {}", slot);
-                        // Implement rollback (restore keys if needed) (tracked in hivellm/synap#233)
+                        // Rollback (issue #233): key movement uses a non-destructive
+                        // copy model — the source node keeps its keys until the
+                        // migration is explicitly completed. Cancelling therefore
+                        // needs no data restore: the source keyspace is already the
+                        // authoritative copy, and the migration is simply marked
+                        // Failed so the slot stays owned by the source node.
+                        // (A future destructive/zero-copy transfer would restore
+                        // `migration.keys_migrated` keys here from the source's
+                        // pre-move snapshot before the slot is reassigned.)
+                        migration.keys_migrated = 0;
+                        info!(
+                            "Migration cancelled and rolled back for slot {} (source retains all keys)",
+                            slot
+                        );
                     }
                 }
                 MigrationCommand::Complete { slot } => {

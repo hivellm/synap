@@ -102,10 +102,72 @@ impl Default for ClusterConfig {
 }
 
 impl ClusterConfig {
-    /// Create cluster config from environment/config file
+    /// Load cluster config from environment variables (issue #233), overlaying a
+    /// default. Recognized vars (all optional):
+    /// - `SYNAP_CLUSTER_ENABLED` (bool)
+    /// - `SYNAP_CLUSTER_NODE_ID` (string)
+    /// - `SYNAP_CLUSTER_NODE_ADDRESS` (host:port)
+    /// - `SYNAP_CLUSTER_SEEDS` (comma-separated host:port list)
+    /// - `SYNAP_CLUSTER_PORT` (u16)
+    /// - `SYNAP_CLUSTER_NODE_TIMEOUT_MS`, `SYNAP_CLUSTER_MIGRATION_BATCH_SIZE`,
+    ///   `SYNAP_CLUSTER_MIGRATION_TIMEOUT_SECS`, `SYNAP_CLUSTER_RAFT_ELECTION_TIMEOUT_MS`,
+    ///   `SYNAP_CLUSTER_RAFT_HEARTBEAT_INTERVAL_MS` (integers)
+    /// - `SYNAP_CLUSTER_REQUIRE_FULL_COVERAGE` (bool)
+    ///
+    /// Invalid values fall back to the default for that field.
     pub fn from_env() -> Self {
-        // Load from environment variables or config file (tracked in hivellm/synap#233)
-        Self::default()
+        Self::from_getter(|k| std::env::var(k).ok())
+    }
+
+    /// Overlay cluster config from a variable getter (env-var backed in prod,
+    /// map-backed in tests — avoids racy global env mutation).
+    pub(crate) fn from_getter(get: impl Fn(&str) -> Option<String>) -> Self {
+        let mut cfg = Self::default();
+
+        if let Some(v) = get("SYNAP_CLUSTER_ENABLED") {
+            cfg.enabled = v.parse().unwrap_or(cfg.enabled);
+        }
+        if let Some(v) = get("SYNAP_CLUSTER_NODE_ID") {
+            if !v.is_empty() {
+                cfg.node_id = Some(v);
+            }
+        }
+        if let Some(v) = get("SYNAP_CLUSTER_NODE_ADDRESS") {
+            if let Ok(addr) = v.parse() {
+                cfg.node_address = addr;
+            }
+        }
+        if let Some(v) = get("SYNAP_CLUSTER_SEEDS") {
+            cfg.seed_nodes = v
+                .split(',')
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .filter_map(|s| s.parse().ok())
+                .collect();
+        }
+        if let Some(v) = get("SYNAP_CLUSTER_PORT") {
+            cfg.cluster_port = v.parse().unwrap_or(cfg.cluster_port);
+        }
+        if let Some(v) = get("SYNAP_CLUSTER_NODE_TIMEOUT_MS") {
+            cfg.node_timeout_ms = v.parse().unwrap_or(cfg.node_timeout_ms);
+        }
+        if let Some(v) = get("SYNAP_CLUSTER_REQUIRE_FULL_COVERAGE") {
+            cfg.require_full_coverage = v.parse().unwrap_or(cfg.require_full_coverage);
+        }
+        if let Some(v) = get("SYNAP_CLUSTER_MIGRATION_BATCH_SIZE") {
+            cfg.migration_batch_size = v.parse().unwrap_or(cfg.migration_batch_size);
+        }
+        if let Some(v) = get("SYNAP_CLUSTER_MIGRATION_TIMEOUT_SECS") {
+            cfg.migration_timeout_secs = v.parse().unwrap_or(cfg.migration_timeout_secs);
+        }
+        if let Some(v) = get("SYNAP_CLUSTER_RAFT_ELECTION_TIMEOUT_MS") {
+            cfg.raft_election_timeout_ms = v.parse().unwrap_or(cfg.raft_election_timeout_ms);
+        }
+        if let Some(v) = get("SYNAP_CLUSTER_RAFT_HEARTBEAT_INTERVAL_MS") {
+            cfg.raft_heartbeat_interval_ms = v.parse().unwrap_or(cfg.raft_heartbeat_interval_ms);
+        }
+
+        cfg
     }
 
     /// Get node timeout as Duration

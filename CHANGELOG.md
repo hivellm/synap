@@ -26,6 +26,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single node owns all 16384 slots until peers join. `INFO cluster` reports the
   node id, known nodes, and slot coverage. `ClusterConfig` fields all carry serde
   defaults so a partial/legacy `cluster:` block still loads. Disabled by default.
+- **Cluster consensus/migration hardening** (issue #233). `ClusterConfig::from_env`
+  now loads every cluster field from `SYNAP_CLUSTER_*` environment variables
+  (invalid values fall back to defaults) via a testable getter. Slot-migration
+  cancel performs an explicit rollback: the non-destructive copy model keeps the
+  source keyspace authoritative, so cancel marks the migration Failed and resets
+  progress without data loss. The Raft vote/heartbeat and failover
+  detect/promote logic is verified by tests. (Multi-node Raft election over the
+  wire is tracked as a follow-up.)
 - **Cluster quota inter-node RPC** (issue #231). The cluster quota coordinator's
   two stubs are now a real length-prefixed bincode TCP RPC: a follower queries the
   master for a user's authoritative quota (`GetQuota`) and reports accumulated

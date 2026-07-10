@@ -549,4 +549,54 @@ mod tests {
             serde_json::from_str(r#"{"seeds": ["127.0.0.1:16005"]}"#).unwrap();
         assert_eq!(cfg2.seed_nodes.len(), 1);
     }
+
+    #[test]
+    fn test_cluster_config_from_getter_overlays_vars() {
+        // Map-backed getter (no global env mutation) exercises from_env's parsing.
+        let vars: std::collections::HashMap<&str, &str> = [
+            ("SYNAP_CLUSTER_ENABLED", "true"),
+            ("SYNAP_CLUSTER_NODE_ID", "n7"),
+            ("SYNAP_CLUSTER_NODE_ADDRESS", "10.0.0.5:7000"),
+            ("SYNAP_CLUSTER_SEEDS", "127.0.0.1:7001, 127.0.0.1:7002"),
+            ("SYNAP_CLUSTER_MIGRATION_BATCH_SIZE", "250"),
+            ("SYNAP_CLUSTER_RAFT_ELECTION_TIMEOUT_MS", "bad-number"),
+        ]
+        .into_iter()
+        .collect();
+
+        let cfg = ClusterConfig::from_getter(|k| vars.get(k).map(|s| s.to_string()));
+        assert!(cfg.enabled);
+        assert_eq!(cfg.node_id.as_deref(), Some("n7"));
+        assert_eq!(cfg.node_address.to_string(), "10.0.0.5:7000");
+        assert_eq!(cfg.seed_nodes.len(), 2);
+        assert_eq!(cfg.migration_batch_size, 250);
+        // Invalid value falls back to the default (1000), not a panic.
+        assert_eq!(cfg.raft_election_timeout_ms, 1000);
+
+        // Empty getter → all defaults, cluster disabled.
+        assert!(!ClusterConfig::from_getter(|_| None).enabled);
+    }
+
+    #[tokio::test]
+    async fn test_migration_cancel_rolls_back_source_intact() {
+        use crate::core::{KVConfig, KVStore};
+        let kv = std::sync::Arc::new(KVStore::new(KVConfig::default()));
+        kv.set("mkey", b"v".to_vec(), None).await.unwrap();
+        let slot = crate::cluster::hash_slot("mkey");
+
+        let mgr =
+            SlotMigrationManager::new_with_kv_store(100, Duration::from_secs(60), Some(kv.clone()));
+        mgr.start_migration(slot, "src".to_string(), "dst".to_string())
+            .unwrap();
+        assert!(mgr.cancel_migration(slot).is_ok());
+
+        // Let the worker process the cancel/rollback.
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let m = mgr.get_migration(slot).expect("migration record");
+        assert_eq!(m.state, MigrationState::Failed);
+        assert_eq!(m.keys_migrated, 0); // rolled back
+        // Non-destructive copy model: the source keeps its key after rollback.
+        assert_eq!(kv.get("mkey").await.unwrap(), Some(b"v".to_vec()));
+    }
 }
