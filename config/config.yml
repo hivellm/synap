@@ -30,12 +30,15 @@ kv_store:
   # Common values: 256 (small), 1024 (medium), 4096 (large), 8192 (very large)
   max_memory_mb: 4096
 
-  # Eviction policy when memory limit is reached
-  # Options:
-  #   lru  -> Least Recently Used (recommended for cache)
-  #   lfu  -> Least Frequently Used
-  #   ttl  -> Shortest Time-To-Live first
-  #   none -> No eviction (returns errors on write)
+  # Eviction policy when memory limit is reached. Options:
+  #   noeviction       -> return an error on write when full (default)
+  #   allkeys-lru      -> Least Recently Used across all keys (recommended cache)
+  #   volatile-lru     -> LRU among keys with a TTL
+  #   allkeys-lfu      -> Least Frequently Used across all keys
+  #   volatile-lfu     -> LFU among keys with a TTL
+  #   allkeys-random   -> random key
+  #   volatile-random  -> random key with a TTL
+  #   volatile-ttl     -> key with the soonest expiry
   eviction_policy: "allkeys-lru"
 
   # TTL cleanup interval in milliseconds

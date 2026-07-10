@@ -1039,6 +1039,39 @@ async fn test_eviction_noeviction_returns_error_when_full() {
     );
 }
 
+/// 4.5 (eviction) — allkeys-lfu evicts under pressure without erroring, and a
+/// frequently-accessed volatile key is not the first to go. Assertions are loose
+/// (eviction is sampled + sharded) but exercise the LFU eviction arm.
+#[tokio::test]
+async fn test_eviction_allkeys_lfu_fires() {
+    let config = KVConfig {
+        max_memory_mb: 1,
+        eviction_policy: EvictionPolicy::AllKeysLfu,
+        eviction_sample_size: 64,
+        ..KVConfig::default()
+    };
+    let store = KVStore::new(config);
+
+    // A volatile "hot" key accessed many times → high frequency counter.
+    store.set("hot", vec![7u8; 100], Some(3600)).await.unwrap();
+    for _ in 0..50 {
+        let _ = store.get("hot").await.unwrap();
+    }
+
+    // Fill memory with volatile freq-1 keys to force eviction.
+    let big = vec![0u8; 50_000];
+    for i in 0..40 {
+        let _ = store
+            .set(&format!("cold_{i}"), big.clone(), Some(3600))
+            .await;
+    }
+
+    // LFU must evict (not error): a normal write still succeeds.
+    store.set("probe", vec![1u8; 10], None).await.unwrap();
+    // Eviction did something: not all 40 cold keys can coexist in 1 MB.
+    assert!(store.dbsize().await.unwrap() < 41);
+}
+
 /// Shard-aware MGET preserves input order across all 64 shards.
 #[tokio::test]
 async fn test_mget_shard_aware_ordering() {

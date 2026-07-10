@@ -1153,6 +1153,29 @@ impl KVStore {
                         .take(sample_size)
                         .map(|k| (k, 0u64))
                         .collect(),
+                    // LFU: score by access frequency — the lowest-frequency key in
+                    // the sample is evicted first.
+                    AllKeysLfu => all_keys
+                        .into_iter()
+                        .take(sample_size)
+                        .map(|k| {
+                            let f = data.get(k.as_str()).map(|v| v.freq()).unwrap_or(0) as u64;
+                            (k, f)
+                        })
+                        .collect(),
+                    VolatileLfu => all_keys
+                        .into_iter()
+                        .filter(|k| {
+                            data.get(k.as_str())
+                                .map(|v| matches!(v, StoredValue::Expiring { .. }))
+                                .unwrap_or(false)
+                        })
+                        .take(sample_size)
+                        .map(|k| {
+                            let f = data.get(k.as_str()).map(|v| v.freq()).unwrap_or(0) as u64;
+                            (k, f)
+                        })
+                        .collect(),
                     NoEviction => break 'outer,
                 };
 

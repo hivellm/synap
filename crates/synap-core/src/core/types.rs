@@ -87,6 +87,7 @@ pub enum StoredValue {
         data: Vec<u8>,
         expires_at: u64,        // Unix timestamp in milliseconds
         last_access: AtomicU32, // Unix timestamp in seconds for LRU
+        freq: AtomicU32,        // access-frequency counter for LFU eviction
     },
 }
 
@@ -98,10 +99,12 @@ impl Clone for StoredValue {
                 data,
                 expires_at,
                 last_access,
+                freq,
             } => Self::Expiring {
                 data: data.clone(),
                 expires_at: *expires_at,
                 last_access: AtomicU32::new(last_access.load(Ordering::Relaxed)),
+                freq: AtomicU32::new(freq.load(Ordering::Relaxed)),
             },
         }
     }
@@ -122,6 +125,7 @@ impl StoredValue {
             data,
             expires_at: expiry.to_unix_ms(),
             last_access: AtomicU32::new(Self::current_timestamp_secs()),
+            freq: AtomicU32::new(1),
         }
     }
 
@@ -131,6 +135,7 @@ impl StoredValue {
             data,
             expires_at: expires_at_ms,
             last_access: AtomicU32::new(Self::current_timestamp_secs()),
+            freq: AtomicU32::new(1),
         }
     }
 
@@ -161,10 +166,26 @@ impl StoredValue {
         }
     }
 
-    /// Update access time for LRU (takes `&self` — AtomicU32 allows interior mutability).
+    /// Update access time for LRU and bump the LFU frequency counter (takes
+    /// `&self` — the atomics allow interior mutability on the read/GET path).
     pub fn update_access(&self) {
-        if let Self::Expiring { last_access, .. } = self {
+        if let Self::Expiring {
+            last_access, freq, ..
+        } = self
+        {
             last_access.store(Self::current_timestamp_secs(), Ordering::Relaxed);
+            // Saturating increment; the LFU eviction arm evicts the lowest freq.
+            let cur = freq.load(Ordering::Relaxed);
+            freq.store(cur.saturating_add(1), Ordering::Relaxed);
+        }
+    }
+
+    /// Access-frequency counter for LFU eviction (0 for persistent values, which
+    /// carry no counter — like `last_access`, LFU is meaningful for volatile keys).
+    pub fn freq(&self) -> u32 {
+        match self {
+            Self::Persistent(_) => 0,
+            Self::Expiring { freq, .. } => freq.load(Ordering::Relaxed),
         }
     }
 
@@ -270,6 +291,12 @@ pub enum EvictionPolicy {
     /// Evict only keys with a TTL set, prioritising those expiring soonest.
     #[serde(rename = "volatile-ttl")]
     VolatileTtl,
+    /// Evict any key using approximated LFU (least-frequently-used).
+    #[serde(rename = "allkeys-lfu")]
+    AllKeysLfu,
+    /// Evict only keys with a TTL set, using approximated LFU.
+    #[serde(rename = "volatile-lfu")]
+    VolatileLfu,
 }
 
 /// Configuration for KV store
@@ -412,10 +439,39 @@ mod tests {
             data: data.clone(),
             expires_at: 0, // Already expired
             last_access: AtomicU32::new(0),
+            freq: AtomicU32::new(1),
         };
 
         assert!(value.is_expired());
         assert_eq!(value.ttl_remaining(), Some(0));
+    }
+
+    #[test]
+    fn test_lfu_freq_counter() {
+        // Volatile values start at freq 1 and bump on each access.
+        let v = StoredValue::new(vec![1, 2, 3], Some(60));
+        assert_eq!(v.freq(), 1);
+        v.update_access();
+        v.update_access();
+        assert_eq!(v.freq(), 3);
+
+        // Persistent values carry no counter.
+        let p = StoredValue::new(vec![1], None);
+        assert_eq!(p.freq(), 0);
+        p.update_access(); // no-op
+        assert_eq!(p.freq(), 0);
+    }
+
+    #[test]
+    fn test_eviction_policy_lfu_serde() {
+        let lfu: EvictionPolicy = serde_json::from_str("\"allkeys-lfu\"").unwrap();
+        assert_eq!(lfu, EvictionPolicy::AllKeysLfu);
+        let vlfu: EvictionPolicy = serde_json::from_str("\"volatile-lfu\"").unwrap();
+        assert_eq!(vlfu, EvictionPolicy::VolatileLfu);
+        assert_eq!(
+            serde_json::to_string(&EvictionPolicy::AllKeysLfu).unwrap(),
+            "\"allkeys-lfu\""
+        );
     }
 
     #[test]
