@@ -430,8 +430,83 @@ pub(super) async fn run(
             ]))
         }
 
+        // ── Blocking pops ──────────────────────────────────────────────────────
+        "BLPOP" => {
+            let (keys, timeout) = parse_block_keys_timeout(args)?;
+            match state.list_store.blpop(keys, timeout).await {
+                Ok((key, value)) => Ok(SynapValue::Array(vec![
+                    SynapValue::Str(key),
+                    SynapValue::Bytes(value),
+                ])),
+                Err(_) => Ok(SynapValue::Null),
+            }
+        }
+        "BRPOP" => {
+            let (keys, timeout) = parse_block_keys_timeout(args)?;
+            match state.list_store.brpop(keys, timeout).await {
+                Ok((key, value)) => Ok(SynapValue::Array(vec![
+                    SynapValue::Str(key),
+                    SynapValue::Bytes(value),
+                ])),
+                Err(_) => Ok(SynapValue::Null),
+            }
+        }
+        "BRPOPLPUSH" => {
+            let source = arg_str(args, 0)?;
+            let dest = arg_str(args, 1)?;
+            let timeout = block_timeout(arg_int(args, 2)?)?;
+            match state.list_store.brpoplpush(&source, &dest, timeout).await {
+                Ok(value) => Ok(SynapValue::Bytes(value)),
+                Err(_) => Ok(SynapValue::Null),
+            }
+        }
+        "BZPOPMIN" => {
+            let (keys, timeout) = parse_block_keys_timeout(args)?;
+            match state.sorted_set_store.bzpopmin(keys, timeout).await {
+                Ok((key, member, score)) => Ok(SynapValue::Array(vec![
+                    SynapValue::Str(key),
+                    SynapValue::Bytes(member),
+                    SynapValue::Float(score),
+                ])),
+                Err(_) => Ok(SynapValue::Null),
+            }
+        }
+        "BZPOPMAX" => {
+            let (keys, timeout) = parse_block_keys_timeout(args)?;
+            match state.sorted_set_store.bzpopmax(keys, timeout).await {
+                Ok((key, member, score)) => Ok(SynapValue::Array(vec![
+                    SynapValue::Str(key),
+                    SynapValue::Bytes(member),
+                    SynapValue::Float(score),
+                ])),
+                Err(_) => Ok(SynapValue::Null),
+            }
+        }
+
         _ => Err(format!("ERR unknown command '{command}'")),
     }
+}
+
+/// Map a blocking-op timeout in seconds to `Option<u64>`. Redis treats `0` as
+/// "block forever" (`None`); a negative timeout is an error.
+fn block_timeout(secs: i64) -> Result<Option<u64>, String> {
+    if secs < 0 {
+        return Err("ERR timeout is negative".into());
+    }
+    Ok(if secs == 0 { None } else { Some(secs as u64) })
+}
+
+/// Split a blocking `CMD key [key ...] timeout` into `(keys, timeout)`. The last
+/// argument is the timeout in seconds (`0` = block forever).
+fn parse_block_keys_timeout(args: &[SynapValue]) -> Result<(Vec<String>, Option<u64>), String> {
+    if args.len() < 2 {
+        return Err("ERR wrong number of arguments for blocking pop".into());
+    }
+    let timeout = block_timeout(arg_int(args, args.len() - 1)?)?;
+    let keys: Vec<String> = (0..args.len() - 1)
+        .map(|i| arg_str(args, i))
+        .collect::<Result<_, _>>()?;
+    Ok((keys, timeout))
 }
 
 /// Parse the optional `[MATCH pattern] [COUNT count]` tail of a `*SCAN` command,

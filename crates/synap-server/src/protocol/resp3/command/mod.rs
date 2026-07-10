@@ -68,6 +68,9 @@ pub async fn dispatch(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
         "RPOP" => collections::cmd_rpop(state, args).await,
         "LRANGE" => collections::cmd_lrange(state, args).await,
         "LLEN" => collections::cmd_llen(state, args).await,
+        "BLPOP" => collections::cmd_blpop(state, args).await,
+        "BRPOP" => collections::cmd_brpop(state, args).await,
+        "BRPOPLPUSH" => collections::cmd_brpoplpush(state, args).await,
 
         "SADD" => collections::cmd_sadd(state, args).await,
         "SMEMBERS" => collections::cmd_smembers(state, args).await,
@@ -80,6 +83,8 @@ pub async fn dispatch(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
         "ZSCORE" => collections::cmd_zscore(state, args).await,
         "ZCARD" => collections::cmd_zcard(state, args).await,
         "ZREM" => collections::cmd_zrem(state, args).await,
+        "BZPOPMIN" => collections::cmd_bzpopmin(state, args).await,
+        "BZPOPMAX" => collections::cmd_bzpopmax(state, args).await,
 
         "PFADD" => collections::cmd_pfadd(state, args).await,
         "PFCOUNT" => collections::cmd_pfcount(state, args).await,
@@ -690,6 +695,45 @@ mod tests {
         } else {
             panic!("Expected Array from ZSCAN, got {result:?}");
         }
+    }
+
+    #[tokio::test]
+    async fn test_blpop_immediate_hit() {
+        let state = make_state();
+        dispatch(&state, &args(&["RPUSH", "blk_l", "a", "b"])).await;
+        let result = dispatch(&state, &args(&["BLPOP", "blk_l", "1"])).await;
+        assert_eq!(
+            result,
+            Resp3Value::Array(vec![
+                Resp3Value::BulkString(b"blk_l".to_vec()),
+                Resp3Value::BulkString(b"a".to_vec()),
+            ]),
+            "BLPOP returns [key, first-element] on an immediate hit"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_brpop_timeout_returns_null() {
+        let state = make_state();
+        let result = dispatch(&state, &args(&["BRPOP", "blk_missing", "1"])).await;
+        assert_eq!(result, Resp3Value::Null, "BRPOP nil on timeout");
+    }
+
+    #[tokio::test]
+    async fn test_bzpopmin_immediate_hit() {
+        let state = make_state();
+        dispatch(&state, &args(&["ZADD", "blk_z", "1", "lo"])).await;
+        dispatch(&state, &args(&["ZADD", "blk_z", "2", "hi"])).await;
+        let result = dispatch(&state, &args(&["BZPOPMIN", "blk_z", "1"])).await;
+        assert_eq!(
+            result,
+            Resp3Value::Array(vec![
+                Resp3Value::BulkString(b"blk_z".to_vec()),
+                Resp3Value::BulkString(b"lo".to_vec()),
+                Resp3Value::BulkString(b"1".to_vec()),
+            ]),
+            "BZPOPMIN returns [key, member, score] for the lowest score"
+        );
     }
 
     #[tokio::test]

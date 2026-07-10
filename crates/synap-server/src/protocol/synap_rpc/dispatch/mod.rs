@@ -38,7 +38,8 @@ async fn run(state: &AppState, command: &str, args: Vec<SynapValue>) -> Result<S
         "HSET" | "HGET" | "HDEL" | "HGETALL" | "HLEN" | "HEXISTS" | "LPUSH" | "RPUSH" | "LPOP"
         | "RPOP" | "LRANGE" | "LLEN" | "SADD" | "SMEMBERS" | "SREM" | "SISMEMBER" | "SCARD"
         | "ZADD" | "ZRANGE" | "ZSCORE" | "ZCARD" | "ZREM" | "PFADD" | "PFCOUNT" | "HMSET"
-        | "HMGET" | "HKEYS" | "HVALS" | "PFMERGE" | "HLLSTATS" | "HSCAN" | "SSCAN" | "ZSCAN" => {
+        | "HMGET" | "HKEYS" | "HVALS" | "PFMERGE" | "HLLSTATS" | "HSCAN" | "SSCAN" | "ZSCAN"
+        | "BLPOP" | "BRPOP" | "BRPOPLPUSH" | "BZPOPMIN" | "BZPOPMAX" => {
             collections::run(state, cmd.as_str(), args).await
         }
 

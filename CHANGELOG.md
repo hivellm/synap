@@ -29,6 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Sorted-set blocking pops `BZPOPMIN` / `BZPOPMAX`** (core) with a per-key
   notify woken by `ZADD`, mirroring the list blocking-pop mechanism.
+- **Blocking pops over the wire (`BLPOP` / `BRPOP` / `BRPOPLPUSH` / `BZPOPMIN` /
+  `BZPOPMAX`)** on the RESP3 and SynapRPC protocols. The last argument is the
+  timeout in seconds (`0` blocks until an element arrives, Redis semantics);
+  the call awaits the existing per-key broadcast notify. Reply is `[key, value]`
+  (lists) / `[key, member, score]` (sorted sets), or nil on timeout.
 - **Collection cursor scans `HSCAN` / `SSCAN` / `ZSCAN`** over the RESP3 and
   SynapRPC wire protocols, with Redis-style `MATCH` (glob) and `COUNT`. The
   cursor is an offset into a stably-sorted snapshot; `0` signals completion. A

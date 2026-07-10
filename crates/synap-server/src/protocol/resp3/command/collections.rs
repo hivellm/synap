@@ -702,3 +702,123 @@ pub(super) async fn cmd_zscan(state: &AppState, args: &[Resp3Value]) -> Resp3Val
         Resp3Value::Array(pairs),
     ])
 }
+
+// ── Blocking pops (BLPOP / BRPOP / BZPOPMIN / BZPOPMAX / BRPOPLPUSH) ───────────
+
+/// Split a blocking `CMD key [key ...] timeout` into `(keys, timeout)`. The last
+/// argument is the timeout in seconds; Redis treats `0` as "block forever"
+/// (mapped to `None`). Returns `None` on a malformed command.
+fn parse_block_keys_timeout(args: &[Resp3Value]) -> Option<(Vec<String>, Option<u64>)> {
+    if args.len() < 3 {
+        return None;
+    }
+    let timeout_secs = arg_f64(args, args.len() - 1)?;
+    if timeout_secs < 0.0 {
+        return None;
+    }
+    let timeout = if timeout_secs == 0.0 {
+        None
+    } else {
+        Some(timeout_secs as u64)
+    };
+    let keys: Vec<String> = (1..args.len() - 1)
+        .filter_map(|i| arg_str(args, i))
+        .collect();
+    if keys.is_empty() {
+        return None;
+    }
+    Some((keys, timeout))
+}
+
+/// `BLPOP key [key ...] timeout` — blocking left pop. Reply: `[key, value]` on a
+/// hit, Null on timeout.
+pub(super) async fn cmd_blpop(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    let (keys, timeout) = match parse_block_keys_timeout(args) {
+        Some(x) => x,
+        None => return err_wrong_args("BLPOP"),
+    };
+    match state.list_store.blpop(keys, timeout).await {
+        Ok((key, value)) => Resp3Value::Array(vec![
+            Resp3Value::BulkString(key.into_bytes()),
+            Resp3Value::BulkString(value),
+        ]),
+        Err(_) => Resp3Value::Null,
+    }
+}
+
+/// `BRPOP key [key ...] timeout` — blocking right pop.
+pub(super) async fn cmd_brpop(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    let (keys, timeout) = match parse_block_keys_timeout(args) {
+        Some(x) => x,
+        None => return err_wrong_args("BRPOP"),
+    };
+    match state.list_store.brpop(keys, timeout).await {
+        Ok((key, value)) => Resp3Value::Array(vec![
+            Resp3Value::BulkString(key.into_bytes()),
+            Resp3Value::BulkString(value),
+        ]),
+        Err(_) => Resp3Value::Null,
+    }
+}
+
+/// `BZPOPMIN key [key ...] timeout` — blocking pop of the lowest-scored member.
+/// Reply: `[key, member, score]` on a hit, Null on timeout.
+pub(super) async fn cmd_bzpopmin(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    let (keys, timeout) = match parse_block_keys_timeout(args) {
+        Some(x) => x,
+        None => return err_wrong_args("BZPOPMIN"),
+    };
+    match state.sorted_set_store.bzpopmin(keys, timeout).await {
+        Ok((key, member, score)) => Resp3Value::Array(vec![
+            Resp3Value::BulkString(key.into_bytes()),
+            Resp3Value::BulkString(member),
+            Resp3Value::BulkString(score.to_string().into_bytes()),
+        ]),
+        Err(_) => Resp3Value::Null,
+    }
+}
+
+/// `BZPOPMAX key [key ...] timeout` — blocking pop of the highest-scored member.
+pub(super) async fn cmd_bzpopmax(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    let (keys, timeout) = match parse_block_keys_timeout(args) {
+        Some(x) => x,
+        None => return err_wrong_args("BZPOPMAX"),
+    };
+    match state.sorted_set_store.bzpopmax(keys, timeout).await {
+        Ok((key, member, score)) => Resp3Value::Array(vec![
+            Resp3Value::BulkString(key.into_bytes()),
+            Resp3Value::BulkString(member),
+            Resp3Value::BulkString(score.to_string().into_bytes()),
+        ]),
+        Err(_) => Resp3Value::Null,
+    }
+}
+
+/// `BRPOPLPUSH source destination timeout` — blocking variant of RPOPLPUSH.
+/// Reply: the popped/pushed value, or Null on timeout.
+pub(super) async fn cmd_brpoplpush(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    if args.len() < 4 {
+        return err_wrong_args("BRPOPLPUSH");
+    }
+    let source = match arg_str(args, 1) {
+        Some(s) => s,
+        None => return err_wrong_args("BRPOPLPUSH"),
+    };
+    let dest = match arg_str(args, 2) {
+        Some(d) => d,
+        None => return err_wrong_args("BRPOPLPUSH"),
+    };
+    let timeout_secs = match arg_f64(args, 3) {
+        Some(t) if t >= 0.0 => t,
+        _ => return Resp3Value::Error("ERR timeout is not a float or out of range".into()),
+    };
+    let timeout = if timeout_secs == 0.0 {
+        None
+    } else {
+        Some(timeout_secs as u64)
+    };
+    match state.list_store.brpoplpush(&source, &dest, timeout).await {
+        Ok(value) => Resp3Value::BulkString(value),
+        Err(_) => Resp3Value::Null,
+    }
+}
