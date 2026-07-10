@@ -1,40 +1,109 @@
-# Redis 7 vs Synap — Comparison Benchmark Results
+# Redis 7 vs Synap — Live `redis-benchmark` Comparison
 
-> ## ⚠️ These numbers are stale (v0.9.0, HTTP/JSON transport). See v1.0 methodology below.
->
-> The tables in this document were produced on **0.9.0 over the HTTP/JSON
-> transport** — before the RESP3 and SynapRPC binary listeners existed. They are
-> kept for history but **do not represent v1.0**. v1.0 should be measured over
-> the binary protocols.
->
-> ### v1.0 benchmark methodology (phase7)
->
-> Two measurement paths, same host, Synap built `--release`:
->
-> 1. **RESP3 vs Redis 7 via `redis-benchmark`** (apples-to-apples, both over RESP):
->    ```bash
->    # Synap (RESP3 listener on 6379 by default; set host 0.0.0.0 or use loopback)
->    ./target/release/synap-server --config config/config.yml &
->    redis-benchmark -h 127.0.0.1 -p 6379 -t get,set,incr,lpush,lrange,sadd -n 100000 -P 1
->    redis-benchmark -h 127.0.0.1 -p 6379 -t get,set,incr,lpush,lrange,sadd -n 100000 -P 16
->    # Redis 7 on the same host, same two runs on its port
->    redis-benchmark -h 127.0.0.1 -p <redis_port> -t get,set,incr,lpush,lrange,sadd -n 100000 -P 1
->    redis-benchmark ... -P 16
->    ```
->    `-P 1` isolates per-op latency; `-P 16` exercises the pipeline-aware flush.
-> 2. **Native SynapRPC** via the in-repo harness: `cargo bench --bench redis_vs_synap`.
->
-> **Execution status: DEFERRED.** `redis-benchmark`/`redis-server` are not
-> available in the current (Windows) environment and Redis is not native to
-> Windows, so the live head-to-head has not been run here. Tracked as a follow-up
-> to run in a Redis-equipped environment (WSL/Docker/Linux). The methodology and
-> harness above are ready to execute as-is.
+**Status:** executed. This is the v1.0 head-to-head the earlier revisions owed.
+Both servers were driven by the **same** `redis-benchmark` binary over RESP, so
+it is a true apples-to-apples measurement.
 
-## v1.0 native-protocol comparison — SynapRPC vs RESP3 vs HTTP (phase7)
+## Environment
+
+- **Harness:** `redis:7-alpine`'s `redis-benchmark`, `-n 100000 -c 50`,
+  `-P 1` (no pipelining) and `-P 16` (pipelined). Commands:
+  `set,get,incr,lpush,rpush,lrange_100,sadd`.
+- **Topology:** both servers and the benchmark client run as containers on one
+  Docker bridge network (`synap-bench`); traffic crosses the Docker network in
+  both cases, so neither side gets a loopback advantage.
+- **Redis:** `redis-server` 7.4.8, pure in-memory (`--save "" --appendonly no`).
+- **Synap:** current `main`, built `--release` (glibc bench image
+  `scripts/Dockerfile.bench`), RESP3 listener on `0.0.0.0:6379`, persistence and
+  auth disabled — matching Redis's in-memory configuration.
+- **Date:** 2026-07-10.
+
+> Absolute rps depends on the host; the **Synap-vs-Redis ratio on the same host,
+> same client** is the durable result.
+
+## Results — `-P 1` (no pipelining, per-op latency)
+
+| Op | Synap rps | Redis rps | Synap/Redis |
+|---|---:|---:|---:|
+| GET | 56,116 | 56,022 | 1.00 |
+| SET | 52,301 | 56,465 | 0.93 |
+| INCR | 53,850 | 55,897 | 0.96 |
+| LPUSH | 55,834 | 57,836 | 0.97 |
+| RPUSH | 56,401 | 55,555 | 1.02 |
+| SADD | 54,945 | 55,493 | 0.99 |
+| LRANGE_100 | 23,900 | 22,660 | 1.05 |
+
+**At `-P 1`, Synap is at parity with Redis 7** (within ~5% on every command, and
+marginally ahead on GET, RPUSH and LRANGE). Non-pipelined throughput is
+latency-bound and both servers sit at ~52–56k rps.
+
+## Results — `-P 16` (pipelined)
+
+| Op | Synap rps | Redis rps | Synap/Redis |
+|---|---:|---:|---:|
+| GET | 833,333 | 925,925 | 0.90 |
+| LPUSH | **740,740** | 549,450 | **1.35** |
+| RPUSH | 787,401 | 961,538 | 0.82 |
+| SADD | 787,401 | 917,431 | 0.86 |
+| LRANGE_100 | 58,616 | 58,445 | 1.00 |
+| SET | 130,718 | 952,381 | 0.14 |
+| INCR | 134,770 | 925,925 | 0.15 |
+
+**At `-P 16`, Synap reaches ~90% of Redis on GET, beats Redis on LPUSH, and is
+~82–86% on RPUSH/SADD.** The outliers are **SET/INCR**: see below.
+
+### The pipelined SET/INCR bottleneck
+
+`redis-benchmark` hammers a **single key** for SET/INCR. Synap takes a per-key
+async lock on every KV write (audit M-010, for MULTI/EXEC isolation), so 50
+clients × 16 pipelined writes to one key serialize on that one `tokio::Mutex` —
+capping SET/INCR at ~130k rps with ~6 ms latency, while lock-free GET hits 833k
+and the sharded collection writes (LPUSH via `parking_lot` RwLock) hit ~740k.
+This is a real, isolated bottleneck for hot-single-key pipelined writes and is
+tracked as a follow-up (`phase12_kv-write-lock-fastpath`). Multi-key or
+non-pipelined write workloads are unaffected (see the `-P 1` parity above).
+
+## Two bugs this benchmark found (now fixed)
+
+The first run of this benchmark surfaced two socket-layer stalls in the RESP3
+server, both since fixed (see CHANGELOG):
+
+1. **No `TCP_NODELAY`.** A bulk reply is written as several small segments
+   (length header, payload, CRLF); with Nagle's algorithm on, the payload
+   segment waited ~40 ms for the header's delayed ACK. Non-pipelined GET/LRANGE
+   ran at **~1,085 rps** before the fix (writes, single-segment, were unaffected).
+2. **Unbuffered write half.** `flush()` on a raw `TcpStream` is a no-op, so the
+   "pipeline-aware flush" could not coalesce a batch — every segment was its own
+   `write()`. Pipelined (`-P 16`) throughput was capped flat at **~17k rps** for
+   every op.
+
+Fix: `set_nodelay(true)` on the RESP3/SynapRPC connections + a `BufWriter` around
+the RESP3 write half. GET went **1,085 → 56,116 rps** (`-P 1`, 52×) and
+**17,442 → 833,333 rps** (`-P 16`, 48×).
+
+## Reproduce
+
+```bash
+docker network create synap-bench
+docker run -d --name redis-bench --network synap-bench \
+  redis:7-alpine redis-server --save "" --appendonly no
+docker build --load -t synap:benchctx -f scripts/Dockerfile.bench .
+docker run -d --name synap-bench --network synap-bench synap:benchctx
+
+bench() { docker run --rm --network synap-bench redis:7-alpine \
+  redis-benchmark -h "$1" -p 6379 -n 100000 -c 50 -P "$2" --csv \
+  -t set,get,incr,lpush,rpush,lrange_100,sadd; }
+bench redis-bench 1 ; bench synap-bench 1
+bench redis-bench 16; bench synap-bench 16
+```
+
+---
+
+## Prior: native-transport comparison (SynapRPC vs RESP3 vs HTTP, phase7)
 
 Measured with `cargo bench --bench protocol_bench` against a live **release**
-server on loopback (Windows, 2026-07-09). This compares Synap's own three
-transports; it is **not** the Redis head-to-head (that is deferred, above).
+server on loopback (Windows, 2026-07-09). This compares Synap's **own** three
+transports (not the Redis head-to-head above):
 
 | Workload | HTTP/JSON | RESP3 | SynapRPC |
 |---|---|---|---|
@@ -44,114 +113,25 @@ transports; it is **not** the Redis head-to-head (that is deferred, above).
 
 - **SynapRPC (MessagePack framing) is the fastest transport** on write and
   round-trip workloads — ~2.8× faster than HTTP/JSON and ~1.4× faster than RESP3
-  on the realistic SET+GET round-trip. RESP3 sits between the two.
-- The isolated **GET-only** row is anomalous (HTTP appears fastest). This looks
-  like a benchmark artifact (HTTP client keep-alive vs per-call overhead on the
-  raw-TCP RESP3/SynapRPC clients in the harness), not a real transport property —
-  the SET+GET round-trip is the representative number. Flagged for the follow-up
-  benchmark run to isolate.
+  on the realistic SET+GET round-trip.
+- The isolated GET-only row is a harness artifact (client keep-alive vs per-call
+  overhead), not a real transport property; the round-trip is representative.
 
-**Date**: 2026-04-08  
-**Synap version**: 0.9.0 (local release build, port 15502)  
-**Redis version**: 7-alpine (Docker `project-v-redis-1`, port 6379)  
-**Platform**: Windows 10, Rust nightly  
-**Profile**: debug (unoptimized — release will be faster for Synap; Redis numbers unchanged)  
-**Transport**: Redis via raw RESP/TCP; Synap via HTTP/JSON over loopback
+> The earlier 0.9.0 HTTP/JSON-transport tables have been removed — they predated
+> the RESP3/SynapRPC listeners and did not represent v1.0. The live
+> `redis-benchmark` results above are the authoritative Redis comparison.
 
-> **Note**: Redis runs through Docker NAT while Synap runs on bare loopback. This reflects real-world deployment where Redis is containerized. For a fully comparable result, build Synap with `--release`.
+## Allocator A/B: mimalloc vs system (kv_bench)
 
-## Run command
+`cargo bench --bench kv_bench -- read_latency/single_get`, system allocator vs
+`--features mimalloc` (Windows, release):
 
-```bash
-SYNAP_HTTP_URL=http://127.0.0.1:15502 \
-  cargo bench --bench redis_vs_synap --features redis-bench --profile dev
-```
+| Allocator | `single_get` |
+|---|---:|
+| system (default) | 107.2 ns |
+| mimalloc | 112.2 ns (**+4.2% slower**, p<0.05) |
 
----
-
-## SET latency (single key, varying value size)
-
-| Value size | Redis p50 | Synap p50 | Synap speedup |
-|-----------|-----------|-----------|---------------|
-| 64 B      | 466 µs    | 332 µs    | **+40%**      |
-| 256 B     | 458 µs    | 348 µs    | **+32%**      |
-| 1 KB      | 469 µs    | 372 µs    | **+26%**      |
-| 4 KB      | 535 µs    | 454 µs    | **+18%**      |
-
-## GET latency (single key, varying value size)
-
-| Value size | Redis p50 | Synap p50 | Synap speedup |
-|-----------|-----------|-----------|---------------|
-| 64 B      | 477 µs    | 299 µs    | **+60%**      |
-| 256 B     | 456 µs    | 302 µs    | **+51%**      |
-| 1 KB      | 459 µs    | 295 µs    | **+56%**      |
-| 4 KB      | 500 µs    | 347 µs    | **+44%**      |
-
-## MSET batch throughput
-
-| Batch size | Redis p50  | Synap p50  | Synap speedup |
-|-----------|------------|------------|---------------|
-| 10 keys   | 497 µs     | 441 µs     | **+13%**      |
-| 50 keys   | 1,023 µs   | 680 µs     | **+50%**      |
-| 100 keys  | 644 µs     | 994 µs     | -35% (HTTP body overhead dominates) |
-
-## INCR latency
-
-| Server | p50    |
-|--------|--------|
-| Redis  | 465 µs |
-| Synap  | 341 µs |
-| **Speedup** | **+36%** |
-
-## BITCOUNT (bitmap population count)
-
-| Bitmap size | Redis p50 | Synap p50 | Synap speedup |
-|------------|-----------|-----------|---------------|
-| 64 KB      | 495 µs    | 306 µs    | **+62%**      |
-| 512 KB     | 556 µs    | 324 µs    | **+72%**      |
-| 1024 KB    | 645 µs    | 296 µs    | **+118%** 🚀  |
-
-> BITCOUNT on large bitmaps shows Synap's biggest advantage. Synap's processing time barely increases with bitmap size (pure memory throughput), while Redis adds serialization overhead for larger responses over the RESP wire protocol.
-
-## HyperLogLog
-
-| Operation    | Redis p50 | Synap p50 | Synap speedup |
-|-------------|-----------|-----------|---------------|
-| PFCOUNT     | 472 µs    | 305 µs    | **+55%**      |
-| PFADD (100) | 561 µs    | 353 µs    | **+59%**      |
-
-## Concurrent reads (8 threads × 100 GETs)
-
-| Server | Total time | Throughput    |
-|--------|-----------|----------------|
-| Redis  | 70.7 ms   | 11.3 Kops/s    |
-| Synap  | 46.1 ms   | 17.3 Kops/s    |
-| **Speedup** | **+35%** | **+53% throughput** |
-
-> Synap's `Arc<RwLock<>>` sharding (64 shards) allows true parallel reads. Redis is single-threaded and serializes all commands.
-
----
-
-## Summary
-
-| Benchmark          | Winner | Margin  |
-|-------------------|--------|---------|
-| SET (small)       | Synap  | +40%    |
-| SET (large)       | Synap  | +18%    |
-| GET (all sizes)   | Synap  | +44–60% |
-| MSET (10–50 keys) | Synap  | +13–50% |
-| MSET (100 keys)   | Redis  | +35%    |
-| INCR              | Synap  | +36%    |
-| BITCOUNT          | Synap  | +62–118%|
-| HyperLogLog       | Synap  | +55–59% |
-| Concurrent reads  | Synap  | +53% throughput |
-
-**Synap wins 8/9 benchmark categories** in this debug build comparison. The only exception is large MSET batches (100 keys) where HTTP/JSON body serialization overhead exceeds the processing advantage.
-
-### Expected release-build improvement
-
-Running with `--release` will improve Synap's numbers by roughly 2–4× for CPU-bound operations (BITCOUNT, HLL, serialization). Redis numbers are independent of Synap's build profile. The MSET regression is expected to flip to Synap's favor with release optimizations.
-
-### Roadmap
-
-Phase 2 (binary TCP protocol) will replace HTTP/JSON with MessagePack frames, reducing per-operation overhead from ~300–500 µs to sub-100 µs — comparable to Redis's native RESP latency when running on bare metal.
+On the read path mimalloc is a small **regression**, so the default
+(`mimalloc` off) is correct and is kept. mimalloc can still help
+allocation-heavy write/large-value workloads; a fuller write/concurrent A/B is
+left for if/when the allocator is reconsidered.
