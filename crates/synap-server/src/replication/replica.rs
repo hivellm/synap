@@ -294,14 +294,24 @@ impl ReplicaNode {
     async fn apply_operation(&self, op: ReplicationOperation) -> ReplicationResult<()> {
         debug!("Applying operation at offset {}", op.offset);
 
-        // Verify offset sequence
+        // Deduplicate on replica join (#234): after a full sync at snapshot
+        // offset X, the master re-streams operations from the replication log
+        // that may overlap the snapshot. Skip anything the snapshot already
+        // covers (offset < current) so non-idempotent ops (e.g. list push) are
+        // not applied twice; apply everything at/after the current offset.
         let expected_offset = self.current_offset.load(Ordering::SeqCst);
+        if op.offset < expected_offset {
+            debug!(
+                "Skipping already-applied operation at offset {} (current {})",
+                op.offset, expected_offset
+            );
+            return Ok(());
+        }
         if op.offset != expected_offset {
             warn!(
-                "Offset mismatch: expected {}, got {}",
+                "Offset gap: expected {}, got {} (applying; ops are idempotent by key)",
                 expected_offset, op.offset
             );
-            // Continue anyway (idempotent operations)
         }
 
         // Apply via the shared applier so the replica converges to the master

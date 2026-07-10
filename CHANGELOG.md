@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Replication: replica joining mid-write-stream no longer loses writes**
+  (issue #234). The master now registers a joining replica in the fan-out set
+  before snapshotting (so writes during snapshot transfer are buffered to it),
+  and the replica deduplicates by offset. Also fixed a partial-sync framing bug
+  where the command was written without the length prefix the replica expected,
+  so partial syncs were misparsed and applied nothing. A replica joining a live
+  master now converges to the full dataset (`test_concurrent_writes_during_sync`
+  re-enabled and asserts all 500 keys).
+
+### Added
+- **Sorted-set blocking pops `BZPOPMIN` / `BZPOPMAX`** (core) with a per-key
+  notify woken by `ZADD`, mirroring the list blocking-pop mechanism.
+
 ## [1.0.0] - 2026-07-09
 
 The **v1.0.0 hardening line**: a `crates/` workspace restructure plus a deep

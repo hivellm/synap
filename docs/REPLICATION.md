@@ -248,6 +248,15 @@ replication:
    - Replication log is in-memory (1M operations circular buffer)
    - For true durability, enable WAL persistence on both master and replicas
 
+6. **Gap-free join under concurrent writes** (issue #234)
+   - The master registers a joining replica in the fan-out set **before** taking
+     its snapshot, so every write that lands during snapshot transfer is buffered
+     to that replica instead of being lost in the snapshot→stream gap.
+   - The replica deduplicates by offset: operations the snapshot already covers
+     (offset < snapshot offset) are skipped, so non-idempotent ops (e.g. list
+     push) are not applied twice.
+   - A replica joining a master mid-write converges to the full dataset.
+
 ### ❌ What Synap Does NOT Guarantee
 
 1. **Strong Consistency**

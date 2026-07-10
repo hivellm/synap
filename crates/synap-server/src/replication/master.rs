@@ -231,45 +231,12 @@ impl MasterNode {
             "Determining sync type"
         );
 
-        if needs_full_sync {
-            info!(replica_id = %replica_id, "Performing full sync for replica");
-
-            // Send full snapshot
-            debug!("Calling send_full_sync");
-            if let Err(e) = Self::send_full_sync(
-                &mut stream,
-                &kv_store,
-                stream_manager.as_ref().map(|s| s.as_ref()),
-                &replication_log,
-            )
-            .await
-            {
-                error!(
-                    replica_id = %replica_id,
-                    error = %e,
-                    "Full sync failed for replica"
-                );
-                return;
-            }
-            info!(replica_id = %replica_id, "Full sync sent successfully");
-        } else {
-            info!(replica_id = %replica_id, "Performing partial sync for replica");
-
-            // Send incremental updates
-            if let Err(e) =
-                Self::send_partial_sync(&mut stream, requested_offset, &replication_log).await
-            {
-                error!(
-                    replica_id = %replica_id,
-                    error = %e,
-                    "Partial sync failed for replica"
-                );
-                return;
-            }
-            info!(replica_id = %replica_id, "Partial sync sent successfully");
-        }
-
-        // Register replica
+        // Register the replica BEFORE syncing (issue #234): once it is in the
+        // replicas map, the replication fan-out buffers every live operation into
+        // this replica's channel while the (possibly large) snapshot is still
+        // transferring — so a write that lands between the snapshot point and
+        // registration is no longer lost. Any overlap (operations the snapshot
+        // already covers) is deduplicated by offset on the replica.
         let (tx, mut rx) = mpsc::unbounded_channel();
         {
             let mut reps = replicas.write();
@@ -286,11 +253,31 @@ impl MasterNode {
             );
         }
 
-        info!("Replica {} connected and synced", replica_id);
+        let sync_result = if needs_full_sync {
+            info!(replica_id = %replica_id, "Performing full sync for replica");
+            Self::send_full_sync(
+                &mut stream,
+                &kv_store,
+                stream_manager.as_ref().map(|s| s.as_ref()),
+                &replication_log,
+            )
+            .await
+        } else {
+            info!(replica_id = %replica_id, "Performing partial sync for replica");
+            Self::send_partial_sync(&mut stream, requested_offset, &replication_log).await
+        };
 
-        // Stream replication commands
+        if let Err(e) = sync_result {
+            error!(replica_id = %replica_id, error = %e, "Sync failed for replica");
+            replicas.write().remove(&replica_id);
+            return;
+        }
+        info!(replica_id = %replica_id, "Sync sent successfully");
+
+        // Stream buffered + live replication commands. The buffer already holds
+        // any operations that arrived during snapshot transfer; they are written
+        // after the FullSync frame, so wire order stays snapshot-then-ops.
         while let Some(cmd) = rx.recv().await {
-            // Send command with length prefix
             if Self::send_command(&mut stream, &cmd).await.is_err() {
                 warn!("Replica {} disconnected", replica_id);
                 break;
@@ -366,9 +353,10 @@ impl MasterNode {
             operations,
         };
 
-        let data = bincode::serde::encode_to_vec(&cmd, bincode::config::legacy())?;
-        stream.write_all(&data).await?;
-        stream.flush().await?;
+        // Use the length-prefixed framing the replica's read_command expects —
+        // a raw write_all here desynchronized the frame boundary so the replica
+        // misparsed the partial sync and applied nothing (issue #234).
+        Self::send_command(stream, &cmd).await?;
 
         debug!("Partial sync sent, {} operations", op_count);
         Ok(())

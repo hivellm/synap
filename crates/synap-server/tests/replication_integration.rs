@@ -478,11 +478,9 @@ async fn test_replica_auto_reconnect() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-// A replica joining mid-write-stream reliably misses in-flight writes, so this
-// fails deterministically (not merely "flaky"). Kept ignored until the
-// snapshot→stream handoff is gap-free — tracked in hivellm/synap#234. The body
-// below already uses deterministic poll-until-synced so it is ready to re-enable.
-#[ignore = "replica join-mid-stream sync gap — tracked in hivellm/synap#234"]
+// A replica joining mid-write-stream must converge to the full dataset: the
+// master registers the replica before snapshotting and buffers live writes during
+// transfer, and the replica deduplicates by offset (hivellm/synap#234).
 async fn test_concurrent_writes_during_sync() {
     let (master, master_kv, master_addr) = create_master().await;
 
@@ -530,11 +528,11 @@ async fn test_concurrent_writes_during_sync() {
         sleep(Duration::from_millis(50)).await;
     }
 
-    // Verify replica received significant data
+    // The replica must converge to ALL 500 keys — no write lost in the join gap.
     let key_count = replica_kv.keys().await.unwrap().len();
-    assert!(
-        key_count >= 100,
-        "Replica should have received data, has {} keys",
+    assert_eq!(
+        key_count, 500,
+        "Replica should converge to all 500 keys, has {}",
         key_count
     );
 
