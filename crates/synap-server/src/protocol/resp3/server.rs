@@ -91,9 +91,19 @@ async fn handle_connection(
     use synap_protocol::resp3::writer::Resp3Writer;
 
     let peer = stream.peer_addr()?;
+    // Disable Nagle's algorithm (like Redis). A bulk reply is written as several
+    // small segments (length header, payload, CRLF); with Nagle on, the payload
+    // segment stalls ~40ms waiting for the header's delayed ACK, capping GET/
+    // LRANGE throughput at ~1k rps while single-segment writes (SET/INCR) are
+    // unaffected.
+    let _ = stream.set_nodelay(true);
     let (read_half, write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
-    let mut writer = Resp3Writer::new(write_half);
+    // Buffer the write half so the pipeline-aware flush actually coalesces a
+    // pipelined batch into one syscall — a raw `TcpStream` write half is
+    // unbuffered, so without this every bulk-reply segment is its own `write()`
+    // and `flush()` is a no-op, capping pipelined throughput.
+    let mut writer = Resp3Writer::new(tokio::io::BufWriter::new(write_half));
 
     // When auth is required the connection starts unauthenticated and must issue
     // a successful AUTH before any command is accepted. `auth_user` holds the

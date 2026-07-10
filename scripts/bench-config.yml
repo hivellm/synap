@@ -11,15 +11,24 @@
 server:
   # Bind address - listen on all interfaces by default
   # Examples:
-  #   "127.0.0.1"  -> localhost only
+  #   "0.0.0.0"  -> localhost only
   #   "0.0.0.0"    -> all interfaces (default)
   host: "0.0.0.0"
 
   # HTTP API port
-  port: 15502
+  port: 15500
 
   # Enable WebSocket support for real-time subscriptions
   websocket_enabled: false
+
+  # Keyspace notifications (Redis notify-keyspace-events). Flag string:
+  #   K = keyspace events (__keyspace@0__:<key>, payload = event)
+  #   E = keyevent events  (__keyevent@0__:<event>, payload = key)
+  #   g $ l s h z x e = generic/string/list/set/hash/zset/expired/evicted classes
+  #   A = all classes (g$lshzxe)
+  # Empty disables them (default) with zero write-path overhead.
+  # Example: "KEA" publishes every event on both channels.
+  notify_keyspace_events: ""
 
 # ----------------------------------------------------------------------------
 # Memory Management
@@ -30,12 +39,15 @@ kv_store:
   # Common values: 256 (small), 1024 (medium), 4096 (large), 8192 (very large)
   max_memory_mb: 4096
 
-  # Eviction policy when memory limit is reached
-  # Options:
-  #   lru  -> Least Recently Used (recommended for cache)
-  #   lfu  -> Least Frequently Used
-  #   ttl  -> Shortest Time-To-Live first
-  #   none -> No eviction (returns errors on write)
+  # Eviction policy when memory limit is reached. Options:
+  #   noeviction       -> return an error on write when full (default)
+  #   allkeys-lru      -> Least Recently Used across all keys (recommended cache)
+  #   volatile-lru     -> LRU among keys with a TTL
+  #   allkeys-lfu      -> Least Frequently Used across all keys
+  #   volatile-lfu     -> LFU among keys with a TTL
+  #   allkeys-random   -> random key
+  #   volatile-random  -> random key with a TTL
+  #   volatile-ttl     -> key with the soonest expiry
   eviction_policy: "allkeys-lru"
 
   # TTL cleanup interval in milliseconds
@@ -177,6 +189,42 @@ protocols:
     prefix: "/kv"
 
 # ----------------------------------------------------------------------------
+# RESP3 TCP Listener (Redis-compatible protocol)
+# ----------------------------------------------------------------------------
+# Enables a raw TCP socket that speaks the Redis RESP3 wire protocol.
+# Any Redis client (redis-cli, redis-rs, ioredis, etc.) can connect directly.
+# Safe by default: bound to loopback. Set host to "0.0.0.0" (and enable auth)
+# only when you intend to expose it on the network.
+resp3:
+  enabled: true
+  host: "0.0.0.0"
+  port: 6379
+
+# ----------------------------------------------------------------------------
+# SynapRPC TCP Listener (native binary protocol)
+# ----------------------------------------------------------------------------
+# Enables a raw TCP socket using the SynapRPC binary protocol:
+# 4-byte LE length prefix + MessagePack body.
+# Use the Synap SDK clients to connect; not compatible with Redis tooling.
+# Safe by default: bound to loopback. Set host to "0.0.0.0" (and enable auth)
+# only when you intend to expose it on the network.
+synap_rpc:
+  enabled: true
+  host: "0.0.0.0"
+  port: 15501
+
+# ----------------------------------------------------------------------------
+# Network limits (shared by the RESP3 and SynapRPC binary listeners)
+# ----------------------------------------------------------------------------
+network:
+  # Close a connection that sends nothing within this many seconds (slow-loris
+  # resistance). Set to 0 to disable the idle timeout.
+  idle_timeout_secs: 300
+  # Maximum concurrent connections per binary listener; new connections beyond
+  # this are refused.
+  max_connections: 10000
+
+# ----------------------------------------------------------------------------
 # MCP (Model Context Protocol) Tools
 # ----------------------------------------------------------------------------
 # Configure which MCP tool categories to expose
@@ -284,7 +332,7 @@ cluster:
   # Address to bind cluster protocol listener
   # Examples:
   #   "0.0.0.0"    -> Listen on all interfaces (recommended)
-  #   "127.0.0.1"  -> Localhost only (testing)
+  #   "0.0.0.0"  -> Localhost only (testing)
   bind_address: "0.0.0.0"
 
   # Heartbeat interval (milliseconds)
@@ -366,12 +414,12 @@ hub:
 
 persistence:
   # Enable data durability
-  enabled: true
+  enabled: false
 
   # Write-Ahead Log (WAL) settings
   wal:
-    enabled: true
-    path: "./data/wal/synap.wal"
+    enabled: false
+    path: "/data/wal/synap.wal"
     buffer_size_kb: 64
     fsync_mode: "always" # Options: always, periodic, never
     fsync_interval_ms: 1000
@@ -379,8 +427,8 @@ persistence:
 
   # Snapshot settings
   snapshot:
-    enabled: true
-    directory: "./data/snapshots"
+    enabled: false
+    directory: "/data/snapshots"
     interval_secs: 300 # Snapshot every 5 minutes
     operation_threshold: 10000 # Or every 10K operations
     max_snapshots: 10 # Keep last 10 snapshots

@@ -97,6 +97,9 @@ async fn handle_connection(
     idle_timeout: std::time::Duration,
 ) -> std::io::Result<()> {
     let peer = stream.peer_addr()?;
+    // Disable Nagle's algorithm so length-prefixed replies aren't held ~40ms
+    // waiting for a delayed ACK (see the RESP3 server for the full rationale).
+    let _ = stream.set_nodelay(true);
     let (read_half, write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
 
