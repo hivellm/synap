@@ -182,7 +182,7 @@ impl RpcClient {
             command: "SET".into(),
             args: vec![
                 SynapValue::Str(key.into()),
-                SynapValue::Bytes(value.to_vec()),
+                SynapValue::from(value.to_vec()),
             ],
         };
         self.send_request(&req);
@@ -197,7 +197,7 @@ impl RpcClient {
         };
         self.send_request(&req);
         match self.recv_response().result {
-            Ok(SynapValue::Bytes(b)) => b,
+            Ok(SynapValue::Bytes(b)) => b.to_vec(),
             Ok(SynapValue::Str(s)) => s.into_bytes(),
             _ => vec![],
         }

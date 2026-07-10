@@ -347,7 +347,7 @@ fn wire_value_to_resp_bytes(v: &WireValue) -> Vec<u8> {
         }
         WireValue::Int(i) => i.to_string().into_bytes(),
         WireValue::Float(f) => f.to_string().into_bytes(),
-        WireValue::Bytes(b) => b.clone(),
+        WireValue::Bytes(b) => b.to_vec(),
         WireValue::Str(s) => s.as_bytes().to_vec(),
         WireValue::Array(_) | WireValue::Map(_) => {
             // Arrays shouldn't appear as individual args; render as empty.

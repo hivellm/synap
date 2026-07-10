@@ -42,6 +42,36 @@ async fn test_get_shared_is_zero_copy_and_consistent() {
 }
 
 #[tokio::test]
+async fn test_mget_shared_is_zero_copy_and_matches_mget() {
+    let store = KVStore::new(KVConfig::default());
+    store.set("ma", b"alpha".to_vec(), None).await.unwrap();
+    store.set("mb", b"beta".to_vec(), None).await.unwrap();
+
+    let keys = vec!["ma".to_string(), "mb".to_string(), "missing".to_string()];
+
+    // mget_shared returns the store's shared buffers.
+    let shared = store.mget_shared(&keys).await.unwrap();
+    assert_eq!(shared.len(), 3);
+    let a1 = shared[0].clone().unwrap();
+    assert_eq!(&*a1, b"alpha");
+    assert!(shared[2].is_none());
+
+    // A second shared read hits the SAME backing allocation (refcount bump).
+    let shared2 = store.mget_shared(&keys).await.unwrap();
+    assert_eq!(
+        a1.as_ptr(),
+        shared2[0].as_ref().unwrap().as_ptr(),
+        "mget_shared must not copy the value"
+    );
+
+    // The Vec-returning mget yields identical bytes.
+    let owned = store.mget(&keys).await.unwrap();
+    assert_eq!(owned[0].as_deref(), Some(&b"alpha"[..]));
+    assert_eq!(owned[1].as_deref(), Some(&b"beta"[..]));
+    assert!(owned[2].is_none());
+}
+
+#[tokio::test]
 async fn test_keyspace_notifications_fire_on_mutations() {
     use crate::core::{EventClass, KeyspaceEventFlags, KeyspaceNotifier, PubSubRouter};
     use std::sync::Arc;

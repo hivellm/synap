@@ -36,7 +36,7 @@ use synap_protocol::synap_rpc::types::{Response, SynapValue};
 fn rpc_str(v: &SynapValue) -> Option<String> {
     match v {
         SynapValue::Str(s) => Some(s.clone()),
-        SynapValue::Bytes(b) => String::from_utf8(b.clone()).ok(),
+        SynapValue::Bytes(b) => String::from_utf8(b.to_vec()).ok(),
         _ => None,
     }
 }

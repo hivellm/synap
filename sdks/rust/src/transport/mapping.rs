@@ -535,13 +535,13 @@ pub(crate) fn map_command(cmd: &str, payload: &Value) -> Option<(&'static str, V
         "queue.list" => ("QLIST", vec![]),
         "queue.publish" => {
             let payload_bytes: WireValue = match &payload["payload"] {
-                Value::Array(arr) => WireValue::Bytes(
+                Value::Array(arr) => WireValue::from(
                     arr.iter()
                         .filter_map(|v| v.as_u64().map(|n| n as u8))
-                        .collect(),
+                        .collect::<Vec<u8>>(),
                 ),
-                Value::String(s) => WireValue::Bytes(s.as_bytes().to_vec()),
-                other => WireValue::Bytes(other.to_string().into_bytes()),
+                Value::String(s) => WireValue::from(s.as_bytes().to_vec()),
+                other => WireValue::from(other.to_string().into_bytes()),
             };
             let mut args = vec![field_str("queue"), payload_bytes];
             if let Some(p) = payload["priority"].as_u64() {
@@ -573,8 +573,8 @@ pub(crate) fn map_command(cmd: &str, payload: &Value) -> Option<(&'static str, V
         "stream.list" => ("SLIST", vec![]),
         "stream.publish" => {
             let data_bytes: WireValue = match &payload["data"] {
-                Value::String(s) => WireValue::Bytes(s.as_bytes().to_vec()),
-                other => WireValue::Bytes(other.to_string().into_bytes()),
+                Value::String(s) => WireValue::from(s.as_bytes().to_vec()),
+                other => WireValue::from(other.to_string().into_bytes()),
             };
             (
                 "SPUBLISH",
@@ -983,9 +983,9 @@ pub(crate) fn map_response(cmd: &str, wire: WireValue) -> Value {
             let values: Vec<Value> = match wire {
                 WireValue::Array(arr) => arr.iter().map(WireValue::to_json).collect(),
                 WireValue::Str(s) => vec![json!(s)],
-                WireValue::Bytes(b) => match String::from_utf8(b.clone()) {
+                WireValue::Bytes(b) => match String::from_utf8(b.to_vec()) {
                     Ok(s) => vec![json!(s)],
-                    Err(_) => vec![json!(b)],
+                    Err(_) => vec![json!(b.as_ref())],
                 },
                 WireValue::Null => vec![],
                 _ => vec![],
@@ -1669,11 +1669,11 @@ mod tests {
             WireValue::Bool(true),
             WireValue::Float(1.5),
             WireValue::Str("ok".into()),
-            WireValue::Bytes(b"bytes".to_vec()),
+            WireValue::from(b"bytes".to_vec()),
             WireValue::Array(vec![
                 WireValue::Str("a".into()),
                 WireValue::Int(2),
-                WireValue::Bytes(b"c".to_vec()),
+                WireValue::from(b"c".to_vec()),
             ]),
             WireValue::Map(vec![(
                 WireValue::Str("k".into()),
@@ -1691,7 +1691,7 @@ mod tests {
     fn map_response_exact_conversions() {
         // GET returns the string content of bytes.
         assert_eq!(
-            map_response("kv.get", WireValue::Bytes(b"hello".to_vec())),
+            map_response("kv.get", WireValue::from(b"hello".to_vec())),
             json!("hello")
         );
         // EXISTS maps an int to a bool-ish JSON.

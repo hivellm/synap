@@ -13,10 +13,10 @@ fn geo_results_to_value(
             .into_iter()
             .map(|(member, dist, coord)| {
                 if dist.is_none() && coord.is_none() {
-                    SynapValue::Bytes(member)
+                    SynapValue::from(member)
                 } else {
                     SynapValue::Array(vec![
-                        SynapValue::Bytes(member),
+                        SynapValue::from(member),
                         dist.map(SynapValue::Float).unwrap_or(SynapValue::Null),
                         coord
                             .map(|c| {
@@ -452,7 +452,7 @@ pub(super) async fn run(
                         ),
                         (
                             SynapValue::Str("payload".into()),
-                            SynapValue::Bytes((*msg.payload).clone()),
+                            SynapValue::from((*msg.payload).clone()),
                         ),
                         (
                             SynapValue::Str("priority".into()),
@@ -623,7 +623,7 @@ pub(super) async fn run(
                                         SynapValue::Int(e.offset as i64),
                                     ),
                                     (SynapValue::Str("event".into()), SynapValue::Str(e.event)),
-                                    (SynapValue::Str("data".into()), SynapValue::Bytes(e.data)),
+                                    (SynapValue::Str("data".into()), SynapValue::from(e.data)),
                                     (
                                         SynapValue::Str("timestamp".into()),
                                         SynapValue::Int(e.timestamp as i64),

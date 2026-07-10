@@ -28,9 +28,10 @@ pub(super) async fn run(
             let key = arg_str(args, 0)?;
             state
                 .kv_store
-                .get(&key)
+                .get_shared(&key)
                 .await
-                .map(|opt| opt.map(SynapValue::Bytes).unwrap_or(SynapValue::Null))
+                // Carry the store's shared buffer to the wire — no copy.
+                .map(|opt| opt.map(SynapValue::from).unwrap_or(SynapValue::Null))
                 .map_err(|e| e.to_string())
         }
         "DEL" => {
@@ -145,13 +146,13 @@ pub(super) async fn run(
                 .collect();
             state
                 .kv_store
-                .mget(&keys)
+                .mget_shared(&keys)
                 .await
                 .map(|values| {
                     SynapValue::Array(
                         values
                             .into_iter()
-                            .map(|opt| opt.map(SynapValue::Bytes).unwrap_or(SynapValue::Null))
+                            .map(|opt| opt.map(SynapValue::from).unwrap_or(SynapValue::Null))
                             .collect(),
                     )
                 })
@@ -233,7 +234,7 @@ pub(super) async fn run(
                 .kv_store
                 .getrange(&key, start, end)
                 .await
-                .map(SynapValue::Bytes)
+                .map(SynapValue::from)
                 .map_err(|e| e.to_string())
         }
         "SETRANGE" => {
@@ -263,7 +264,7 @@ pub(super) async fn run(
                 .kv_store
                 .getset(&key, value)
                 .await
-                .map(|opt| opt.map(SynapValue::Bytes).unwrap_or(SynapValue::Null))
+                .map(|opt| opt.map(SynapValue::from).unwrap_or(SynapValue::Null))
                 .map_err(|e| e.to_string())
         }
         "MSETNX" => {

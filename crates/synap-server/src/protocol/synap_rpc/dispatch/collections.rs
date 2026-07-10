@@ -36,7 +36,7 @@ pub(super) async fn run(
             state
                 .hash_store
                 .hget(&key, &field)
-                .map(|opt| opt.map(SynapValue::Bytes).unwrap_or(SynapValue::Null))
+                .map(|opt| opt.map(SynapValue::from).unwrap_or(SynapValue::Null))
                 .map_err(|e| e.to_string())
         }
         "HDEL" => {
@@ -59,7 +59,7 @@ pub(super) async fn run(
                 .map(|map| {
                     let mut pairs = Vec::new();
                     for (f, v) in map {
-                        pairs.push((SynapValue::Str(f), SynapValue::Bytes(v)));
+                        pairs.push((SynapValue::Str(f), SynapValue::from(v)));
                     }
                     SynapValue::Map(pairs)
                 })
@@ -117,7 +117,7 @@ pub(super) async fn run(
                     if v.is_empty() {
                         SynapValue::Null
                     } else {
-                        SynapValue::Bytes(v.remove(0))
+                        SynapValue::from(v.remove(0))
                     }
                 })
                 .map_err(|e| e.to_string())
@@ -131,7 +131,7 @@ pub(super) async fn run(
                     if v.is_empty() {
                         SynapValue::Null
                     } else {
-                        SynapValue::Bytes(v.remove(0))
+                        SynapValue::from(v.remove(0))
                     }
                 })
                 .map_err(|e| e.to_string())
@@ -143,7 +143,7 @@ pub(super) async fn run(
             state
                 .list_store
                 .lrange(&key, start, stop)
-                .map(|items| SynapValue::Array(items.into_iter().map(SynapValue::Bytes).collect()))
+                .map(|items| SynapValue::Array(items.into_iter().map(SynapValue::from).collect()))
                 .map_err(|e| e.to_string())
         }
         "LLEN" => {
@@ -173,7 +173,7 @@ pub(super) async fn run(
             state
                 .set_store
                 .smembers(&key)
-                .map(|ms| SynapValue::Array(ms.into_iter().map(SynapValue::Bytes).collect()))
+                .map(|ms| SynapValue::Array(ms.into_iter().map(SynapValue::from).collect()))
                 .map_err(|e| e.to_string())
         }
         "SREM" => {
@@ -230,14 +230,14 @@ pub(super) async fn run(
             if with_scores {
                 let pairs = members
                     .into_iter()
-                    .map(|sm| (SynapValue::Bytes(sm.member), SynapValue::Float(sm.score)))
+                    .map(|sm| (SynapValue::from(sm.member), SynapValue::Float(sm.score)))
                     .collect();
                 Ok(SynapValue::Map(pairs))
             } else {
                 Ok(SynapValue::Array(
                     members
                         .into_iter()
-                        .map(|sm| SynapValue::Bytes(sm.member))
+                        .map(|sm| SynapValue::from(sm.member))
                         .collect(),
                 ))
             }
@@ -318,7 +318,7 @@ pub(super) async fn run(
                     state
                         .hash_store
                         .hget(&key, f)
-                        .map(|opt| opt.map(SynapValue::Bytes).unwrap_or(SynapValue::Null))
+                        .map(|opt| opt.map(SynapValue::from).unwrap_or(SynapValue::Null))
                         .unwrap_or(SynapValue::Null)
                 })
                 .collect();
@@ -337,7 +337,7 @@ pub(super) async fn run(
             state
                 .hash_store
                 .hgetall(&key)
-                .map(|map| SynapValue::Array(map.into_values().map(SynapValue::Bytes).collect()))
+                .map(|map| SynapValue::Array(map.into_values().map(SynapValue::from).collect()))
                 .map_err(|e| e.to_string())
         }
 
@@ -391,7 +391,7 @@ pub(super) async fn run(
                 .map(|(next, items)| {
                     let pairs = items
                         .into_iter()
-                        .map(|(f, v)| (SynapValue::Str(f), SynapValue::Bytes(v)))
+                        .map(|(f, v)| (SynapValue::Str(f), SynapValue::from(v)))
                         .collect();
                     SynapValue::Array(vec![SynapValue::Int(next as i64), SynapValue::Map(pairs)])
                 })
@@ -407,7 +407,7 @@ pub(super) async fn run(
                 .map(|(next, items)| {
                     SynapValue::Array(vec![
                         SynapValue::Int(next as i64),
-                        SynapValue::Array(items.into_iter().map(SynapValue::Bytes).collect()),
+                        SynapValue::Array(items.into_iter().map(SynapValue::from).collect()),
                     ])
                 })
                 .map_err(|e| e.to_string())
@@ -422,7 +422,7 @@ pub(super) async fn run(
                     .zscan(&key, cursor, pattern.as_deref(), count);
             let pairs = items
                 .into_iter()
-                .map(|(m, score)| (SynapValue::Bytes(m), SynapValue::Float(score)))
+                .map(|(m, score)| (SynapValue::from(m), SynapValue::Float(score)))
                 .collect();
             Ok(SynapValue::Array(vec![
                 SynapValue::Int(next as i64),
@@ -436,7 +436,7 @@ pub(super) async fn run(
             match state.list_store.blpop(keys, timeout).await {
                 Ok((key, value)) => Ok(SynapValue::Array(vec![
                     SynapValue::Str(key),
-                    SynapValue::Bytes(value),
+                    SynapValue::from(value),
                 ])),
                 Err(_) => Ok(SynapValue::Null),
             }
@@ -446,7 +446,7 @@ pub(super) async fn run(
             match state.list_store.brpop(keys, timeout).await {
                 Ok((key, value)) => Ok(SynapValue::Array(vec![
                     SynapValue::Str(key),
-                    SynapValue::Bytes(value),
+                    SynapValue::from(value),
                 ])),
                 Err(_) => Ok(SynapValue::Null),
             }
@@ -456,7 +456,7 @@ pub(super) async fn run(
             let dest = arg_str(args, 1)?;
             let timeout = block_timeout(arg_int(args, 2)?)?;
             match state.list_store.brpoplpush(&source, &dest, timeout).await {
-                Ok(value) => Ok(SynapValue::Bytes(value)),
+                Ok(value) => Ok(SynapValue::from(value)),
                 Err(_) => Ok(SynapValue::Null),
             }
         }
@@ -465,7 +465,7 @@ pub(super) async fn run(
             match state.sorted_set_store.bzpopmin(keys, timeout).await {
                 Ok((key, member, score)) => Ok(SynapValue::Array(vec![
                     SynapValue::Str(key),
-                    SynapValue::Bytes(member),
+                    SynapValue::from(member),
                     SynapValue::Float(score),
                 ])),
                 Err(_) => Ok(SynapValue::Null),
@@ -476,7 +476,7 @@ pub(super) async fn run(
             match state.sorted_set_store.bzpopmax(keys, timeout).await {
                 Ok((key, member, score)) => Ok(SynapValue::Array(vec![
                     SynapValue::Str(key),
-                    SynapValue::Bytes(member),
+                    SynapValue::from(member),
                     SynapValue::Float(score),
                 ])),
                 Err(_) => Ok(SynapValue::Null),

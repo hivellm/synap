@@ -823,9 +823,23 @@ impl KVStore {
     /// many lookups, dramatically reducing contention with concurrent
     /// writers on the same shard.
     pub async fn mget(&self, keys: &[String]) -> Result<Vec<Option<Vec<u8>>>> {
+        Ok(self
+            .mget_shared(keys)
+            .await?
+            .into_iter()
+            .map(|opt| opt.map(|a| a.to_vec()))
+            .collect())
+    }
+
+    /// MGET returning shared buffers — like [`mget`](Self::mget) but each present
+    /// value is the store's `Arc<[u8]>` (a refcount bump, no copy) so a batch read
+    /// reaches the wire without copying values. `mget` is a thin `to_vec` wrapper
+    /// over this. The L1-cache path still yields an owned `Vec` (the cache holds
+    /// `Vec<u8>`); the shard hot path — the large-value case — is zero-copy.
+    pub async fn mget_shared(&self, keys: &[String]) -> Result<Vec<Option<Arc<[u8]>>>> {
         debug!("MGET count={}", keys.len());
 
-        let mut results: Vec<Option<Vec<u8>>> = vec![None; keys.len()];
+        let mut results: Vec<Option<Arc<[u8]>>> = vec![None; keys.len()];
 
         // 1. Cluster routing check for every key — fail fast on the
         //    first wrong-owner key, matching single-key get() semantics.
@@ -840,7 +854,7 @@ impl KVStore {
                 if let Some(cached) = cache.get(key) {
                     self.stats.gets.fetch_add(1, Ordering::Relaxed);
                     self.stats.hits.fetch_add(1, Ordering::Relaxed);
-                    results[i] = Some(cached);
+                    results[i] = Some(Arc::from(cached));
                 } else {
                     pending.push((i, key.as_str()));
                 }
@@ -884,12 +898,13 @@ impl KVStore {
                             // Atomic LRU update — safe under read lock.
                             value.update_access();
                             self.stats.hits.fetch_add(1, Ordering::Relaxed);
-                            let value_data = value.data().to_vec();
+                            // Shared buffer — a refcount bump, not a copy.
+                            let value_arc = value.data_arc();
                             let ttl = value.ttl_remaining();
                             if let Some(ref cache) = self.cache {
-                                cache.put(key.to_string(), value_data.clone(), ttl);
+                                cache.put(key.to_string(), value_arc.to_vec(), ttl);
                             }
-                            results[orig] = Some(value_data);
+                            results[orig] = Some(value_arc);
                         }
                         Some(_) => {
                             // Present but expired — drop the read lock,
@@ -915,12 +930,12 @@ impl KVStore {
                             // Race: another writer refreshed the key.
                             v.update_access();
                             self.stats.hits.fetch_add(1, Ordering::Relaxed);
-                            let value_data = v.data().to_vec();
+                            let value_arc = v.data_arc();
                             let ttl = v.ttl_remaining();
                             if let Some(ref cache) = self.cache {
-                                cache.put(key.to_string(), value_data.clone(), ttl);
+                                cache.put(key.to_string(), value_arc.to_vec(), ttl);
                             }
-                            results[orig] = Some(value_data);
+                            results[orig] = Some(value_arc);
                             false
                         }
                         None => {

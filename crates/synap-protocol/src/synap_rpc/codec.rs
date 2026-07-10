@@ -114,7 +114,7 @@ mod tests {
             command: "SET".into(),
             args: vec![
                 SynapValue::Str("k".into()),
-                SynapValue::Bytes(vec![1, 2, 3]),
+                SynapValue::Bytes(vec![1u8, 2, 3].into()),
             ],
         };
         let frame = encode_frame(&req).unwrap();
@@ -165,7 +165,7 @@ mod tests {
             Bool(true),
             Int(-1),
             Float(2.71),
-            Bytes(vec![0xff, 0x00]),
+            Bytes(vec![0xffu8, 0x00].into()),
             Str("test".into()),
             Array(vec![Int(1), Null]),
             Map(vec![(Str("a".into()), Int(1))]),

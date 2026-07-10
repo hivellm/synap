@@ -13,8 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the shared buffer (a refcount bump), and cloning a stored value (GETSET, cache
   fill, snapshot iteration, replication) is now cheap. `get` remains a thin
   `Vec<u8>` wrapper. In-place mutators (APPEND/SETRANGE) copy-on-write. A new
-  `large_value_read` benchmark compares `get` vs `get_shared`. (Threading the
-  shared buffer through the RESP3/SynapRPC value enums to the wire is a follow-up.)
+  `large_value_read` benchmark compares `get` vs `get_shared`.
+- **`GET`/`MGET` are zero-copy end-to-end over the binary protocols.** The shared
+  `Arc<[u8]>` value now reaches the socket without an intermediate `to_vec()`:
+  a new `Resp3Value::BulkShared(Arc<[u8]>)` reply variant (serialised byte-for-byte
+  like `BulkString`) carries RESP3 `GET`/`MGET` replies, and `SynapValue::Bytes`
+  now wraps `Arc<[u8]>` (serialised identically to `Vec<u8>` — SynapRPC wire
+  unchanged). Added `KVStore::mget_shared`; `mget` is a thin `to_vec` wrapper over
+  it. Large-value reads over RESP3/SynapRPC no longer copy the payload.
 
 ### Fixed
 - **Replication: replica joining mid-write-stream no longer loses writes**

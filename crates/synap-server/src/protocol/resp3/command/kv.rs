@@ -56,8 +56,9 @@ pub(super) async fn cmd_get(state: &AppState, args: &[Resp3Value]) -> Resp3Value
         Some(k) => k,
         None => return Resp3Value::Error("ERR key must be a string".into()),
     };
-    match state.kv_store.get(&key).await {
-        Ok(Some(v)) => Resp3Value::BulkString(v),
+    match state.kv_store.get_shared(&key).await {
+        // Carry the store's shared buffer straight to the wire — no copy.
+        Ok(Some(v)) => Resp3Value::BulkShared(v),
         Ok(None) => Resp3Value::Null,
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -237,11 +238,11 @@ pub(super) async fn cmd_mget(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         return err_wrong_args("MGET");
     }
     let keys: Vec<String> = (1..args.len()).filter_map(|i| arg_str(args, i)).collect();
-    match state.kv_store.mget(&keys).await {
+    match state.kv_store.mget_shared(&keys).await {
         Ok(values) => Resp3Value::Array(
             values
                 .into_iter()
-                .map(|v| v.map(Resp3Value::BulkString).unwrap_or(Resp3Value::Null))
+                .map(|v| v.map(Resp3Value::BulkShared).unwrap_or(Resp3Value::Null))
                 .collect(),
         ),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),

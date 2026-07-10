@@ -62,7 +62,7 @@ fn arg_str(args: &[SynapValue], idx: usize) -> Result<String, String> {
 
 fn arg_bytes(args: &[SynapValue], idx: usize) -> Result<Vec<u8>, String> {
     match args.get(idx) {
-        Some(SynapValue::Bytes(b)) => Ok(b.clone()),
+        Some(SynapValue::Bytes(b)) => Ok(b.to_vec()),
         Some(SynapValue::Str(s)) => Ok(s.as_bytes().to_vec()),
         Some(_) => Err(format!("ERR argument {idx} must be bytes")),
         None => Err(format!("ERR missing argument {idx}")),

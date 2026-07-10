@@ -74,7 +74,7 @@ fn str_arg(s: &str) -> SynapValue {
 }
 
 fn bytes_arg(b: &[u8]) -> SynapValue {
-    SynapValue::Bytes(b.to_vec())
+    SynapValue::from(b.to_vec())
 }
 
 #[tokio::test]
@@ -105,7 +105,7 @@ async fn test_get_after_set() {
     )
     .await;
     let resp = dispatch(&state, req(2, "GET", vec![str_arg("rpc_gk")])).await;
-    assert_eq!(resp.result, Ok(SynapValue::Bytes(b"gval".to_vec())));
+    assert_eq!(resp.result, Ok(SynapValue::from(b"gval".to_vec())));
 }
 
 #[tokio::test]
@@ -168,7 +168,7 @@ async fn test_hget_after_hset() {
         req(2, "HGET", vec![str_arg("rpc_h2"), str_arg("f")]),
     )
     .await;
-    assert_eq!(resp.result, Ok(SynapValue::Bytes(b"v".to_vec())));
+    assert_eq!(resp.result, Ok(SynapValue::from(b"v".to_vec())));
 }
 
 #[tokio::test]
@@ -191,7 +191,7 @@ async fn test_lpop_after_lpush() {
     )
     .await;
     let resp = dispatch(&state, req(2, "LPOP", vec![str_arg("rpc_lst2")])).await;
-    assert_eq!(resp.result, Ok(SynapValue::Bytes(b"hello".to_vec())));
+    assert_eq!(resp.result, Ok(SynapValue::from(b"hello".to_vec())));
 }
 
 #[tokio::test]
@@ -373,9 +373,9 @@ async fn test_getset() {
         req(2, "GETSET", vec![str_arg("rpc_gs"), bytes_arg(b"new")]),
     )
     .await;
-    assert_eq!(resp.result, Ok(SynapValue::Bytes(b"old".to_vec())));
+    assert_eq!(resp.result, Ok(SynapValue::from(b"old".to_vec())));
     let resp = dispatch(&state, req(3, "GET", vec![str_arg("rpc_gs")])).await;
-    assert_eq!(resp.result, Ok(SynapValue::Bytes(b"new".to_vec())));
+    assert_eq!(resp.result, Ok(SynapValue::from(b"new".to_vec())));
 }
 
 #[tokio::test]
@@ -395,7 +395,7 @@ async fn test_getrange_setrange() {
         ),
     )
     .await;
-    assert_eq!(resp.result, Ok(SynapValue::Bytes(b"cde".to_vec())));
+    assert_eq!(resp.result, Ok(SynapValue::from(b"cde".to_vec())));
 
     let resp = dispatch(
         &state,
@@ -560,8 +560,8 @@ async fn test_hmset_hmget() {
     assert_eq!(
         resp.result,
         Ok(SynapValue::Array(vec![
-            SynapValue::Bytes(b"v1".to_vec()),
-            SynapValue::Bytes(b"v2".to_vec()),
+            SynapValue::from(b"v1".to_vec()),
+            SynapValue::from(b"v2".to_vec()),
             SynapValue::Null,
         ]))
     );
@@ -587,7 +587,7 @@ async fn test_hkeys_hvals() {
     let resp = dispatch(&state, req(3, "HVALS", vec![str_arg("rpc_hkv")])).await;
     assert_eq!(
         resp.result,
-        Ok(SynapValue::Array(vec![SynapValue::Bytes(b"va".to_vec())]))
+        Ok(SynapValue::Array(vec![SynapValue::from(b"va".to_vec())]))
     );
 }
 

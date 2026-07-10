@@ -1,5 +1,7 @@
 //! SynapRPC wire types — shared between client and server.
 
+use std::sync::Arc;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -15,11 +17,34 @@ pub enum SynapValue {
     Bool(bool),
     Int(i64),
     Float(f64),
-    /// Raw bytes — stored without base64 encoding (unlike HTTP/JSON transport)
-    Bytes(Vec<u8>),
+    /// Raw bytes — stored without base64 encoding (unlike HTTP/JSON transport).
+    /// Backed by a shared `Arc<[u8]>` so the `GET`/`MGET` reply path can carry
+    /// the store's value to the wire with no copy (phase11 wire-value zero-copy).
+    /// The `arc_bytes` adapter serialises it as the same seq-of-`u8` that a
+    /// `Vec<u8>` produces, so the wire format is unchanged.
+    #[serde(with = "arc_bytes")]
+    Bytes(Arc<[u8]>),
     Str(String),
     Array(Vec<SynapValue>),
     Map(Vec<(SynapValue, SynapValue)>),
+}
+
+/// Serde adapter for `Arc<[u8]>` that matches `Vec<u8>`'s wire encoding (a plain
+/// seq of `u8`), so switching `Bytes` to a shared buffer keeps the SynapRPC wire
+/// format byte-identical. Deserialisation allocates a fresh `Arc`.
+mod arc_bytes {
+    use std::sync::Arc;
+
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(bytes: &Arc<[u8]>, s: S) -> Result<S::Ok, S::Error> {
+        // `<[u8]>::serialize` emits the same representation as `Vec<u8>`.
+        (**bytes).serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Arc<[u8]>, D::Error> {
+        Ok(Arc::from(Vec::<u8>::deserialize(d)?))
+    }
 }
 
 impl SynapValue {
@@ -34,7 +59,7 @@ impl SynapValue {
     /// Convenience: extract bytes (also accepts Str as UTF-8 bytes).
     pub fn as_bytes(&self) -> Option<&[u8]> {
         match self {
-            Self::Bytes(b) => Some(b.as_slice()),
+            Self::Bytes(b) => Some(&**b),
             Self::Str(s) => Some(s.as_bytes()),
             _ => None,
         }
@@ -112,6 +137,12 @@ impl From<&str> for SynapValue {
 
 impl From<Vec<u8>> for SynapValue {
     fn from(b: Vec<u8>) -> Self {
+        Self::Bytes(b.into())
+    }
+}
+
+impl From<Arc<[u8]>> for SynapValue {
+    fn from(b: Arc<[u8]>) -> Self {
         Self::Bytes(b)
     }
 }
@@ -184,8 +215,8 @@ mod tests {
             SynapValue::Int(i64::MAX),
             SynapValue::Float(1.5_f64),
             SynapValue::Float(f64::NEG_INFINITY),
-            SynapValue::Bytes(vec![0, 1, 2, 255]),
-            SynapValue::Bytes(vec![]),
+            SynapValue::Bytes(vec![0u8, 1, 2, 255].into()),
+            SynapValue::Bytes(Vec::<u8>::new().into()),
             SynapValue::Str("hello".into()),
             SynapValue::Str(String::new()),
             SynapValue::Array(vec![SynapValue::Int(1), SynapValue::Str("two".into())]),
@@ -217,9 +248,12 @@ mod tests {
         assert_eq!(SynapValue::Int(42).to_json(), json!(42));
         assert_eq!(SynapValue::Str("hi".into()).to_json(), json!("hi"));
         // UTF-8 bytes decode as a string.
-        assert_eq!(SynapValue::Bytes(b"hi".to_vec()).to_json(), json!("hi"));
+        assert_eq!(SynapValue::from(b"hi".to_vec()).to_json(), json!("hi"));
         // Non-UTF-8 bytes fall back to lowercase hex.
-        assert_eq!(SynapValue::Bytes(vec![0xff, 0x00]).to_json(), json!("ff00"));
+        assert_eq!(
+            SynapValue::Bytes(vec![0xffu8, 0x00].into()).to_json(),
+            json!("ff00")
+        );
         // Map becomes an object keyed by string keys.
         let m = SynapValue::Map(vec![(SynapValue::Str("k".into()), SynapValue::Int(1))]);
         assert_eq!(m.to_json(), json!({"k": 1}));
@@ -232,7 +266,7 @@ mod tests {
             command: "SET".into(),
             args: vec![
                 SynapValue::Str("key".into()),
-                SynapValue::Bytes(b"val".to_vec()),
+                SynapValue::from(b"val".to_vec()),
             ],
         };
         let enc = rmp_serde::to_vec(&req).unwrap();

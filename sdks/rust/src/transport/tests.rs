@@ -12,7 +12,7 @@ fn wire_value_to_json_basic() {
 
 #[test]
 fn wire_value_bytes_utf8() {
-    let v = WireValue::Bytes(b"hello".to_vec());
+    let v = WireValue::from(b"hello".to_vec());
     assert_eq!(v.to_json(), json!("hello"));
 }
 
@@ -183,7 +183,7 @@ fn wire_value_to_json_array_and_map() {
 
 #[test]
 fn wire_value_bytes_non_utf8_renders_hex() {
-    let v = WireValue::Bytes(vec![0xFF, 0xFE]);
+    let v = WireValue::Bytes(vec![0xFFu8, 0xFE].into());
     let j = v.to_json();
     // Non-UTF8 bytes should become a hex string.
     assert!(j.as_str().unwrap().chars().all(|c| c.is_ascii_hexdigit()));
@@ -493,7 +493,7 @@ fn wire_value_to_resp_bytes_variants() {
         b"hello".to_vec()
     );
     assert_eq!(
-        wire_value_to_resp_bytes(&WireValue::Bytes(vec![1, 2, 3])),
+        wire_value_to_resp_bytes(&WireValue::Bytes(vec![1u8, 2, 3].into())),
         vec![1u8, 2, 3]
     );
     // Arrays and Maps render as empty bytes.

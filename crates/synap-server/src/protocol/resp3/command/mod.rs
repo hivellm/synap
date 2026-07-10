@@ -290,7 +290,10 @@ mod tests {
         let state = make_state();
         dispatch(&state, &args(&["SET", "getkey", "getval"])).await;
         let result = dispatch(&state, &args(&["GET", "getkey"])).await;
-        assert_eq!(result, Resp3Value::BulkString(b"getval".to_vec()));
+        // GET carries the store's shared buffer (BulkShared) for a zero-copy reply;
+        // the bytes are unchanged.
+        assert!(matches!(result, Resp3Value::BulkShared(_)));
+        assert_eq!(result.as_bytes(), Some(&b"getval"[..]));
     }
 
     #[tokio::test]
@@ -351,14 +354,16 @@ mod tests {
         let state = make_state();
         dispatch(&state, &args(&["MSET", "mg1", "va", "mg2", "vb"])).await;
         let result = dispatch(&state, &args(&["MGET", "mg1", "mg2", "mg_missing"])).await;
-        assert_eq!(
-            result,
-            Resp3Value::Array(vec![
-                Resp3Value::BulkString(b"va".to_vec()),
-                Resp3Value::BulkString(b"vb".to_vec()),
-                Resp3Value::Null,
-            ])
-        );
+        // MGET carries shared buffers (BulkShared) for present keys; bytes unchanged.
+        if let Resp3Value::Array(items) = &result {
+            assert_eq!(items.len(), 3);
+            assert_eq!(items[0].as_bytes(), Some(&b"va"[..]));
+            assert!(matches!(items[0], Resp3Value::BulkShared(_)));
+            assert_eq!(items[1].as_bytes(), Some(&b"vb"[..]));
+            assert_eq!(items[2], Resp3Value::Null);
+        } else {
+            panic!("Expected Array from MGET, got {result:?}");
+        }
     }
 
     #[tokio::test]

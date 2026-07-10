@@ -11,6 +11,7 @@
 //! The `parse_from_reader` async variant is used by the server accept loop.
 
 use std::str;
+use std::sync::Arc;
 use tokio::io::{AsyncBufRead, AsyncReadExt};
 
 /// A RESP3 value.
@@ -22,6 +23,12 @@ pub enum Resp3Value {
     Double(f64),
     Boolean(bool),
     BulkString(Vec<u8>),
+    /// A bulk string backed by a shared buffer. Serialised byte-for-byte
+    /// identically to [`Resp3Value::BulkString`], but lets the `GET`/`MGET` reply
+    /// path carry the store's `Arc<[u8]>` value straight to the socket without a
+    /// `to_vec()` copy (phase11 wire-value zero-copy). The parser never produces
+    /// this variant — it is a server→client reply representation only.
+    BulkShared(Arc<[u8]>),
     Null,
     Array(Vec<Resp3Value>),
     Set(Vec<Resp3Value>),
@@ -32,10 +39,11 @@ pub enum Resp3Value {
 }
 
 impl Resp3Value {
-    /// Convenience: get inner bytes (BulkString or SimpleString).
+    /// Convenience: get inner bytes (BulkString, BulkShared or SimpleString).
     pub fn as_bytes(&self) -> Option<&[u8]> {
         match self {
             Self::BulkString(b) => Some(b),
+            Self::BulkShared(b) => Some(b),
             Self::SimpleString(s) => Some(s.as_bytes()),
             _ => None,
         }
@@ -46,6 +54,7 @@ impl Resp3Value {
         match self {
             Self::SimpleString(s) => Some(s.as_str()),
             Self::BulkString(b) => str::from_utf8(b).ok(),
+            Self::BulkShared(b) => str::from_utf8(b).ok(),
             _ => None,
         }
     }

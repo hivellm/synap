@@ -146,6 +146,14 @@ async fn write_value<W: AsyncWrite + Unpin>(w: &mut W, value: &Resp3Value) -> st
             w.write_all(data).await?;
             w.write_all(b"\r\n").await
         }
+        // Serialised byte-for-byte identically to BulkString; the payload is a
+        // shared buffer carried from the store with no intermediate copy.
+        Resp3Value::BulkShared(data) => {
+            w.write_all(format!("${}\r\n", data.len()).as_bytes())
+                .await?;
+            w.write_all(data).await?;
+            w.write_all(b"\r\n").await
+        }
         Resp3Value::Null => w.write_all(b"_\r\n").await,
         Resp3Value::Array(items) => {
             w.write_all(format!("*{}\r\n", items.len()).as_bytes())
@@ -224,6 +232,16 @@ mod tests {
     async fn write_bulk_string() {
         let b = write_to_vec(&Resp3Value::BulkString(b"hello".to_vec())).await;
         assert_eq!(b, b"$5\r\nhello\r\n");
+    }
+
+    #[tokio::test]
+    async fn write_bulk_shared_matches_bulk_string() {
+        use std::sync::Arc;
+        // The shared variant must serialise byte-for-byte like the owned one.
+        let owned = write_to_vec(&Resp3Value::BulkString(b"hello".to_vec())).await;
+        let shared = write_to_vec(&Resp3Value::BulkShared(Arc::from(b"hello".to_vec()))).await;
+        assert_eq!(owned, shared);
+        assert_eq!(shared, b"$5\r\nhello\r\n");
     }
 
     #[tokio::test]
