@@ -467,6 +467,9 @@ pub struct SortedSetStore {
     /// Shared cross-datatype memory budget (audit M-018).
     mem: Option<crate::core::GlobalMemory>,
     mem_bytes: Arc<std::sync::atomic::AtomicI64>,
+    /// Per-key broadcast channels used to wake `BZPOPMIN`/`BZPOPMAX` waiters when
+    /// a member is added to a key (mirrors the list store's blocking-pop notify).
+    notify_tx: Arc<RwLock<HashMap<String, tokio::sync::broadcast::Sender<()>>>>,
 }
 
 impl SortedSetStore {
@@ -495,6 +498,90 @@ impl SortedSetStore {
             shards: std::array::from_fn(|_| Arc::new(RwLock::new(HashMap::new()))),
             mem: None,
             mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            notify_tx: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Wake any `BZPOPMIN`/`BZPOPMAX` waiters blocked on `key`.
+    fn notify_waiters(&self, key: &str) {
+        if let Some(tx) = self.notify_tx.read().get(key) {
+            let _ = tx.send(());
+        }
+    }
+
+    /// Get (or lazily create) the broadcast receiver blocked pops wait on.
+    fn get_or_create_channel(&self, key: &str) -> tokio::sync::broadcast::Receiver<()> {
+        let mut notify = self.notify_tx.write();
+        notify
+            .entry(key.to_string())
+            .or_insert_with(|| tokio::sync::broadcast::channel(100).0)
+            .subscribe()
+    }
+
+    /// BZPOPMIN — pop the lowest-scored member from the first non-empty key,
+    /// blocking up to `timeout_secs` (0/None = wait indefinitely) until a member
+    /// is available. Returns `(key, member, score)`.
+    pub async fn bzpopmin(
+        &self,
+        keys: Vec<String>,
+        timeout_secs: Option<u64>,
+    ) -> Result<(String, Vec<u8>, f64), crate::core::SynapError> {
+        self.bzpop(keys, timeout_secs, true).await
+    }
+
+    /// BZPOPMAX — like [`bzpopmin`](Self::bzpopmin) but pops the highest score.
+    pub async fn bzpopmax(
+        &self,
+        keys: Vec<String>,
+        timeout_secs: Option<u64>,
+    ) -> Result<(String, Vec<u8>, f64), crate::core::SynapError> {
+        self.bzpop(keys, timeout_secs, false).await
+    }
+
+    async fn bzpop(
+        &self,
+        keys: Vec<String>,
+        timeout_secs: Option<u64>,
+        min: bool,
+    ) -> Result<(String, Vec<u8>, f64), crate::core::SynapError> {
+        // Immediate attempt across all keys, in order.
+        let pop = |key: &str| -> Option<ScoredMember> {
+            let popped = if min {
+                self.zpopmin(key, 1)
+            } else {
+                self.zpopmax(key, 1)
+            };
+            popped.into_iter().next()
+        };
+        for key in &keys {
+            if let Some(sm) = pop(key) {
+                return Ok((key.clone(), sm.member, sm.score));
+            }
+        }
+
+        let wait = async {
+            let mut receivers: Vec<_> =
+                keys.iter().map(|k| self.get_or_create_channel(k)).collect();
+            loop {
+                for rx in &mut receivers {
+                    let _ = rx.recv().await;
+                }
+                for key in &keys {
+                    if let Some(sm) = pop(key) {
+                        return (key.clone(), sm.member, sm.score);
+                    }
+                }
+            }
+        };
+
+        match timeout_secs {
+            Some(secs) if secs > 0 => {
+                match tokio::time::timeout(std::time::Duration::from_secs(secs), wait).await {
+                    Ok(v) => Ok(v),
+                    Err(_) => Err(crate::core::SynapError::Timeout),
+                }
+            }
+            _ => Ok(wait.await),
         }
     }
 
@@ -555,10 +642,15 @@ impl SortedSetStore {
         score: f64,
         opts: &ZAddOptions,
     ) -> (usize, usize) {
-        let shard = self.get_or_create(key);
-        let mut map = shard.write();
-        let zset = map.entry(key.to_string()).or_default();
-        zset.zadd(member, score, opts)
+        let result = {
+            let shard = self.get_or_create(key);
+            let mut map = shard.write();
+            let zset = map.entry(key.to_string()).or_default();
+            zset.zadd(member, score, opts)
+        };
+        // A member is now available — wake any blocked BZPOPMIN/BZPOPMAX waiter.
+        self.notify_waiters(key);
+        result
     }
 
     /// Remove members from sorted set
@@ -1230,5 +1322,57 @@ mod tests {
 
         let expired = SortedSetValue::with_ttl(0);
         assert!(expired.is_expired());
+    }
+
+    #[tokio::test]
+    async fn test_bzpopmin_max_immediate() {
+        let store = SortedSetStore::new();
+        seed(&store, "z", &[("a", 1.0), ("b", 2.0), ("c", 3.0)]);
+
+        let (k, m, s) = store.bzpopmin(vec!["z".into()], Some(1)).await.unwrap();
+        assert_eq!(k, "z");
+        assert_eq!(m, b"a".to_vec());
+        assert_eq!(s, 1.0);
+
+        let (_, m, s) = store.bzpopmax(vec!["z".into()], Some(1)).await.unwrap();
+        assert_eq!(m, b"c".to_vec());
+        assert_eq!(s, 3.0);
+    }
+
+    #[tokio::test]
+    async fn test_bzpopmin_first_nonempty_key() {
+        let store = SortedSetStore::new();
+        seed(&store, "z2", &[("x", 5.0)]);
+        // z1 empty, z2 has a member → pops from z2.
+        let (k, m, _) = store
+            .bzpopmin(vec!["z1".into(), "z2".into()], Some(1))
+            .await
+            .unwrap();
+        assert_eq!(k, "z2");
+        assert_eq!(m, b"x".to_vec());
+    }
+
+    #[tokio::test]
+    async fn test_bzpopmin_times_out_when_empty() {
+        let store = SortedSetStore::new();
+        let err = store.bzpopmin(vec!["missing".into()], Some(1)).await;
+        assert!(matches!(err, Err(crate::core::SynapError::Timeout)));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_bzpopmin_wakes_on_zadd() {
+        let store = Arc::new(SortedSetStore::new());
+        let waiter = Arc::clone(&store);
+        let handle =
+            tokio::spawn(async move { waiter.bzpopmin(vec!["z".into()], Some(5)).await.unwrap() });
+
+        // Let the waiter block, then push a member — it must wake and pop it.
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        store.zadd("z", b"m".to_vec(), 7.0, &ZAddOptions::default());
+
+        let (k, m, s) = handle.await.unwrap();
+        assert_eq!(k, "z");
+        assert_eq!(m, b"m".to_vec());
+        assert_eq!(s, 7.0);
     }
 }
