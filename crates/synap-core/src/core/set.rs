@@ -162,6 +162,8 @@ pub struct SetStore {
     /// Shared cross-datatype memory budget (audit M-018).
     mem: Option<crate::core::GlobalMemory>,
     mem_bytes: Arc<std::sync::atomic::AtomicI64>,
+    /// Optional keyspace-notification publisher (Redis `notify-keyspace-events`).
+    keyspace_notifier: Option<Arc<crate::core::KeyspaceNotifier>>,
 }
 
 impl Default for SetStore {
@@ -195,6 +197,7 @@ impl SetStore {
             stats: Arc::new(RwLock::new(SetStats::default())),
             mem: None,
             mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            keyspace_notifier: None,
         }
     }
 
@@ -203,6 +206,24 @@ impl SetStore {
         mem.register(Arc::clone(&self.mem_bytes));
         self.mem = Some(mem);
         self
+    }
+
+    /// Attach a keyspace-notification publisher so set mutations publish
+    /// `s`-class events. A no-op when `notifier` is `None`.
+    pub fn with_keyspace_notifier(
+        mut self,
+        notifier: Option<Arc<crate::core::KeyspaceNotifier>>,
+    ) -> Self {
+        self.keyspace_notifier = notifier;
+        self
+    }
+
+    /// Publish a set keyspace notification for `key` if a notifier is attached.
+    #[inline]
+    fn notify_keyspace(&self, event: &str, key: &str) {
+        if let Some(ref n) = self.keyspace_notifier {
+            n.notify(crate::core::EventClass::Set, event, key);
+        }
     }
 
     /// Total payload bytes currently held (keys + members across shards).
@@ -271,6 +292,10 @@ impl SetStore {
         let added = set.add(members);
         self.stats.write().sadd_count += 1;
 
+        drop(map);
+        if added > 0 {
+            self.notify_keyspace("sadd", key);
+        }
         Ok(added)
     }
 
@@ -295,6 +320,10 @@ impl SetStore {
             map.remove(key);
         }
 
+        drop(map);
+        if removed > 0 {
+            self.notify_keyspace("srem", key);
+        }
         Ok(removed)
     }
 

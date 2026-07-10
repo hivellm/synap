@@ -234,4 +234,53 @@ mod tests {
         notifier.notify(EventClass::Generic, "del", "foo");
         assert_eq!(pubsub.get_stats().messages_published, 2);
     }
+
+    #[test]
+    fn test_collection_stores_fire_keyspace_events() {
+        use crate::core::sorted_set::ZAddOptions;
+        use crate::core::{HashStore, ListStore, SetStore, SortedSetStore};
+
+        // Each store publishes 2 messages per event (keyspace + keyevent) under KEA.
+        let make = || {
+            let pubsub = Arc::new(PubSubRouter::new());
+            let notifier = Arc::new(KeyspaceNotifier::new(
+                pubsub.clone(),
+                KeyspaceEventFlags::parse("KEA"),
+                0,
+            ));
+            (pubsub, notifier)
+        };
+
+        // Hash: hset then hdel.
+        let (pubsub, notifier) = make();
+        let hash = HashStore::new().with_keyspace_notifier(Some(notifier));
+        hash.hset("h", "f", b"v".to_vec()).unwrap();
+        assert_eq!(pubsub.get_stats().messages_published, 2);
+        hash.hdel("h", &["f".to_string()]).unwrap();
+        assert_eq!(pubsub.get_stats().messages_published, 4);
+
+        // List: rpush then lpop.
+        let (pubsub, notifier) = make();
+        let list = ListStore::new().with_keyspace_notifier(Some(notifier));
+        list.rpush("l", vec![b"a".to_vec()], false).unwrap();
+        assert_eq!(pubsub.get_stats().messages_published, 2);
+        list.lpop("l", Some(1)).unwrap();
+        assert_eq!(pubsub.get_stats().messages_published, 4);
+
+        // Set: sadd then srem.
+        let (pubsub, notifier) = make();
+        let set = SetStore::new().with_keyspace_notifier(Some(notifier));
+        set.sadd("s", vec![b"m".to_vec()]).unwrap();
+        assert_eq!(pubsub.get_stats().messages_published, 2);
+        set.srem("s", vec![b"m".to_vec()]).unwrap();
+        assert_eq!(pubsub.get_stats().messages_published, 4);
+
+        // Sorted set: zadd then zrem.
+        let (pubsub, notifier) = make();
+        let zset = SortedSetStore::new().with_keyspace_notifier(Some(notifier));
+        zset.zadd("z", b"m".to_vec(), 1.0, &ZAddOptions::default());
+        assert_eq!(pubsub.get_stats().messages_published, 2);
+        zset.zrem("z", &[b"m".to_vec()]);
+        assert_eq!(pubsub.get_stats().messages_published, 4);
+    }
 }

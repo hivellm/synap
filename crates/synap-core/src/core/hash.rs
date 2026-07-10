@@ -147,6 +147,8 @@ pub struct HashStore {
     /// grow writes are refused once the shared total is over the cap.
     mem: Option<crate::core::GlobalMemory>,
     mem_bytes: Arc<std::sync::atomic::AtomicI64>,
+    /// Optional keyspace-notification publisher (Redis `notify-keyspace-events`).
+    keyspace_notifier: Option<Arc<crate::core::KeyspaceNotifier>>,
 }
 
 /// Statistics for hash operations
@@ -185,6 +187,7 @@ impl HashStore {
             stats: Arc::new(RwLock::new(HashStats::default())),
             mem: None,
             mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            keyspace_notifier: None,
         }
     }
 
@@ -193,6 +196,24 @@ impl HashStore {
         mem.register(Arc::clone(&self.mem_bytes));
         self.mem = Some(mem);
         self
+    }
+
+    /// Attach a keyspace-notification publisher so hash mutations publish `h`-class
+    /// events. A no-op when `notifier` is `None`.
+    pub fn with_keyspace_notifier(
+        mut self,
+        notifier: Option<Arc<crate::core::KeyspaceNotifier>>,
+    ) -> Self {
+        self.keyspace_notifier = notifier;
+        self
+    }
+
+    /// Publish a hash keyspace notification for `key` if a notifier is attached.
+    #[inline]
+    fn notify_keyspace(&self, event: &str, key: &str) {
+        if let Some(ref n) = self.keyspace_notifier {
+            n.notify(crate::core::EventClass::Hash, event, key);
+        }
     }
 
     /// Total payload bytes currently held (field keys + values across all shards).
@@ -249,41 +270,49 @@ impl HashStore {
     pub fn hset(&self, key: &str, field: &str, value: Vec<u8>) -> Result<bool> {
         self.check_admit(field.len() + value.len())?;
         let shard = self.shard_for_key(key);
-        let mut data = shard.data.write();
 
-        // Get or create hash
-        let hash = data
-            .entry(key.to_string())
-            .or_insert_with(|| HashValue::new(None));
+        // Perform the mutation under the shard write lock, then release it before
+        // publishing the keyspace notification.
+        let created = {
+            let mut data = shard.data.write();
 
-        // Check if expired
-        if hash.is_expired() {
-            data.remove(key);
-            let new_hash = HashValue::new(None);
-            data.insert(key.to_string(), new_hash);
+            // Get or create hash
             let hash = data
-                .get_mut(key)
-                .expect("key was just inserted on the line above");
-            let created = hash.set_field(field.to_string(), value);
+                .entry(key.to_string())
+                .or_insert_with(|| HashValue::new(None));
 
-            // Update stats
-            let mut stats = self.stats.write();
-            stats.hset_count += 1;
-            stats.total_fields += 1;
+            // Check if expired
+            if hash.is_expired() {
+                data.remove(key);
+                let new_hash = HashValue::new(None);
+                data.insert(key.to_string(), new_hash);
+                let hash = data
+                    .get_mut(key)
+                    .expect("key was just inserted on the line above");
+                let created = hash.set_field(field.to_string(), value);
 
-            return Ok(created);
-        }
+                // Update stats
+                let mut stats = self.stats.write();
+                stats.hset_count += 1;
+                stats.total_fields += 1;
 
-        let created = hash.set_field(field.to_string(), value);
+                created
+            } else {
+                let created = hash.set_field(field.to_string(), value);
 
-        // Update stats
-        let mut stats = self.stats.write();
-        stats.hset_count += 1;
-        if created {
-            stats.total_fields += 1;
-        }
+                // Update stats
+                let mut stats = self.stats.write();
+                stats.hset_count += 1;
+                if created {
+                    stats.total_fields += 1;
+                }
 
-        trace!("HSET key={} field={} created={}", key, field, created);
+                trace!("HSET key={} field={} created={}", key, field, created);
+                created
+            }
+        };
+
+        self.notify_keyspace("hset", key);
         Ok(created)
     }
 
@@ -325,40 +354,48 @@ impl HashStore {
     /// Returns number of fields deleted
     pub fn hdel(&self, key: &str, fields: &[String]) -> Result<usize> {
         let shard = self.shard_for_key(key);
-        let mut data = shard.data.write();
 
-        // Update stats
-        {
-            let mut stats = self.stats.write();
-            stats.hdel_count += 1;
-        }
-
-        if let Some(hash) = data.get_mut(key) {
-            // Check if expired
-            if hash.is_expired() {
-                data.remove(key);
-                return Ok(0);
-            }
-
-            let deleted = hash.delete_fields(fields);
-
-            // Remove hash if empty
-            if hash.is_empty() {
-                data.remove(key);
-            }
+        let deleted = {
+            let mut data = shard.data.write();
 
             // Update stats
-            if deleted > 0 {
+            {
                 let mut stats = self.stats.write();
-                stats.total_fields = stats.total_fields.saturating_sub(deleted);
+                stats.hdel_count += 1;
             }
 
-            trace!("HDEL key={} fields={:?} deleted={}", key, fields, deleted);
-            Ok(deleted)
-        } else {
-            trace!("HDEL key={} not_found", key);
-            Ok(0)
+            if let Some(hash) = data.get_mut(key) {
+                // Check if expired
+                if hash.is_expired() {
+                    data.remove(key);
+                    0
+                } else {
+                    let deleted = hash.delete_fields(fields);
+
+                    // Remove hash if empty
+                    if hash.is_empty() {
+                        data.remove(key);
+                    }
+
+                    // Update stats
+                    if deleted > 0 {
+                        let mut stats = self.stats.write();
+                        stats.total_fields = stats.total_fields.saturating_sub(deleted);
+                    }
+
+                    trace!("HDEL key={} fields={:?} deleted={}", key, fields, deleted);
+                    deleted
+                }
+            } else {
+                trace!("HDEL key={} not_found", key);
+                0
+            }
+        };
+
+        if deleted > 0 {
+            self.notify_keyspace("hdel", key);
         }
+        Ok(deleted)
     }
 
     /// HEXISTS - Check if field exists in hash

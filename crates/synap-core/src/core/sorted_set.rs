@@ -470,6 +470,8 @@ pub struct SortedSetStore {
     /// Per-key broadcast channels used to wake `BZPOPMIN`/`BZPOPMAX` waiters when
     /// a member is added to a key (mirrors the list store's blocking-pop notify).
     notify_tx: Arc<RwLock<HashMap<String, tokio::sync::broadcast::Sender<()>>>>,
+    /// Optional keyspace-notification publisher (Redis `notify-keyspace-events`).
+    keyspace_notifier: Option<Arc<crate::core::KeyspaceNotifier>>,
 }
 
 impl SortedSetStore {
@@ -499,6 +501,7 @@ impl SortedSetStore {
             mem: None,
             mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
             notify_tx: Arc::new(RwLock::new(HashMap::new())),
+            keyspace_notifier: None,
         }
     }
 
@@ -592,6 +595,24 @@ impl SortedSetStore {
         self
     }
 
+    /// Attach a keyspace-notification publisher so sorted-set mutations publish
+    /// `z`-class events. A no-op when `notifier` is `None`.
+    pub fn with_keyspace_notifier(
+        mut self,
+        notifier: Option<Arc<crate::core::KeyspaceNotifier>>,
+    ) -> Self {
+        self.keyspace_notifier = notifier;
+        self
+    }
+
+    /// Publish a sorted-set keyspace notification for `key` if a notifier is attached.
+    #[inline]
+    fn notify_keyspace(&self, event: &str, key: &str) {
+        if let Some(ref n) = self.keyspace_notifier {
+            n.notify(crate::core::EventClass::SortedSet, event, key);
+        }
+    }
+
     /// Total payload bytes currently held (keys + members + 8B/score across shards).
     pub fn memory_bytes(&self) -> usize {
         let mut total = 0usize;
@@ -650,18 +671,25 @@ impl SortedSetStore {
         };
         // A member is now available — wake any blocked BZPOPMIN/BZPOPMAX waiter.
         self.notify_waiters(key);
+        self.notify_keyspace("zadd", key);
         result
     }
 
     /// Remove members from sorted set
     pub fn zrem(&self, key: &str, members: &[Vec<u8>]) -> usize {
         let shard = self.get_or_create(key);
-        let mut map = shard.write();
-        if let Some(zset) = map.get_mut(key) {
-            zset.zrem(members)
-        } else {
-            0
+        let removed = {
+            let mut map = shard.write();
+            if let Some(zset) = map.get_mut(key) {
+                zset.zrem(members)
+            } else {
+                0
+            }
+        };
+        if removed > 0 {
+            self.notify_keyspace("zrem", key);
         }
+        removed
     }
 
     /// Get score of member

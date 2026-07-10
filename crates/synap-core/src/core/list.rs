@@ -300,6 +300,8 @@ pub struct ListStore {
     /// Shared cross-datatype memory budget (audit M-018).
     mem: Option<crate::core::GlobalMemory>,
     mem_bytes: Arc<std::sync::atomic::AtomicI64>,
+    /// Optional keyspace-notification publisher (Redis `notify-keyspace-events`).
+    keyspace_notifier: Option<Arc<crate::core::KeyspaceNotifier>>,
 }
 
 impl Default for ListStore {
@@ -334,6 +336,7 @@ impl ListStore {
             notify_tx: Arc::new(RwLock::new(HashMap::new())),
             mem: None,
             mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+            keyspace_notifier: None,
         }
     }
 
@@ -342,6 +345,24 @@ impl ListStore {
         mem.register(Arc::clone(&self.mem_bytes));
         self.mem = Some(mem);
         self
+    }
+
+    /// Attach a keyspace-notification publisher so list mutations publish
+    /// `l`-class events. A no-op when `notifier` is `None`.
+    pub fn with_keyspace_notifier(
+        mut self,
+        notifier: Option<Arc<crate::core::KeyspaceNotifier>>,
+    ) -> Self {
+        self.keyspace_notifier = notifier;
+        self
+    }
+
+    /// Publish a list keyspace notification for `key` if a notifier is attached.
+    #[inline]
+    fn notify_keyspace(&self, event: &str, key: &str) {
+        if let Some(ref n) = self.keyspace_notifier {
+            n.notify(crate::core::EventClass::List, event, key);
+        }
     }
 
     /// Total payload bytes currently held (keys + element values across shards).
@@ -438,6 +459,7 @@ impl ListStore {
         // Notify blocked waiters
         drop(map);
         self.notify_waiters(key);
+        self.notify_keyspace("lpush", key);
 
         Ok(len)
     }
@@ -474,6 +496,7 @@ impl ListStore {
         // Notify blocked waiters
         drop(map);
         self.notify_waiters(key);
+        self.notify_keyspace("rpush", key);
 
         Ok(len)
     }
@@ -509,9 +532,11 @@ impl ListStore {
 
         self.stats.write().lpop_count += 1;
 
+        drop(map);
         if result.is_empty() {
             Err(SynapError::NotFound)
         } else {
+            self.notify_keyspace("lpop", key);
             Ok(result)
         }
     }
@@ -547,9 +572,11 @@ impl ListStore {
 
         self.stats.write().rpop_count += 1;
 
+        drop(map);
         if result.is_empty() {
             Err(SynapError::NotFound)
         } else {
+            self.notify_keyspace("rpop", key);
             Ok(result)
         }
     }

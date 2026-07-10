@@ -272,10 +272,30 @@ async fn main() -> Result<()> {
                             .with_cluster(cluster_topology.clone(), cluster_migration.clone())
                             .with_keyspace_notifier(keyspace_notifier.clone()),
                     ),
-                    hs.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
-                    ls.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
-                    ss.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
-                    zs.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
+                    hs.map(|s| {
+                        Arc::new(
+                            s.with_global_memory(global_mem.clone())
+                                .with_keyspace_notifier(keyspace_notifier.clone()),
+                        )
+                    }),
+                    ls.map(|s| {
+                        Arc::new(
+                            s.with_global_memory(global_mem.clone())
+                                .with_keyspace_notifier(keyspace_notifier.clone()),
+                        )
+                    }),
+                    ss.map(|s| {
+                        Arc::new(
+                            s.with_global_memory(global_mem.clone())
+                                .with_keyspace_notifier(keyspace_notifier.clone()),
+                        )
+                    }),
+                    zs.map(|s| {
+                        Arc::new(
+                            s.with_global_memory(global_mem.clone())
+                                .with_keyspace_notifier(keyspace_notifier.clone()),
+                        )
+                    }),
                     qm.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
                     offset,
                 )
@@ -288,10 +308,18 @@ async fn main() -> Result<()> {
                             .with_cluster(cluster_topology.clone(), cluster_migration.clone())
                             .with_keyspace_notifier(keyspace_notifier.clone()),
                     ),
-                    Some(Arc::new(HashStore::new())),
-                    Some(Arc::new(ListStore::new())),
-                    Some(Arc::new(SetStore::new())),
-                    Some(Arc::new(SortedSetStore::new())),
+                    Some(Arc::new(
+                        HashStore::new().with_keyspace_notifier(keyspace_notifier.clone()),
+                    )),
+                    Some(Arc::new(
+                        ListStore::new().with_keyspace_notifier(keyspace_notifier.clone()),
+                    )),
+                    Some(Arc::new(
+                        SetStore::new().with_keyspace_notifier(keyspace_notifier.clone()),
+                    )),
+                    Some(Arc::new(
+                        SortedSetStore::new().with_keyspace_notifier(keyspace_notifier.clone()),
+                    )),
                     if config.queue.enabled {
                         Some(Arc::new(QueueManager::new(queue_config.clone())))
                     } else {
@@ -311,16 +339,24 @@ async fn main() -> Result<()> {
                     .with_keyspace_notifier(keyspace_notifier.clone()),
             ),
             Some(Arc::new(
-                HashStore::new().with_global_memory(global_mem.clone()),
+                HashStore::new()
+                    .with_global_memory(global_mem.clone())
+                    .with_keyspace_notifier(keyspace_notifier.clone()),
             )),
             Some(Arc::new(
-                ListStore::new().with_global_memory(global_mem.clone()),
+                ListStore::new()
+                    .with_global_memory(global_mem.clone())
+                    .with_keyspace_notifier(keyspace_notifier.clone()),
             )),
             Some(Arc::new(
-                SetStore::new().with_global_memory(global_mem.clone()),
+                SetStore::new()
+                    .with_global_memory(global_mem.clone())
+                    .with_keyspace_notifier(keyspace_notifier.clone()),
             )),
             Some(Arc::new(
-                SortedSetStore::new().with_global_memory(global_mem.clone()),
+                SortedSetStore::new()
+                    .with_global_memory(global_mem.clone())
+                    .with_keyspace_notifier(keyspace_notifier.clone()),
             )),
             if config.queue.enabled {
                 Some(Arc::new(
@@ -449,25 +485,40 @@ async fn main() -> Result<()> {
     // Use recovered hash store (fallback shares the cross-datatype budget too).
     let hash_store: Arc<synap_server::core::HashStore> =
         hash_store_recovered.unwrap_or_else(|| {
-            Arc::new(synap_server::core::HashStore::new().with_global_memory(global_mem.clone()))
+            Arc::new(
+                synap_server::core::HashStore::new()
+                    .with_global_memory(global_mem.clone())
+                    .with_keyspace_notifier(keyspace_notifier.clone()),
+            )
         });
     info!("Hash store initialized");
 
     // Use recovered list store
     let list_store: Arc<synap_server::core::ListStore> =
         list_store_recovered.unwrap_or_else(|| {
-            Arc::new(synap_server::core::ListStore::new().with_global_memory(global_mem.clone()))
+            Arc::new(
+                synap_server::core::ListStore::new()
+                    .with_global_memory(global_mem.clone())
+                    .with_keyspace_notifier(keyspace_notifier.clone()),
+            )
         });
     info!("List store initialized");
 
     // Create set store (always fresh here — wire the shared budget).
-    let set_store =
-        Arc::new(synap_server::core::SetStore::new().with_global_memory(global_mem.clone()));
+    let set_store = Arc::new(
+        synap_server::core::SetStore::new()
+            .with_global_memory(global_mem.clone())
+            .with_keyspace_notifier(keyspace_notifier.clone()),
+    );
     info!("Set store initialized");
 
     // Use sorted set store (fresh or recovered)
     let sorted_set_store = _sorted_set_store_recovered.unwrap_or_else(|| {
-        Arc::new(synap_server::core::SortedSetStore::new().with_global_memory(global_mem.clone()))
+        Arc::new(
+            synap_server::core::SortedSetStore::new()
+                .with_global_memory(global_mem.clone())
+                .with_keyspace_notifier(keyspace_notifier.clone()),
+        )
     });
     info!("Sorted set store initialized");
 
