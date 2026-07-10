@@ -26,6 +26,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   single node owns all 16384 slots until peers join. `INFO cluster` reports the
   node id, known nodes, and slot coverage. `ClusterConfig` fields all carry serde
   defaults so a partial/legacy `cluster:` block still loads. Disabled by default.
+- **Cluster quota inter-node RPC** (issue #231). The cluster quota coordinator's
+  two stubs are now a real length-prefixed bincode TCP RPC: a follower queries the
+  master for a user's authoritative quota (`GetQuota`) and reports accumulated
+  usage deltas (`ApplyDeltas`), which the master aggregates. Deltas are cleared
+  only after the master acks (no silent loss); with no master configured a
+  follower falls back to a permissive quota and keeps deltas pending.
 
 ## [1.0.0] - 2026-07-09
 

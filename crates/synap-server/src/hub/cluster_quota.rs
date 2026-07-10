@@ -25,10 +25,83 @@
 use crate::hub::HubClient;
 use crate::hub::sdk::ResourceType;
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use uuid::Uuid;
+
+/// Wire snapshot of a user's quota sent between cluster nodes (issue #231).
+/// `Uuid` is carried as `u128` to avoid the uuid serde feature.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuotaSnapshot {
+    pub user_id: u128,
+    pub storage_limit: u64,
+    pub storage_used: u64,
+    pub monthly_operations_limit: u64,
+    pub monthly_operations: u64,
+}
+
+/// Wire form of a usage delta reported by a follower to the master.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeltaEntry {
+    pub user_id: u128,
+    pub storage_added: u64,
+    pub storage_removed: u64,
+    pub operations: u64,
+}
+
+/// Inter-node quota RPC messages (length-prefixed bincode over TCP).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+enum QuotaRpc {
+    /// Follower → master: fetch the authoritative quota for a user.
+    GetQuota { user_id: u128 },
+    /// Follower → master: report accumulated usage deltas.
+    ApplyDeltas { deltas: Vec<DeltaEntry> },
+    /// Master → follower: the requested quota snapshot.
+    QuotaResponse(QuotaSnapshot),
+    /// Master → follower: deltas accepted.
+    Ack,
+    /// Master → follower: request failed.
+    Error(String),
+}
+
+/// Write a length-prefixed (u32 BE) bincode frame.
+async fn write_frame(stream: &mut TcpStream, msg: &QuotaRpc) -> Result<(), String> {
+    let data = bincode::serde::encode_to_vec(msg, bincode::config::legacy())
+        .map_err(|e| format!("encode: {e}"))?;
+    stream
+        .write_all(&(data.len() as u32).to_be_bytes())
+        .await
+        .map_err(|e| format!("write len: {e}"))?;
+    stream
+        .write_all(&data)
+        .await
+        .map_err(|e| format!("write data: {e}"))?;
+    stream.flush().await.map_err(|e| format!("flush: {e}"))?;
+    Ok(())
+}
+
+/// Read a length-prefixed (u32 BE) bincode frame.
+async fn read_frame(stream: &mut TcpStream) -> Result<QuotaRpc, String> {
+    let mut len_buf = [0u8; 4];
+    stream
+        .read_exact(&mut len_buf)
+        .await
+        .map_err(|e| format!("read len: {e}"))?;
+    let len = u32::from_be_bytes(len_buf) as usize;
+    let mut data = vec![0u8; len];
+    stream
+        .read_exact(&mut data)
+        .await
+        .map_err(|e| format!("read data: {e}"))?;
+    bincode::serde::decode_from_slice(&data, bincode::config::legacy())
+        .map(|(m, _)| m)
+        .map_err(|e| format!("decode: {e}"))
+}
 
 /// Quota information cached on each node
 #[derive(Debug, Clone)]
@@ -102,6 +175,10 @@ pub struct ClusterQuotaManager {
 
     /// Sync interval (how often replicas send deltas to master)
     sync_interval: Duration,
+
+    /// Master node's quota-RPC address (followers only). When set, quota queries
+    /// and delta sync go to this address over TCP (issue #231).
+    master_addr: Option<SocketAddr>,
 }
 
 impl ClusterQuotaManager {
@@ -115,7 +192,82 @@ impl ClusterQuotaManager {
             is_master,
             cache_ttl: Duration::from_secs(60),     // 60s cache
             sync_interval: Duration::from_secs(30), // 30s sync
+            master_addr: None,
         }
+    }
+
+    /// Point a follower at its master's quota-RPC address (issue #231).
+    pub fn with_master_addr(mut self, addr: SocketAddr) -> Self {
+        self.master_addr = Some(addr);
+        self
+    }
+
+    /// Start the quota-RPC server (master only): accept follower connections and
+    /// answer `GetQuota` / `ApplyDeltas` requests. Returns the bound address (so a
+    /// caller passing port 0 learns the OS-assigned port).
+    pub async fn start_rpc_server(
+        self: Arc<Self>,
+        listen_addr: SocketAddr,
+    ) -> Result<SocketAddr, String> {
+        let listener = TcpListener::bind(listen_addr)
+            .await
+            .map_err(|e| format!("bind quota rpc: {e}"))?;
+        let bound = listener
+            .local_addr()
+            .map_err(|e| format!("local_addr: {e}"))?;
+        tokio::spawn(async move {
+            while let Ok((mut stream, _peer)) = listener.accept().await {
+                let me = Arc::clone(&self);
+                tokio::spawn(async move {
+                    // One request/response per connection is sufficient here.
+                    if let Ok(req) = read_frame(&mut stream).await {
+                        let resp = me.handle_rpc(req).await;
+                        let _ = write_frame(&mut stream, &resp).await;
+                    }
+                });
+            }
+        });
+        Ok(bound)
+    }
+
+    /// Handle a single inter-node quota request (pure of I/O, unit-testable).
+    async fn handle_rpc(&self, req: QuotaRpc) -> QuotaRpc {
+        match req {
+            QuotaRpc::GetQuota { user_id } => {
+                match self.get_quota(Uuid::from_u128(user_id)).await {
+                    Ok(q) => QuotaRpc::QuotaResponse(QuotaSnapshot {
+                        user_id,
+                        storage_limit: q.storage_limit,
+                        storage_used: q.storage_used,
+                        monthly_operations_limit: q.monthly_operations_limit,
+                        monthly_operations: q.monthly_operations,
+                    }),
+                    Err(e) => QuotaRpc::Error(e),
+                }
+            }
+            QuotaRpc::ApplyDeltas { deltas } => {
+                // Aggregate follower deltas into this master's pending set; the
+                // periodic apply_local_deltas() folds them into the cache + Hub.
+                let mut pending = self.pending_deltas.write();
+                for d in deltas {
+                    let entry = pending.entry(Uuid::from_u128(d.user_id)).or_default();
+                    entry.storage_added += d.storage_added;
+                    entry.storage_removed += d.storage_removed;
+                    entry.operations += d.operations;
+                }
+                QuotaRpc::Ack
+            }
+            other => QuotaRpc::Error(format!("unexpected request: {other:?}")),
+        }
+    }
+
+    /// Open a connection to the master and exchange one request/response.
+    async fn rpc_call(&self, addr: SocketAddr, req: QuotaRpc) -> Result<QuotaRpc, String> {
+        let mut stream = TcpStream::connect(addr)
+            .await
+            .map_err(|e| format!("connect master {addr}: {e}"))?;
+        write_frame(&mut stream, &req).await?;
+        read_frame(&mut stream).await
     }
 
     /// Get quota for user (checks cache first, then fetches from master/Hub)
@@ -171,19 +323,46 @@ impl ClusterQuotaManager {
         Ok(cached_quota)
     }
 
-    /// Fetch quota from master node (replica nodes)
+    /// Fetch quota from the master node over the inter-node RPC (issue #231).
+    /// Falls back to a permissive quota only when no master address is configured.
     async fn fetch_from_master(&self, user_id: Uuid) -> Result<CachedQuota, String> {
-        // Inter-node RPC to query the master for quota is not yet implemented —
-        // tracked in hivellm/synap#231. For now, return a permissive default.
-        Ok(CachedQuota {
-            user_id,
-            storage_limit: u64::MAX,
-            storage_used: 0,
-            monthly_operations_limit: u64::MAX,
-            monthly_operations: 0,
-            cached_at: SystemTime::now(),
-            ttl: self.cache_ttl,
-        })
+        let Some(addr) = self.master_addr else {
+            return Ok(CachedQuota {
+                user_id,
+                storage_limit: u64::MAX,
+                storage_used: 0,
+                monthly_operations_limit: u64::MAX,
+                monthly_operations: 0,
+                cached_at: SystemTime::now(),
+                ttl: self.cache_ttl,
+            });
+        };
+
+        match self
+            .rpc_call(
+                addr,
+                QuotaRpc::GetQuota {
+                    user_id: user_id.as_u128(),
+                },
+            )
+            .await?
+        {
+            QuotaRpc::QuotaResponse(s) => {
+                let cached = CachedQuota {
+                    user_id,
+                    storage_limit: s.storage_limit,
+                    storage_used: s.storage_used,
+                    monthly_operations_limit: s.monthly_operations_limit,
+                    monthly_operations: s.monthly_operations,
+                    cached_at: SystemTime::now(),
+                    ttl: self.cache_ttl,
+                };
+                self.quota_cache.write().insert(user_id, cached.clone());
+                Ok(cached)
+            }
+            QuotaRpc::Error(e) => Err(e),
+            other => Err(format!("unexpected quota response: {other:?}")),
+        }
     }
 
     /// Track storage usage (add bytes)
@@ -265,13 +444,43 @@ impl ClusterQuotaManager {
         Ok(())
     }
 
-    /// Send deltas to master node (replica nodes)
+    /// Send accumulated usage deltas to the master over the inter-node RPC
+    /// (issue #231). Deltas are drained only after the master acknowledges them,
+    /// so a failed send does not silently lose usage.
     async fn send_deltas_to_master(&self) -> Result<(), String> {
-        // Inter-node RPC to send deltas to the master is not yet implemented —
-        // tracked in hivellm/synap#231. For now, just clear pending deltas
-        // (they would be lost).
-        self.pending_deltas.write().clear();
-        Ok(())
+        let Some(addr) = self.master_addr else {
+            // No master configured — nothing to send to; keep deltas pending.
+            return Ok(());
+        };
+
+        let snapshot: Vec<DeltaEntry> = {
+            let pending = self.pending_deltas.read();
+            pending
+                .iter()
+                .map(|(uid, d)| DeltaEntry {
+                    user_id: uid.as_u128(),
+                    storage_added: d.storage_added,
+                    storage_removed: d.storage_removed,
+                    operations: d.operations,
+                })
+                .collect()
+        };
+        if snapshot.is_empty() {
+            return Ok(());
+        }
+
+        match self
+            .rpc_call(addr, QuotaRpc::ApplyDeltas { deltas: snapshot })
+            .await?
+        {
+            QuotaRpc::Ack => {
+                // Master accepted — safe to clear the pending deltas now.
+                self.pending_deltas.write().clear();
+                Ok(())
+            }
+            QuotaRpc::Error(e) => Err(e),
+            other => Err(format!("unexpected delta response: {other:?}")),
+        }
     }
 
     /// Get sync interval
@@ -391,5 +600,78 @@ mod tests {
 
         assert!(!replica.is_master());
         assert_eq!(replica.node_id(), "node-2");
+    }
+
+    fn seed_quota(mgr: &ClusterQuotaManager, user_id: Uuid, limit: u64, used: u64) {
+        mgr.quota_cache.write().insert(
+            user_id,
+            CachedQuota {
+                user_id,
+                storage_limit: limit,
+                storage_used: used,
+                monthly_operations_limit: 1_000_000,
+                monthly_operations: 0,
+                cached_at: SystemTime::now(),
+                ttl: Duration::from_secs(300),
+            },
+        );
+    }
+
+    /// A follower fetches quota from the master and reports deltas over the RPC
+    /// (issue #231): the follower sees the master's authoritative quota and the
+    /// master accumulates the reported deltas.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_quota_rpc_query_and_delta_roundtrip() {
+        let user = Uuid::from_u128(42);
+
+        let master = Arc::new(ClusterQuotaManager::new("master".to_string(), true, None));
+        seed_quota(&master, user, 5000, 1200);
+        let addr = Arc::clone(&master)
+            .start_rpc_server("127.0.0.1:0".parse().unwrap())
+            .await
+            .unwrap();
+
+        let follower =
+            ClusterQuotaManager::new("follower".to_string(), false, None).with_master_addr(addr);
+
+        // Query: follower gets the master's authoritative quota.
+        let q = follower.get_quota(user).await.unwrap();
+        assert_eq!(q.storage_limit, 5000);
+        assert_eq!(q.storage_used, 1200);
+
+        // Report deltas: follower accumulates then syncs to the master.
+        follower.track_storage_add(user, 300);
+        follower.track_operation(user);
+        follower.track_operation(user);
+        follower.sync_deltas_to_master().await.unwrap();
+
+        // Master received and aggregated the deltas; follower cleared its pending.
+        let master_pending = master.pending_deltas.read();
+        let d = master_pending.get(&user).expect("master got deltas");
+        assert_eq!(d.storage_added, 300);
+        assert_eq!(d.operations, 2);
+        assert!(follower.pending_deltas.read().is_empty());
+    }
+
+    /// With no master address configured, a follower falls back to a permissive
+    /// quota (does not error) and keeps its deltas pending.
+    #[tokio::test]
+    async fn test_quota_rpc_no_master_is_permissive() {
+        let follower = ClusterQuotaManager::new("follower".to_string(), false, None);
+        let user = Uuid::from_u128(7);
+        let q = follower.get_quota(user).await.unwrap();
+        assert_eq!(q.storage_limit, u64::MAX);
+        follower.track_operation(user);
+        follower.sync_deltas_to_master().await.unwrap();
+        // Deltas stay pending (not lost) when there is no master to send to.
+        assert_eq!(
+            follower
+                .pending_deltas
+                .read()
+                .get(&user)
+                .unwrap()
+                .operations,
+            1
+        );
     }
 }
