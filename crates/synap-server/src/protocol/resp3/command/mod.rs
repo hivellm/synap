@@ -154,6 +154,9 @@ pub async fn dispatch(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
         "DBSIZE" => kv::cmd_dbsize(state).await,
         "HKEYS" => collections::cmd_hkeys(state, args).await,
         "HVALS" => collections::cmd_hvals(state, args).await,
+        "HSCAN" => collections::cmd_hscan(state, args).await,
+        "SSCAN" => collections::cmd_sscan(state, args).await,
+        "ZSCAN" => collections::cmd_zscan(state, args).await,
 
         _ => Resp3Value::Error(format!("ERR unknown command '{cmd}'")),
     }
@@ -627,6 +630,65 @@ mod tests {
             assert_eq!(items.len(), 2, "HVALS should return 2 values");
         } else {
             panic!("Expected Array from HVALS, got {result:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_hscan_returns_cursor_and_pairs() {
+        let state = make_state();
+        dispatch(&state, &args(&["HSET", "hscan_h", "f1", "v1", "f2", "v2"])).await;
+        let result = dispatch(&state, &args(&["HSCAN", "hscan_h", "0"])).await;
+        if let Resp3Value::Array(top) = result {
+            assert_eq!(top.len(), 2, "HSCAN reply is [cursor, pairs]");
+            assert_eq!(top[0], Resp3Value::BulkString(b"0".to_vec()), "full scan");
+            if let Resp3Value::Array(pairs) = &top[1] {
+                assert_eq!(pairs.len(), 4, "2 field/value pairs = 4 elements");
+            } else {
+                panic!("Expected pairs array, got {:?}", top[1]);
+            }
+        } else {
+            panic!("Expected Array from HSCAN, got {result:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_sscan_match_filters_members() {
+        let state = make_state();
+        dispatch(
+            &state,
+            &args(&["SADD", "sscan_s", "apple", "apricot", "banana"]),
+        )
+        .await;
+        let result = dispatch(
+            &state,
+            &args(&["SSCAN", "sscan_s", "0", "MATCH", "ap*", "COUNT", "100"]),
+        )
+        .await;
+        if let Resp3Value::Array(top) = result {
+            if let Resp3Value::Array(members) = &top[1] {
+                assert_eq!(members.len(), 2, "ap* matches apple + apricot");
+            } else {
+                panic!("Expected members array, got {:?}", top[1]);
+            }
+        } else {
+            panic!("Expected Array from SSCAN, got {result:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_zscan_returns_member_score_pairs() {
+        let state = make_state();
+        dispatch(&state, &args(&["ZADD", "zscan_z", "1", "a"])).await;
+        dispatch(&state, &args(&["ZADD", "zscan_z", "2", "b"])).await;
+        let result = dispatch(&state, &args(&["ZSCAN", "zscan_z", "0"])).await;
+        if let Resp3Value::Array(top) = result {
+            if let Resp3Value::Array(pairs) = &top[1] {
+                assert_eq!(pairs.len(), 4, "2 member/score pairs = 4 elements");
+            } else {
+                panic!("Expected pairs array, got {:?}", top[1]);
+            }
+        } else {
+            panic!("Expected Array from ZSCAN, got {result:?}");
         }
     }
 

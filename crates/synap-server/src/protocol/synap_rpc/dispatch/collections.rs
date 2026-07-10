@@ -380,6 +380,79 @@ pub(super) async fn run(
             ]))
         }
 
+        // ── SCAN cursors ───────────────────────────────────────────────────────
+        "HSCAN" => {
+            let key = arg_str(args, 0)?;
+            let cursor = arg_int(args, 1)?.max(0) as u64;
+            let (pattern, count) = parse_scan_opts(args, 2)?;
+            state
+                .hash_store
+                .hscan(&key, cursor, pattern.as_deref(), count)
+                .map(|(next, items)| {
+                    let pairs = items
+                        .into_iter()
+                        .map(|(f, v)| (SynapValue::Str(f), SynapValue::Bytes(v)))
+                        .collect();
+                    SynapValue::Array(vec![SynapValue::Int(next as i64), SynapValue::Map(pairs)])
+                })
+                .map_err(|e| e.to_string())
+        }
+        "SSCAN" => {
+            let key = arg_str(args, 0)?;
+            let cursor = arg_int(args, 1)?.max(0) as u64;
+            let (pattern, count) = parse_scan_opts(args, 2)?;
+            state
+                .set_store
+                .sscan(&key, cursor, pattern.as_deref(), count)
+                .map(|(next, items)| {
+                    SynapValue::Array(vec![
+                        SynapValue::Int(next as i64),
+                        SynapValue::Array(items.into_iter().map(SynapValue::Bytes).collect()),
+                    ])
+                })
+                .map_err(|e| e.to_string())
+        }
+        "ZSCAN" => {
+            let key = arg_str(args, 0)?;
+            let cursor = arg_int(args, 1)?.max(0) as u64;
+            let (pattern, count) = parse_scan_opts(args, 2)?;
+            let (next, items) =
+                state
+                    .sorted_set_store
+                    .zscan(&key, cursor, pattern.as_deref(), count);
+            let pairs = items
+                .into_iter()
+                .map(|(m, score)| (SynapValue::Bytes(m), SynapValue::Float(score)))
+                .collect();
+            Ok(SynapValue::Array(vec![
+                SynapValue::Int(next as i64),
+                SynapValue::Map(pairs),
+            ]))
+        }
+
         _ => Err(format!("ERR unknown command '{command}'")),
     }
+}
+
+/// Parse the optional `[MATCH pattern] [COUNT count]` tail of a `*SCAN` command,
+/// starting at `args[start]`. `count` defaults to 10 (Redis default).
+fn parse_scan_opts(args: &[SynapValue], start: usize) -> Result<(Option<String>, usize), String> {
+    let mut pattern = None;
+    let mut count = 10usize;
+    let mut i = start;
+    while i < args.len() {
+        let opt = arg_str(args, i)?;
+        match opt.to_ascii_uppercase().as_str() {
+            "MATCH" => {
+                pattern = Some(arg_str(args, i + 1)?);
+                i += 2;
+            }
+            "COUNT" => {
+                count = arg_int(args, i + 1)?.max(1) as usize;
+                i += 2;
+            }
+            _ => return Err("ERR syntax error".into()),
+        }
+    }
+    Ok((pattern, count))
 }

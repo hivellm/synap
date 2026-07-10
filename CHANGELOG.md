@@ -29,10 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Sorted-set blocking pops `BZPOPMIN` / `BZPOPMAX`** (core) with a per-key
   notify woken by `ZADD`, mirroring the list blocking-pop mechanism.
-- **Collection cursor scans `HSCAN` / `SSCAN` / `ZSCAN`** (core) with Redis-style
-  `MATCH` (glob) and `COUNT`. The cursor is an offset into a stably-sorted
-  snapshot; `0` signals completion. A shared byte-level glob matcher (`*`, `?`,
-  `[...]` classes, escapes) backs `MATCH`.
+- **Collection cursor scans `HSCAN` / `SSCAN` / `ZSCAN`** over the RESP3 and
+  SynapRPC wire protocols, with Redis-style `MATCH` (glob) and `COUNT`. The
+  cursor is an offset into a stably-sorted snapshot; `0` signals completion. A
+  shared byte-level glob matcher (`*`, `?`, `[...]` classes, escapes) backs
+  `MATCH`. (REST exposes non-cursored `HGETALL`/`HKEYS`/`HVALS` equivalents.)
 - **LFU eviction policies `allkeys-lfu` / `volatile-lfu`** (core). Volatile values
   carry an access-frequency counter bumped on every read; eviction samples and
   evicts the lowest-frequency key. (Like the existing LRU policies, the counter is

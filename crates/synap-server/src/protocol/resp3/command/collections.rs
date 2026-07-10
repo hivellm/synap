@@ -580,3 +580,125 @@ pub(super) async fn cmd_hvals(state: &AppState, args: &[Resp3Value]) -> Resp3Val
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
 }
+
+// ── SCAN cursors (HSCAN / SSCAN / ZSCAN) ──────────────────────────────────────
+
+/// Parse the optional `[MATCH pattern] [COUNT count]` tail of a `*SCAN` command,
+/// starting at `args[start]`. Returns `(pattern, count)` with `count` defaulting
+/// to 10 (Redis default), or `None` on a malformed option.
+fn parse_scan_opts(args: &[Resp3Value], start: usize) -> Option<(Option<String>, usize)> {
+    let mut pattern = None;
+    let mut count = 10usize;
+    let mut i = start;
+    while i < args.len() {
+        let opt = arg_str(args, i)?;
+        match opt.to_ascii_uppercase().as_str() {
+            "MATCH" => {
+                pattern = Some(arg_str(args, i + 1)?);
+                i += 2;
+            }
+            "COUNT" => {
+                count = arg_i64(args, i + 1)?.max(1) as usize;
+                i += 2;
+            }
+            _ => return None,
+        }
+    }
+    Some((pattern, count))
+}
+
+/// `HSCAN key cursor [MATCH pattern] [COUNT count]`
+pub(super) async fn cmd_hscan(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    if args.len() < 3 {
+        return err_wrong_args("HSCAN");
+    }
+    let key = match arg_str(args, 1) {
+        Some(k) => k,
+        None => return err_wrong_args("HSCAN"),
+    };
+    let cursor = match arg_u64(args, 2) {
+        Some(c) => c,
+        None => return Resp3Value::Error("ERR invalid cursor".into()),
+    };
+    let (pattern, count) = match parse_scan_opts(args, 3) {
+        Some(o) => o,
+        None => return Resp3Value::Error("ERR syntax error".into()),
+    };
+    match state
+        .hash_store
+        .hscan(&key, cursor, pattern.as_deref(), count)
+    {
+        Ok((next, items)) => {
+            let mut pairs = Vec::with_capacity(items.len() * 2);
+            for (f, v) in items {
+                pairs.push(Resp3Value::BulkString(f.into_bytes()));
+                pairs.push(Resp3Value::BulkString(v));
+            }
+            Resp3Value::Array(vec![
+                Resp3Value::BulkString(next.to_string().into_bytes()),
+                Resp3Value::Array(pairs),
+            ])
+        }
+        Err(e) => Resp3Value::Error(format!("ERR {e}")),
+    }
+}
+
+/// `SSCAN key cursor [MATCH pattern] [COUNT count]`
+pub(super) async fn cmd_sscan(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    if args.len() < 3 {
+        return err_wrong_args("SSCAN");
+    }
+    let key = match arg_str(args, 1) {
+        Some(k) => k,
+        None => return err_wrong_args("SSCAN"),
+    };
+    let cursor = match arg_u64(args, 2) {
+        Some(c) => c,
+        None => return Resp3Value::Error("ERR invalid cursor".into()),
+    };
+    let (pattern, count) = match parse_scan_opts(args, 3) {
+        Some(o) => o,
+        None => return Resp3Value::Error("ERR syntax error".into()),
+    };
+    match state
+        .set_store
+        .sscan(&key, cursor, pattern.as_deref(), count)
+    {
+        Ok((next, items)) => Resp3Value::Array(vec![
+            Resp3Value::BulkString(next.to_string().into_bytes()),
+            Resp3Value::Array(items.into_iter().map(Resp3Value::BulkString).collect()),
+        ]),
+        Err(e) => Resp3Value::Error(format!("ERR {e}")),
+    }
+}
+
+/// `ZSCAN key cursor [MATCH pattern] [COUNT count]`
+pub(super) async fn cmd_zscan(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    if args.len() < 3 {
+        return err_wrong_args("ZSCAN");
+    }
+    let key = match arg_str(args, 1) {
+        Some(k) => k,
+        None => return err_wrong_args("ZSCAN"),
+    };
+    let cursor = match arg_u64(args, 2) {
+        Some(c) => c,
+        None => return Resp3Value::Error("ERR invalid cursor".into()),
+    };
+    let (pattern, count) = match parse_scan_opts(args, 3) {
+        Some(o) => o,
+        None => return Resp3Value::Error("ERR syntax error".into()),
+    };
+    let (next, items) = state
+        .sorted_set_store
+        .zscan(&key, cursor, pattern.as_deref(), count);
+    let mut pairs = Vec::with_capacity(items.len() * 2);
+    for (m, score) in items {
+        pairs.push(Resp3Value::BulkString(m));
+        pairs.push(Resp3Value::BulkString(score.to_string().into_bytes()));
+    }
+    Resp3Value::Array(vec![
+        Resp3Value::BulkString(next.to_string().into_bytes()),
+        Resp3Value::Array(pairs),
+    ])
+}

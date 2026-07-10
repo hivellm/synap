@@ -475,6 +475,55 @@ async fn test_scan_prefix() {
 // ── Hash extension tests ──────────────────────────────────────────────────
 
 #[tokio::test]
+async fn test_hscan_cursor_and_match() {
+    let state = make_state();
+    dispatch(
+        &state,
+        req(
+            1,
+            "HMSET",
+            vec![
+                str_arg("rpc_hscan"),
+                str_arg("apple"),
+                bytes_arg(b"1"),
+                str_arg("apricot"),
+                bytes_arg(b"2"),
+                str_arg("banana"),
+                bytes_arg(b"3"),
+            ],
+        ),
+    )
+    .await;
+    let resp = dispatch(
+        &state,
+        req(
+            2,
+            "HSCAN",
+            vec![
+                str_arg("rpc_hscan"),
+                SynapValue::Int(0),
+                str_arg("MATCH"),
+                str_arg("ap*"),
+                str_arg("COUNT"),
+                SynapValue::Int(100),
+            ],
+        ),
+    )
+    .await;
+    match &resp.result {
+        Ok(SynapValue::Array(top)) => {
+            assert_eq!(top.len(), 2, "reply is [cursor, pairs]");
+            assert_eq!(top[0], SynapValue::Int(0), "full scan -> cursor 0");
+            match &top[1] {
+                SynapValue::Map(pairs) => assert_eq!(pairs.len(), 2, "ap* matches 2 fields"),
+                other => panic!("unexpected HSCAN pairs: {other:?}"),
+            }
+        }
+        other => panic!("unexpected HSCAN result: {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn test_hmset_hmget() {
     let state = make_state();
     let resp = dispatch(
