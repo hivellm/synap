@@ -39,8 +39,10 @@ pub struct KVStore {
     mem: Option<crate::core::GlobalMemory>,
     /// Per-key lock registry shared with the `TransactionManager` so a MULTI/EXEC
     /// is isolated from non-transactional writers to the same keys (audit M-010).
-    /// Single-key writes take the key's lock; EXEC holds its whole key set and
-    /// calls the `*_unlocked` methods to avoid re-entrant deadlock.
+    /// Single-key writes take the key's **read** guard (shared — concurrent plain
+    /// writers don't serialize here); EXEC holds the **write** guards for its whole
+    /// key set and calls the `*_unlocked` methods to avoid re-entrant deadlock
+    /// (phase12 write-lock fast-path).
     key_locks: Arc<crate::core::KeyLockManager>,
     /// Optional keyspace-notification publisher (Redis `notify-keyspace-events`).
     /// `None` (the default) makes every notify site a single branch with no cost.
@@ -271,7 +273,7 @@ impl KVStore {
         let key: String = key.into();
         // Isolate this write against an in-flight EXEC touching the same key
         // (audit M-010). EXEC calls `set_unlocked` while holding the lock itself.
-        let _guard = self.key_locks.lock_key(&key).await;
+        let _guard = self.key_locks.read_key(&key).await;
         self.set_unlocked(key, value, ttl_secs).await
     }
 
@@ -621,7 +623,7 @@ impl KVStore {
     /// Delete a key
     pub async fn delete(&self, key: &str) -> Result<bool> {
         // Isolate against an in-flight EXEC on the same key (audit M-010).
-        let _guard = self.key_locks.lock_key(key).await;
+        let _guard = self.key_locks.read_key(key).await;
         self.delete_unlocked(key).await
     }
 
@@ -699,7 +701,7 @@ impl KVStore {
     /// and returns an error on overflow rather than wrapping.
     pub async fn incr(&self, key: &str, amount: i64) -> Result<i64> {
         // Isolate against an in-flight EXEC on the same key (audit M-010).
-        let _guard = self.key_locks.lock_key(key).await;
+        let _guard = self.key_locks.read_key(key).await;
         self.incr_unlocked(key, amount).await
     }
 
@@ -1597,7 +1599,7 @@ impl KVStore {
         debug!("GETSET key={}, value_size={}", key, value.len());
 
         // Isolate against an in-flight EXEC on the same key (audit M-010).
-        let _guard = self.key_locks.lock_key(key).await;
+        let _guard = self.key_locks.read_key(key).await;
 
         let shard = self.get_shard(key);
         let mut data = shard.data.write();

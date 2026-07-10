@@ -234,17 +234,19 @@ async fn committed_transaction_reaches_replica() {
 /// A non-transactional write to a key an EXEC holds is ordered entirely after the
 /// EXEC — never interleaved (spec: "Concurrent plain write does not interleave").
 ///
-/// The EXEC holds the per-key lock for the union of its keys across all commands;
-/// this test holds that same lock explicitly (as `exec` does) and shows a plain
-/// `SET` on the key blocks until the lock is released, then applies strictly
-/// after.
+/// The EXEC holds the per-key **write** lock for the union of its keys across all
+/// commands; this test holds that same lock explicitly (as `exec` does, via
+/// `write_keys`) and shows a plain `SET` on the key — which takes the shared
+/// **read** side — blocks until the write lock is released, then applies strictly
+/// after (phase12 read/write split preserves M-010 isolation).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn plain_write_is_isolated_from_held_key_lock() {
     let kv = Arc::new(KVStore::new(KVConfig::default()));
     kv.set("k", b"before".to_vec(), None).await.unwrap();
 
-    // Simulate an EXEC holding key `k`'s lock across its commands.
-    let guard = kv.key_locks().lock_key("k").await;
+    // Simulate an EXEC holding key `k`'s write lock across its commands.
+    let keys: std::collections::BTreeSet<String> = ["k".to_string()].into_iter().collect();
+    let guard = kv.key_locks().write_keys(&keys).await;
 
     let kv2 = Arc::clone(&kv);
     let writer = tokio::spawn(async move {

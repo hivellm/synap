@@ -419,7 +419,7 @@ impl TransactionManager {
         // between its commands (audit M-010 isolation). Acquired in sorted order
         // (BTreeSet) to prevent deadlock. execute_commands calls the *_unlocked
         // store methods to avoid re-entrant deadlock on these same locks.
-        let _key_guards = self.kv_store.key_locks().lock_keys(&keys_to_lock).await;
+        let _key_guards = self.kv_store.key_locks().write_keys(&keys_to_lock).await;
 
         // Execute the queued commands. The EXEC lock above guarantees no other
         // transaction runs concurrently and the WATCH check-and-apply is atomic;

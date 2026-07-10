@@ -20,27 +20,27 @@ Synap server, `-n 100000 -c 50`, single key.
 | Op | SynapRPC `-P 1` | RESP3 `-P 1` | Redis `-P 1` |
 |---|---:|---:|---:|
 | GET | **166,003** | 56,116 | 56,022 |
-| SET | **88,264** | 52,301 | 56,465 |
-| INCR | **92,267** | 53,850 | 55,897 |
+| SET | **170,307** | 52,301 | 56,465 |
+| INCR | **169,726** | 53,850 | 55,897 |
 
-**At `-P 1`, native SynapRPC is ~3× faster than RESP3 on GET and ~1.7× on
-SET/INCR** — a single MessagePack frame per reply vs RESP3's multi-segment bulk
-encoding, and a tighter codec. This is the durable cross-protocol result (per-op,
-least sensitive to client-loop differences).
+**At `-P 1`, native SynapRPC is ~3× faster than RESP3** on every op — a single
+MessagePack frame per reply vs RESP3's multi-segment bulk encoding, and a tighter
+codec. This is the durable cross-protocol result (per-op, least sensitive to
+client-loop differences).
 
 | Op | SynapRPC `-P 16` | RESP3 `-P 16` |
 |---|---:|---:|
-| GET | 552,203 | 833,333 |
-| SET | 81,474 | 130,718 |
-| INCR | 77,977 | 134,770 |
+| GET | 599,687 | 847,457 |
+| SET | 330,092 | 757,575 |
+| INCR | 470,708 | 458,715 |
 
-At `-P 16`, SynapRPC GET reaches 552k (the SynapRPC server was given a `BufWriter`
+At `-P 16`, SynapRPC GET reaches 600k (the SynapRPC server was given a `BufWriter`
 so a pipelined burst of replies coalesces into one syscall — +23% over the
-unbuffered path). It trails RESP3's 833k here mainly because `synap-bench` is a
+unbuffered path). It trails RESP3's GET here mainly because `synap-bench` is a
 simple blocking client that sends a batch then reads it before the next, leaving
 inter-batch gaps, whereas `redis-benchmark` keeps the pipe continuously full — so
-this row understates the SynapRPC server ceiling. SET/INCR are flat on both
-protocols (the per-key transaction lock, below).
+this row understates the SynapRPC server ceiling. SET/INCR now scale with
+pipelining after the phase12 write-lock fix (below).
 
 ## Environment
 
@@ -79,27 +79,31 @@ latency-bound and both servers sit at ~52–56k rps.
 
 | Op | Synap rps | Redis rps | Synap/Redis |
 |---|---:|---:|---:|
-| GET | 833,333 | 925,925 | 0.90 |
+| GET | 847,457 | 925,925 | 0.92 |
 | LPUSH | **740,740** | 549,450 | **1.35** |
 | RPUSH | 787,401 | 961,538 | 0.82 |
 | SADD | 787,401 | 917,431 | 0.86 |
 | LRANGE_100 | 58,616 | 58,445 | 1.00 |
-| SET | 130,718 | 952,381 | 0.14 |
-| INCR | 134,770 | 925,925 | 0.15 |
+| SET | 757,575 | 952,381 | 0.80 |
+| INCR | 458,715 | 925,925 | 0.50 |
 
-**At `-P 16`, Synap reaches ~90% of Redis on GET, beats Redis on LPUSH, and is
-~82–86% on RPUSH/SADD.** The outliers are **SET/INCR**: see below.
+**At `-P 16`, Synap reaches ~80–92% of Redis on GET/SET, beats Redis on LPUSH,
+and is ~82–86% on RPUSH/SADD.** INCR (a read-modify-write under the shard data
+lock) is the lowest at ~50%.
 
-### The pipelined SET/INCR bottleneck
+### The pipelined SET/INCR bottleneck — fixed (phase12)
 
-`redis-benchmark` hammers a **single key** for SET/INCR. Synap takes a per-key
-async lock on every KV write (audit M-010, for MULTI/EXEC isolation), so 50
-clients × 16 pipelined writes to one key serialize on that one `tokio::Mutex` —
-capping SET/INCR at ~130k rps with ~6 ms latency, while lock-free GET hits 833k
-and the sharded collection writes (LPUSH via `parking_lot` RwLock) hit ~740k.
-This is a real, isolated bottleneck for hot-single-key pipelined writes and is
-tracked as a follow-up (`phase12_kv-write-lock-fastpath`). Multi-key or
-non-pipelined write workloads are unaffected (see the `-P 1` parity above).
+`redis-benchmark` hammers a **single key** for SET/INCR. Originally Synap took a
+per-key async **mutex** on every KV write (audit M-010, for MULTI/EXEC
+isolation), so 50 clients × 16 pipelined writes to one key serialized on that one
+`tokio::Mutex` — capping SET/INCR at **~130k rps**. But that lock only needs to
+exclude plain writers *from an EXEC*, not from each other (two `SET k` are already
+serialized by the KV shard data lock). So `KeyLockManager` was changed to a
+sharded **`RwLock`**: plain writers take the shared **read** side (no longer
+serialize), EXEC takes the exclusive **write** side (M-010 isolation preserved).
+Result: **RESP3 SET 130k → 757k (5.8×), INCR 134k → 458k (3.4×)**; native
+SynapRPC SET 81k → 330k, INCR 78k → 470k. `-P 1` is unchanged/slightly better and
+all transaction-isolation tests still pass.
 
 ## Two bugs this benchmark found (now fixed)
 

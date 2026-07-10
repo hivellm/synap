@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **KV write per-key lock is now a sharded `RwLock`, not a mutex** (phase12
+  write-lock fast-path). The M-010 per-key lock only needs to exclude plain
+  writers *from an EXEC*, not from each other (two `SET k` are already serialized
+  by the shard data lock). Plain writes now take the shared **read** side and no
+  longer serialize on a single async mutex; EXEC takes the exclusive **write**
+  side, preserving MULTI/EXEC isolation. Pipelined single-hot-key throughput jumps
+  — RESP3 `SET` 130k → 757k rps (5.8×), `INCR` 134k → 458k (3.4×); native SynapRPC
+  `SET` 81k → 330k, `INCR` 78k → 470k. `-P 1` is unchanged/slightly better.
 - **KV values are stored behind a shared `Arc<[u8]>` buffer** (audit M-018 read
   half). A read no longer copies the whole value: `KVStore::get_shared` returns
   the shared buffer (a refcount bump), and cloning a stored value (GETSET, cache
