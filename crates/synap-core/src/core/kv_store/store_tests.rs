@@ -42,6 +42,36 @@ async fn test_get_shared_is_zero_copy_and_consistent() {
 }
 
 #[tokio::test]
+async fn test_keyspace_notifications_fire_on_mutations() {
+    use crate::core::{EventClass, KeyspaceEventFlags, KeyspaceNotifier, PubSubRouter};
+    use std::sync::Arc;
+
+    let pubsub = Arc::new(PubSubRouter::new());
+    // KEA = keyspace + keyevent + all classes.
+    let notifier = Arc::new(KeyspaceNotifier::new(
+        pubsub.clone(),
+        KeyspaceEventFlags::parse("KEA"),
+        0,
+    ));
+    let store = KVStore::new(KVConfig::default()).with_keyspace_notifier(Some(notifier));
+
+    // SET → "set" (keyspace + keyevent = 2 publishes).
+    store.set("nk", b"v".to_vec(), None).await.unwrap();
+    assert_eq!(pubsub.get_stats().messages_published, 2);
+
+    // DELETE → "del" (+2).
+    assert!(store.delete("nk").await.unwrap());
+    assert_eq!(pubsub.get_stats().messages_published, 4);
+
+    // Deleting a missing key fires nothing.
+    assert!(!store.delete("absent").await.unwrap());
+    assert_eq!(pubsub.get_stats().messages_published, 4);
+
+    // Class gate is respected via the shared notifier logic.
+    assert!(KeyspaceEventFlags::parse("KEA").class_enabled(EventClass::String));
+}
+
+#[tokio::test]
 async fn test_get_nonexistent() {
     let store = KVStore::new(KVConfig::default());
 

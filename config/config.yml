@@ -21,6 +21,15 @@ server:
   # Enable WebSocket support for real-time subscriptions
   websocket_enabled: false
 
+  # Keyspace notifications (Redis notify-keyspace-events). Flag string:
+  #   K = keyspace events (__keyspace@0__:<key>, payload = event)
+  #   E = keyevent events  (__keyevent@0__:<event>, payload = key)
+  #   g $ l s h z x e = generic/string/list/set/hash/zset/expired/evicted classes
+  #   A = all classes (g$lshzxe)
+  # Empty disables them (default) with zero write-path overhead.
+  # Example: "KEA" publishes every event on both channels.
+  notify_keyspace_events: ""
+
 # ----------------------------------------------------------------------------
 # Memory Management
 # ----------------------------------------------------------------------------

@@ -221,6 +221,29 @@ async fn main() -> Result<()> {
         (None, None)
     };
 
+    // Pub/Sub router — created before the stores so keyspace notifications can
+    // publish through it. A keyspace notifier is built only when the config flag
+    // string enables at least one target + class; otherwise it stays `None` and
+    // every notify site is a single no-op branch on the write path.
+    let pubsub_router_inner = Arc::new(PubSubRouter::new());
+    let keyspace_notifier = {
+        use synap_server::core::{KeyspaceEventFlags, KeyspaceNotifier};
+        let flags = KeyspaceEventFlags::parse(&config.server.notify_keyspace_events);
+        if flags.is_active() {
+            info!(
+                "Keyspace notifications enabled (notify-keyspace-events=\"{}\")",
+                config.server.notify_keyspace_events
+            );
+            Some(Arc::new(KeyspaceNotifier::new(
+                pubsub_router_inner.clone(),
+                flags,
+                0,
+            )))
+        } else {
+            None
+        }
+    };
+
     #[allow(clippy::type_complexity)]
     let (
         kv_store,
@@ -246,7 +269,8 @@ async fn main() -> Result<()> {
                 (
                     Arc::new(
                         kv.with_global_memory(global_mem.clone())
-                            .with_cluster(cluster_topology.clone(), cluster_migration.clone()),
+                            .with_cluster(cluster_topology.clone(), cluster_migration.clone())
+                            .with_keyspace_notifier(keyspace_notifier.clone()),
                     ),
                     hs.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
                     ls.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
@@ -261,7 +285,8 @@ async fn main() -> Result<()> {
                 (
                     Arc::new(
                         KVStore::new(kv_config.clone())
-                            .with_cluster(cluster_topology.clone(), cluster_migration.clone()),
+                            .with_cluster(cluster_topology.clone(), cluster_migration.clone())
+                            .with_keyspace_notifier(keyspace_notifier.clone()),
                     ),
                     Some(Arc::new(HashStore::new())),
                     Some(Arc::new(ListStore::new())),
@@ -282,7 +307,8 @@ async fn main() -> Result<()> {
             Arc::new(
                 KVStore::new(kv_config.clone())
                     .with_global_memory(global_mem.clone())
-                    .with_cluster(cluster_topology.clone(), cluster_migration.clone()),
+                    .with_cluster(cluster_topology.clone(), cluster_migration.clone())
+                    .with_keyspace_notifier(keyspace_notifier.clone()),
             ),
             Some(Arc::new(
                 HashStore::new().with_global_memory(global_mem.clone()),
@@ -344,11 +370,10 @@ async fn main() -> Result<()> {
         Some(cg_mgr)
     };
 
-    // Initialize Pub/Sub router (enabled by default for now)
+    // Pub/Sub router (created earlier so keyspace notifications share it).
     let pubsub_router = {
-        let router = Arc::new(PubSubRouter::new());
         info!("Pub/Sub system enabled");
-        Some(router)
+        Some(pubsub_router_inner)
     };
 
     // Start the replication node (self-runs on construction). The master is

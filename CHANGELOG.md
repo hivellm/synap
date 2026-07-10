@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-enabled and asserts all 500 keys).
 
 ### Added
+- **Keyspace notifications (`notify-keyspace-events`)**. A new
+  `server.notify_keyspace_events` Redis-style flag string (`K` keyspace, `E`
+  keyevent, `g$lshzxe`/`A` classes) enables publishing `__keyspace@0__:<key>`
+  (payload = event) and `__keyevent@0__:<event>` (payload = key) through the
+  Pub/Sub router, so `PSUBSCRIBE __keyspace@0__:*` observes changes. Empty (the
+  default) disables them with zero write-path overhead. This release wires the
+  KV string/generic/expired events (`set`, `del`, `expire`, `persist`,
+  `incrby`/`decrby`, `append`, `setrange`, `expired`); collection-type
+  (`h`/`l`/`s`/`z`) events follow.
 - **Sorted-set blocking pops `BZPOPMIN` / `BZPOPMAX`** (core) with a per-key
   notify woken by `ZADD`, mirroring the list blocking-pop mechanism.
 - **Blocking pops over the wire (`BLPOP` / `BRPOP` / `BRPOPLPUSH` / `BZPOPMIN` /

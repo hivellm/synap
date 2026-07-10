@@ -81,6 +81,15 @@ pub struct Server {
     pub host: String,
     pub port: u16,
     pub websocket_enabled: bool,
+    /// Redis-style `notify-keyspace-events` flag string enabling keyspace
+    /// notifications (e.g. `"KEA"` for all events on both channels). Empty (the
+    /// default) disables them entirely — no publish overhead on the write path.
+    #[serde(default = "default_notify_keyspace_events")]
+    pub notify_keyspace_events: String,
+}
+
+fn default_notify_keyspace_events() -> String {
+    String::new()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -324,6 +333,7 @@ impl Default for ServerConfig {
                 host: "0.0.0.0".to_string(),
                 port: 15500,
                 websocket_enabled: false,
+                notify_keyspace_events: String::new(),
             },
             kv_store: KVStoreConfig {
                 max_memory_mb: 4096,

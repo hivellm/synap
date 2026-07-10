@@ -42,6 +42,9 @@ pub struct KVStore {
     /// Single-key writes take the key's lock; EXEC holds its whole key set and
     /// calls the `*_unlocked` methods to avoid re-entrant deadlock.
     key_locks: Arc<crate::core::KeyLockManager>,
+    /// Optional keyspace-notification publisher (Redis `notify-keyspace-events`).
+    /// `None` (the default) makes every notify site a single branch with no cost.
+    keyspace_notifier: Option<Arc<crate::core::KeyspaceNotifier>>,
 }
 
 impl KVStore {
@@ -60,6 +63,25 @@ impl KVStore {
         self.cluster_topology = topology;
         self.cluster_migration = migration;
         self
+    }
+
+    /// Attach a keyspace-notification publisher so mutating commands publish
+    /// `__keyspace@0__` / `__keyevent@0__` events (Redis `notify-keyspace-events`).
+    /// A no-op when `notifier` is `None`.
+    pub fn with_keyspace_notifier(
+        mut self,
+        notifier: Option<Arc<crate::core::KeyspaceNotifier>>,
+    ) -> Self {
+        self.keyspace_notifier = notifier;
+        self
+    }
+
+    /// Publish a keyspace notification for `key` if a notifier is attached.
+    #[inline]
+    fn notify_keyspace(&self, class: crate::core::EventClass, event: &str, key: &str) {
+        if let Some(ref n) = self.keyspace_notifier {
+            n.notify(class, event, key);
+        }
     }
 
     /// Attach a shared [`GlobalMemory`](crate::core::GlobalMemory) budget so this
@@ -117,6 +139,7 @@ impl KVStore {
             cluster_migration: None,
             mem: None,
             key_locks: Arc::new(crate::core::KeyLockManager::new()),
+            keyspace_notifier: None,
         }
     }
 
@@ -150,6 +173,7 @@ impl KVStore {
             cluster_migration: migration,
             mem: None,
             key_locks: Arc::new(crate::core::KeyLockManager::new()),
+            keyspace_notifier: None,
         }
     }
 
@@ -300,6 +324,8 @@ impl KVStore {
         let key_len = key.len();
         // Clone key for cache before moving it into the HashMap.
         let cache_key = self.cache.as_ref().map(|_| key.clone());
+        // Clone key for the keyspace notification (published after the lock drops).
+        let notify_key = self.keyspace_notifier.as_ref().map(|_| key.clone());
 
         shard.track_ttl(&stored, &key);
         let old = data.insert(key, stored);
@@ -330,6 +356,13 @@ impl KVStore {
                     + secs
             });
             cache.put(k, value, cache_ttl);
+        }
+
+        // Release the shard lock before publishing so notification delivery never
+        // runs under the write lock.
+        drop(data);
+        if let Some(k) = notify_key {
+            self.notify_keyspace(crate::core::EventClass::String, "set", &k);
         }
 
         Ok(())
@@ -616,6 +649,8 @@ impl KVStore {
             self.stats
                 .total_memory_bytes
                 .fetch_sub(removed_size as i64, Ordering::Relaxed);
+            drop(data);
+            self.notify_keyspace(crate::core::EventClass::Generic, "del", key);
             Ok(true)
         } else {
             Ok(false)
@@ -708,6 +743,11 @@ impl KVStore {
         data.insert(key.to_string(), stored);
 
         self.stats.sets.fetch_add(1, Ordering::Relaxed);
+
+        drop(data);
+        // Redis fires "incrby"/"decrby" for INCR/DECR-family ops on the string.
+        let event = if amount >= 0 { "incrby" } else { "decrby" };
+        self.notify_keyspace(crate::core::EventClass::String, event, key);
 
         Ok(new_value)
     }
@@ -970,6 +1010,10 @@ impl KVStore {
             .as_millis() as u64;
 
         let mut total_expired = 0;
+        // Keys removed by this pass, collected only when a notifier is attached,
+        // so `expired` events are published after all shard locks are released.
+        let notify_expired = self.keyspace_notifier.is_some();
+        let mut expired_notify: Vec<String> = Vec::new();
 
         for shard in self.shards.iter() {
             // --- Heap-driven eviction (fast path) ---
@@ -1011,6 +1055,9 @@ impl KVStore {
                                 .total_memory_bytes
                                 .fetch_sub(removed_size as i64, Ordering::Relaxed);
                             total_expired += 1;
+                            if notify_expired {
+                                expired_notify.push(key.as_str().to_string());
+                            }
                         }
                     }
                 }
@@ -1048,6 +1095,9 @@ impl KVStore {
                                         .total_memory_bytes
                                         .fetch_sub(removed_size as i64, Ordering::Relaxed);
                                     total_expired += 1;
+                                    if notify_expired {
+                                        expired_notify.push(key.clone());
+                                    }
                                 }
                             }
                         }
@@ -1068,6 +1118,11 @@ impl KVStore {
             self.stats
                 .total_keys
                 .fetch_sub(total_expired as i64, Ordering::Relaxed);
+        }
+
+        // Publish `expired` events after every shard lock has been released.
+        for key in expired_notify {
+            self.notify_keyspace(crate::core::EventClass::Expired, "expired", &key);
         }
     }
 
@@ -1298,6 +1353,8 @@ impl KVStore {
             let new_value = StoredValue::new(value.data().to_vec(), Some(ttl_secs));
             shard.track_ttl(&new_value, key);
             data.insert(key.to_string(), new_value);
+            drop(data);
+            self.notify_keyspace(crate::core::EventClass::Generic, "expire", key);
             Ok(true)
         } else {
             Ok(false)
@@ -1315,6 +1372,8 @@ impl KVStore {
             // Convert to persistent variant
             let new_value = StoredValue::new(value.data().to_vec(), None);
             data.insert(key.to_string(), new_value);
+            drop(data);
+            self.notify_keyspace(crate::core::EventClass::Generic, "persist", key);
             Ok(true)
         } else {
             Ok(false)
@@ -1381,6 +1440,9 @@ impl KVStore {
         if let Some(ref cache) = self.cache {
             cache.delete(key);
         }
+
+        drop(data);
+        self.notify_keyspace(crate::core::EventClass::String, "append", key);
 
         Ok(new_length)
     }
@@ -1483,6 +1545,9 @@ impl KVStore {
             cache.delete(key);
         }
 
+        drop(data);
+        self.notify_keyspace(crate::core::EventClass::String, "setrange", key);
+
         Ok(new_length)
     }
 
@@ -1547,6 +1612,9 @@ impl KVStore {
         if let Some(ref cache) = self.cache {
             cache.delete(key);
         }
+
+        drop(data);
+        self.notify_keyspace(crate::core::EventClass::String, "set", key);
 
         Ok(old_value)
     }
