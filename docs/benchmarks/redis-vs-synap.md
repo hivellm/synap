@@ -4,6 +4,44 @@
 Both servers were driven by the **same** `redis-benchmark` binary over RESP, so
 it is a true apples-to-apples measurement.
 
+> **Note on protocols.** Synap's **native protocol is SynapRPC** (MessagePack over
+> a length-prefixed TCP frame); RESP3 exists for Redis-client **compatibility**.
+> The `redis-benchmark` sections below measure the *compatibility* path against
+> Redis. The **native SynapRPC path is measured separately below and is markedly
+> faster per operation** — that is Synap's intended fast path.
+
+## Native SynapRPC vs the RESP3 compatibility path
+
+Measured with the in-repo `synap-bench` load generator (a `redis-benchmark`
+equivalent that speaks SynapRPC — `crates/synap-server/src/bin/synap_bench.rs`),
+run as a container on the **same** `synap-bench` network against the **same**
+Synap server, `-n 100000 -c 50`, single key.
+
+| Op | SynapRPC `-P 1` | RESP3 `-P 1` | Redis `-P 1` |
+|---|---:|---:|---:|
+| GET | **166,003** | 56,116 | 56,022 |
+| SET | **88,264** | 52,301 | 56,465 |
+| INCR | **92,267** | 53,850 | 55,897 |
+
+**At `-P 1`, native SynapRPC is ~3× faster than RESP3 on GET and ~1.7× on
+SET/INCR** — a single MessagePack frame per reply vs RESP3's multi-segment bulk
+encoding, and a tighter codec. This is the durable cross-protocol result (per-op,
+least sensitive to client-loop differences).
+
+| Op | SynapRPC `-P 16` | RESP3 `-P 16` |
+|---|---:|---:|
+| GET | 552,203 | 833,333 |
+| SET | 81,474 | 130,718 |
+| INCR | 77,977 | 134,770 |
+
+At `-P 16`, SynapRPC GET reaches 552k (the SynapRPC server was given a `BufWriter`
+so a pipelined burst of replies coalesces into one syscall — +23% over the
+unbuffered path). It trails RESP3's 833k here mainly because `synap-bench` is a
+simple blocking client that sends a batch then reads it before the next, leaving
+inter-batch gaps, whereas `redis-benchmark` keeps the pipe continuously full — so
+this row understates the SynapRPC server ceiling. SET/INCR are flat on both
+protocols (the per-key transaction lock, below).
+
 ## Environment
 
 - **Harness:** `redis:7-alpine`'s `redis-benchmark`, `-n 100000 -c 50`,

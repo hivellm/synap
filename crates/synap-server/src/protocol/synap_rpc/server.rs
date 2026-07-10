@@ -20,7 +20,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use tokio::io::BufReader;
+use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 
@@ -29,7 +29,7 @@ use crate::metrics;
 use crate::server::handlers::AppState;
 
 use super::dispatch::dispatch;
-use synap_protocol::synap_rpc::codec::{encode_frame, read_request, write_response};
+use synap_protocol::synap_rpc::codec::{encode_frame, read_request};
 use synap_protocol::synap_rpc::types::{Response, SynapValue};
 
 /// Extract a UTF-8 string from a `SynapValue` for the AUTH handshake.
@@ -106,43 +106,57 @@ async fn handle_connection(
     // Writer channel: dispatch tasks send (response, metadata) here; a
     // dedicated writer task serialises them to the socket in arrival order.
     let (tx, mut rx) = mpsc::channel::<(Response, String, f64, usize)>(64);
-    let mut writer = write_half;
+    // Buffer the write half so a pipelined burst of responses is coalesced into
+    // one syscall: the writer drains everything already queued, then flushes once
+    // (mirrors the RESP3 server). A raw write half would emit one `write()` per
+    // response and cap pipelined throughput.
+    let mut writer = BufWriter::new(write_half);
 
     // Writer task — receives (response, command, elapsed_secs, in_frame_bytes).
     let write_task = tokio::spawn(async move {
-        while let Some((response, command, elapsed, in_bytes)) = rx.recv().await {
+        // Encode + buffer one response; returns false on a fatal write error.
+        async fn emit(
+            writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
+            response: Response,
+            command: String,
+            elapsed: f64,
+            in_bytes: usize,
+        ) -> bool {
             let is_err = response.result.is_err();
-
-            // Encode and write the response.
             match encode_frame(&response) {
                 Ok(frame) => {
                     let out_bytes = frame.len();
-                    if let Err(e) = write_response(&mut writer, &response).await {
+                    if let Err(e) = writer.write_all(&frame).await {
                         tracing::debug!(error = %e, "SynapRPC write error");
-                        break;
+                        return false;
                     }
-                    // Record metrics after successful write.
                     metrics::record_synap_rpc_command(&command, !is_err, elapsed);
                     metrics::synap_rpc_frame_sizes(in_bytes, out_bytes);
-
                     if elapsed > 0.001 {
-                        tracing::warn!(
-                            cmd = %command,
-                            elapsed_ms = elapsed * 1_000.0,
-                            "SynapRPC slow command"
-                        );
-                    } else {
-                        tracing::debug!(
-                            cmd = %command,
-                            elapsed_us = elapsed * 1_000_000.0,
-                            ok = !is_err,
-                            "SynapRPC command"
-                        );
+                        tracing::warn!(cmd = %command, elapsed_ms = elapsed * 1_000.0, "SynapRPC slow command");
                     }
+                    true
                 }
                 Err(e) => {
                     tracing::error!(cmd = %command, error = %e, "SynapRPC encode error");
+                    true
                 }
+            }
+        }
+
+        'outer: while let Some((response, command, elapsed, in_bytes)) = rx.recv().await {
+            if !emit(&mut writer, response, command, elapsed, in_bytes).await {
+                break;
+            }
+            // Drain any responses already queued (a pipelined burst) before flushing.
+            while let Ok((response, command, elapsed, in_bytes)) = rx.try_recv() {
+                if !emit(&mut writer, response, command, elapsed, in_bytes).await {
+                    break 'outer;
+                }
+            }
+            if let Err(e) = writer.flush().await {
+                tracing::debug!(error = %e, "SynapRPC flush error");
+                break;
             }
         }
     });

@@ -24,12 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **RESP3/SynapRPC throughput: `TCP_NODELAY` + buffered writes** (found by the
-  live Redis benchmark). Connections now set `TCP_NODELAY`, and the RESP3 write
-  half is wrapped in a `BufWriter` so the pipeline-aware flush actually coalesces
-  a batch into one syscall. Without these, Nagle's algorithm stalled every
-  multi-segment bulk reply ~40 ms on a delayed ACK — non-pipelined `GET`/`LRANGE`
-  ran at ~1.1k rps (now ~56k, on par with Redis 7) and pipelined (`-P 16`) `GET`
-  was capped at ~17k rps (now ~833k, ~90% of Redis).
+  live Redis benchmark). Connections now set `TCP_NODELAY`, and both the RESP3
+  and SynapRPC write halves are wrapped in a `BufWriter` so a pipelined burst of
+  replies coalesces into one syscall (the SynapRPC writer also drains its response
+  channel before flushing and now encodes each frame once instead of twice).
+  Without these, Nagle's algorithm stalled every multi-segment bulk reply ~40 ms
+  on a delayed ACK — non-pipelined RESP3 `GET`/`LRANGE` ran at ~1.1k rps (now
+  ~56k, on par with Redis 7) and pipelined (`-P 16`) `GET` was capped at ~17k rps
+  (now ~833k, ~90% of Redis). Pipelined SynapRPC `GET` rose ~23% (448k→552k).
+  Native SynapRPC stays ~3× faster than the RESP3 compatibility path per op.
 - **Replication: replica joining mid-write-stream no longer loses writes**
   (issue #234). The master now registers a joining replica in the fan-out set
   before snapshotting (so writes during snapshot transfer are buffered to it),

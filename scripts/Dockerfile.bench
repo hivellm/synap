@@ -10,6 +10,7 @@ FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /src/target/release/synap-server /usr/local/bin/synap-server
+COPY --from=builder /src/target/release/synap_bench /usr/local/bin/synap-bench
 COPY config/bench-config.yml /app/config.yml
 EXPOSE 6379 15500 15501
 CMD ["synap-server", "--config", "/app/config.yml"]
