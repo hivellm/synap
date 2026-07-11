@@ -116,7 +116,11 @@ impl Clone for StoredValue {
 
 impl StoredValue {
     /// Create a new stored value using a seconds-based TTL (backward-compatible).
-    pub fn new(data: Vec<u8>, ttl_secs: Option<u64>) -> Self {
+    ///
+    /// Accepts anything convertible into the shared buffer: a `Vec<u8>` (one
+    /// alloc + copy) or an `Arc<[u8]>` (identity — zero copy, the phase13
+    /// parse-bulk-into-arc write path).
+    pub fn new(data: impl Into<Arc<[u8]>>, ttl_secs: Option<u64>) -> Self {
         match ttl_secs {
             None => Self::Persistent(data.into()),
             Some(secs) => Self::with_expiry(data, Expiry::Seconds(secs)),
@@ -124,7 +128,7 @@ impl StoredValue {
     }
 
     /// Create a new stored value using the rich `Expiry` enum.
-    pub fn with_expiry(data: Vec<u8>, expiry: Expiry) -> Self {
+    pub fn with_expiry(data: impl Into<Arc<[u8]>>, expiry: Expiry) -> Self {
         Self::Expiring {
             data: data.into(),
             expires_at: expiry.to_unix_ms(),

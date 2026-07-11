@@ -275,10 +275,10 @@ impl ClusterQuotaManager {
         // Check cache first
         {
             let cache = self.quota_cache.read();
-            if let Some(quota) = cache.get(&user_id) {
-                if quota.is_valid() {
-                    return Ok(quota.clone());
-                }
+            if let Some(quota) = cache.get(&user_id)
+                && quota.is_valid()
+            {
+                return Ok(quota.clone());
             }
         }
 

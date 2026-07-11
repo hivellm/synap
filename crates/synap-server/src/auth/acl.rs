@@ -163,10 +163,10 @@ impl Acl {
         let rules = self.rules.read();
 
         // Check specific rule
-        if let Some(rule) = rules.get(&key) {
-            if rule.check_access(ctx, action) {
-                return Ok(());
-            }
+        if let Some(rule) = rules.get(&key)
+            && rule.check_access(ctx, action)
+        {
+            return Ok(());
         }
 
         // Check wildcard rule
@@ -181,10 +181,10 @@ impl Acl {
             }
         );
 
-        if let Some(rule) = rules.get(&wildcard_key) {
-            if rule.check_access(ctx, action) {
-                return Ok(());
-            }
+        if let Some(rule) = rules.get(&wildcard_key)
+            && rule.check_access(ctx, action)
+        {
+            return Ok(());
         }
 
         // Default deny if no rules match

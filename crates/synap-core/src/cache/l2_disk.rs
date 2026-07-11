@@ -190,7 +190,7 @@ impl L2DiskCache {
         self.index.write().insert(key, entry);
 
         // Save index periodically (every 100 inserts)
-        if self.index.read().len() % 100 == 0 {
+        if self.index.read().len().is_multiple_of(100) {
             self.save_index()?;
         }
 

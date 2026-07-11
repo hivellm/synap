@@ -55,12 +55,12 @@ impl ReplicationLog {
         let mut ops = self.operations.write();
 
         // If buffer is full, remove oldest
-        if ops.len() >= self.max_size {
-            if let Some(removed) = ops.pop_front() {
-                self.oldest_offset
-                    .store(removed.offset + 1, Ordering::SeqCst);
-                debug!("Replication log full, removed offset {}", removed.offset);
-            }
+        if ops.len() >= self.max_size
+            && let Some(removed) = ops.pop_front()
+        {
+            self.oldest_offset
+                .store(removed.offset + 1, Ordering::SeqCst);
+            debug!("Replication log full, removed offset {}", removed.offset);
         }
 
         ops.push_back(repl_op);

@@ -233,10 +233,10 @@ impl PubSubRouter {
                 } else {
                     // Remove exact topic subscription
                     let mut topics_map = self.topics.write();
-                    if let Some(topic_subs) = topics_map.get_mut(topic_pattern) {
-                        if topic_subs.subscribers.remove(subscriber_id) {
-                            unsubscribed += 1;
-                        }
+                    if let Some(topic_subs) = topics_map.get_mut(topic_pattern)
+                        && topic_subs.subscribers.remove(subscriber_id)
+                    {
+                        unsubscribed += 1;
                     }
                 }
             }
@@ -245,10 +245,10 @@ impl PubSubRouter {
             let mut topics_map = self.topics.write();
             let all_keys: Vec<String> = topics_map.keys().cloned().collect();
             for key in all_keys {
-                if let Some(topic_subs) = topics_map.get_mut(&key) {
-                    if topic_subs.subscribers.remove(subscriber_id) {
-                        unsubscribed += 1;
-                    }
+                if let Some(topic_subs) = topics_map.get_mut(&key)
+                    && topic_subs.subscribers.remove(subscriber_id)
+                {
+                    unsubscribed += 1;
                 }
             }
 

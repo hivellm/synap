@@ -46,12 +46,12 @@ fn crc16(data: &[u8]) -> u16 {
 /// Format: `{tag}key` or `key{tag}` - only the tag is hashed.
 fn extract_hash_tag(key: &str) -> Option<&str> {
     // Look for {tag} pattern
-    if let Some(start) = key.find('{') {
-        if let Some(end) = key[start + 1..].find('}') {
-            let tag = &key[start + 1..start + 1 + end];
-            if !tag.is_empty() {
-                return Some(tag);
-            }
+    if let Some(start) = key.find('{')
+        && let Some(end) = key[start + 1..].find('}')
+    {
+        let tag = &key[start + 1..start + 1 + end];
+        if !tag.is_empty() {
+            return Some(tag);
         }
     }
     None

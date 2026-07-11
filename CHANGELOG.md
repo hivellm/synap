@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Bulk arguments are parsed directly into shared `Arc<[u8]>` buffers**
+  (phase13 parse-bulk-into-arc). A RESP3 bulk payload is born shared: `SET`
+  stores the parser's buffer via a refcount bump instead of re-allocating and
+  memcpying the whole value (`Vec → Arc`), removing one full copy from every KV
+  write on both protocols (SynapRPC `SET` likewise clones the deserialized
+  `Bytes` Arc). `KVStore::set`/`StoredValue::new` now accept
+  `impl Into<Arc<[u8]>>` — existing `Vec` callers unchanged. `Resp3Value`
+  equality treats `BulkString`/`BulkShared` as the same wire value. Workspace
+  `rust-version` raised 1.85 → 1.92 (`Arc::new_zeroed_slice`), with the
+  mechanical clippy fixes that unlocked.
 - **Reply serialization, metrics and waiter-notify hot paths de-allocated**
   (phase12 round 4). RESP3 reply headers and integer replies are formatted into
   a stack buffer (itoa-style) instead of `format!` — no `String` per reply; the

@@ -245,10 +245,10 @@ impl HashStore {
 
     /// Refuse a growing write when the shared budget is already over the cap.
     fn check_admit(&self, incoming: usize) -> Result<()> {
-        if let Some(m) = &self.mem {
-            if m.would_exceed(incoming as i64) {
-                return Err(SynapError::MemoryLimitExceeded);
-            }
+        if let Some(m) = &self.mem
+            && m.would_exceed(incoming as i64)
+        {
+            return Err(SynapError::MemoryLimitExceeded);
         }
         Ok(())
     }

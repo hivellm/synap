@@ -156,11 +156,10 @@ pub(super) async fn handle_queue_socket(
                         if let Ok(cmd) = serde_json::from_str::<serde_json::Value>(&text) {
                             match cmd["command"].as_str() {
                                 Some("ack") => {
-                                    if let Some(msg_id) = cmd["message_id"].as_str() {
-                                        if let Err(e) = queue_manager.ack(&queue_name, msg_id).await {
+                                    if let Some(msg_id) = cmd["message_id"].as_str()
+                                        && let Err(e) = queue_manager.ack(&queue_name, msg_id).await {
                                             error!("ACK error: {}", e);
                                         }
-                                    }
                                 }
                                 Some("nack") => {
                                     if let Some(msg_id) = cmd["message_id"].as_str() {

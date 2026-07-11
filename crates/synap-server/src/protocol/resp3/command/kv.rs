@@ -19,7 +19,9 @@ pub(super) async fn cmd_set(state: &AppState, args: &[Resp3Value]) -> Resp3Value
         Some(k) => k,
         None => return Resp3Value::Error("ERR key must be a string".into()),
     };
-    let value = match arg_bytes(args, 2) {
+    // Take the parsed bulk payload as its shared buffer — a refcount bump for
+    // parser-produced args, no value copy (phase13 parse-bulk-into-arc).
+    let value = match args[2].to_shared_bytes() {
         Some(v) => v,
         None => return Resp3Value::Error("ERR value required".into()),
     };
@@ -212,7 +214,7 @@ pub(super) async fn cmd_decrby(state: &AppState, args: &[Resp3Value]) -> Resp3Va
 }
 
 pub(super) async fn cmd_mset(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
-    if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+    if args.len() < 3 || !(args.len() - 1).is_multiple_of(2) {
         return Resp3Value::Error("ERR syntax error — MSET key value [key value ...]".into());
     }
     let mut pairs = Vec::new();
@@ -424,7 +426,7 @@ pub(super) async fn cmd_getset(state: &AppState, args: &[Resp3Value]) -> Resp3Va
 }
 
 pub(super) async fn cmd_msetnx(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
-    if args.len() < 3 || (args.len() - 1) % 2 != 0 {
+    if args.len() < 3 || !(args.len() - 1).is_multiple_of(2) {
         return err_wrong_args("MSETNX");
     }
     let pairs: Vec<(String, Vec<u8>)> = (0..(args.len() - 1) / 2)

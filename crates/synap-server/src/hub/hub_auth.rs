@@ -57,21 +57,20 @@ impl HubUserContext {
 /// 3. Query parameter `access_key`
 pub fn extract_access_key(headers: &HeaderMap) -> Option<String> {
     // Check X-Hub-Access-Key header
-    if let Some(key) = headers.get("x-hub-access-key") {
-        if let Ok(key_str) = key.to_str() {
-            debug!("Access key found in X-Hub-Access-Key header");
-            return Some(key_str.to_string());
-        }
+    if let Some(key) = headers.get("x-hub-access-key")
+        && let Ok(key_str) = key.to_str()
+    {
+        debug!("Access key found in X-Hub-Access-Key header");
+        return Some(key_str.to_string());
     }
 
     // Check Authorization Bearer token
-    if let Some(auth) = headers.get("authorization") {
-        if let Ok(auth_str) = auth.to_str() {
-            if let Some(token) = auth_str.strip_prefix("Bearer ") {
-                debug!("Access key found in Authorization Bearer header");
-                return Some(token.to_string());
-            }
-        }
+    if let Some(auth) = headers.get("authorization")
+        && let Ok(auth_str) = auth.to_str()
+        && let Some(token) = auth_str.strip_prefix("Bearer ")
+    {
+        debug!("Access key found in Authorization Bearer header");
+        return Some(token.to_string());
     }
 
     None

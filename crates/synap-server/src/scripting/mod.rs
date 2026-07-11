@@ -448,7 +448,7 @@ async fn handle_redis_call(
         "zadd" => {
             ensure_min_args(&args, 3, &command_name)?;
             let pair_count = args.len().saturating_sub(1);
-            if pair_count % 2 != 0 {
+            if !pair_count.is_multiple_of(2) {
                 return Err(mlua::Error::RuntimeError(
                     "ZADD requires score/member pairs".to_string(),
                 ));

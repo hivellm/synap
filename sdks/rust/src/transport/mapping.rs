@@ -919,10 +919,10 @@ pub(crate) fn map_response(cmd: &str, wire: WireValue) -> Value {
             let mut fields = serde_json::Map::new();
             if let WireValue::Array(arr) = wire {
                 for chunk in arr.chunks(2) {
-                    if let (Some(k), Some(v)) = (chunk.first(), chunk.get(1)) {
-                        if let Some(key_str) = k.as_str() {
-                            fields.insert(key_str.to_string(), v.to_json());
-                        }
+                    if let (Some(k), Some(v)) = (chunk.first(), chunk.get(1))
+                        && let Some(key_str) = k.as_str()
+                    {
+                        fields.insert(key_str.to_string(), v.to_json());
                     }
                 }
             }
@@ -1171,10 +1171,10 @@ pub(crate) fn map_response(cmd: &str, wire: WireValue) -> Value {
                 WireValue::Array(ref arr) => {
                     let mut obj = serde_json::Map::new();
                     for pair in arr.chunks(2) {
-                        if let [k, v] = pair {
-                            if let Some(key) = k.as_str() {
-                                obj.insert(key.to_string(), v.to_json());
-                            }
+                        if let [k, v] = pair
+                            && let Some(key) = k.as_str()
+                        {
+                            obj.insert(key.to_string(), v.to_json());
                         }
                     }
                     Value::Object(obj)

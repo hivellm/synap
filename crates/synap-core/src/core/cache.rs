@@ -130,12 +130,12 @@ impl CacheLayer {
 
         // Evict if at capacity
         while l1.data.len() >= l1.max_size && !l1.lru_order.is_empty() {
-            if let Some(evict_key) = l1.lru_order.pop_front() {
-                if let Some(evicted) = l1.data.remove(&evict_key) {
-                    stats.l1_evictions += 1;
-                    stats.total_bytes = stats.total_bytes.saturating_sub(evicted.size);
-                    debug!("L1 Cache EVICT: {}", evict_key);
-                }
+            if let Some(evict_key) = l1.lru_order.pop_front()
+                && let Some(evicted) = l1.data.remove(&evict_key)
+            {
+                stats.l1_evictions += 1;
+                stats.total_bytes = stats.total_bytes.saturating_sub(evicted.size);
+                debug!("L1 Cache EVICT: {}", evict_key);
             }
         }
 

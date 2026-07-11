@@ -161,18 +161,17 @@ impl UserManager {
         let mut root_username = self.root_username.write();
 
         // If root user already exists, update password and enabled status
-        if let Some(existing_root) = root_username.as_ref() {
-            if existing_root == username {
-                if let Some(user) = users.get_mut(username) {
-                    // Update password if provided
-                    if !password.is_empty() {
-                        user.change_password(password)?;
-                    }
-                    user.enabled = enabled;
-                    info!("Updated root user: {} (enabled: {})", username, enabled);
-                    return Ok(());
-                }
+        if let Some(existing_root) = root_username.as_ref()
+            && existing_root == username
+            && let Some(user) = users.get_mut(username)
+        {
+            // Update password if provided
+            if !password.is_empty() {
+                user.change_password(password)?;
             }
+            user.enabled = enabled;
+            info!("Updated root user: {} (enabled: {})", username, enabled);
+            return Ok(());
         }
 
         // Create root user if it doesn't exist
@@ -258,16 +257,16 @@ impl UserManager {
         // Check if root user is disabled
         if self.is_root_user(username) {
             let root_username = self.root_username.read();
-            if let Some(root) = root_username.as_ref() {
-                if root == username {
-                    let users = self.users.read();
-                    if let Some(user) = users.get(username) {
-                        if !user.enabled {
-                            return Err(SynapError::InvalidRequest(
-                                "Root user is disabled".to_string(),
-                            ));
-                        }
-                    }
+            if let Some(root) = root_username.as_ref()
+                && root == username
+            {
+                let users = self.users.read();
+                if let Some(user) = users.get(username)
+                    && !user.enabled
+                {
+                    return Err(SynapError::InvalidRequest(
+                        "Root user is disabled".to_string(),
+                    ));
                 }
             }
         }
@@ -291,10 +290,10 @@ impl UserManager {
         user.update_last_login();
 
         // Transparently upgrade a legacy SHA-512 hash to bcrypt on successful login.
-        if user.needs_rehash() {
-            if let Ok(new_hash) = User::hash_password(password) {
-                user.password_hash = new_hash;
-            }
+        if user.needs_rehash()
+            && let Ok(new_hash) = User::hash_password(password)
+        {
+            user.password_hash = new_hash;
         }
 
         Ok(user.clone())

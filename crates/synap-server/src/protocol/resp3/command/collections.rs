@@ -4,7 +4,7 @@ use crate::core::sorted_set::ZAddOptions;
 // ── Hash commands ─────────────────────────────────────────────────────────────
 
 pub(super) async fn cmd_hset(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
-    if args.len() < 4 || (args.len() - 2) % 2 != 0 {
+    if args.len() < 4 || !(args.len() - 2).is_multiple_of(2) {
         return Resp3Value::Error("ERR syntax — HSET key field value [field value ...]".into());
     }
     let key = match arg_str(args, 1) {

@@ -136,10 +136,10 @@ impl ApiKey {
             return false;
         }
 
-        if let Some(expires_at) = self.expires_at {
-            if Utc::now() > expires_at {
-                return false;
-            }
+        if let Some(expires_at) = self.expires_at
+            && Utc::now() > expires_at
+        {
+            return false;
         }
 
         true

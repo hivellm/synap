@@ -42,6 +42,25 @@ async fn test_get_shared_is_zero_copy_and_consistent() {
 }
 
 #[tokio::test]
+async fn test_set_shared_buffer_is_zero_copy() {
+    // phase13 parse-bulk-into-arc: a SET given an Arc<[u8]> must store THAT
+    // buffer (refcount bump), not a copy — proven by pointer equality on read.
+    let store = KVStore::new(KVConfig::default());
+    let value: std::sync::Arc<[u8]> = b"zero-copy-write".to_vec().into();
+    store
+        .set("zc", std::sync::Arc::clone(&value), None)
+        .await
+        .unwrap();
+    let read = store.get_shared("zc").await.unwrap().unwrap();
+    assert_eq!(
+        read.as_ptr(),
+        value.as_ptr(),
+        "stored buffer must share the caller's allocation (no write copy)"
+    );
+    assert_eq!(&*read, b"zero-copy-write");
+}
+
+#[tokio::test]
 async fn test_mget_shared_is_zero_copy_and_matches_mget() {
     let store = KVStore::new(KVConfig::default());
     store.set("ma", b"alpha".to_vec(), None).await.unwrap();

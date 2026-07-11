@@ -441,10 +441,10 @@ impl ListStore {
 
     /// Refuse a growing write when the shared budget is already over the cap.
     fn check_admit(&self, incoming: usize) -> Result<()> {
-        if let Some(m) = &self.mem {
-            if m.would_exceed(incoming as i64) {
-                return Err(SynapError::MemoryLimitExceeded);
-            }
+        if let Some(m) = &self.mem
+            && m.would_exceed(incoming as i64)
+        {
+            return Err(SynapError::MemoryLimitExceeded);
         }
         Ok(())
     }
@@ -820,10 +820,10 @@ impl ListStore {
             }
 
             // Push to destination (handle expiration first)
-            if let Some(existing_list) = map.get(destination) {
-                if existing_list.is_expired() {
-                    map.remove(destination);
-                }
+            if let Some(existing_list) = map.get(destination)
+                && existing_list.is_expired()
+            {
+                map.remove(destination);
             }
 
             let dest_list = map
@@ -876,10 +876,10 @@ impl ListStore {
         }
 
         // Push to destination (handle expiration first)
-        if let Some(existing_list) = dest_map.get(destination) {
-            if existing_list.is_expired() {
-                dest_map.remove(destination);
-            }
+        if let Some(existing_list) = dest_map.get(destination)
+            && existing_list.is_expired()
+        {
+            dest_map.remove(destination);
         }
 
         let dest_list = dest_map
@@ -905,11 +905,11 @@ impl ListStore {
     ) -> Result<(String, Vec<u8>)> {
         // Try immediate pop first
         for key in &keys {
-            if let Ok(mut values) = self.lpop(key, Some(1)) {
-                if !values.is_empty() {
-                    self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
-                    return Ok((key.clone(), values.remove(0)));
-                }
+            if let Ok(mut values) = self.lpop(key, Some(1))
+                && !values.is_empty()
+            {
+                self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
+                return Ok((key.clone(), values.remove(0)));
             }
         }
 
@@ -929,10 +929,10 @@ impl ListStore {
 
                     // Try to pop from any key
                     for key in &keys {
-                        if let Ok(mut values) = self.lpop(key, Some(1)) {
-                            if !values.is_empty() {
-                                return Ok((key.clone(), values.remove(0)));
-                            }
+                        if let Ok(mut values) = self.lpop(key, Some(1))
+                            && !values.is_empty()
+                        {
+                            return Ok((key.clone(), values.remove(0)));
                         }
                     }
                 }
@@ -960,11 +960,11 @@ impl ListStore {
 
                 // Try to pop from any key
                 for key in &keys {
-                    if let Ok(mut values) = self.lpop(key, Some(1)) {
-                        if !values.is_empty() {
-                            self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
-                            return Ok((key.clone(), values.remove(0)));
-                        }
+                    if let Ok(mut values) = self.lpop(key, Some(1))
+                        && !values.is_empty()
+                    {
+                        self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
+                        return Ok((key.clone(), values.remove(0)));
                     }
                 }
             }
@@ -1027,11 +1027,11 @@ impl ListStore {
     ) -> Result<(String, Vec<u8>)> {
         // Try immediate pop first
         for key in &keys {
-            if let Ok(mut values) = self.rpop(key, Some(1)) {
-                if !values.is_empty() {
-                    self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
-                    return Ok((key.clone(), values.remove(0)));
-                }
+            if let Ok(mut values) = self.rpop(key, Some(1))
+                && !values.is_empty()
+            {
+                self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
+                return Ok((key.clone(), values.remove(0)));
             }
         }
 
@@ -1048,10 +1048,10 @@ impl ListStore {
                     }
 
                     for key in &keys {
-                        if let Ok(mut values) = self.rpop(key, Some(1)) {
-                            if !values.is_empty() {
-                                return Ok((key.clone(), values.remove(0)));
-                            }
+                        if let Ok(mut values) = self.rpop(key, Some(1))
+                            && !values.is_empty()
+                        {
+                            return Ok((key.clone(), values.remove(0)));
                         }
                     }
                 }
@@ -1076,11 +1076,11 @@ impl ListStore {
                 }
 
                 for key in &keys {
-                    if let Ok(mut values) = self.rpop(key, Some(1)) {
-                        if !values.is_empty() {
-                            self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
-                            return Ok((key.clone(), values.remove(0)));
-                        }
+                    if let Ok(mut values) = self.rpop(key, Some(1))
+                        && !values.is_empty()
+                    {
+                        self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
+                        return Ok((key.clone(), values.remove(0)));
                     }
                 }
             }

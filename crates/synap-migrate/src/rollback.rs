@@ -45,10 +45,10 @@ pub async fn rollback_migration(data_dir: &Path, backup_dir: &Path) -> Result<()
             }
 
             // Don't delete the backup directory if it's inside data_dir
-            if let Ok(stripped) = path.strip_prefix(data_dir) {
-                if stripped.starts_with("backups") || stripped.starts_with("backup") {
-                    continue;
-                }
+            if let Ok(stripped) = path.strip_prefix(data_dir)
+                && (stripped.starts_with("backups") || stripped.starts_with("backup"))
+            {
+                continue;
             }
 
             if path.is_file() {

@@ -183,8 +183,8 @@ impl crate::pubsub::PubSubManager {
                                                     tracing::debug!("Unknown WS message type: {}", msg_type);
                                                 }
                                             }
-                                        } else if let Some(topic) = json.get("topic").and_then(|t| t.as_str()) {
-                                            if let Some(payload_or_data) = json.get("payload").or_else(|| json.get("data")) {
+                                        } else if let Some(topic) = json.get("topic").and_then(|t| t.as_str())
+                                            && let Some(payload_or_data) = json.get("payload").or_else(|| json.get("data")) {
                                                 let pubsub_msg = PubSubMessage {
                                                     topic: topic.to_string(),
                                                     data: payload_or_data.clone(),
@@ -197,7 +197,6 @@ impl crate::pubsub::PubSubManager {
                                                     break;
                                                 }
                                             }
-                                        }
                                     }
                                     Err(e) => {
                                         tracing::warn!("Failed to parse WebSocket message: {}", e);

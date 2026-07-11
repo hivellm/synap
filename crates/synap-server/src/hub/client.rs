@@ -82,14 +82,14 @@ impl HubClient {
         // Check cache first
         {
             let cache = self.access_key_cache.read();
-            if let Some(cached) = cache.get(access_key) {
-                if cached.cached_at.elapsed() < self.config.cache_ttl_duration() {
-                    debug!(
-                        "Access key validation cache hit for user {}",
-                        cached.user_id
-                    );
-                    return Ok((cached.user_id, cached.plan));
-                }
+            if let Some(cached) = cache.get(access_key)
+                && cached.cached_at.elapsed() < self.config.cache_ttl_duration()
+            {
+                debug!(
+                    "Access key validation cache hit for user {}",
+                    cached.user_id
+                );
+                return Ok((cached.user_id, cached.plan));
             }
         }
 

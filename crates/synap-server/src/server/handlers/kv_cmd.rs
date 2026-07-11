@@ -138,10 +138,8 @@ pub(super) async fn handle_kv_del_cmd(
     }
 
     // Log to WAL if deleted
-    if deleted {
-        if let Some(ref persistence) = state.persistence {
-            let _ = persistence.log_kv_del(vec![key.to_string()]).await;
-        }
+    if deleted && let Some(ref persistence) = state.persistence {
+        let _ = persistence.log_kv_del(vec![key.to_string()]).await;
     }
 
     Ok(serde_json::json!({ "deleted": deleted }))
@@ -349,10 +347,10 @@ pub(super) async fn handle_kv_mdel_cmd(
     let count = state.kv_store.mdel(&keys).await?;
 
     // Log deletions to WAL
-    if count > 0 {
-        if let Some(ref persistence) = state.persistence {
-            let _ = persistence.log_kv_del(keys).await;
-        }
+    if count > 0
+        && let Some(ref persistence) = state.persistence
+    {
+        let _ = persistence.log_kv_del(keys).await;
     }
 
     Ok(serde_json::json!({ "deleted": count }))
@@ -420,10 +418,10 @@ pub(super) async fn handle_kv_append_cmd(
     let length = state.kv_store.append(key, value_bytes).await?;
 
     // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence.log_kv_set(key.to_string(), vec![], None).await {
-            error!("Failed to log KV APPEND to WAL: {}", e);
-        }
+    if let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence.log_kv_set(key.to_string(), vec![], None).await
+    {
+        error!("Failed to log KV APPEND to WAL: {}", e);
     }
 
     Ok(serde_json::json!({ "length": length }))
@@ -492,10 +490,10 @@ pub(super) async fn handle_kv_setrange_cmd(
     let length = state.kv_store.setrange(key, offset, value_bytes).await?;
 
     // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence.log_kv_set(key.to_string(), vec![], None).await {
-            error!("Failed to log KV SETRANGE to WAL: {}", e);
-        }
+    if let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence.log_kv_set(key.to_string(), vec![], None).await
+    {
+        error!("Failed to log KV SETRANGE to WAL: {}", e);
     }
 
     Ok(serde_json::json!({ "length": length }))
@@ -536,13 +534,12 @@ pub(super) async fn handle_kv_getset_cmd(
     let old_value = state.kv_store.getset(key, value_bytes.clone()).await?;
 
     // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence
+    if let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence
             .log_kv_set(key.to_string(), value_bytes, None)
             .await
-        {
-            error!("Failed to log KV GETSET to WAL: {}", e);
-        }
+    {
+        error!("Failed to log KV GETSET to WAL: {}", e);
     }
 
     if let Some(old_bytes) = old_value {
@@ -587,12 +584,10 @@ pub(super) async fn handle_kv_msetnx_cmd(
     let success = state.kv_store.msetnx(kv_pairs.clone()).await?;
 
     // Log to WAL if all keys were set
-    if success {
-        if let Some(ref persistence) = state.persistence {
-            for (key, value_bytes) in kv_pairs {
-                if let Err(e) = persistence.log_kv_set(key, value_bytes, None).await {
-                    error!("Failed to log KV MSETNX to WAL: {}", e);
-                }
+    if success && let Some(ref persistence) = state.persistence {
+        for (key, value_bytes) in kv_pairs {
+            if let Err(e) = persistence.log_kv_set(key, value_bytes, None).await {
+                error!("Failed to log KV MSETNX to WAL: {}", e);
             }
         }
     }
@@ -660,14 +655,13 @@ pub(super) async fn handle_key_rename_cmd(
     manager.rename(source, destination).await?;
 
     // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence
+    if let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence
             .log_kv_rename(source.to_string(), destination.to_string())
             .await
-        {
-            error!("Failed to log RENAME to WAL: {}", e);
-            // Don't fail the request, just log the error
-        }
+    {
+        error!("Failed to log RENAME to WAL: {}", e);
+        // Don't fail the request, just log the error
     }
 
     Ok(serde_json::json!({

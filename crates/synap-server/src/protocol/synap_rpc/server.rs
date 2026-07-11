@@ -263,50 +263,48 @@ async fn handle_connection(
 
             // After SUBSCRIBE succeeds, register the connection's write channel
             // with the pubsub router so that publish() delivers push frames.
-            if is_subscribe {
-                if let Ok(SynapValue::Map(ref pairs)) = response.result {
-                    let sub_id = pairs.iter().find_map(|(k, v)| {
-                        if k.as_str() == Some("subscriber_id") {
-                            v.as_str().map(str::to_owned)
-                        } else {
-                            None
+            if is_subscribe && let Ok(SynapValue::Map(ref pairs)) = response.result {
+                let sub_id = pairs.iter().find_map(|(k, v)| {
+                    if k.as_str() == Some("subscriber_id") {
+                        v.as_str().map(str::to_owned)
+                    } else {
+                        None
+                    }
+                });
+                if let (Some(sub_id), Some(router)) = (sub_id, state.pubsub_router.as_ref()) {
+                    let router = Arc::clone(router);
+                    let (push_tx, mut push_rx) = tokio::sync::mpsc::channel::<PubSubMessage>(
+                        crate::core::pubsub::SUBSCRIBER_CHANNEL_CAPACITY,
+                    );
+                    router.register_connection(sub_id, push_tx);
+                    let tx_push = tx.clone();
+                    tokio::spawn(async move {
+                        while let Some(msg) = push_rx.recv().await {
+                            let push_value = SynapValue::Map(vec![
+                                (SynapValue::Str("topic".into()), SynapValue::Str(msg.topic)),
+                                (
+                                    SynapValue::Str("payload".into()),
+                                    SynapValue::Str(msg.payload.to_string()),
+                                ),
+                                (SynapValue::Str("id".into()), SynapValue::Str(msg.id)),
+                                (
+                                    SynapValue::Str("timestamp".into()),
+                                    SynapValue::Int(msg.timestamp as i64),
+                                ),
+                            ]);
+                            let push_response = Response {
+                                id: u32::MAX,
+                                result: Ok(push_value),
+                            };
+                            if tx_push
+                                .send((push_response, "_push".to_string(), 0.0, 0))
+                                .await
+                                .is_err()
+                            {
+                                break; // writer task gone — connection closed
+                            }
                         }
                     });
-                    if let (Some(sub_id), Some(router)) = (sub_id, state.pubsub_router.as_ref()) {
-                        let router = Arc::clone(router);
-                        let (push_tx, mut push_rx) = tokio::sync::mpsc::channel::<PubSubMessage>(
-                            crate::core::pubsub::SUBSCRIBER_CHANNEL_CAPACITY,
-                        );
-                        router.register_connection(sub_id, push_tx);
-                        let tx_push = tx.clone();
-                        tokio::spawn(async move {
-                            while let Some(msg) = push_rx.recv().await {
-                                let push_value = SynapValue::Map(vec![
-                                    (SynapValue::Str("topic".into()), SynapValue::Str(msg.topic)),
-                                    (
-                                        SynapValue::Str("payload".into()),
-                                        SynapValue::Str(msg.payload.to_string()),
-                                    ),
-                                    (SynapValue::Str("id".into()), SynapValue::Str(msg.id)),
-                                    (
-                                        SynapValue::Str("timestamp".into()),
-                                        SynapValue::Int(msg.timestamp as i64),
-                                    ),
-                                ]);
-                                let push_response = Response {
-                                    id: u32::MAX,
-                                    result: Ok(push_value),
-                                };
-                                if tx_push
-                                    .send((push_response, "_push".to_string(), 0.0, 0))
-                                    .await
-                                    .is_err()
-                                {
-                                    break; // writer task gone — connection closed
-                                }
-                            }
-                        });
-                    }
                 }
             }
 

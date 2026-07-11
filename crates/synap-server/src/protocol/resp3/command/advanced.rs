@@ -614,10 +614,10 @@ pub(super) async fn cmd_exec(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
     match state.transaction_manager.exec(&client_id).await {
         Ok(Some((results, writes))) => {
             // Persist + replicate the whole transaction atomically (audit M-010).
-            if let Some(ref persistence) = state.persistence {
-                if let Err(e) = persistence.log_transaction(&writes).await {
-                    tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
-                }
+            if let Some(ref persistence) = state.persistence
+                && let Err(e) = persistence.log_transaction(&writes).await
+            {
+                tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
             }
             Resp3Value::Array(
                 results
@@ -867,7 +867,7 @@ pub(super) async fn cmd_geoadd(state: &AppState, args: &[Resp3Value]) -> Resp3Va
             _ => break,
         }
     }
-    if args.len() <= pos || (args.len() - pos) % 3 != 0 {
+    if args.len() <= pos || !(args.len() - pos).is_multiple_of(3) {
         return Resp3Value::Error(
             "ERR syntax error: expected longitude latitude member triplets".into(),
         );

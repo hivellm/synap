@@ -15,7 +15,11 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufRead, AsyncReadExt};
 
 /// A RESP3 value.
-#[derive(Debug, Clone, PartialEq)]
+///
+/// `PartialEq` is implemented manually (below) so `BulkString` and `BulkShared`
+/// compare equal when their bytes match — they are the same wire value with a
+/// different ownership representation.
+#[derive(Debug, Clone)]
 pub enum Resp3Value {
     SimpleString(String),
     Error(String),
@@ -70,6 +74,55 @@ impl Resp3Value {
     /// True only for the Null variant.
     pub fn is_null(&self) -> bool {
         matches!(self, Self::Null)
+    }
+
+    /// Extract the payload as a shared buffer. `BulkShared` is a refcount bump
+    /// (no copy — the phase13 zero-copy write path); other byte-carrying
+    /// variants fall back to a copy.
+    pub fn into_shared_bytes(self) -> Option<Arc<[u8]>> {
+        match self {
+            Self::BulkShared(b) => Some(b),
+            Self::BulkString(b) => Some(b.into()),
+            Self::SimpleString(s) => Some(s.into_bytes().into()),
+            _ => None,
+        }
+    }
+
+    /// Borrowing variant of [`into_shared_bytes`](Self::into_shared_bytes):
+    /// clone the shared buffer out of a `&Resp3Value` (refcount bump for
+    /// `BulkShared`).
+    pub fn to_shared_bytes(&self) -> Option<Arc<[u8]>> {
+        match self {
+            Self::BulkShared(b) => Some(Arc::clone(b)),
+            Self::BulkString(b) => Some(b.as_slice().into()),
+            Self::SimpleString(s) => Some(s.as_bytes().into()),
+            _ => None,
+        }
+    }
+}
+
+impl PartialEq for Resp3Value {
+    fn eq(&self, other: &Self) -> bool {
+        use Resp3Value::*;
+        match (self, other) {
+            (SimpleString(a), SimpleString(b)) => a == b,
+            (Error(a), Error(b)) => a == b,
+            (Integer(a), Integer(b)) => a == b,
+            (Double(a), Double(b)) => a == b,
+            (Boolean(a), Boolean(b)) => a == b,
+            // BulkString and BulkShared are the same wire value — compare bytes
+            // across representations.
+            (BulkString(a), BulkString(b)) => a == b,
+            (BulkShared(a), BulkShared(b)) => a == b,
+            (BulkString(a), BulkShared(b)) | (BulkShared(b), BulkString(a)) => a.as_slice() == &**b,
+            (Null, Null) => true,
+            (Array(a), Array(b)) => a == b,
+            (Set(a), Set(b)) => a == b,
+            (Map(a), Map(b)) => a == b,
+            (Verbatim(ea, da), Verbatim(eb, db)) => ea == eb && da == db,
+            (BigNumber(a), BigNumber(b)) => a == b,
+            _ => false,
+        }
     }
 }
 
@@ -127,15 +180,25 @@ async fn read_line<R: AsyncBufRead + Unpin>(reader: &mut R) -> std::io::Result<S
     String::from_utf8(line).map_err(|_| resp_err("invalid utf-8 in protocol line"))
 }
 
+/// Read a bulk payload directly into a shared `Arc<[u8]>` buffer.
+///
+/// The payload is *born* shared: command arguments flow to the store (SET) or
+/// the reply path without the `Vec<u8> → Arc<[u8]>` re-allocation + memcpy the
+/// old `Vec` path paid (phase13 parse-bulk-into-arc). Zero-initializing costs
+/// the same memset `vec![0u8; len]` already paid.
 async fn read_bulk_bytes<R: AsyncBufRead + Unpin>(
     reader: &mut R,
     len: usize,
-) -> std::io::Result<Vec<u8>> {
+) -> std::io::Result<Arc<[u8]>> {
     if len > MAX_BULK_LEN {
         return Err(resp_err("bulk length exceeds maximum"));
     }
-    let mut data = vec![0u8; len];
-    reader.read_exact(&mut data).await?;
+    // SAFETY: a zeroed `MaybeUninit<u8>` is a valid `u8` (0), so `assume_init`
+    // on a zeroed slice is sound.
+    let mut data: Arc<[u8]> = unsafe { Arc::new_zeroed_slice(len).assume_init() };
+    // Freshly created — refcount is 1, so `get_mut` always succeeds.
+    let buf = Arc::get_mut(&mut data).expect("freshly created Arc is unique");
+    reader.read_exact(buf).await?;
     // Consume the trailing \r\n
     let mut crlf = [0u8; 2];
     reader.read_exact(&mut crlf).await?;
@@ -171,7 +234,7 @@ async fn parse_type<R: AsyncBufRead + Unpin>(
                 return Ok(Resp3Value::Null);
             }
             let data = read_bulk_bytes(reader, len as usize).await?;
-            Ok(Resp3Value::BulkString(data))
+            Ok(Resp3Value::BulkShared(data))
         }
         // Array: *3\r\n... or *-1\r\n (null array — RESP2 compat)
         b'*' => {

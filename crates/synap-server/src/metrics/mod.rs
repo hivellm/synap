@@ -787,15 +787,15 @@ impl Drop for PerfTimer<'_> {
         self.histogram
             .with_label_values(&[self.label])
             .observe(elapsed);
-        if let Some(threshold) = self.slow_threshold_secs {
-            if elapsed > threshold {
-                tracing::warn!(
-                    command = self.label,
-                    elapsed_ms = elapsed * 1_000.0,
-                    threshold_ms = threshold * 1_000.0,
-                    "slow command detected"
-                );
-            }
+        if let Some(threshold) = self.slow_threshold_secs
+            && elapsed > threshold
+        {
+            tracing::warn!(
+                command = self.label,
+                elapsed_ms = elapsed * 1_000.0,
+                threshold_ms = threshold * 1_000.0,
+                "slow command detected"
+            );
         }
     }
 }

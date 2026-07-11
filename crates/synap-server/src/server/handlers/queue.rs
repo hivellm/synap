@@ -84,14 +84,13 @@ pub async fn queue_publish(
     let message_id = message.id.clone();
 
     // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence
+    if let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence
             .log_queue_publish(scoped_name.clone(), message)
             .await
-        {
-            error!("Failed to log queue publish to WAL: {}", e);
-            // Don't fail the request, just log the error
-        }
+    {
+        error!("Failed to log queue publish to WAL: {}", e);
+        // Don't fail the request, just log the error
     }
 
     Ok(Json(PublishResponse { message_id }))
@@ -173,14 +172,13 @@ pub async fn queue_ack(
     queue_manager.ack(&scoped_name, &req.message_id).await?;
 
     // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence
+    if let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence
             .log_queue_ack(scoped_name.clone(), req.message_id.clone())
             .await
-        {
-            error!("Failed to log queue ACK to WAL: {}", e);
-            // Don't fail the request, just log the error
-        }
+    {
+        error!("Failed to log queue ACK to WAL: {}", e);
+        // Don't fail the request, just log the error
     }
 
     Ok(Json(serde_json::json!({ "success": true })))
@@ -216,14 +214,13 @@ pub async fn queue_nack(
         .await?;
 
     // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence
+    if let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence
             .log_queue_nack(scoped_name.clone(), req.message_id.clone(), req.requeue)
             .await
-        {
-            error!("Failed to log queue NACK to WAL: {}", e);
-            // Don't fail the request, just log the error
-        }
+    {
+        error!("Failed to log queue NACK to WAL: {}", e);
+        // Don't fail the request, just log the error
     }
 
     Ok(Json(serde_json::json!({ "success": true })))
@@ -473,14 +470,13 @@ pub(super) async fn handle_queue_publish_cmd(
     let message_id = message.id.clone();
 
     // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence
+    if let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence
             .log_queue_publish(queue.to_string(), message)
             .await
-        {
-            error!("Failed to log queue publish to WAL: {}", e);
-            // Don't fail the request, just log the error
-        }
+    {
+        error!("Failed to log queue publish to WAL: {}", e);
+        // Don't fail the request, just log the error
     }
 
     Ok(serde_json::json!({ "message_id": message_id }))
@@ -549,14 +545,13 @@ pub(super) async fn handle_queue_ack_cmd(
     queue_manager.ack(queue, message_id).await?;
 
     // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence
+    if let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence
             .log_queue_ack(queue.to_string(), message_id.to_string())
             .await
-        {
-            error!("Failed to log queue ACK to WAL: {}", e);
-            // Don't fail the request, just log the error
-        }
+    {
+        error!("Failed to log queue ACK to WAL: {}", e);
+        // Don't fail the request, just log the error
     }
 
     Ok(serde_json::json!({ "success": true }))
@@ -592,14 +587,13 @@ pub(super) async fn handle_queue_nack_cmd(
     queue_manager.nack(queue, message_id, requeue).await?;
 
     // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence
+    if let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence
             .log_queue_nack(queue.to_string(), message_id.to_string(), requeue)
             .await
-        {
-            error!("Failed to log queue NACK to WAL: {}", e);
-            // Don't fail the request, just log the error
-        }
+    {
+        error!("Failed to log queue NACK to WAL: {}", e);
+        // Don't fail the request, just log the error
     }
 
     Ok(serde_json::json!({ "success": true }))

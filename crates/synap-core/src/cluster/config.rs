@@ -127,15 +127,15 @@ impl ClusterConfig {
         if let Some(v) = get("SYNAP_CLUSTER_ENABLED") {
             cfg.enabled = v.parse().unwrap_or(cfg.enabled);
         }
-        if let Some(v) = get("SYNAP_CLUSTER_NODE_ID") {
-            if !v.is_empty() {
-                cfg.node_id = Some(v);
-            }
+        if let Some(v) = get("SYNAP_CLUSTER_NODE_ID")
+            && !v.is_empty()
+        {
+            cfg.node_id = Some(v);
         }
-        if let Some(v) = get("SYNAP_CLUSTER_NODE_ADDRESS") {
-            if let Ok(addr) = v.parse() {
-                cfg.node_address = addr;
-            }
+        if let Some(v) = get("SYNAP_CLUSTER_NODE_ADDRESS")
+            && let Ok(addr) = v.parse()
+        {
+            cfg.node_address = addr;
         }
         if let Some(v) = get("SYNAP_CLUSTER_SEEDS") {
             cfg.seed_nodes = v

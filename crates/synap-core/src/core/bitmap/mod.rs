@@ -474,10 +474,10 @@ impl BitmapStore {
         let mut map = shard.write();
 
         // Remove expired value if present
-        if let Some(existing_bitmap) = map.get(key) {
-            if existing_bitmap.is_expired() {
-                map.remove(key);
-            }
+        if let Some(existing_bitmap) = map.get(key)
+            && existing_bitmap.is_expired()
+        {
+            map.remove(key);
         }
 
         let bitmap = map
@@ -626,10 +626,10 @@ impl BitmapStore {
         let mut map = dest_shard.write();
 
         // Remove expired value if present
-        if let Some(existing_bitmap) = map.get(dest_key) {
-            if existing_bitmap.is_expired() {
-                map.remove(dest_key);
-            }
+        if let Some(existing_bitmap) = map.get(dest_key)
+            && existing_bitmap.is_expired()
+        {
+            map.remove(dest_key);
         }
 
         let dest_bitmap = map
@@ -722,10 +722,10 @@ impl BitmapStore {
         let mut map = shard.write();
 
         // Remove expired value if present
-        if let Some(existing_bitmap) = map.get(key) {
-            if existing_bitmap.is_expired() {
-                map.remove(key);
-            }
+        if let Some(existing_bitmap) = map.get(key)
+            && existing_bitmap.is_expired()
+        {
+            map.remove(key);
         }
 
         let bitmap = map

@@ -1,4 +1,4 @@
-use super::{AppState, SynapValue, arg_bytes, arg_int, arg_str};
+use super::{AppState, SynapValue, arg_bytes, arg_int, arg_shared, arg_str};
 
 pub(super) async fn run(
     state: &AppState,
@@ -15,7 +15,8 @@ pub(super) async fn run(
 
         "SET" => {
             let key = arg_str(args, 0)?;
-            let value = arg_bytes(args, 1)?;
+            // Refcount bump of the deserialized Bytes arg — no value copy.
+            let value = arg_shared(args, 1)?;
             let ttl: Option<u64> = args.get(2).and_then(|v| v.as_int()).map(|n| n as u64);
             state
                 .kv_store
@@ -123,7 +124,7 @@ pub(super) async fn run(
                 .map_err(|e| e.to_string())
         }
         "MSET" => {
-            if args.len() % 2 != 0 {
+            if !args.len().is_multiple_of(2) {
                 return Err("ERR wrong number of arguments for 'MSET'".into());
             }
             let mut pairs = Vec::new();
@@ -268,7 +269,7 @@ pub(super) async fn run(
                 .map_err(|e| e.to_string())
         }
         "MSETNX" => {
-            if args.len() % 2 != 0 {
+            if !args.len().is_multiple_of(2) {
                 return Err("ERR wrong number of arguments for 'MSETNX'".into());
             }
             let mut pairs = Vec::new();

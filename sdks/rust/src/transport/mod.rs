@@ -230,12 +230,11 @@ impl SynapRpcTransport {
                     Err(_) => break,
                 };
                 // Only forward push frames (server sentinel id).
-                if resp.id == u32::MAX {
-                    if let Ok(wire_val) = resp.result {
-                        if push_tx.send(wire_val.to_json()).is_err() {
-                            break; // receiver dropped
-                        }
-                    }
+                if resp.id == u32::MAX
+                    && let Ok(wire_val) = resp.result
+                    && push_tx.send(wire_val.to_json()).is_err()
+                {
+                    break; // receiver dropped
                 }
                 // Non-push frames on a dedicated subscription connection are
                 // unexpected; skip silently.

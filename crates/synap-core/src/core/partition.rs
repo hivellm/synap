@@ -278,10 +278,10 @@ impl Partition {
 
         self.total_bytes = self.total_bytes.saturating_sub(bytes_removed);
 
-        if initial_len != self.buffer.len() {
-            if let Some(first) = self.buffer.front() {
-                self.min_offset = first.offset;
-            }
+        if initial_len != self.buffer.len()
+            && let Some(first) = self.buffer.front()
+        {
+            self.min_offset = first.offset;
         }
     }
 

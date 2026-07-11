@@ -78,6 +78,17 @@ fn arg_bytes(args: &[SynapValue], idx: usize) -> Result<Vec<u8>, String> {
     }
 }
 
+/// Extract an argument as a shared buffer — a refcount bump for `Bytes` args
+/// (no copy; phase13 parse-bulk-into-arc write path), copying only for `Str`.
+fn arg_shared(args: &[SynapValue], idx: usize) -> Result<std::sync::Arc<[u8]>, String> {
+    match args.get(idx) {
+        Some(SynapValue::Bytes(b)) => Ok(std::sync::Arc::clone(b)),
+        Some(SynapValue::Str(s)) => Ok(s.as_bytes().into()),
+        Some(_) => Err(format!("ERR argument {idx} must be bytes")),
+        None => Err(format!("ERR missing argument {idx}")),
+    }
+}
+
 fn arg_int(args: &[SynapValue], idx: usize) -> Result<i64, String> {
     match args.get(idx) {
         Some(SynapValue::Int(n)) => Ok(*n),

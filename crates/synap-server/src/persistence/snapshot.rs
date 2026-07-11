@@ -447,12 +447,12 @@ impl SnapshotManager {
 
         while let Some(entry) = dir.next_entry().await? {
             let path = entry.path();
-            if path.extension().and_then(|s| s.to_str()) == Some("bin") {
-                if let Some(filename) = path.file_name() {
-                    let name = filename.to_string_lossy();
-                    if name.starts_with("snapshot-") {
-                        snapshots.push(path);
-                    }
+            if path.extension().and_then(|s| s.to_str()) == Some("bin")
+                && let Some(filename) = path.file_name()
+            {
+                let name = filename.to_string_lossy();
+                if name.starts_with("snapshot-") {
+                    snapshots.push(path);
                 }
             }
         }

@@ -69,7 +69,7 @@ pub(super) async fn run(
                     _ => break,
                 }
             }
-            if (args.len() - pos) % 3 != 0 {
+            if !(args.len() - pos).is_multiple_of(3) {
                 return Err(
                     "ERR wrong number of arguments for 'GEOADD': expected lat/lon/member triplets"
                         .into(),
@@ -822,10 +822,10 @@ pub(super) async fn run(
                 Ok(None) => Ok(SynapValue::Null),
                 Ok(Some((results, writes))) => {
                     // Persist + replicate the whole transaction atomically (M-010).
-                    if let Some(ref persistence) = state.persistence {
-                        if let Err(e) = persistence.log_transaction(&writes).await {
-                            tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
-                        }
+                    if let Some(ref persistence) = state.persistence
+                        && let Err(e) = persistence.log_transaction(&writes).await
+                    {
+                        tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
                     }
                     Ok(SynapValue::Array(
                         results

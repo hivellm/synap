@@ -40,11 +40,11 @@ async fn test_kv_store_with_cluster_routing() {
     for i in 0..1000 {
         let key = format!("test:key:{}", i);
         let slot = hash_slot(&key);
-        if let Ok(owner) = topology.get_slot_owner(slot) {
-            if owner == "node-0" {
-                test_key = Some(key);
-                break;
-            }
+        if let Ok(owner) = topology.get_slot_owner(slot)
+            && owner == "node-0"
+        {
+            test_key = Some(key);
+            break;
         }
     }
 
@@ -68,11 +68,11 @@ async fn test_kv_store_cluster_moved_error() {
     for i in 0..1000 {
         let key = format!("test:key:{}", i);
         let slot = hash_slot(&key);
-        if let Ok(owner) = topology.get_slot_owner(slot) {
-            if owner != "node-0" {
-                test_key = Some(key);
-                break;
-            }
+        if let Ok(owner) = topology.get_slot_owner(slot)
+            && owner != "node-0"
+        {
+            test_key = Some(key);
+            break;
         }
     }
 
@@ -101,11 +101,11 @@ async fn test_kv_store_cluster_ask_error() {
     for i in 0..1000 {
         let key = format!("test:key:{}", i);
         let slot = hash_slot(&key);
-        if let Ok(owner) = topology.get_slot_owner(slot) {
-            if owner == "node-0" {
-                test_slot = Some(slot);
-                break;
-            }
+        if let Ok(owner) = topology.get_slot_owner(slot)
+            && owner == "node-0"
+        {
+            test_slot = Some(slot);
+            break;
         }
     }
 
@@ -206,11 +206,11 @@ async fn test_kv_store_get_with_cluster_routing() {
     for i in 0..1000 {
         let key = format!("test:key:{}", i);
         let slot = hash_slot(&key);
-        if let Ok(owner) = topology.get_slot_owner(slot) {
-            if owner == "node-0" {
-                test_key = Some(key);
-                break;
-            }
+        if let Ok(owner) = topology.get_slot_owner(slot)
+            && owner == "node-0"
+        {
+            test_key = Some(key);
+            break;
         }
     }
 
@@ -227,11 +227,11 @@ async fn test_kv_store_get_with_cluster_routing() {
     for i in 0..1000 {
         let key = format!("test:other:{}", i);
         let slot = hash_slot(&key);
-        if let Ok(owner) = topology.get_slot_owner(slot) {
-            if owner != "node-0" {
-                other_key = Some(key);
-                break;
-            }
+        if let Ok(owner) = topology.get_slot_owner(slot)
+            && owner != "node-0"
+        {
+            other_key = Some(key);
+            break;
         }
     }
 
@@ -254,11 +254,11 @@ async fn test_kv_store_delete_with_cluster_routing() {
     for i in 0..1000 {
         let key = format!("test:key:{}", i);
         let slot = hash_slot(&key);
-        if let Ok(owner) = topology.get_slot_owner(slot) {
-            if owner == "node-0" {
-                test_key = Some(key);
-                break;
-            }
+        if let Ok(owner) = topology.get_slot_owner(slot)
+            && owner == "node-0"
+        {
+            test_key = Some(key);
+            break;
         }
     }
 
@@ -275,11 +275,11 @@ async fn test_kv_store_delete_with_cluster_routing() {
     for i in 0..1000 {
         let key = format!("test:other:{}", i);
         let slot = hash_slot(&key);
-        if let Ok(owner) = topology.get_slot_owner(slot) {
-            if owner != "node-0" {
-                other_key = Some(key);
-                break;
-            }
+        if let Ok(owner) = topology.get_slot_owner(slot)
+            && owner != "node-0"
+        {
+            other_key = Some(key);
+            break;
         }
     }
 

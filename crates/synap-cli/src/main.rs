@@ -289,7 +289,7 @@ impl CliClient {
     }
 
     async fn cmd_mset(&self, args: &[String]) -> Result<String> {
-        if args.len() < 2 || args.len() % 2 != 0 {
+        if args.len() < 2 || !args.len().is_multiple_of(2) {
             return Err(anyhow::anyhow!("Usage: MSET key value [key value ...]"));
         }
         let pairs: Vec<Value> = args

@@ -216,13 +216,11 @@ impl OptimizedWAL {
                 FsyncMode::Never => false,
             };
 
-            if should_fsync {
-                if let Ok(_file) = writer.get_mut().sync_all().await {
-                    last_fsync = std::time::Instant::now();
-                    let mut stats_guard = stats.lock().await;
-                    stats_guard.fsyncs_performed += 1;
-                    debug!("WAL fsync performed, batch size: {}", batch_size);
-                }
+            if should_fsync && let Ok(_file) = writer.get_mut().sync_all().await {
+                last_fsync = std::time::Instant::now();
+                let mut stats_guard = stats.lock().await;
+                stats_guard.fsyncs_performed += 1;
+                debug!("WAL fsync performed, batch size: {}", batch_size);
             }
 
             // Send responses

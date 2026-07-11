@@ -71,19 +71,18 @@ pub async fn find_latest_snapshot(data_dir: &Path) -> Result<Option<PathBuf>> {
     {
         let path = entry.path();
 
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with("snapshot-v") && name.ends_with(".bin") {
-                // Extract timestamp from filename: snapshot-v2-{timestamp}.bin
-                if let Some(ts_str) = name
-                    .strip_prefix("snapshot-v2-")
-                    .and_then(|s| s.strip_suffix(".bin"))
-                {
-                    if let Ok(timestamp) = ts_str.parse::<u64>() {
-                        if latest.is_none() || latest.as_ref().unwrap().1 < timestamp {
-                            latest = Some((path.clone(), timestamp));
-                        }
-                    }
-                }
+        if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && name.starts_with("snapshot-v")
+            && name.ends_with(".bin")
+        {
+            // Extract timestamp from filename: snapshot-v2-{timestamp}.bin
+            if let Some(ts_str) = name
+                .strip_prefix("snapshot-v2-")
+                .and_then(|s| s.strip_suffix(".bin"))
+                && let Ok(timestamp) = ts_str.parse::<u64>()
+                && (latest.is_none() || latest.as_ref().unwrap().1 < timestamp)
+            {
+                latest = Some((path.clone(), timestamp));
             }
         }
     }

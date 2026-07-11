@@ -27,14 +27,14 @@ pub async fn kv_set(
     };
 
     // Reject oversized values before any allocation in the store
-    if let Some(max_bytes) = state.kv_store.config().max_value_size_bytes {
-        if value_bytes.len() > max_bytes {
-            return Err(SynapError::InvalidRequest(format!(
-                "Value size {} bytes exceeds max_value_size_bytes {}",
-                value_bytes.len(),
-                max_bytes
-            )));
-        }
+    if let Some(max_bytes) = state.kv_store.config().max_value_size_bytes
+        && value_bytes.len() > max_bytes
+    {
+        return Err(SynapError::InvalidRequest(format!(
+            "Value size {} bytes exceeds max_value_size_bytes {}",
+            value_bytes.len(),
+            max_bytes
+        )));
     }
 
     // WAL write-ahead: when durability mode is Sync (fsync_mode=Always),
@@ -76,25 +76,23 @@ pub async fn kv_set(
     };
 
     // WAL write-ahead (sync mode): log BEFORE writing to memory
-    if is_sync {
-        if let Some(ref persistence) = state.persistence {
-            let ttl_secs = expiry.and_then(|e| match e {
-                Expiry::Seconds(s) => Some(s),
-                Expiry::Milliseconds(ms) => Some(ms / 1_000),
-                _ => None,
-            });
-            persistence
-                .log_kv_set(
-                    scoped_key.clone().into_owned(),
-                    value_bytes.clone(),
-                    ttl_secs,
-                )
-                .await
-                .map_err(|e| {
-                    error!("WAL write failed (sync mode), aborting SET: {}", e);
-                    SynapError::InternalError(format!("WAL write failed: {e}"))
-                })?;
-        }
+    if is_sync && let Some(ref persistence) = state.persistence {
+        let ttl_secs = expiry.and_then(|e| match e {
+            Expiry::Seconds(s) => Some(s),
+            Expiry::Milliseconds(ms) => Some(ms / 1_000),
+            _ => None,
+        });
+        persistence
+            .log_kv_set(
+                scoped_key.clone().into_owned(),
+                value_bytes.clone(),
+                ttl_secs,
+            )
+            .await
+            .map_err(|e| {
+                error!("WAL write failed (sync mode), aborting SET: {}", e);
+                SynapError::InternalError(format!("WAL write failed: {e}"))
+            })?;
     }
 
     let opts = SetOptions {
@@ -112,25 +110,25 @@ pub async fn kv_set(
 
     // Async WAL: log after memory write (default, Periodic/Never modes)
     // Only log when the write actually happened (NX/XX condition was met).
-    if result.written && !is_sync {
-        if let Some(ref persistence) = state.persistence {
-            let ttl_secs = expiry.and_then(|e| match e {
-                Expiry::Seconds(s) => Some(s),
-                Expiry::Milliseconds(ms) => Some(ms / 1_000),
-                _ => None,
-            });
-            // wal_value is Some when persistence is active (cloned above).
-            if let Some(wv) = wal_value {
-                if let Err(e) = persistence
-                    .log_kv_set(scoped_key.into_owned(), wv, ttl_secs)
-                    .await
-                {
-                    error!(
-                        "Failed to log KV SET to WAL (async mode, data in memory): {}",
-                        e
-                    );
-                }
-            }
+    if result.written
+        && !is_sync
+        && let Some(ref persistence) = state.persistence
+    {
+        let ttl_secs = expiry.and_then(|e| match e {
+            Expiry::Seconds(s) => Some(s),
+            Expiry::Milliseconds(ms) => Some(ms / 1_000),
+            _ => None,
+        });
+        // wal_value is Some when persistence is active (cloned above).
+        if let Some(wv) = wal_value
+            && let Err(e) = persistence
+                .log_kv_set(scoped_key.into_owned(), wv, ttl_secs)
+                .await
+        {
+            error!(
+                "Failed to log KV SET to WAL (async mode, data in memory): {}",
+                e
+            );
         }
     }
 
@@ -209,12 +207,11 @@ pub async fn kv_delete(
     let deleted = state.kv_store.delete(&scoped_key).await?;
 
     // Log to WAL if persistence is enabled
-    if deleted {
-        if let Some(ref persistence) = state.persistence {
-            if let Err(e) = persistence.log_kv_del(vec![scoped_key.into_owned()]).await {
-                error!("Failed to log KV DELETE to WAL: {}", e);
-            }
-        }
+    if deleted
+        && let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence.log_kv_del(vec![scoped_key.into_owned()]).await
+    {
+        error!("Failed to log KV DELETE to WAL: {}", e);
     }
 
     Ok(Json(DeleteResponse { deleted, key }))
@@ -514,13 +511,12 @@ pub async fn kv_getset(
         .await?;
 
     // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence
+    if let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence
             .log_kv_set(scoped_key.into_owned(), value_bytes, None)
             .await
-        {
-            error!("Failed to log KV GETSET to WAL: {}", e);
-        }
+    {
+        error!("Failed to log KV GETSET to WAL: {}", e);
     }
 
     if let Some(old_bytes) = old_value {
@@ -572,12 +568,10 @@ pub async fn kv_msetnx(
     let success = state.kv_store.msetnx(scoped_pairs.clone()).await?;
 
     // Log to WAL if all keys were set
-    if success {
-        if let Some(ref persistence) = state.persistence {
-            for (key, value_bytes) in scoped_pairs {
-                if let Err(e) = persistence.log_kv_set(key, value_bytes, None).await {
-                    error!("Failed to log KV MSETNX to WAL: {}", e);
-                }
+    if success && let Some(ref persistence) = state.persistence {
+        for (key, value_bytes) in scoped_pairs {
+            if let Err(e) = persistence.log_kv_set(key, value_bytes, None).await {
+                error!("Failed to log KV MSETNX to WAL: {}", e);
             }
         }
     }
@@ -720,14 +714,13 @@ pub async fn key_rename(
     manager.rename(&scoped_source, &scoped_dest).await?;
 
     // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence
+    if let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence
             .log_kv_rename(scoped_source.into_owned(), scoped_dest.into_owned())
             .await
-        {
-            error!("Failed to log RENAME to WAL: {}", e);
-            // Don't fail the request, just log the error
-        }
+    {
+        error!("Failed to log RENAME to WAL: {}", e);
+        // Don't fail the request, just log the error
     }
 
     Ok(Json(RenameResponse {
@@ -1147,10 +1140,10 @@ pub async fn transaction_exec(
         Some((results, writes)) => {
             // Persist + replicate the whole transaction as one atomic unit
             // (audit M-010).
-            if let Some(ref persistence) = state.persistence {
-                if let Err(e) = persistence.log_transaction(&writes).await {
-                    error!("Failed to log EXEC transaction to WAL: {}", e);
-                }
+            if let Some(ref persistence) = state.persistence
+                && let Err(e) = persistence.log_transaction(&writes).await
+            {
+                error!("Failed to log EXEC transaction to WAL: {}", e);
             }
             Ok(Json(ExecResponse::Success { results }))
         }

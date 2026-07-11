@@ -10,7 +10,7 @@ pub(super) async fn run(
         // ── Hash ──────────────────────────────────────────────────────────────
         "HSET" => {
             let key = arg_str(args, 0)?;
-            if (args.len() - 1) % 2 != 0 {
+            if !(args.len() - 1).is_multiple_of(2) {
                 return Err("ERR wrong number of arguments for 'HSET'".into());
             }
             let mut added = 0i64;
@@ -291,7 +291,7 @@ pub(super) async fn run(
         // ── Hash extensions ────────────────────────────────────────────────────
         "HMSET" => {
             let key = arg_str(args, 0)?;
-            if (args.len() - 1) % 2 != 0 {
+            if !(args.len() - 1).is_multiple_of(2) {
                 return Err("ERR wrong number of arguments for 'HMSET'".into());
             }
             let mut i = 1;

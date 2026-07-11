@@ -319,10 +319,10 @@ impl ConsumerGroup {
                         .unwrap_or(false)
                 });
 
-                if let Some(underloaded_id) = underloaded {
-                    if let Some(member) = self.members.get_mut(underloaded_id) {
-                        member.partitions.push(partition_id);
-                    }
+                if let Some(underloaded_id) = underloaded
+                    && let Some(member) = self.members.get_mut(underloaded_id)
+                {
+                    member.partitions.push(partition_id);
                 }
             }
         }

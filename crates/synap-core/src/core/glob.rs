@@ -30,12 +30,12 @@ pub fn glob_match_bytes(pattern: &[u8], text: &[u8]) -> bool {
                     continue;
                 }
                 b'[' => {
-                    if let Some((matched, next_p)) = match_class(pattern, p, text[t]) {
-                        if matched {
-                            p = next_p;
-                            t += 1;
-                            continue;
-                        }
+                    if let Some((matched, next_p)) = match_class(pattern, p, text[t])
+                        && matched
+                    {
+                        p = next_p;
+                        t += 1;
+                        continue;
                     }
                     // Class didn't match → try backtracking.
                 }

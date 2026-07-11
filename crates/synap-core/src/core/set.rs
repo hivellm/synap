@@ -291,10 +291,10 @@ impl SetStore {
 
     /// Refuse a growing write when the shared budget is already over the cap.
     fn check_admit(&self, incoming: usize) -> Result<()> {
-        if let Some(m) = &self.mem {
-            if m.would_exceed(incoming as i64) {
-                return Err(SynapError::MemoryLimitExceeded);
-            }
+        if let Some(m) = &self.mem
+            && m.would_exceed(incoming as i64)
+        {
+            return Err(SynapError::MemoryLimitExceeded);
         }
         Ok(())
     }
@@ -513,10 +513,10 @@ impl SetStore {
             }
 
             // Add to destination
-            if let Some(existing_set) = map.get(destination) {
-                if existing_set.is_expired() {
-                    map.remove(destination);
-                }
+            if let Some(existing_set) = map.get(destination)
+                && existing_set.is_expired()
+            {
+                map.remove(destination);
             }
 
             let dest_set = map
@@ -567,10 +567,10 @@ impl SetStore {
         }
 
         // Add to destination
-        if let Some(existing_set) = dest_map.get(destination) {
-            if existing_set.is_expired() {
-                dest_map.remove(destination);
-            }
+        if let Some(existing_set) = dest_map.get(destination)
+            && existing_set.is_expired()
+        {
+            dest_map.remove(destination);
         }
 
         let dest_set = dest_map
@@ -628,10 +628,10 @@ impl SetStore {
         for key in keys {
             let shard = self.shard(key);
             let map = shard.read();
-            if let Some(set) = map.get(key) {
-                if !set.is_expired() {
-                    result.extend(set.members.iter().cloned());
-                }
+            if let Some(set) = map.get(key)
+                && !set.is_expired()
+            {
+                result.extend(set.members.iter().cloned());
             }
         }
 
@@ -660,10 +660,10 @@ impl SetStore {
         for key in keys.iter().skip(1) {
             let shard = self.shard(key);
             let map = shard.read();
-            if let Some(set) = map.get(key) {
-                if !set.is_expired() {
-                    result.retain(|member| !set.members.contains(member));
-                }
+            if let Some(set) = map.get(key)
+                && !set.is_expired()
+            {
+                result.retain(|member| !set.members.contains(member));
             }
         }
 

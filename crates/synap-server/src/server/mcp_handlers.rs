@@ -148,13 +148,12 @@ async fn handle_kv_set(
         .map_err(|e| ErrorData::internal_error(format!("Set failed: {}", e), None))?;
 
     // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence
+    if let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence
             .log_kv_set(key.to_string(), value_bytes, ttl)
             .await
-        {
-            tracing::error!("Failed to log KV SET to WAL (MCP): {}", e);
-        }
+    {
+        tracing::error!("Failed to log KV SET to WAL (MCP): {}", e);
     }
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
@@ -186,12 +185,11 @@ async fn handle_kv_delete(
         .map_err(|e| ErrorData::internal_error(format!("Delete failed: {}", e), None))?;
 
     // Log to WAL if deleted
-    if deleted {
-        if let Some(ref persistence) = state.persistence {
-            if let Err(e) = persistence.log_kv_del(vec![key.to_string()]).await {
-                tracing::error!("Failed to log KV DELETE to WAL (MCP): {}", e);
-            }
-        }
+    if deleted
+        && let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence.log_kv_del(vec![key.to_string()]).await
+    {
+        tracing::error!("Failed to log KV DELETE to WAL (MCP): {}", e);
     }
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
@@ -229,13 +227,12 @@ async fn handle_kv_append(
         .map_err(|e| ErrorData::internal_error(format!("APPEND failed: {}", e), None))?;
 
     // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence {
-        if let Err(e) = persistence
+    if let Some(ref persistence) = state.persistence
+        && let Err(e) = persistence
             .log_kv_set(key.to_string(), value_bytes, None)
             .await
-        {
-            tracing::error!("Failed to log KV APPEND to WAL (MCP): {}", e);
-        }
+    {
+        tracing::error!("Failed to log KV APPEND to WAL (MCP): {}", e);
     }
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
@@ -968,10 +965,10 @@ async fn handle_transaction_exec(
     {
         Some((results, writes)) => {
             // Persist + replicate the whole transaction atomically (audit M-010).
-            if let Some(ref persistence) = state.persistence {
-                if let Err(e) = persistence.log_transaction(&writes).await {
-                    tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
-                }
+            if let Some(ref persistence) = state.persistence
+                && let Err(e) = persistence.log_transaction(&writes).await
+            {
+                tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
             }
             Ok(CallToolResult::success(vec![ContentBlock::text(
                 json!({

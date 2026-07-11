@@ -203,16 +203,16 @@ impl KVStore {
 
             // Check if slot is migrating FIRST (before ownership check)
             // During migration, keys should be redirected to destination node
-            if let Some(ref migration) = self.cluster_migration {
-                if let Some(migration_status) = migration.get_migration(slot) {
-                    // Slot is migrating - return ASK redirect to destination node
-                    let to_node = migration_status.to_node;
-                    if let Ok(node) = topology.get_node(&to_node) {
-                        return Err(SynapError::ClusterAsk {
-                            slot,
-                            node_address: node.address.to_string(),
-                        });
-                    }
+            if let Some(ref migration) = self.cluster_migration
+                && let Some(migration_status) = migration.get_migration(slot)
+            {
+                // Slot is migrating - return ASK redirect to destination node
+                let to_node = migration_status.to_node;
+                if let Ok(node) = topology.get_node(&to_node) {
+                    return Err(SynapError::ClusterAsk {
+                        slot,
+                        node_address: node.address.to_string(),
+                    });
                 }
             }
 
@@ -281,7 +281,7 @@ impl KVStore {
     pub async fn set(
         &self,
         key: impl Into<String>,
-        value: Vec<u8>,
+        value: impl Into<Arc<[u8]>>,
         ttl_secs: Option<u64>,
     ) -> Result<()> {
         let key: String = key.into();
@@ -293,18 +293,23 @@ impl KVStore {
 
     /// SET body without the per-key lock. Callers MUST already hold the key's
     /// lock (the public `set`, or `TransactionManager::exec` for its key set).
+    ///
+    /// `value` accepts a `Vec<u8>` (converted once) or an `Arc<[u8]>` straight
+    /// from the parser (zero-copy — phase13 parse-bulk-into-arc): the stored
+    /// entry shares the buffer via a refcount bump, no memcpy.
     pub(crate) async fn set_unlocked(
         &self,
         key: String,
-        value: Vec<u8>,
+        value: impl Into<Arc<[u8]>>,
         ttl_secs: Option<u64>,
     ) -> Result<()> {
+        let value: Arc<[u8]> = value.into();
         debug!("SET key={}, size={}, ttl={:?}", key, value.len(), ttl_secs);
 
         // Check cluster routing (returns error if key doesn't belong to this node)
         self.check_cluster_routing(&key)?;
 
-        let stored = StoredValue::new(value.clone(), ttl_secs);
+        let stored = StoredValue::new(Arc::clone(&value), ttl_secs);
         let entry_size = self.estimate_entry_size(&key, &stored);
 
         // Check memory limits against the shared cross-datatype budget (audit
@@ -371,7 +376,8 @@ impl KVStore {
                     .as_secs()
                     + secs
             });
-            cache.put(k, value, cache_ttl);
+            // The L1 cache stores owned Vecs — copy only when a cache is attached.
+            cache.put(k, value.to_vec(), cache_ttl);
         }
 
         // Release the shard lock before publishing so notification delivery never
@@ -555,13 +561,13 @@ impl KVStore {
         self.check_cluster_routing(key)?;
 
         // Try L1 cache first
-        if let Some(ref cache) = self.cache {
-            if let Some(cached_value) = cache.get(key) {
-                debug!("L1 Cache HIT: {}", key);
-                self.stats.gets.fetch_add(1, Ordering::Relaxed);
-                self.stats.hits.fetch_add(1, Ordering::Relaxed);
-                return Ok(Some(Arc::from(cached_value)));
-            }
+        if let Some(ref cache) = self.cache
+            && let Some(cached_value) = cache.get(key)
+        {
+            debug!("L1 Cache HIT: {}", key);
+            self.stats.gets.fetch_add(1, Ordering::Relaxed);
+            self.stats.hits.fetch_add(1, Ordering::Relaxed);
+            return Ok(Some(Arc::from(cached_value)));
         }
 
         // Cache miss - get from storage.
@@ -1289,16 +1295,16 @@ impl KVStore {
                     .min_by_key(|(_, score)| *score)
                     .map(|(k, _)| k);
 
-                if let Some(key) = victim {
-                    if let Some(val) = data.remove(&key) {
-                        let size = self.estimate_entry_size(&key, &val) as i64;
-                        self.stats.total_keys.fetch_sub(1, Ordering::Relaxed);
-                        self.stats
-                            .total_memory_bytes
-                            .fetch_sub(size, Ordering::Relaxed);
-                        freed += size;
-                        debug!("Evicted key={} size={} policy={:?}", key, size, policy);
-                    }
+                if let Some(key) = victim
+                    && let Some(val) = data.remove(&key)
+                {
+                    let size = self.estimate_entry_size(&key, &val) as i64;
+                    self.stats.total_keys.fetch_sub(1, Ordering::Relaxed);
+                    self.stats
+                        .total_memory_bytes
+                        .fetch_sub(size, Ordering::Relaxed);
+                    freed += size;
+                    debug!("Evicted key={} size={} policy={:?}", key, size, policy);
                 }
             }
 
@@ -1665,10 +1671,10 @@ impl KVStore {
         for (key, _) in &pairs {
             let shard = self.get_shard(key);
             let data = shard.data.read();
-            if let Some(value) = data.get(key) {
-                if !value.is_expired() {
-                    return Ok(false);
-                }
+            if let Some(value) = data.get(key)
+                && !value.is_expired()
+            {
+                return Ok(false);
             }
         }
 

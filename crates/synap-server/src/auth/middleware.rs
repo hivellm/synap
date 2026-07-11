@@ -116,10 +116,10 @@ impl AuthMiddleware {
             // Check query parameter
             req.uri().query().and_then(|q| {
                 for pair in q.split('&') {
-                    if let Some((k, v)) = pair.split_once('=') {
-                        if k == "api_key" {
-                            return Some(v.to_string());
-                        }
+                    if let Some((k, v)) = pair.split_once('=')
+                        && k == "api_key"
+                    {
+                        return Some(v.to_string());
                     }
                 }
                 None

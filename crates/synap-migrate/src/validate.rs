@@ -164,10 +164,10 @@ pub async fn check_status(data_dir: &Path) -> Result<String> {
 
 /// Extract user ID from a scoped resource name
 fn extract_user_id_from_key(key: &str) -> Option<String> {
-    if key.starts_with("user_") {
-        if let Some(colon_pos) = key.find(':') {
-            return Some(key[5..colon_pos].to_string());
-        }
+    if key.starts_with("user_")
+        && let Some(colon_pos) = key.find(':')
+    {
+        return Some(key[5..colon_pos].to_string());
     }
     None
 }

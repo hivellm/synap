@@ -232,10 +232,10 @@ impl HyperLogLogStore {
         let mut map = shard.write();
 
         // Remove expired value if present
-        if let Some(existing_hll) = map.get(key) {
-            if existing_hll.is_expired() {
-                map.remove(key);
-            }
+        if let Some(existing_hll) = map.get(key)
+            && existing_hll.is_expired()
+        {
+            map.remove(key);
         }
 
         let added = match map.entry(key.to_string()) {
@@ -305,10 +305,10 @@ impl HyperLogLogStore {
             let source_shard = self.shard(source_key);
             let source_map = source_shard.read();
 
-            if let Some(source_hll) = source_map.get(source_key) {
-                if !source_hll.is_expired() {
-                    source_hlls.push(source_hll.clone());
-                }
+            if let Some(source_hll) = source_map.get(source_key)
+                && !source_hll.is_expired()
+            {
+                source_hlls.push(source_hll.clone());
             }
         }
 

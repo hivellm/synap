@@ -92,19 +92,19 @@ pub fn init_metrics() {
 /// load average and `synap_process_memory_bytes` was host memory.
 pub async fn update_system_metrics() {
     // ── Per-process CPU + memory (this Synap process only) ──
-    if let Ok(mut guard) = proc_sampler().lock() {
-        if let Some(pid) = guard.pid {
-            guard.sys.refresh_processes_specifics(
-                sysinfo::ProcessesToUpdate::Some(&[pid]),
-                true,
-                sysinfo::ProcessRefreshKind::everything(),
-            );
-            if let Some(proc_) = guard.sys.process(pid) {
-                let rss = proc_.memory();
-                let vmem = proc_.virtual_memory();
-                let cpu = proc_.cpu_usage() as f64;
-                crate::metrics::set_process_metrics(rss, vmem, cpu);
-            }
+    if let Ok(mut guard) = proc_sampler().lock()
+        && let Some(pid) = guard.pid
+    {
+        guard.sys.refresh_processes_specifics(
+            sysinfo::ProcessesToUpdate::Some(&[pid]),
+            true,
+            sysinfo::ProcessRefreshKind::everything(),
+        );
+        if let Some(proc_) = guard.sys.process(pid) {
+            let rss = proc_.memory();
+            let vmem = proc_.virtual_memory();
+            let cpu = proc_.cpu_usage() as f64;
+            crate::metrics::set_process_metrics(rss, vmem, cpu);
         }
     }
 
@@ -213,12 +213,12 @@ pub async fn update_broker_metrics(state: &AppState) {
     }
 
     // ── Queues: ready depth + dead-letter count ──
-    if let Some(qm) = &state.queue_manager {
-        if let Ok(queues) = qm.list_queues().await {
-            for q in queues {
-                if let Ok(s) = qm.stats(&q).await {
-                    crate::metrics::set_queue_gauges(&q, s.depth as i64, s.dead_lettered as i64);
-                }
+    if let Some(qm) = &state.queue_manager
+        && let Ok(queues) = qm.list_queues().await
+    {
+        for q in queues {
+            if let Ok(s) = qm.stats(&q).await {
+                crate::metrics::set_queue_gauges(&q, s.depth as i64, s.dead_lettered as i64);
             }
         }
     }

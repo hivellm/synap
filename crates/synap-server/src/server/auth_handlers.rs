@@ -264,19 +264,19 @@ pub async fn auth_revoke_key(
     debug!("Revoking API key: {}", key_id);
 
     // Check if user owns the key or is admin
-    if let Some(api_key) = state.api_key_manager.get(&key_id) {
-        if !auth_context.is_admin {
-            if let Some(user_id) = &auth_context.user_id {
-                if api_key.username.as_ref() != Some(user_id) {
-                    return Err(SynapError::InvalidRequest(
-                        "Cannot revoke API key owned by another user".to_string(),
-                    ));
-                }
-            } else {
+    if let Some(api_key) = state.api_key_manager.get(&key_id)
+        && !auth_context.is_admin
+    {
+        if let Some(user_id) = &auth_context.user_id {
+            if api_key.username.as_ref() != Some(user_id) {
                 return Err(SynapError::InvalidRequest(
-                    "Not authorized to revoke this API key".to_string(),
+                    "Cannot revoke API key owned by another user".to_string(),
                 ));
             }
+        } else {
+            return Err(SynapError::InvalidRequest(
+                "Not authorized to revoke this API key".to_string(),
+            ));
         }
     }
 

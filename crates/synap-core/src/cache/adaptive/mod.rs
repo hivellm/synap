@@ -188,12 +188,13 @@ impl<K: Hash + Eq + Clone, V: Clone> AdaptiveCache<K, V> {
 
     fn insert_lru(&mut self, key: K, value: V) {
         // Evict if at capacity
-        if self.lru_cache.len() >= self.capacity && !self.lru_cache.contains_key(&key) {
-            if let Some(evict_key) = self.lru_order.pop_front() {
-                self.lru_cache.remove(&evict_key);
-                if let Some(stats) = self.stats.get_mut(&CacheStrategy::Lru) {
-                    stats.record_eviction();
-                }
+        if self.lru_cache.len() >= self.capacity
+            && !self.lru_cache.contains_key(&key)
+            && let Some(evict_key) = self.lru_order.pop_front()
+        {
+            self.lru_cache.remove(&evict_key);
+            if let Some(stats) = self.stats.get_mut(&CacheStrategy::Lru) {
+                stats.record_eviction();
             }
         }
 

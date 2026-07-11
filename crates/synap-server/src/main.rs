@@ -92,10 +92,10 @@ async fn main() -> Result<()> {
     if let Ok(root_enabled) = std::env::var("SYNAP_AUTH_ROOT_ENABLED") {
         config.auth.root.enabled = root_enabled.parse().unwrap_or(true);
     }
-    if let Ok(default_ttl) = std::env::var("SYNAP_AUTH_DEFAULT_KEY_TTL") {
-        if let Ok(ttl) = default_ttl.parse::<u64>() {
-            config.auth.default_key_ttl = ttl;
-        }
+    if let Ok(default_ttl) = std::env::var("SYNAP_AUTH_DEFAULT_KEY_TTL")
+        && let Ok(ttl) = default_ttl.parse::<u64>()
+    {
+        config.auth.default_key_ttl = ttl;
     }
 
     // Override HiveHub config from environment variables (Docker/Cloud support)
@@ -111,20 +111,20 @@ async fn main() -> Result<()> {
         if let Ok(service_api_key) = std::env::var("SYNAP_HUB_SERVICE_API_KEY") {
             config.hub.service_api_key = service_api_key;
         }
-        if let Ok(usage_interval) = std::env::var("SYNAP_HUB_USAGE_REPORT_INTERVAL") {
-            if let Ok(interval) = usage_interval.parse::<u64>() {
-                config.hub.usage_report_interval = interval;
-            }
+        if let Ok(usage_interval) = std::env::var("SYNAP_HUB_USAGE_REPORT_INTERVAL")
+            && let Ok(interval) = usage_interval.parse::<u64>()
+        {
+            config.hub.usage_report_interval = interval;
         }
-        if let Ok(cache_ttl) = std::env::var("SYNAP_HUB_CACHE_TTL") {
-            if let Ok(ttl) = cache_ttl.parse::<u64>() {
-                config.hub.cache_ttl = ttl;
-            }
+        if let Ok(cache_ttl) = std::env::var("SYNAP_HUB_CACHE_TTL")
+            && let Ok(ttl) = cache_ttl.parse::<u64>()
+        {
+            config.hub.cache_ttl = ttl;
         }
-        if let Ok(timeout) = std::env::var("SYNAP_HUB_TIMEOUT") {
-            if let Ok(t) = timeout.parse::<u64>() {
-                config.hub.timeout = t;
-            }
+        if let Ok(timeout) = std::env::var("SYNAP_HUB_TIMEOUT")
+            && let Ok(t) = timeout.parse::<u64>()
+        {
+            config.hub.timeout = t;
         }
     }
 
