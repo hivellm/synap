@@ -17,6 +17,7 @@
 //! ```
 
 use super::error::{Result, SynapError};
+use ahash::RandomState as AHashState;
 use parking_lot::RwLock;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
@@ -30,10 +31,14 @@ const SHARD_COUNT: usize = 64;
 
 /// Set value stored in a single key
 /// Contains unique members
+///
+/// The member set is keyed with `ahash` (like the KV store) instead of the
+/// default SipHash — the multi-key SADD benchmark showed the default hasher
+/// tax on every member insert/lookup (phase13 write-scalability).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetValue {
     /// Unique members
-    pub members: HashSet<Vec<u8>>,
+    pub members: HashSet<Vec<u8>, AHashState>,
     /// TTL for entire set
     pub ttl_secs: Option<u64>,
     /// Creation timestamp
@@ -47,7 +52,7 @@ impl SetValue {
     pub fn new(ttl_secs: Option<u64>) -> Self {
         let now = Self::current_timestamp();
         Self {
-            members: HashSet::new(),
+            members: HashSet::default(),
             ttl_secs,
             created_at: now,
             updated_at: now,
@@ -196,7 +201,7 @@ impl AtomicSetStats {
 
 /// Sharded set store with 64-way concurrency
 pub struct SetStore {
-    shards: Vec<Arc<RwLock<HashMap<String, SetValue>>>>,
+    shards: Vec<Arc<RwLock<HashMap<String, SetValue, AHashState>>>>,
     stats: Arc<AtomicSetStats>,
     /// Shared cross-datatype memory budget (audit M-018).
     mem: Option<crate::core::GlobalMemory>,
@@ -228,7 +233,7 @@ impl SetStore {
     pub fn new() -> Self {
         let mut shards = Vec::with_capacity(SHARD_COUNT);
         for _ in 0..SHARD_COUNT {
-            shards.push(Arc::new(RwLock::new(HashMap::new())));
+            shards.push(Arc::new(RwLock::new(HashMap::default())));
         }
 
         Self {
@@ -307,7 +312,7 @@ impl SetStore {
     }
 
     /// Get shard for key
-    fn shard(&self, key: &str) -> &Arc<RwLock<HashMap<String, SetValue>>> {
+    fn shard(&self, key: &str) -> &Arc<RwLock<HashMap<String, SetValue, AHashState>>> {
         &self.shards[self.shard_index(key)]
     }
 

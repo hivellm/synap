@@ -1,5 +1,10 @@
 # Proposal: phase13_contiguous-list-encoding
 
+> **Scope extension (2026-07-11):** the same small-collection encoding applies to
+> SETs — the multi-key SADD gap (0.66 after ahash) is the per-new-key
+> `HashSet`+`SetValue` allocation vs Redis's ~20-byte listpack. Add a small-set
+> contiguous encoding alongside the list one, same thresholds/upgrade model.
+
 Source: docs/analysis/redis-parity-deep-dive.md (item J, plan round 6)
 
 ## Why

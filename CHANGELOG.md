@@ -109,6 +109,16 @@ fixed for the 1.0 release.
   Stream), so those collections survive a restart.
 
 ### Changed
+- **High-concurrency writes fixed and now beat Redis** (phase13
+  write-scalability). Two multi-key findings from the live sweep: (1) with
+  ~3,200 in-flight pipelined writes (`-r 1000000, c=200, P=16`) every write went
+  through tokio's async `RwLock` acquire on the per-key lock, collapsing SET to
+  0.24 of Redis — a `try_read_owned` fast path (grant immediately when no EXEC
+  holds the shard) restored **SET to 1.19× and INCR to 1.03× of Redis 7 at
+  c=200**; (2) the SetStore shard map and `SetValue` member set moved from
+  default SipHash to `ahash` (matching KVStore), lifting multi-key SADD
+  0.57 → 0.66 (the remainder is the small-set encoding shape, tracked for the
+  contiguous-encoding work).
 - **Bulk arguments are parsed directly into shared `Arc<[u8]>` buffers**
   (phase13 parse-bulk-into-arc). A RESP3 bulk payload is born shared: `SET`
   stores the parser's buffer via a refcount bump instead of re-allocating and

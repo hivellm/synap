@@ -172,19 +172,23 @@ c=50, P=16): SET 535k (+13% over its single-key 473k), GET 599k, INCR 519k —
 randomizing keys makes the native protocol *faster*, confirming the sharding
 headroom.
 
-Two honest findings the sweep exposed (tracked as
-`phase13_write-scalability-under-contention`):
+Two findings the sweep exposed, worked in
+`phase13_write-scalability-under-contention`:
 
-1. **SADD multi-key regression (0.57).** Single-key SADD is 0.93; with 1M keys
-   it halves. Suspects: every op hits the miss path (`SetValue::new` —
-   `HashSet` alloc, `SystemTime::now` timestamps, SipHash default hashers for
-   both the key map and member set — where KVStore uses `ahash`).
-2. **Writes collapse at c=200** while reads scale (`-r 1000000, c=200, P=16`):
-   GET **1.16** (731k vs 632k — Synap wins), but SET 0.24 / INCR 0.26. ~3,200
-   in-flight ops ÷ 64 data shards ≈ 50 concurrent writers per `parking_lot`
-   write lock; contended `parking_lot` **parks tokio worker threads**, starving
-   the runtime. Candidate fixes: `try_read_owned` fast path on the key lock,
-   more/finer data shards, or yielding lock acquisition on the write path.
+1. **Writes collapsed at c=200 — FIXED, now beats Redis.** Initially
+   (`-r 1000000, c=200, P=16`) GET won at 1.16 but SET fell to **0.24** / INCR
+   **0.26**: with ~3,200 in-flight pipelined writes, every one went through
+   tokio's async `RwLock` acquire (queue + waker) on the per-key lock. A
+   `try_read_owned` fast path (grant immediately when no EXEC holds the shard —
+   the common case) restored them to **SET 742k (1.19× Redis)** and **INCR
+   675k (1.03×)** at c=200. High-concurrency writes are now a Synap win too.
+2. **SADD multi-key regression (0.57 → 0.66, remainder structural).** Switching
+   the SetStore shard map and the `SetValue` member set from default SipHash to
+   `ahash` (matching KVStore) recovered part of it. The remaining gap is the
+   miss-path shape: Synap allocates a full `HashSet` + `SetValue` per new key
+   while Redis creates a ~20-byte listpack for small sets — that is the
+   small-collection contiguous-encoding work (`phase13_contiguous-list-encoding`
+   scope extended to small sets).
 
 ## Two bugs this benchmark found (now fixed)
 

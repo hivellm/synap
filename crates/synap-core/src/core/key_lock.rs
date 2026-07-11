@@ -75,7 +75,14 @@ impl KeyLockManager {
     /// side) still excludes them.
     pub async fn read_key(&self, key: &str) -> OwnedRwLockReadGuard<()> {
         let idx = Self::shard_index(key);
-        self.shards[idx].clone().read_owned().await
+        // Fast path: no EXEC holds (or waits on) this shard — the common case.
+        // `try_read_owned` grants the guard without touching tokio's async
+        // acquire machinery (queue + waker), which matters under thousands of
+        // in-flight pipelined writes (phase13 write-scalability).
+        match self.shards[idx].clone().try_read_owned() {
+            Ok(guard) => guard,
+            Err(_) => self.shards[idx].clone().read_owned().await,
+        }
     }
 
     /// Acquire the **write** (exclusive) side of every distinct shard covering
