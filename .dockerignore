@@ -59,4 +59,5 @@ examples/
 # Config files (will be mounted)
 config*.yml
 !config.yml
+!config.docker.yml
 
