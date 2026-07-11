@@ -30,12 +30,88 @@ use tokio::time::timeout;
 
 const SHARD_COUNT: usize = 64;
 
+/// Packed-encoding thresholds — mirror Redis's `list-max-listpack-size`
+/// defaults: past either bound, the list upgrades to the `Deque` representation.
+const MAX_PACKED_ENTRIES: usize = 128;
+const MAX_PACKED_ELEM: usize = 64;
+
+/// Storage representation for a list (phase13 contiguous encoding).
+///
+/// Small lists are stored **packed**: `[u32 LE len][bytes]…` entries in one
+/// contiguous buffer — Redis's listpack analogue. Pushing appends into a hot
+/// buffer with no per-element heap allocation and dense cache behaviour. Past
+/// the thresholds the list upgrades (once, one-way — like listpack → quicklist)
+/// to the `VecDeque<Vec<u8>>` representation, and the pre-existing complex-op
+/// logic (LSET/LTRIM/LREM/LINSERT) always runs on `Deque` via a lazy upgrade,
+/// so it did not need to be rewritten for two encodings.
+#[derive(Debug, Clone)]
+enum ListRepr {
+    Packed { buf: Vec<u8>, count: usize },
+    Deque(VecDeque<Vec<u8>>),
+}
+
+impl ListRepr {
+    /// Iterate the packed entries as byte slices.
+    fn packed_iter(buf: &[u8]) -> impl Iterator<Item = &[u8]> {
+        let mut pos = 0usize;
+        std::iter::from_fn(move || {
+            if pos + 4 > buf.len() {
+                return None;
+            }
+            let len =
+                u32::from_le_bytes([buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]]) as usize;
+            let start = pos + 4;
+            pos = start + len;
+            buf.get(start..start + len)
+        })
+    }
+
+    fn append_entry(buf: &mut Vec<u8>, value: &[u8]) {
+        buf.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        buf.extend_from_slice(value);
+    }
+}
+
+/// Serialize the representation as the logical element sequence — byte-for-byte
+/// the same encoding `VecDeque<Vec<u8>>` produced, so snapshots written before
+/// the packed encoding still load and new snapshots stay readable.
+mod repr_as_seq {
+    use super::ListRepr;
+    use serde::ser::SerializeSeq;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(repr: &ListRepr, s: S) -> Result<S::Ok, S::Error> {
+        match repr {
+            ListRepr::Packed { buf, count } => {
+                let mut seq = s.serialize_seq(Some(*count))?;
+                for e in ListRepr::packed_iter(buf) {
+                    seq.serialize_element(e)?;
+                }
+                seq.end()
+            }
+            ListRepr::Deque(d) => {
+                let mut seq = s.serialize_seq(Some(d.len()))?;
+                for e in d {
+                    seq.serialize_element(e)?;
+                }
+                seq.end()
+            }
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<ListRepr, D::Error> {
+        let elements = Vec::<Vec<u8>>::deserialize(d)?;
+        Ok(super::ListValue::repr_from_elements(elements))
+    }
+}
+
 /// List value stored in a single key
 /// Contains ordered elements with push/pop at both ends
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListValue {
     /// Ordered elements (front = left, back = right)
-    pub elements: VecDeque<Vec<u8>>,
+    #[serde(rename = "elements", with = "repr_as_seq")]
+    repr: ListRepr,
     /// TTL for entire list
     pub ttl_secs: Option<u64>,
     /// Creation timestamp
@@ -49,10 +125,74 @@ impl ListValue {
     pub fn new(ttl_secs: Option<u64>) -> Self {
         let now = Self::current_timestamp();
         Self {
-            elements: VecDeque::new(),
+            repr: ListRepr::Packed {
+                buf: Vec::new(),
+                count: 0,
+            },
             ttl_secs,
             created_at: now,
             updated_at: now,
+        }
+    }
+
+    /// Build the right representation for a known element sequence (snapshot
+    /// recovery / deserialization).
+    fn repr_from_elements(elements: Vec<Vec<u8>>) -> ListRepr {
+        let fits = elements.len() <= MAX_PACKED_ENTRIES
+            && elements.iter().all(|e| e.len() <= MAX_PACKED_ELEM);
+        if fits {
+            let mut buf = Vec::new();
+            let count = elements.len();
+            for e in &elements {
+                ListRepr::append_entry(&mut buf, e);
+            }
+            ListRepr::Packed { buf, count }
+        } else {
+            ListRepr::Deque(elements.into())
+        }
+    }
+
+    /// Upgrade to the `Deque` representation (one-way) and return it — the
+    /// complex mutators run their existing logic on this.
+    fn ensure_deque(&mut self) -> &mut VecDeque<Vec<u8>> {
+        if let ListRepr::Packed { buf, .. } = &self.repr {
+            let elements: VecDeque<Vec<u8>> =
+                ListRepr::packed_iter(buf).map(|e| e.to_vec()).collect();
+            self.repr = ListRepr::Deque(elements);
+        }
+        match &mut self.repr {
+            ListRepr::Deque(d) => d,
+            ListRepr::Packed { .. } => unreachable!("just upgraded"),
+        }
+    }
+
+    /// Whether one more element of `elem_len` bytes still fits the packed form.
+    fn packed_fits(&self, elem_len: usize) -> bool {
+        match &self.repr {
+            ListRepr::Packed { count, .. } => {
+                *count < MAX_PACKED_ENTRIES && elem_len <= MAX_PACKED_ELEM
+            }
+            ListRepr::Deque(_) => false,
+        }
+    }
+
+    /// Total payload bytes across elements (memory accounting).
+    pub fn element_bytes(&self) -> usize {
+        match &self.repr {
+            // Subtract the 4-byte length headers — accounting wants the logical
+            // payload (matches the previous per-element sum).
+            ListRepr::Packed { buf, count } => buf.len().saturating_sub(4 * count),
+            ListRepr::Deque(d) => d.iter().map(Vec::len).sum(),
+        }
+    }
+
+    /// Consume into the logical element sequence (snapshot recovery).
+    pub fn into_elements(self) -> Vec<Vec<u8>> {
+        match self.repr {
+            ListRepr::Packed { buf, .. } => {
+                ListRepr::packed_iter(&buf).map(|e| e.to_vec()).collect()
+            }
+            ListRepr::Deque(d) => d.into(),
         }
     }
 
@@ -76,42 +216,92 @@ impl ListValue {
 
     /// Get number of elements
     pub fn len(&self) -> usize {
-        self.elements.len()
+        match &self.repr {
+            ListRepr::Packed { count, .. } => *count,
+            ListRepr::Deque(d) => d.len(),
+        }
     }
 
     /// Check if list is empty
     pub fn is_empty(&self) -> bool {
-        self.elements.is_empty()
+        self.len() == 0
     }
 
     /// Push element to left (front)
     pub fn lpush(&mut self, value: Vec<u8>) {
         self.updated_at = Self::current_timestamp();
-        self.elements.push_front(value);
+        if self.packed_fits(value.len())
+            && let ListRepr::Packed { buf, count } = &mut self.repr
+        {
+            // Prepend: splice the entry at the front. O(len(buf)) memmove —
+            // bounded by the packed thresholds, cache-friendly.
+            let mut entry = Vec::with_capacity(4 + value.len());
+            ListRepr::append_entry(&mut entry, &value);
+            buf.splice(0..0, entry);
+            *count += 1;
+            return;
+        }
+        self.ensure_deque().push_front(value);
     }
 
     /// Push element to right (back)
     pub fn rpush(&mut self, value: Vec<u8>) {
         self.updated_at = Self::current_timestamp();
-        self.elements.push_back(value);
+        if self.packed_fits(value.len())
+            && let ListRepr::Packed { buf, count } = &mut self.repr
+        {
+            // Append into the hot contiguous buffer — no per-element alloc.
+            ListRepr::append_entry(buf, &value);
+            *count += 1;
+            return;
+        }
+        self.ensure_deque().push_back(value);
     }
 
     /// Pop element from left (front)
     pub fn lpop(&mut self) -> Option<Vec<u8>> {
         self.updated_at = Self::current_timestamp();
-        self.elements.pop_front()
+        match &mut self.repr {
+            ListRepr::Packed { buf, count } => {
+                let first = ListRepr::packed_iter(buf).next()?.to_vec();
+                buf.drain(..4 + first.len());
+                *count -= 1;
+                Some(first)
+            }
+            ListRepr::Deque(d) => d.pop_front(),
+        }
     }
 
     /// Pop element from right (back)
     pub fn rpop(&mut self) -> Option<Vec<u8>> {
         self.updated_at = Self::current_timestamp();
-        self.elements.pop_back()
+        match &mut self.repr {
+            ListRepr::Packed { buf, count } => {
+                // Find the last entry's start (forward scan — bounded by the
+                // packed entry cap).
+                let mut pos = 0usize;
+                let mut last_start = None;
+                while pos + 4 <= buf.len() {
+                    let len =
+                        u32::from_le_bytes([buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]])
+                            as usize;
+                    last_start = Some(pos);
+                    pos += 4 + len;
+                }
+                let start = last_start?;
+                let value = buf[start + 4..].to_vec();
+                buf.truncate(start);
+                *count -= 1;
+                Some(value)
+            }
+            ListRepr::Deque(d) => d.pop_back(),
+        }
     }
 
     /// Get range of elements (0-indexed, inclusive)
     /// Supports negative indices (-1 = last element)
     pub fn lrange(&self, start: i64, stop: i64) -> Vec<Vec<u8>> {
-        let len = self.elements.len() as i64;
+        let len = self.len() as i64;
         if len == 0 {
             return Vec::new();
         }
@@ -133,18 +323,22 @@ impl ListValue {
             return Vec::new();
         }
 
-        self.elements
-            .iter()
-            .skip(start as usize)
-            .take((stop - start + 1) as usize)
-            .cloned()
-            .collect()
+        let skip = start as usize;
+        let take = (stop - start + 1) as usize;
+        match &self.repr {
+            ListRepr::Packed { buf, .. } => ListRepr::packed_iter(buf)
+                .skip(skip)
+                .take(take)
+                .map(|e| e.to_vec())
+                .collect(),
+            ListRepr::Deque(d) => d.iter().skip(skip).take(take).cloned().collect(),
+        }
     }
 
     /// Get element at index (0-indexed)
     /// Supports negative indices (-1 = last element)
-    pub fn lindex(&self, index: i64) -> Option<&Vec<u8>> {
-        let len = self.elements.len() as i64;
+    pub fn lindex(&self, index: i64) -> Option<Vec<u8>> {
+        let len = self.len() as i64;
         let idx = if index < 0 {
             (len + index).max(0)
         } else {
@@ -154,13 +348,18 @@ impl ListValue {
         if idx >= len || idx < 0 {
             None
         } else {
-            self.elements.get(idx as usize)
+            match &self.repr {
+                ListRepr::Packed { buf, .. } => ListRepr::packed_iter(buf)
+                    .nth(idx as usize)
+                    .map(<[u8]>::to_vec),
+                ListRepr::Deque(d) => d.get(idx as usize).cloned(),
+            }
         }
     }
 
     /// Set element at index
     pub fn lset(&mut self, index: i64, value: Vec<u8>) -> Result<()> {
-        let len = self.elements.len() as i64;
+        let len = self.len() as i64;
         let idx = if index < 0 {
             (len + index).max(0)
         } else {
@@ -172,13 +371,14 @@ impl ListValue {
         }
 
         self.updated_at = Self::current_timestamp();
-        self.elements[idx as usize] = value;
+        // Rare mutator: run on the Deque representation (lazy one-way upgrade).
+        self.ensure_deque()[idx as usize] = value;
         Ok(())
     }
 
     /// Trim list to keep only elements in range [start, stop]
     pub fn ltrim(&mut self, start: i64, stop: i64) {
-        let len = self.elements.len() as i64;
+        let len = self.len() as i64;
         if len == 0 {
             return;
         }
@@ -196,20 +396,24 @@ impl ListValue {
             stop.min(len - 1)
         };
 
+        // Rare mutator: run on the Deque representation (lazy one-way upgrade).
+        let d = self.ensure_deque();
+
         if start > stop || start >= len {
-            self.elements.clear();
+            d.clear();
             return;
         }
 
         self.updated_at = Self::current_timestamp();
+        let d = self.ensure_deque();
 
         // Remove elements after stop+1
         let keep_len = (stop + 1) as usize;
-        self.elements.truncate(keep_len);
+        d.truncate(keep_len);
 
         // Remove elements before start
         for _ in 0..start {
-            self.elements.pop_front();
+            d.pop_front();
         }
     }
 
@@ -220,17 +424,19 @@ impl ListValue {
     pub fn lrem(&mut self, count: i64, value: &[u8]) -> usize {
         self.updated_at = Self::current_timestamp();
         let mut removed = 0;
+        // Rare mutator: run on the Deque representation (lazy one-way upgrade).
+        let d = self.ensure_deque();
 
         if count == 0 {
             // Remove all occurrences
-            self.elements.retain(|elem| elem != value);
-            removed = self.elements.len();
+            d.retain(|elem| elem != value);
+            removed = d.len();
         } else if count > 0 {
             // Remove from head to tail
             let mut i = 0;
-            while i < self.elements.len() && removed < count as usize {
-                if self.elements[i] == value {
-                    self.elements.remove(i);
+            while i < d.len() && removed < count as usize {
+                if d[i] == value {
+                    d.remove(i);
                     removed += 1;
                 } else {
                     i += 1;
@@ -238,12 +444,12 @@ impl ListValue {
             }
         } else {
             // Remove from tail to head
-            let mut i = self.elements.len();
+            let mut i = d.len();
             let target = count.unsigned_abs() as usize;
             while i > 0 && removed < target {
                 i -= 1;
-                if self.elements[i] == value {
-                    self.elements.remove(i);
+                if d[i] == value {
+                    d.remove(i);
                     removed += 1;
                 }
             }
@@ -254,11 +460,13 @@ impl ListValue {
 
     /// Insert value before or after pivot
     pub fn linsert(&mut self, before: bool, pivot: &[u8], value: Vec<u8>) -> Result<usize> {
-        if let Some(pos) = self.elements.iter().position(|elem| elem == pivot) {
-            self.updated_at = Self::current_timestamp();
+        // Rare mutator: run on the Deque representation (lazy one-way upgrade).
+        let d = self.ensure_deque();
+        if let Some(pos) = d.iter().position(|elem| elem == pivot) {
             let insert_pos = if before { pos } else { pos + 1 };
-            self.elements.insert(insert_pos, value);
-            Ok(self.elements.len())
+            d.insert(insert_pos, value);
+            self.updated_at = Self::current_timestamp();
+            Ok(self.len())
         } else {
             Err(SynapError::NotFound)
         }
@@ -266,7 +474,10 @@ impl ListValue {
 
     /// Find position of value (first occurrence, 0-indexed)
     pub fn lpos(&self, value: &[u8]) -> Option<usize> {
-        self.elements.iter().position(|elem| elem == value)
+        match &self.repr {
+            ListRepr::Packed { buf, .. } => ListRepr::packed_iter(buf).position(|e| e == value),
+            ListRepr::Deque(d) => d.iter().position(|elem| elem == value),
+        }
     }
 }
 
@@ -421,9 +632,7 @@ impl ListStore {
         for shard in self.shards.iter() {
             for (key, v) in shard.read().iter() {
                 total += key.len();
-                for e in v.elements.iter() {
-                    total += e.len();
-                }
+                total += v.element_bytes();
             }
         }
         total
@@ -684,9 +893,7 @@ impl ListStore {
         }
 
         self.stats.lindex_count.fetch_add(1, Ordering::Relaxed);
-        list.lindex(index)
-            .cloned()
-            .ok_or(SynapError::IndexOutOfRange)
+        list.lindex(index).ok_or(SynapError::IndexOutOfRange)
     }
 
     /// LSET - Set element at index
@@ -1133,6 +1340,81 @@ impl ListStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Packed → Deque upgrade at the entry-count threshold keeps order and ops.
+    #[test]
+    fn test_packed_upgrade_on_entry_count() {
+        let mut lv = ListValue::new(None);
+        for i in 0..(MAX_PACKED_ENTRIES + 10) {
+            lv.rpush(format!("e{i}").into_bytes());
+        }
+        assert!(
+            matches!(lv.repr, ListRepr::Deque(_)),
+            "must upgrade past cap"
+        );
+        assert_eq!(lv.len(), MAX_PACKED_ENTRIES + 10);
+        assert_eq!(lv.lindex(0), Some(b"e0".to_vec()));
+        assert_eq!(
+            lv.lindex(-1),
+            Some(format!("e{}", MAX_PACKED_ENTRIES + 9).into_bytes())
+        );
+        assert_eq!(lv.lpop(), Some(b"e0".to_vec()));
+        assert_eq!(
+            lv.rpop(),
+            Some(format!("e{}", MAX_PACKED_ENTRIES + 9).into_bytes())
+        );
+    }
+
+    /// A single oversized element upgrades immediately.
+    #[test]
+    fn test_packed_upgrade_on_large_element() {
+        let mut lv = ListValue::new(None);
+        lv.rpush(vec![b'x'; MAX_PACKED_ELEM + 1]);
+        assert!(matches!(lv.repr, ListRepr::Deque(_)));
+        assert_eq!(lv.len(), 1);
+    }
+
+    /// Packed push/pop from both ends behaves exactly like the deque form.
+    #[test]
+    fn test_packed_ops_match_semantics() {
+        let mut lv = ListValue::new(None);
+        lv.rpush(b"b".to_vec());
+        lv.lpush(b"a".to_vec());
+        lv.rpush(b"c".to_vec());
+        assert!(matches!(lv.repr, ListRepr::Packed { .. }));
+        assert_eq!(
+            lv.lrange(0, -1),
+            vec![b"a".to_vec(), b"b".to_vec(), b"c".to_vec()]
+        );
+        assert_eq!(lv.lpos(b"b"), Some(1));
+        assert_eq!(lv.rpop(), Some(b"c".to_vec()));
+        assert_eq!(lv.lpop(), Some(b"a".to_vec()));
+        assert_eq!(lv.len(), 1);
+        // Complex mutator on a packed list lazily upgrades then works.
+        lv.lset(0, b"z".to_vec()).unwrap();
+        assert_eq!(lv.lindex(0), Some(b"z".to_vec()));
+    }
+
+    /// Serde round-trip: packed and deque forms serialize as the same logical
+    /// sequence (snapshot compatibility) and reload correctly.
+    #[test]
+    fn test_repr_serde_roundtrip() {
+        let mut packed = ListValue::new(None);
+        packed.rpush(b"one".to_vec());
+        packed.rpush(b"two".to_vec());
+        let bytes = serde_json::to_vec(&packed).unwrap();
+        let back: ListValue = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(back.lrange(0, -1), vec![b"one".to_vec(), b"two".to_vec()]);
+
+        let mut big = ListValue::new(None);
+        for i in 0..(MAX_PACKED_ENTRIES + 5) {
+            big.rpush(format!("v{i}").into_bytes());
+        }
+        let bytes = serde_json::to_vec(&big).unwrap();
+        let back: ListValue = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(back.len(), MAX_PACKED_ENTRIES + 5);
+        assert_eq!(back.lindex(3), Some(b"v3".to_vec()));
+    }
 
     #[test]
     fn test_lpush_rpush() {

@@ -76,7 +76,7 @@ pub async fn recover(
             let lists = ListStore::new();
             for (key, list_value) in snapshot.list_data {
                 // Restore list by pushing all elements
-                let elements: Vec<Vec<u8>> = list_value.elements.into_iter().collect();
+                let elements: Vec<Vec<u8>> = list_value.into_elements();
                 if !elements.is_empty() {
                     lists.rpush(&key, elements, false)?;
                 }

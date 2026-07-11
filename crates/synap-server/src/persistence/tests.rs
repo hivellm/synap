@@ -297,7 +297,7 @@ async fn test_snapshot_roundtrip_all_datatypes() {
     let h = snapshot.hash_data.get("h").unwrap();
     assert_eq!(h.get("f1").unwrap(), b"v1");
     assert_eq!(h.get("f2").unwrap(), b"v2");
-    assert_eq!(snapshot.list_data.get("l").unwrap().elements.len(), 2);
+    assert_eq!(snapshot.list_data.get("l").unwrap().len(), 2);
     assert_eq!(snapshot.set_data.get("s").unwrap().members.len(), 2);
     let z = snapshot.sorted_set_data.get("z").unwrap();
     assert_eq!(z.len(), 1);
