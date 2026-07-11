@@ -147,6 +147,40 @@ now that SET/GET/SADD are already at 0.91–0.94. Tracked as a possible follow-u
 > exclude plain writers *from an EXEC*, not from each other, so it became a
 > sharded `RwLock` — the single biggest win in the table above.
 
+## Multi-key: where the architectures diverge
+
+All tables above use `redis-benchmark`'s default **single hot key** — Synap's
+worst case (sharding and multi-core execution buy nothing) and Redis's best.
+With a randomized keyspace (`-r 1000000`, the realistic shape), the 64-way
+sharded stores parallelize while Redis stays serial on one thread
+(median-of-3, `-n 150000 -P 16`):
+
+| Op (c=50) | Synap rps | Redis rps | Synap/Redis |
+|---|---:|---:|---:|
+| INCR | 761,421 | 607,287 | **1.25** |
+| LPUSH | 641,026 | 513,699 | **1.25** |
+| SET | 797,872 | 700,935 | **1.14** |
+| GET | 742,574 | 789,474 | 0.94 |
+| SADD | 392,670 | 684,932 | **0.57** ⚠ |
+
+**On the multi-key shape Synap beats Redis 7 on SET/INCR/LPUSH by 14–25%** and
+ties GET. Redis itself gets *slower* multi-key (cache misses across a 1M-key
+dict); Synap's shards absorb it.
+
+Two honest findings the sweep exposed (tracked as
+`phase13_write-scalability-under-contention`):
+
+1. **SADD multi-key regression (0.57).** Single-key SADD is 0.93; with 1M keys
+   it halves. Suspects: every op hits the miss path (`SetValue::new` —
+   `HashSet` alloc, `SystemTime::now` timestamps, SipHash default hashers for
+   both the key map and member set — where KVStore uses `ahash`).
+2. **Writes collapse at c=200** while reads scale (`-r 1000000, c=200, P=16`):
+   GET **1.16** (731k vs 632k — Synap wins), but SET 0.24 / INCR 0.26. ~3,200
+   in-flight ops ÷ 64 data shards ≈ 50 concurrent writers per `parking_lot`
+   write lock; contended `parking_lot` **parks tokio worker threads**, starving
+   the runtime. Candidate fixes: `try_read_owned` fast path on the key lock,
+   more/finer data shards, or yielding lock acquisition on the write path.
+
 ## Two bugs this benchmark found (now fixed)
 
 The first run of this benchmark surfaced two socket-layer stalls in the RESP3
