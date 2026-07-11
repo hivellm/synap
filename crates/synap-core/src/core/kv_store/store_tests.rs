@@ -42,6 +42,45 @@ async fn test_get_shared_is_zero_copy_and_consistent() {
 }
 
 #[tokio::test]
+async fn test_incr_int_encoding_roundtrip() {
+    // phase13 int-encoding: INCR creates/keeps an int-encoded value; GET still
+    // reads the decimal bytes; SET-then-INCR upgrades a Persistent numeric
+    // string; APPEND over a counter degrades gracefully to plain bytes.
+    let store = KVStore::new(KVConfig::default());
+
+    // Fresh key: INCR creates the counter.
+    assert_eq!(store.incr("ic", 5).await.unwrap(), 5);
+    assert_eq!(store.get("ic").await.unwrap(), Some(b"5".to_vec()));
+    assert_eq!(store.incr("ic", -7).await.unwrap(), -2);
+    assert_eq!(store.get("ic").await.unwrap(), Some(b"-2".to_vec()));
+
+    // Persistent numeric string upgrades on first INCR.
+    store.set("up", b"41".to_vec(), None).await.unwrap();
+    assert_eq!(store.incr("up", 1).await.unwrap(), 42);
+    assert_eq!(store.get("up").await.unwrap(), Some(b"42".to_vec()));
+
+    // Extremes render correctly.
+    store
+        .set("min", i64::MIN.to_string().into_bytes(), None)
+        .await
+        .unwrap();
+    assert_eq!(store.incr("min", 1).await.unwrap(), i64::MIN + 1);
+    assert_eq!(
+        store.get("min").await.unwrap(),
+        Some((i64::MIN + 1).to_string().into_bytes())
+    );
+
+    // APPEND over a counter degrades it to plain bytes.
+    store.append("ic", b"x".to_vec()).await.unwrap();
+    assert_eq!(store.get("ic").await.unwrap(), Some(b"-2x".to_vec()));
+    // And a further INCR now fails (not a valid integer) — Redis behaviour.
+    assert!(store.incr("ic", 1).await.is_err());
+
+    // get_shared works on int-encoded values (materializes a buffer).
+    assert_eq!(&*store.get_shared("up").await.unwrap().unwrap(), b"42");
+}
+
+#[tokio::test]
 async fn test_set_shared_buffer_is_zero_copy() {
     // phase13 parse-bulk-into-arc: a SET given an Arc<[u8]> must store THAT
     // buffer (refcount bump), not a copy — proven by pointer equality on read.

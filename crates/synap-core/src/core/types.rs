@@ -81,6 +81,14 @@ pub enum StoredValue {
     /// (getset, cache fill, snapshot iteration) is cheap (audit M-018 read half).
     Persistent(Arc<[u8]>),
 
+    /// Integer-encoded persistent value — the analogue of Redis's `object.c`
+    /// int encoding (phase13 int-encoding-counters). `INCR`/`DECR` mutate
+    /// `value` and re-render the inline decimal cache: **zero heap allocation
+    /// per op**. `buf[..len]` always holds the decimal ASCII rendering, so
+    /// `data()` can hand out a borrow like any other variant. 20 bytes fit
+    /// `i64::MIN` (`-` + 19 digits).
+    Int { value: i64, buf: [u8; 20], len: u8 },
+
     /// Expiring value with TTL and LRU tracking.
     ///
     /// `expires_at` is a Unix timestamp in **milliseconds** (u64) to support
@@ -95,10 +103,40 @@ pub enum StoredValue {
     },
 }
 
+/// Render `n` as decimal ASCII into a 20-byte buffer, returning `(buf, len)`.
+#[inline]
+fn render_int(n: i64) -> ([u8; 20], u8) {
+    let mut buf = [0u8; 20];
+    let mut pos = buf.len();
+    let neg = n < 0;
+    let mut v = n.unsigned_abs();
+    loop {
+        pos -= 1;
+        buf[pos] = b'0' + (v % 10) as u8;
+        v /= 10;
+        if v == 0 {
+            break;
+        }
+    }
+    if neg {
+        pos -= 1;
+        buf[pos] = b'-';
+    }
+    let len = (buf.len() - pos) as u8;
+    // Shift the digits to the front so `data()` is simply `&buf[..len]`.
+    buf.copy_within(pos.., 0);
+    (buf, len)
+}
+
 impl Clone for StoredValue {
     fn clone(&self) -> Self {
         match self {
             Self::Persistent(data) => Self::Persistent(data.clone()),
+            Self::Int { value, buf, len } => Self::Int {
+                value: *value,
+                buf: *buf,
+                len: *len,
+            },
             Self::Expiring {
                 data,
                 expires_at,
@@ -169,7 +207,7 @@ impl StoredValue {
     #[inline]
     pub fn is_expired(&self) -> bool {
         match self {
-            Self::Persistent(_) => false,
+            Self::Persistent(_) | Self::Int { .. } => false,
             Self::Expiring { expires_at, .. } => Self::current_timestamp_ms() >= *expires_at,
         }
     }
@@ -192,7 +230,7 @@ impl StoredValue {
     /// carry no counter — like `last_access`, LFU is meaningful for volatile keys).
     pub fn freq(&self) -> u32 {
         match self {
-            Self::Persistent(_) => 0,
+            Self::Persistent(_) | Self::Int { .. } => 0,
             Self::Expiring { freq, .. } => freq.load(Ordering::Relaxed),
         }
     }
@@ -200,7 +238,7 @@ impl StoredValue {
     /// Get remaining TTL in seconds, rounded down (for cache layer).
     pub fn ttl_remaining(&self) -> Option<u64> {
         match self {
-            Self::Persistent(_) => None,
+            Self::Persistent(_) | Self::Int { .. } => None,
             Self::Expiring { expires_at, .. } => {
                 let now_ms = Self::current_timestamp_ms();
                 if *expires_at > now_ms {
@@ -215,7 +253,7 @@ impl StoredValue {
     /// Get remaining TTL in seconds.
     pub fn remaining_ttl_secs(&self) -> Option<u64> {
         match self {
-            Self::Persistent(_) => None,
+            Self::Persistent(_) | Self::Int { .. } => None,
             Self::Expiring { expires_at, .. } => {
                 let now_ms = Self::current_timestamp_ms();
                 if now_ms >= *expires_at {
@@ -230,7 +268,7 @@ impl StoredValue {
     /// Get remaining TTL in milliseconds (new — for PX/PTTL support).
     pub fn remaining_ttl_ms(&self) -> Option<u64> {
         match self {
-            Self::Persistent(_) => None,
+            Self::Persistent(_) | Self::Int { .. } => None,
             Self::Expiring { expires_at, .. } => {
                 let now_ms = Self::current_timestamp_ms();
                 if now_ms >= *expires_at {
@@ -245,7 +283,7 @@ impl StoredValue {
     /// Get absolute expiry in milliseconds (for KEEPTTL on overwrite).
     pub fn expires_at_ms(&self) -> Option<u64> {
         match self {
-            Self::Persistent(_) => None,
+            Self::Persistent(_) | Self::Int { .. } => None,
             Self::Expiring { expires_at, .. } => Some(*expires_at),
         }
     }
@@ -255,6 +293,7 @@ impl StoredValue {
     pub fn data(&self) -> &[u8] {
         match self {
             Self::Persistent(data) => data,
+            Self::Int { buf, len, .. } => &buf[..*len as usize],
             Self::Expiring { data, .. } => data,
         }
     }
@@ -265,6 +304,8 @@ impl StoredValue {
     pub fn data_arc(&self) -> Arc<[u8]> {
         match self {
             Self::Persistent(data) => Arc::clone(data),
+            // Int has no shared buffer; materialize one (~20B) for the read handle.
+            Self::Int { buf, len, .. } => Arc::from(&buf[..*len as usize]),
             Self::Expiring { data, .. } => Arc::clone(data),
         }
     }
@@ -276,6 +317,8 @@ impl StoredValue {
     pub fn set_data(&mut self, new: Vec<u8>) {
         match self {
             Self::Persistent(data) => *data = new.into(),
+            // Writing raw bytes over a counter degrades it to a plain value.
+            Self::Int { .. } => *self = Self::Persistent(new.into()),
             Self::Expiring { data, .. } => *data = new.into(),
         }
     }
@@ -283,8 +326,51 @@ impl StoredValue {
     /// Get last access timestamp in seconds (for LRU eviction).
     pub fn last_access(&self) -> u32 {
         match self {
-            Self::Persistent(_) => 0,
+            Self::Persistent(_) | Self::Int { .. } => 0,
             Self::Expiring { last_access, .. } => last_access.load(Ordering::Relaxed),
+        }
+    }
+
+    // ── Integer encoding (phase13 int-encoding-counters) ─────────────────────
+
+    /// Create an integer-encoded persistent value.
+    pub fn new_int(n: i64) -> Self {
+        let (buf, len) = render_int(n);
+        Self::Int { value: n, buf, len }
+    }
+
+    /// Read the value as an `i64`: direct for the `Int` variant (no parse), a
+    /// byte parse for the others. `None` when the payload is not an integer.
+    #[inline]
+    pub fn as_int(&self) -> Option<i64> {
+        match self {
+            Self::Int { value, .. } => Some(*value),
+            other => std::str::from_utf8(other.data())
+                .ok()?
+                .trim()
+                .parse::<i64>()
+                .ok(),
+        }
+    }
+
+    /// Store an integer result (INCR/DECR):
+    /// - `Int` — mutate in place and re-render the inline cache (**zero alloc**);
+    /// - `Persistent` — upgrade to the `Int` encoding (subsequent INCRs are free);
+    /// - `Expiring` — keep the variant (preserves TTL/LRU) and swap the bytes.
+    #[inline]
+    pub fn set_int(&mut self, n: i64) {
+        match self {
+            Self::Int { value, buf, len } => {
+                *value = n;
+                let (b, l) = render_int(n);
+                *buf = b;
+                *len = l;
+            }
+            Self::Persistent(_) => *self = Self::new_int(n),
+            Self::Expiring { data, .. } => {
+                let (b, l) = render_int(n);
+                *data = Arc::from(&b[..l as usize]);
+            }
         }
     }
 }

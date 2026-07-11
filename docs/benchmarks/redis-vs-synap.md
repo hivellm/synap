@@ -130,6 +130,14 @@ list-encoding quirk).
    and stored via a refcount bump; the `Vec → Arc` re-alloc + full value memcpy
    per write is gone. Round-5 medians: RESP3 SET 810k / GET 819k / INCR 802k
    (0.92) / SADD (0.94); native SynapRPC SET 467k → 496k.
+10. **Integer encoding for counters** (phase13 int-encoding-counters — Redis
+    `object.c` analogue). `StoredValue::Int { i64, inline decimal cache }`:
+    INCR/DECR are an in-place integer add + stack re-render — **zero heap
+    allocation per op** (previously a `String` format + `Vec → Arc` copy each).
+    Numeric `Persistent` values upgrade on first INCR; TTL'd values keep their
+    variant; APPEND degrades a counter to plain bytes (Redis behaviour).
+    Median-of-5: INCR single-key 815k (0.92 — now inside the same band as
+    GET/SET, no longer the outlier); multi-key INCR 806k (**1.18× Redis**).
 
 ### The remaining gap is architectural
 

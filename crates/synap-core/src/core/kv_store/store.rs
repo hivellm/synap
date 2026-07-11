@@ -19,20 +19,6 @@ fn shard_hasher() -> &'static RandomState {
     HASHER.get_or_init(RandomState::new)
 }
 
-/// Parse a base-10 `i64` straight from stored bytes, without an intermediate
-/// `Vec`/`String` allocation (INCR/DECR hot path).
-#[inline]
-fn parse_i64(bytes: &[u8]) -> Option<i64> {
-    std::str::from_utf8(bytes).ok()?.trim().parse::<i64>().ok()
-}
-
-/// Format an `i64` as its decimal ASCII bytes. One allocation for the owned
-/// value the store must keep (`i64::to_string` reuses the buffer via `into_bytes`).
-#[inline]
-fn int_to_bytes(n: i64) -> Vec<u8> {
-    n.to_string().into_bytes()
-}
-
 /// Key-Value store using 64-way sharded radix tries for lock-free concurrency
 /// Eliminates lock contention by distributing keys across multiple shards
 #[derive(Clone)]
@@ -741,25 +727,29 @@ impl KVStore {
         // under the shard write lock (the hot-key serialization point).
         let new_value = if let Some(value) = data.get_mut(key) {
             if value.is_expired() {
-                // Expired — overwrite as a fresh persistent counter (0 + amount).
+                // Expired — overwrite as a fresh int-encoded counter (0 + amount).
                 let nv = amount;
-                value.set_data(int_to_bytes(nv));
+                *value = StoredValue::new_int(nv);
                 nv
             } else {
-                let cur = parse_i64(value.data()).ok_or_else(|| {
+                let cur = value.as_int().ok_or_else(|| {
                     SynapError::InvalidValue("Value is not a valid integer".to_string())
                 })?;
                 let nv = cur.checked_add(amount).ok_or_else(|| {
                     SynapError::InvalidValue("Integer overflow on INCR/DECR".to_string())
                 })?;
-                value.set_data(int_to_bytes(nv));
+                // Int variant: in-place integer add + inline re-render — zero
+                // heap allocation (Redis object.c int-encoding analogue).
+                // Persistent upgrades to Int; Expiring keeps its TTL.
+                value.set_int(nv);
                 value.update_access();
                 nv
             }
         } else {
-            // Missing — insert a fresh persistent counter.
+            // Missing — insert a fresh int-encoded counter (no allocs beyond
+            // the map entry itself).
             let nv = amount;
-            let stored = StoredValue::new(int_to_bytes(nv), None);
+            let stored = StoredValue::new_int(nv);
             shard.track_ttl(&stored, key);
             data.insert(key.to_string(), stored);
             nv

@@ -1,10 +1,9 @@
 # ⚡ Synap
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.85%2B)-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-636%2B%20(100%25)-brightgreen.svg)](#testing--quality)
-[![Coverage](https://img.shields.io/badge/coverage-99.30%25-brightgreen.svg)](docs/TESTING.md)
-[![Version](https://img.shields.io/badge/version-0.13.0-blue.svg)](#project-status)
+[![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.92%2B)-orange.svg)](https://www.rust-lang.org/)
+[![Tests](https://img.shields.io/badge/tests-1800%2B-brightgreen.svg)](docs/TESTING.md)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](CHANGELOG.md)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
 
@@ -14,62 +13,56 @@ Synap is a modern, high-performance data infrastructure system built in Rust, co
 
 Synap provides multiple core capabilities in a single, cohesive system:
 
-1. **💾 Memory Key-Value Store** - Radix-tree based in-memory storage with O(k) lookup
-2. **#️⃣ Hash Data Structure** - Field-value maps within keys (Redis-compatible HSET, HGET, etc.) ✅ **v0.6.0**
-3. **📋 List Data Structure** - Ordered sequences with LPUSH, RPOP, LRANGE (Redis-compatible) ✅ **v0.6.0**
-4. **🔷 Set Data Structure** - Unordered unique collections with SADD, SREM, SINTER, SUNION (Redis-compatible) ✅ **v0.6.0**
-5. **📊 Sorted Set Data Structure** - Scored members with ranking (ZADD, ZRANGE, ZRANK, ZINTER/ZUNION) ✅ **v0.7.0**
-6. **🔢 HyperLogLog** - Probabilistic cardinality estimation with ~0.81% error (~12KB memory) ✅ **v0.7.0-rc1**
-7. **🗺️ Geospatial Indexes** - Redis-compatible GEO commands (GEOADD, GEORADIUS, GEOSEARCH) ✅ **v0.7.0-rc2**
-8. **🔢 Bitmap Operations** - Redis-compatible bit manipulation (SETBIT, GETBIT, BITCOUNT, BITOP) ✅ **v0.7.0-rc2**
-9. **📝 String Extensions** - APPEND, GETRANGE, SETRANGE, GETSET, MSETNX ✅ **v0.7.0-rc1**
-10. **📜 Lua Scripting** - Server-side scripting with EVAL/EVALSHA and redis.call() bridge ✅ **v0.7.0**
-11. **🔄 Transactions** - MULTI/EXEC/WATCH/DISCARD with optimistic locking ✅ **v0.7.0**
-12. **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees
-13. **📡 Event Streams** - Kafka-style partitioned topics with consumer groups and retention
-14. **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
+- **💾 Key-Value Store** - Sharded in-memory storage with TTL, LRU/LFU eviction, and atomic operations
+- **🧱 Redis-compatible data structures** - Hashes, Lists, Sets, Sorted Sets, Bitmaps, HyperLogLog, Geospatial indexes, and string extensions (APPEND, GETRANGE, SETRANGE, …)
+- **📜 Lua Scripting** - Server-side scripting with EVAL/EVALSHA and a redis.call() bridge
+- **🔄 Transactions** - MULTI/EXEC/WATCH/DISCARD — atomic, durable (single WAL group-commit), replicated, and isolated from concurrent writers
+- **⏸️ Blocking operations** - BLPOP/BRPOP/BRPOPLPUSH and BZPOPMIN/BZPOPMAX with Redis timeout semantics
+- **🔍 Cursor scans** - SCAN plus HSCAN/SSCAN/ZSCAN with MATCH glob and COUNT
+- **🔔 Keyspace notifications** - Redis-style `notify-keyspace-events` (`__keyspace@0__:*` / `__keyevent@0__:*`) via Pub/Sub
+- **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees, DLQ, priorities, and per-consumer prefetch/QoS
+- **📡 Event Streams** - Kafka-style partitioned topics with consumer groups, retention policies, and consumer-offset-aware buffering
+- **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
 
 ## ✨ Key Features
 
 ### ⚡ Performance
-- **🚀 Sub-microsecond Operations**: 87ns for GET operations (20,000x better than target)
-- **📈 High Throughput**: 10M+ ops/sec sequential writes (200x better than baseline)
-- **💾 Efficient Memory**: 92MB for 1M keys (54% reduction vs baseline)
-- **🔄 64-Way Sharding**: Linear scalability with CPU core count
+- **🏁 Redis 7 parity, measured**: driven by the same `redis-benchmark` binary, Synap matches Redis at `-P 1` on every command and sits at 0.85–0.95 pipelined on a single hot key — see [Performance](#-performance)
+- **📈 Wins on realistic workloads**: with a randomized keyspace, Synap **beats Redis 7 on SET/INCR/LPUSH by 14–25%**, and at 200 connections wins SET at **1.19×**
+- **🚀 Native SynapRPC protocol**: ~3× faster than the RESP3 compatibility path per operation (166k vs 56k rps at `-P 1`)
+- **🧵 Zero-copy hot paths**: values live behind shared `Arc<[u8]>` buffers — parsed once, stored, replied, and replicated by refcount bump, no payload memcpy
+- **💾 Efficient Memory**: 92MB for 1M keys (vs ~200MB in Redis)
+- **🔄 64-Way Sharding**: multi-core scalability with lock-free atomic stats
 - **⚙️ Async I/O**: Built on Tokio for non-blocking operations
 - **🗜️ Smart Compression**: LZ4/Zstd compression with minimal CPU overhead
-- **🔥 Hot Data Cache**: Decompressed cache for frequently accessed data
 - **⚡ SIMD Acceleration**: Runtime-dispatched AVX2/NEON/SIMD128 for BITCOUNT, BITOP, PFMERGE — up to 9.5× faster than scalar on HyperLogLog merge
-- **🔑 KV Optimizations**: ahash shard hasher, inline keys (CompactString), shard-aware MGET, per-shard TTL min-heap — 14–25% faster SET, 21% faster bulk insert, 14% faster TTL cleanup
 
-### 🔐 Security & Authentication (✅ PRODUCTION READY - Jan 2025)
-- **🔒 Authentication System** - Root user, user management, API keys
-- **🛡️ Fine-grained Permissions** - Resource-based permissions (RabbitMQ-style)
+### 🔐 Security & Authentication
+- **🔒 Authentication on every transport** - HTTP, RESP3, SynapRPC, and MCP all gate commands behind auth; destructive/admin commands (FLUSHALL, CONFIG, SHUTDOWN, …) additionally require admin
+- **🔑 bcrypt password hashing** - Constant-time comparison; legacy SHA-512 hashes transparently rehash on next login
+- **🛡️ Fine-grained Permissions** - Users, API keys (expiration, IP filtering), resource-based ACLs
 - **📝 Audit Logging** - Track all authentication events (login, API key usage, permission denials)
-- **🔑 Password Validation** - Configurable password requirements (SHA512 hashing)
-- **🌐 IP Filtering** - Restrict API keys to specific IP addresses
-- **✅ Basic Auth & Bearer Token** - Support for both authentication methods
-- **🔐 MCP Authentication** - Full authentication support for MCP protocol
+- **🧯 DoS hardening** - Parsers cap client-controlled allocations, bounded pub/sub channels, connection limits + idle timeouts on the binary listeners, no reachable panics
+- **🔐 Safe defaults** - Binary listeners (RESP3/SynapRPC) bind to loopback by default
 
-### 💪 Durability (✅ COMPLETE - Oct 2025)
-- **💾 Full Persistence**: WAL + Snapshots for KV, Queue, and Stream
-- **🔄 OptimizedWAL**: Redis-style batching (10K ops/batch, 100µs window)
-- **📨 Queue Persistence**: RabbitMQ-style durable messaging with ACK tracking
-- **📡 Stream Persistence**: Kafka-style append-only logs per room
+### 💪 Durability
+- **💾 Full Persistence**: WAL + Snapshots covering **all datatypes** — KV, Hash, List, Set, Sorted Set, Queue, and Stream
+- **🔄 Async WAL with group commit**: Redis-style batching (10K ops/batch, 100µs window); transactions commit as one atomic fsync
+- **🧾 Verified snapshots**: CRC64 recomputed on load — corrupt/torn snapshots are rejected, never silently loaded
+- **🧠 True `maxmemory`**: a shared budget sums every datatype (not just KV), with per-datatype accounting exposed as metrics
 - **⚖️ PACELC Model**: PC/EL (Consistency during partition, Latency in normal operation)
 - **⏱️ Recovery Time**: 1-10 seconds from snapshots + WAL replay
 
 ### 🛡️ Reliability & High Availability
-- **🔄 Master-Slave Replication**: 1 write master + N read replicas (✅ **PRODUCTION READY**)
-  - TCP binary protocol with length-prefixed framing
-  - Full sync via snapshot transfer (CRC32 verified)
-  - Partial sync via replication log (incremental updates)
-  - Auto-reconnect with intelligent resync
-  - 51 comprehensive tests (98% passing)
-  - Stress tested: 5000 operations
+- **🔄 Master-Slave Replication**: 1 write master + N read replicas, wired directly from config
+  - Every datatype converges — KV, hash, list, set, sorted set, queue, stream — via the same applier the WAL recovery path uses
+  - Full sync via snapshot transfer (CRC verified) + partial sync via replication log; replicas joining mid-write-stream lose nothing
+  - Works with persistence disabled (replication is decoupled from the WAL)
+  - Auto-reconnect with intelligent resync; `INFO replication` reports live role, replica count, offset, and lag
 - **✅ Message Acknowledgment**: Guaranteed message delivery with ACK/NACK
-- **🔁 Event Replay**: Stream history and replay capabilities
+- **🔁 Event Replay**: Stream history and replay; retention protects events the slowest consumer hasn't read
 - **🔀 Manual Failover**: Promote replica to master capability
+- **🧩 Cluster mode (preview)**: hash-slot topology (16384 slots), slot migration with rollback, and inter-node quota RPC — initialized from config, disabled by default
 
 ### 📊 Monitoring & Observability
 - **📈 INFO Command** - Redis-style server introspection (server, memory, stats, replication, keyspace)
@@ -131,8 +124,8 @@ PHP, C#) select the transport via URL scheme — no separate builder options req
 
 Additional integration protocols:
 
-- **🤖 MCP (Model Context Protocol)**: ✅ **PRODUCTION READY** — Configurable tools (KV, Hash, List, Set, Queue, Sorted Set) at `/mcp` endpoint with authentication support
-- **🌐 UMICP (Universal Matrix Inter-Communication Protocol)**: ✅ **PRODUCTION READY** — 13 operations via MCP bridge with TLS support
+- **🤖 MCP (Model Context Protocol)**: Configurable tools (KV, Hash, List, Set, Queue, Sorted Set) at `/mcp` endpoint with authentication support
+- **🌐 UMICP (Universal Matrix Inter-Communication Protocol)**: 13 operations via MCP bridge with TLS support
 
 ### 📊 Scalability
 - **📖 Read Scaling**: Multiple replica nodes for distributed reads
@@ -207,31 +200,16 @@ sdks/rust/src/               # Rust SDK — shares synap-protocol wire types
 
 **From GitHub Releases** (Recommended):
 
-```bash
-# Download pre-built binaries from GitHub Releases
-# https://github.com/hivellm/synap/releases
+Pre-built binaries for Linux (x86_64), macOS (Intel and Apple Silicon), and
+Windows (x86_64) are published on the
+[GitHub Releases page](https://github.com/hivellm/synap/releases).
 
-# Linux (x86_64)
-wget https://github.com/hivellm/synap/releases/download/v0.3.0/synap-linux-x86_64.tar.gz
+```bash
+# Example (Linux x86_64) — replace <version> with the latest release
+wget https://github.com/hivellm/synap/releases/download/v<version>/synap-linux-x86_64.tar.gz
 tar -xzf synap-linux-x86_64.tar.gz
 cd synap-linux-x86_64
 ./synap-server --config config.yml
-
-# macOS (Intel)
-wget https://github.com/hivellm/synap/releases/download/v0.3.0/synap-macos-x86_64.tar.gz
-tar -xzf synap-macos-x86_64.tar.gz
-cd synap-macos-x86_64
-./synap-server --config config.yml
-
-# macOS (Apple Silicon)
-wget https://github.com/hivellm/synap/releases/download/v0.3.0/synap-macos-aarch64.tar.gz
-tar -xzf synap-macos-aarch64.tar.gz
-cd synap-macos-aarch64
-./synap-server --config config.yml
-
-# Windows (x86_64)
-# Download synap-windows-x86_64.zip from releases page
-# Extract and run synap-server.exe
 ```
 
 **🐳 Docker**:
@@ -285,10 +263,10 @@ docker run -d \
 **Multi-Architecture Build**:
 ```bash
 # Build and push multi-arch images (AMD64 + ARM64)
-./scripts/docker-publish.sh 0.8.1
+./scripts/docker-publish.sh 1.0.0
 
 # Or using PowerShell
-.\scripts\docker-publish.ps1 0.8.1
+.\scripts\docker-publish.ps1 1.0.0
 ```
 
 **Docker Compose**:
@@ -306,7 +284,7 @@ docker-compose up -d
 
 **Available Images**:
 - `hivehub/synap:latest` - Latest stable release
-- `hivehub/synap:0.8.1` - Specific version
+- `hivehub/synap:<version>` - Specific version (e.g. `hivehub/synap:1.0.0`)
 - Supports `linux/amd64` and `linux/arm64` architectures
 
 📖 **For detailed Docker documentation, see [DOCKER_README.md](DOCKER_README.md)**
@@ -318,14 +296,14 @@ docker-compose up -d
 git clone https://github.com/hivellm/synap.git
 cd synap
 
-# Build from source (requires Rust nightly 1.85+)
+# Build from source (requires Rust nightly 1.92+)
 cargo build --release
 
 # Run server
 ./target/release/synap-server --config config.yml
 ```
 
-See [Development Guide](docs/DEVELOPMENT.md) for detailed build instructions.
+See [Development Guide](docs/specs/DEVELOPMENT.md) for detailed build instructions.
 
 ### 💻 Basic Usage
 
@@ -367,7 +345,7 @@ curl -X POST http://localhost:15500/kv/set \
   -d '{"key": "user:1", "value": "John Doe"}'
 ```
 
-### 🔒 Authentication & Security (✅ Production Ready)
+### 🔒 Authentication & Security
 
 Authentication is **disabled by default** for development. Enable it for production:
 
@@ -427,9 +405,9 @@ Synap supports master-slave replication for high availability and read scaling.
 docker-compose up -d
 
 # Master available at: localhost:15500
-# Replica 1 at: localhost:15501
-# Replica 2 at: localhost:15502
-# Replica 3 at: localhost:15503
+# Replica 1 at: localhost:15510
+# Replica 2 at: localhost:15520
+# Replica 3 at: localhost:15530
 ```
 
 #### Manual Setup
@@ -444,7 +422,7 @@ server:
 replication:
   enabled: true
   role: "master"
-  replica_listen_address: "0.0.0.0:15501"
+  replica_listen_address: "0.0.0.0:15600"  # 15600 = replication (SynapRPC uses 15501)
   heartbeat_interval_ms: 1000
   max_lag_ms: 10000
   buffer_size_kb: 256
@@ -470,7 +448,7 @@ server:
 replication:
   enabled: true
   role: "replica"
-  master_address: "master:15501"  # Master's replication port
+  master_address: "master:15600"  # Master's replication port
   heartbeat_interval_ms: 1000
   max_lag_ms: 10000
   buffer_size_kb: 256
@@ -515,13 +493,13 @@ curl -X POST http://localhost:15500/kv/set \
 
 ```bash
 # Read from replica 1 (eventually consistent, ~5ms lag)
-curl http://localhost:15501/kv/get/user:100
+curl http://localhost:15510/kv/get/user:100
 
 # Read from replica 2
-curl http://localhost:15502/kv/get/user:100
+curl http://localhost:15520/kv/get/user:100
 
 # Read from replica 3
-curl http://localhost:15503/kv/get/user:100
+curl http://localhost:15530/kv/get/user:100
 ```
 
 **Monitor Replication Status**:
@@ -546,7 +524,7 @@ See [docs/specs/REPLICATION.md](docs/specs/REPLICATION.md) for complete replicat
 
 For detailed Docker deployment guide, see:
 - **[DOCKER_README.md](DOCKER_README.md)** - Complete Docker Hub documentation with examples
-- **[docs/DOCKER_DEPLOYMENT.md](docs/DOCKER_DEPLOYMENT.md)** - Advanced deployment guide
+- **[docs/specs/DOCKER_DEPLOYMENT.md](docs/specs/DOCKER_DEPLOYMENT.md)** - Advanced deployment guide
 
 ## 🎯 Use Cases
 
@@ -567,12 +545,12 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 
 ## 🛠️ Technology Stack
 
-- **Language**: Rust (Edition 2024)
+- **Language**: Rust (Edition 2024, workspace of focused crates: `synap-core`, `synap-protocol`, `synap-server`, `synap-cli`, `synap-migrate`)
 - **Runtime**: Tokio (async/await)
 - **Web Framework**: Axum
-- **Data Structure**: radix_trie (memory-efficient key-value)
+- **Storage**: 64-way sharded stores (ahash) with `Arc<[u8]>` shared values; radix trie for pub/sub topic routing
 - **Serialization**: serde (JSON, MessagePack)
-- **Protocols**: StreamableHTTP + WebSocket + MCP + UMICP
+- **Protocols**: SynapRPC + RESP3 + HTTP/StreamableHTTP + WebSocket + MCP + UMICP
 
 ## 📚 Documentation
 
@@ -583,42 +561,42 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 
 ### 🔧 Core Documentation
 - **[Architecture](docs/ARCHITECTURE.md)** - System architecture and components
-- **[Roadmap](docs/ROADMAP.md)** - Development roadmap and timeline
-- **[Configuration](docs/CONFIGURATION.md)** - Complete configuration reference
+- **[Configuration](docs/specs/CONFIGURATION.md)** - Complete configuration reference
 - **[CLI Guide](docs/CLI_GUIDE.md)** - Synap CLI usage and commands
+- **[Transports](docs/transports.md)** - SynapRPC / RESP3 / HTTP command-parity matrix
+- **[Transactions](docs/transactions.md)** - MULTI/EXEC durability, replication, and isolation
+- **[Replication](docs/replication.md)** - Setup, sync semantics, and monitoring
+- **[Memory Accounting](docs/memory-accounting.md)** - `maxmemory` across all datatypes
+- **[Observability](docs/observability.md)** - Prometheus metrics reference
 
 ### 🔒 Security & Authentication
 - **[Authentication](docs/AUTHENTICATION.md)** - Complete auth guide (users, roles, API keys, ACL)
-- **[Queue Concurrency](docs/QUEUE_CONCURRENCY_TESTS.md)** - Zero-duplicate guarantees
+- **[Network Limits](docs/network-limits.md)** - Connection caps, idle timeouts, parser bounds
 
 ### 🌐 API & Protocols
 - **[REST API](docs/api/REST_API.md)** - Complete REST API documentation
 - **[OpenAPI Spec](docs/api/openapi.yml)** - OpenAPI 3.0 specification (YAML/JSON)
 - **[StreamableHTTP](docs/protocol/STREAMABLE_HTTP.md)** - StreamableHTTP protocol
-- **[MCP Integration](docs/protocol/MCP_USAGE.md)** - Model Context Protocol ✅ **PRODUCTION READY**
-- **[MCP Test Results](docs/protocol/MCP_TEST_RESULTS.md)** - Live testing via Cursor AI
-- **[UMICP Integration](docs/protocol/UMICP_INTEGRATION.md)** - UMICP protocol ✅ **PRODUCTION READY**
+- **[MCP Integration](docs/protocol/MCP_USAGE.md)** - Model Context Protocol
+- **[UMICP Integration](docs/protocol/UMICP_INTEGRATION.md)** - UMICP protocol
 
 ### 📊 Performance & Testing
-- **[Benchmark Results](docs/BENCHMARK_RESULTS.md)** - KV performance metrics
+- **[Redis vs Synap](docs/benchmarks/redis-vs-synap.md)** - Live `redis-benchmark` head-to-head
+- **[Benchmarks](docs/benchmarks/README.md)** - All benchmark suites and results
+- **[Queue Concurrency](docs/benchmarks/QUEUE_CONCURRENCY_TESTS.md)** - Zero-duplicate guarantees
 - **[Testing Strategy](docs/TESTING.md)** - Test coverage and approach
-- **[Phase 1 Summary](docs/PHASE1_SUMMARY.md)** - Phase 1 implementation details
 
-### 🔧 Development
-- **[Development Guide](docs/DEVELOPMENT.md)** - Setup and contribution guide
-- **[Design Decisions](docs/DESIGN_DECISIONS.md)** - Technical choices
-- **[Project DAG](docs/PROJECT_DAG.md)** - Component dependencies
-- **[Deployment](docs/DEPLOYMENT.md)** - Production deployment (planned)
-- **[Packaging](docs/PACKAGING_AND_DISTRIBUTION.md)** - Distribution packages (planned)
-
-### 📋 Project Planning
-
+### 🔧 Development & Planning
+- **[Development Guide](docs/specs/DEVELOPMENT.md)** - Setup and contribution guide
+- **[Design Decisions](docs/specs/DESIGN_DECISIONS.md)** - Technical choices
 - **[Roadmap](docs/ROADMAP.md)** - Development roadmap and timeline
 - **[Project DAG](docs/PROJECT_DAG.md)** - Component dependencies and implementation order
+- **[Deployment](docs/specs/DEPLOYMENT.md)** - Production deployment
+- **[Packaging](docs/specs/PACKAGING_AND_DISTRIBUTION.md)** - Distribution packages
 
 ### 🧩 Component Specifications
 
-- **[Key-Value Store](docs/specs/KEY_VALUE_STORE.md)** - Radix-tree storage system
+- **[Key-Value Store](docs/specs/KEY_VALUE_STORE.md)** - Sharded storage system
 - **[Queue System](docs/specs/QUEUE_SYSTEM.md)** - Message queues with ACK
 - **[Event Stream](docs/specs/EVENT_STREAM.md)** - Room-based broadcasting
 - **[Pub/Sub](docs/specs/PUBSUB.md)** - Topic-based messaging
@@ -639,71 +617,64 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 
 ## 📊 Performance
 
-### ✅ Head-to-Head vs Redis 7 (April 2026) ⚡
+### ✅ Head-to-Head vs Redis 7 — live `redis-benchmark` (July 2026) ⚡
 
-**🔬 Network-level comparison** — Synap v0.9.0 (HTTP/JSON, debug build) vs Redis 7-alpine (RESP/TCP, Docker).  
-Both measured sequentially over loopback. Release build improves Synap numbers by 2–4×; Redis numbers are constant.  
-Full results: [`docs/benchmarks/redis-vs-synap.md`](docs/benchmarks/redis-vs-synap.md)
+Both servers driven by the **same** `redis-benchmark` binary over RESP
+(release build, containers on one Docker network, persistence and auth off on
+both sides). Full methodology and history:
+[`docs/benchmarks/redis-vs-synap.md`](docs/benchmarks/redis-vs-synap.md)
 
-| Operation | Synap p50 | Redis p50 | Synap edge |
-|-----------|-----------|-----------|-----------|
-| **GET (64 B)** | **299 µs** | 477 µs | ✅ **+60% faster** |
-| **GET (1 KB)** | **295 µs** | 459 µs | ✅ **+56% faster** |
-| **SET (64 B)** | **332 µs** | 466 µs | ✅ **+40% faster** |
-| **SET (4 KB)** | **454 µs** | 535 µs | ✅ **+18% faster** |
-| **INCR** | **341 µs** | 465 µs | ✅ **+36% faster** |
-| **BITCOUNT (1 MB bitmap)** | **296 µs** | 645 µs | ✅ **+118% faster** 🚀 |
-| **PFCOUNT** | **305 µs** | 472 µs | ✅ **+55% faster** |
-| **Concurrent reads (8T×100)** | **46.1 ms** | 70.7 ms | ✅ **+53% throughput** |
-| **MSET (100 keys)** | 994 µs | **644 µs** | 🟰 HTTP body overhead |
-| **Memory (1M keys)** | **92 MB** | ~200 MB | ✅ **54% reduction** |
+**Single hot key** (Redis's best case — sharding buys Synap nothing):
 
-> BITCOUNT advantage grows with bitmap size because Synap processes entirely in memory (AVX2/NEON SIMD) while Redis incurs wire-serialization overhead for large payloads.
+| Shape | Result |
+|-------|--------|
+| `-P 1` (per-op latency) | **Parity** — within ~5% of Redis on every command; Synap ahead on GET, RPUSH, LRANGE |
+| `-P 16` (pipelined) | **0.85–0.95 of Redis** on GET/SET/SADD/INCR (~750–815k rps); Synap **wins LPUSH at 1.51×**, ties LRANGE |
 
-### 📈 Optimization Results
+**Randomized 1M keyspace** (the realistic shape — Synap's shards parallelize,
+Redis stays serial):
 
-| Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
-| Memory (1M keys) | 200MB | **92MB** | **54% reduction** |
-| Write throughput | 50K ops/s | **10M+ ops/s** | **200x faster** |
-| Read latency P99 | 2-5ms | **87ns** | **20,000x faster** |
-| Concurrent ops | Limited | **64x parallel** | Linear scaling |
-| TTL cleanup CPU | 100% | **1-10%** | **10-100x reduction** |
-| BITCOUNT throughput (AVX2) | 20 GiB/s | **64 GiB/s** | **3.1× faster** |
-| PFMERGE throughput (AVX2) | 1.9 GiB/s | **18 GiB/s** | **9.5× faster** |
-| KV SET (256B key) | 152 ns | **114 ns** | **25% faster** |
-| KV bulk insert (1M keys) | 1.56 s | **1.23 s** | **21% faster** |
-| MGET (100 keys) | 11.0 µs | **10.1 µs** | **8% faster** |
-| TTL cleanup (1K expiring keys) | 127 ns | **109 ns** | **14% faster** |
+| Op | Synap rps | Redis rps | Synap/Redis |
+|---|---:|---:|---:|
+| SET (c=50) | 797,872 | 700,935 | ✅ **1.14** |
+| INCR (c=50) | 761,421 | 607,287 | ✅ **1.25** |
+| LPUSH (c=50) | 641,026 | 513,699 | ✅ **1.25** |
+| GET (c=50) | 742,574 | 789,474 | 0.94 |
+| SET (c=200) | 742,000 | — | ✅ **1.19** |
+| INCR (c=200) | 675,000 | — | ✅ **1.03** |
 
-### 🔜 Planned
+**Native SynapRPC** (Synap's own protocol; RESP3 exists for compatibility) is
+**~3× faster per operation** than the RESP3 path — 166–170k rps vs ~56k at
+`-P 1` — and ~2.8× faster than HTTP/JSON on a SET+GET round-trip.
 
-| Operation | Target | Status |
-|-----------|--------|--------|
-| Event Publish | < 1ms | 🔄 In Progress |
-| Pub/Sub Publish | < 0.5ms | 🔵 Planned |
-| Replication Lag | < 10ms | 🔵 Planned |
+**Memory**: 92 MB for 1M keys vs ~200 MB in Redis (**54% less**).
 
-**Test Coverage**: 636+ tests passing (100% passing)
+### 📈 What the v1.0 optimization rounds delivered
 
-**Scripts**: `./scripts/test-performance.ps1` (full suite), `./scripts/quick-test.ps1` (fast validation)
+| Optimization | Effect |
+|--------------|--------|
+| `TCP_NODELAY` + buffered writes | Non-pipelined GET 1.1k → 56k rps (52×); pipelined 17k → 833k (48×) |
+| Per-key write lock: mutex → sharded `RwLock` + `try_read` fast path | Pipelined SET 130k → 785k; c=200 writes went from 0.24× to 1.19× Redis |
+| Zero-copy values (`Arc<[u8]>` end-to-end) | SET stores the parser's buffer by refcount bump; GET/MGET reach the socket without copying |
+| Hot-path allocations removed (dispatch, replies, metrics, INCR in-place) | INCR 480k → ~800k rps; SADD 630k → ~800k |
+| SIMD (AVX2/NEON) BITCOUNT/BITOP/PFMERGE | Up to 64 GiB/s popcount, 9.5× faster HLL merge |
+| O(1) stream consume seek + per-queue deadline min-heap | Consume/ACK sweeps no longer scan whole buffers |
+
+**Tests**: 1,800+ across the workspace • **Benchmarks**: 13 criterion suites + `synap-bench` load generator
 
 ## ⚖️ Comparison
 
 | Feature | Synap | Redis | RabbitMQ | Kafka |
 |---------|-------|-------|----------|-------|
 | Key-Value | ✅ | ✅ | ❌ | ❌ |
-| **Hashes** | ✅ (v0.6.0) | ✅ | ❌ | ❌ |
-| **Lists** | ✅ (v0.6.0) | ✅ | ❌ | ❌ |
-| **Sets** | ✅ (v0.6.0) | ✅ | ❌ | ❌ |
-| **Sorted Sets** | ✅ (v0.7.0) | ✅ | ❌ | ❌ |
-| **Geospatial** | ✅ (v0.7.0-rc2) | ✅ | ❌ | ❌ |
-| **Bitmaps** | ✅ (v0.7.0-rc2) | ✅ | ❌ | ❌ |
-| **HyperLogLog** | ✅ (v0.7.0-rc1) | ✅ | ❌ | ❌ |
-| **Lua Scripting** | ✅ (v0.7.0) | ✅ | ❌ | ❌ |
-| **Transactions** | ✅ (v0.7.0) | ✅ | ❌ | ❌ |
-| **String Extensions** | ✅ (v0.7.0-rc1) | ✅ | ❌ | ❌ |
+| Hashes / Lists / Sets / Sorted Sets | ✅ | ✅ | ❌ | ❌ |
+| Geospatial / Bitmaps / HyperLogLog | ✅ | ✅ | ❌ | ❌ |
+| Lua Scripting | ✅ | ✅ | ❌ | ❌ |
+| Transactions (MULTI/EXEC/WATCH) | ✅ (durable + replicated) | ✅ | ❌ | ❌ |
+| Blocking Pops (BLPOP/BZPOPMIN…) | ✅ | ✅ | ❌ | ❌ |
+| Keyspace Notifications | ✅ | ✅ | ❌ | ❌ |
 | Queues (ACK) | ✅ | ❌ | ✅ | ❌ |
+| Consumer Prefetch/QoS | ✅ | ❌ | ✅ | ❌ |
 | Priority Queues | ✅ (0-9) | ❌ | ✅ | ❌ |
 | Dead Letter Queue | ✅ | ❌ | ✅ | ❌ |
 | Event Streams | ✅ | ✅ (Limited) | ❌ | ✅ |
@@ -715,16 +686,15 @@ Full results: [`docs/benchmarks/redis-vs-synap.md`](docs/benchmarks/redis-vs-syn
 | RBAC | ✅ | ✅ (Limited) | ✅ | ✅ |
 | API Key Expiration | ✅ | ❌ | ❌ | ❌ |
 | IP Filtering | ✅ | ✅ | ❌ | ❌ |
-| Replication | ✅ (Master-Slave) | ✅ | ✅ | ✅ |
-| Persistence | ✅ (WAL+Snapshot) | ✅ (AOF/RDB) | ✅ (Disk) | ✅ (Log) |
+| Replication | ✅ (Master-Slave, all datatypes) | ✅ | ✅ | ✅ |
+| Persistence | ✅ (WAL+Snapshot, CRC-verified) | ✅ (AOF/RDB) | ✅ (Disk) | ✅ (Log) |
 | PACELC Model | PC/EL | PC/EL | PC/EC | PA/EL |
 | Native Compression | ✅ (LZ4/Zstd) | ❌ | ❌ | ✅ (Snappy) |
-| Hot Data Cache | 🔄 (L1/L2) | ✅ (Single) | ❌ | ❌ |
 | StreamableHTTP | ✅ | ❌ | ❌ | ❌ |
 | MCP Support | ✅ (Configurable, Auth) | ❌ | ❌ | ❌ |
 | UMICP Support | ✅ (13 ops, TLS) | ❌ | ❌ | ❌ |
-| Enhanced Monitoring | ✅ (INFO, SLOWLOG, MEMORY) | ✅ (INFO) | ❌ | ❌ |
-| Password Hashing | ✅ (SHA512) | ✅ (SHA256) | ✅ (bcrypt) | ✅ (SASL) |
+| Enhanced Monitoring | ✅ (INFO, SLOWLOG, MEMORY, Prometheus) | ✅ (INFO) | ❌ | ❌ |
+| Password Hashing | ✅ (bcrypt) | ✅ (SHA256) | ✅ (bcrypt) | ✅ (SASL) |
 | AI Integration | ✅ (MCP+UMICP) | ❌ | ❌ | ❌ |
 | Matrix Operations | ✅ (via UMICP) | ❌ | ❌ | ❌ |
 | Single Binary | ✅ | ✅ | ❌ | ❌ |
@@ -738,222 +708,5 @@ Apache License 2.0 - See [LICENSE](LICENSE) for details.
 
 ## 🤝 Contributing
 
-See [DEVELOPMENT.md](docs/DEVELOPMENT.md) for development setup and contribution guidelines.
-
-## 📊 Project Status
-
-**Status**: ✅ Phase 1-3 Complete | ✅ Redis Phase 1-2 Complete (Hash, List, Set, Sorted Set, Geospatial, Bitmap, String Extensions)  
-**Version**: 0.13.0 (Broker observability metrics + `target/` hygiene — closes #196, #211)  
-**Edition**: Rust 2024 (nightly 1.85+)  
-**Last Updated**: 2026-07-01
-
-### ✅ Implementation Complete
-
-#### 🎯 Phase 1: Foundation (v0.1.0-alpha)
-- ✅ Radix tree-based key-value store
-- ✅ GET/SET/DELETE + Atomic (INCR/DECR)
-- ✅ Batch operations (MSET/MGET/MDEL)
-- ✅ TTL support with background cleanup
-- ✅ Extended commands (KEYS, SCAN, FLUSH, EXPIRE, PERSIST)
-- ✅ HTTP REST API (4 KV endpoints)
-- ✅ StreamableHTTP Protocol (15+ commands)
-- ✅ Comprehensive error handling
-- ✅ Advanced logging (JSON + Pretty formats)
-
-#### ✅ Phase 2: Core Features (v0.2.0-beta) - COMPLETE (Oct 2025)
-
-**📨 Queue System** ✅ COMPLETE
-- ✅ FIFO with priority support (0-9)
-- ✅ ACK/NACK mechanism + retry logic
-- ✅ Dead Letter Queue (DLQ)
-- ✅ Background deadline checker
-- ✅ **9 REST API endpoints** (create, publish, consume, ack, nack, etc.)
-- ✅ **Zero-duplicate guarantee** (5 concurrency tests)
-- ✅ Performance: 7,500+ msg/s with 50 concurrent consumers
-
-**🔒 Authentication & Authorization** ✅ COMPLETE
-- ✅ **User management** (SHA512 password hashing)
-- ✅ **Role-Based Access Control** (admin, readonly, custom roles)
-- ✅ **API Keys** (expiration, IP filtering, usage tracking)
-- ✅ **ACL system** (resource-based permissions)
-- ✅ **Basic Auth + Bearer Token** authentication
-- ✅ **Multi-tenant support** via permission patterns
-- ✅ **23 security tests** (100% auth module coverage)
-
-**🗜️ Compression** ✅ COMPLETE
-- ✅ LZ4 (fast compression)
-- ✅ Zstandard (better ratio)
-- ✅ Configurable thresholds
-- ✅ 6 comprehensive tests
-
-**📡 Event Streams** ✅ COMPLETE + KAFKA-STYLE PARTITIONING ✅ NEW
-- ✅ Ring buffer implementation (VecDeque, 10K msg/room)
-- ✅ Room-based isolation (multi-tenant)
-- ✅ Message history (offset-based replay)
-- ✅ Offset-based consumption (Kafka-style)
-- ✅ Automatic compaction (retention policy)
-- ✅ **Kafka-style persistence** (append-only logs per room)
-- ✅ **Stream recovery** from disk logs
-- ✅ **Master-Slave replication** (full + partial sync)
-- ✅ **Snapshot integration** (stream data in full sync)
-- ✅ **Partitioned Topics** (multiple partitions per topic) ✅ NEW
-- ✅ **Consumer Groups** (coordinated consumption with rebalancing) ✅ NEW
-- ✅ **Key-Based Routing** (hash-based partition assignment) ✅ NEW
-- ✅ **Advanced Retention** (time, size, count, combined, infinite) ✅ NEW
-- ✅ **Assignment Strategies** (round-robin, range, sticky) ✅ NEW
-- ✅ **Offset Management** (commit/checkpoint positions) ✅ NEW
-- ✅ 6 simple stream endpoints + 17 Kafka-style endpoints
-- ✅ Performance: 12.5M msgs/s consume, 2.3 GiB/s publish, 10K+ events/sec per partition
-
-**🔔 Pub/Sub System** ✅ COMPLETE
-- ✅ Topic routing (Radix Trie)
-- ✅ Wildcard subscriptions (`*` and `#`)
-- ✅ Fan-out messaging (concurrent delivery)
-- ✅ Hierarchical topics
-- ✅ Performance: 850K msgs/s, 1.2µs latency
-
-**💾 Persistence** ✅ COMPLETE - All Subsystems
-- ✅ **OptimizedWAL** (Redis-style batching, 10K ops/batch) ✅ NEW
-- ✅ **Queue Persistence** (RabbitMQ-style ACK tracking) ✅ NEW
-- ✅ **Stream Persistence** (Kafka-style append-only logs) ✅ NEW
-- ✅ AsyncWAL with group commit (3-5x throughput)
-- ✅ Streaming snapshot v2 (O(1) memory)
-- ✅ Automatic recovery on startup (KV + Queue + Stream)
-- ✅ 3 fsync modes: Always, Periodic, Never
-- ✅ Manual snapshot endpoint (POST /snapshot)
-
-#### 🔄 Phase 3: Replication (v0.3.0-rc) - COMPLETE (Oct 2025)
-
-**Master-Slave Replication** ✅ COMPLETE
-- ✅ **TCP communication layer** (length-prefixed binary protocol)
-- ✅ **Full sync** (snapshot transfer with CRC32 verification)
-- ✅ **Partial sync** (incremental replication log updates)
-- ✅ **Circular replication log** (1M operations buffer, like Redis)
-- ✅ **Lag monitoring** (real-time offset tracking)
-- ✅ **Auto-reconnect** (intelligent full/partial resync)
-- ✅ **Manual failover** (promote replica to master)
-- ✅ **Stream replication** (Event Streams included in sync) ✅ NEW
-- ✅ **Multi-subsystem sync** (KV + Queue + Streams) ✅ NEW
-- ✅ **67 comprehensive tests** (25 unit + 16 extended + 10 integration + 16 KV operations)
-- ✅ **Stress tested** (5000 operations validated)
-- ✅ **Multiple replicas** (3+ replicas tested simultaneously)
-
-**Performance**:
-- Snapshot creation: 1000 keys < 50ms
-- Large values: 100KB transfers validated
-- Multiple replicas: 3 replicas sync concurrently
-- Stress test: 5000 ops in ~4-5 seconds
-
-#### 🧪 Testing & Quality
-- ✅ **636+ tests passing** (100% passing)
-  - 131 library tests (KV, Queue, Streams, Partitioning, Consumer Groups, Persistence, Auth, Compression) — includes 3 new KV optimization tests
-  - 67 replication tests (25 unit + 16 extended + 10 integration TCP + 16 KV ops)
-  - 21 integration tests (performance, hybrid storage, persistence e2e)
-  - 7 Kafka-style integration tests (partition, consumer groups, retention)
-  - 40+ geospatial tests (23 unit + 17 integration)
-  - 12 bitmap integration tests
-  - 30 Lua scripting tests
-  - 11 transaction tests
-  - 58 authentication tests
-  - 9 SIMD correctness tests (popcount, bitop AND/OR/XOR/NOT, max_reduce, bitpos, backend detection)
-  - Protocol tests across REST, StreamableHTTP, WebSocket
-- ✅ **12 comprehensive benchmark suites**
-  - `kv_bench`: Memory, sharding, TTL, concurrency
-  - `queue_bench`: Arc sharing, priority, pending messages
-  - `persistence_bench`: AsyncWAL, snapshots, recovery
-  - `hybrid_bench`: Adaptive storage (HashMap/RadixTrie)
-  - `stream_bench`: Publish, consume, overflow, multi-subscriber
-  - `pubsub_bench`: Wildcards, fan-out, hierarchy
-  - `compression_bench`: LZ4/Zstd performance
-  - `kv_persistence_bench`: With disk I/O (3 fsync modes)
-  - `queue_persistence_bench`: RabbitMQ-style durability
-  - `geospatial_bench`: GEO operations performance
-  - `bitmap_bench`: Bit manipulation performance
-  - `simd_bench`: SIMD vs scalar — popcount, BITOP AND, PFMERGE max-reduce ✅ NEW
-- ✅ **99.30% test coverage**
-- ✅ Clean `cargo fmt` and `cargo clippy`
-- ✅ WebSocket tests with graceful shutdown (s2s-tests feature)
-
-### 🚀 Quick Start
-
-```bash
-# Clone and build
-git clone https://github.com/hivellm/synap.git
-cd synap
-cargo build --release
-
-# Run tests (636+ passing)
-cargo test
-
-# Run server
-./target/release/synap-server --config config.yml
-# Server starts at http://0.0.0.0:15500
-
-# Use CLI client
-./target/release/synap-cli
-synap> SET mykey "Hello World"
-synap> GET mykey
-
-# Or via HTTP API
-curl -X POST http://localhost:15500/kv/set \
-  -H "Content-Type: application/json" \
-  -d '{"key": "test", "value": "hello", "ttl": 3600}'
-
-curl http://localhost:15500/kv/get/test
-# Returns: "hello" (plain value, not wrapped JSON)
-
-# Or via MCP (Cursor/Claude Desktop)
-# Just ask: "Get the value of key 'test' from Synap"
-# MCP tool synap_kv_get will be called automatically
-```
-
-### 📨 Queue System Examples
-
-```bash
-# Create queue
-curl -X POST http://localhost:15500/queue/jobs \
-  -H "Content-Type: application/json" \
-  -d '{"max_depth": 10000, "ack_deadline_secs": 30}'
-
-# Publish message
-curl -X POST http://localhost:15500/queue/jobs/publish \
-  -H "Content-Type: application/json" \
-  -d '{"payload": [72,101,108,108,111], "priority": 9, "max_retries": 3}'
-
-# Consume message
-curl http://localhost:15500/queue/jobs/consume/worker-1
-
-# Acknowledge (ACK)
-curl -X POST http://localhost:15500/queue/jobs/ack \
-  -H "Content-Type: application/json" \
-  -d '{"message_id": "xxx-xxx-xxx"}'
-```
-
-### 🔒 Authentication Examples
-
-```bash
-# Basic Auth (Redis-style)
-curl -u admin:password http://localhost:15500/queue/private/stats
-
-# API Key (Bearer Token)
-curl -H "Authorization: Bearer sk_XXXXX..." http://localhost:15500/queue/list
-
-# API Key (Query Parameter)
-curl http://localhost:15500/queue/list?api_key=sk_XXXXX...
-```
-
-See [docs/AUTHENTICATION.md](docs/AUTHENTICATION.md) for complete authentication guide.
-
-### 🔜 Next Phases
-
-**✅ Phase 2 (Q4 2025)**: Event Streams, Pub/Sub, Persistence - **COMPLETE**  
-**✅ Phase 3 (Q1 2026)**: Master-Slave Replication with TCP - **COMPLETE**  
-**✅ Redis Phase 1 (Oct 2025)**: Hash, List, Set Data Structures + 5 SDKs - **COMPLETE** 🎉  
-**✅ Redis Phase 2 (Jan 2025)**: Sorted Sets, String Extensions, Geospatial, Bitmap - **COMPLETE** 🎉  
-**✅ MCP Integration**: Model Context Protocol with Authentication & Configurable Tools - **COMPLETE**  
-**✅ UMICP Integration**: Universal Matrix Inter-Communication Protocol with TLS - **COMPLETE**  
-**✅ Enhanced Monitoring**: INFO, SLOWLOG, MEMORY USAGE, CLIENT LIST - **COMPLETE**  
-**⏳ Phase 4 (Q2 2026)**: Clustering, Sharding, GUI Dashboard, Distribution packages
-
-See [docs/ROADMAP.md](docs/ROADMAP.md) for details.
+See [DEVELOPMENT.md](docs/specs/DEVELOPMENT.md) for development setup and contribution guidelines.
 

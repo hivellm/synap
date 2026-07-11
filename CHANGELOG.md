@@ -109,6 +109,16 @@ fixed for the 1.0 release.
   Stream), so those collections survive a restart.
 
 ### Changed
+- **Counters are integer-encoded — INCR/DECR allocate nothing** (phase13
+  int-encoding-counters, the analogue of Redis `object.c` int encoding). A new
+  `StoredValue::Int` variant holds the `i64` plus an inline decimal cache, so
+  INCR is an in-place add + stack re-render (previously a `String` format and a
+  `Vec → Arc` copy per op) while `data()` still hands out a plain byte borrow.
+  Numeric values upgrade to the encoding on first INCR; TTL'd counters keep
+  their expiry; `APPEND` over a counter degrades it to plain bytes (Redis
+  behaviour). Snapshots/replication are unaffected (they carry the logical
+  bytes). Median-of-5: INCR single-key 815k rps (0.92 — now in the same band as
+  GET/SET), multi-key 806k (**1.18× Redis 7**).
 - **High-concurrency writes fixed and now beat Redis** (phase13
   write-scalability). Two multi-key findings from the live sweep: (1) with
   ~3,200 in-flight pipelined writes (`-r 1000000, c=200, P=16`) every write went
