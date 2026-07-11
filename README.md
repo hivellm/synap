@@ -209,7 +209,7 @@ Windows (x86_64) are published on the
 wget https://github.com/hivellm/synap/releases/download/v<version>/synap-linux-x86_64.tar.gz
 tar -xzf synap-linux-x86_64.tar.gz
 cd synap-linux-x86_64
-./synap-server --config config.yml
+./synap-server --config config/config.yml
 ```
 
 **🐳 Docker**:
@@ -300,7 +300,7 @@ cd synap
 cargo build --release
 
 # Run server
-./target/release/synap-server --config config.yml
+./target/release/synap-server --config config/config.yml
 ```
 
 See [Development Guide](docs/specs/DEVELOPMENT.md) for detailed build instructions.
@@ -359,7 +359,7 @@ Authentication is **disabled by default** for development. Enable it for product
 - ✅ **Password Validation** - Configurable password requirements (length, complexity)
 - ✅ **IP Filtering** - Restrict API keys to specific IP addresses
 
-**Via Config File** (`config.yml`):
+**Via Config File** (`config/config.yml`):
 ```yaml
 auth:
   enabled: true
@@ -412,7 +412,7 @@ docker-compose up -d
 
 #### Manual Setup
 
-**Master Node Configuration** (`config-master.yml`):
+**Master Node Configuration** (`config/config-master.yml`):
 
 ```yaml
 server:
@@ -438,7 +438,7 @@ persistence:
     directory: "./data/snapshots"
 ```
 
-**Replica Node Configuration** (`config-replica.yml`):
+**Replica Node Configuration** (`config/config-replica.yml`):
 
 ```yaml
 server:
@@ -469,13 +469,13 @@ persistence:
 
 ```bash
 # Terminal 1: Start master
-synap-server --config config-master.yml
+synap-server --config config/config-master.yml
 
 # Terminal 2: Start replica 1
-synap-server --config config-replica-1.yml
+synap-server --config config/config-replica.yml
 
 # Terminal 3: Start replica 2
-synap-server --config config-replica-2.yml
+synap-server --config config/config-replica.yml
 ```
 
 #### Usage Patterns
