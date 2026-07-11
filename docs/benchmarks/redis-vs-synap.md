@@ -175,6 +175,32 @@ sharded stores parallelize while Redis stays serial on one thread
 ties GET. Redis itself gets *slower* multi-key (cache misses across a 1M-key
 dict); Synap's shards absorb it.
 
+**Final clean sweep** (both servers restarted with empty datasets — earlier
+runs had accumulated millions of keys in the long-lived Redis container,
+skewing both sides; median-of-3, `-r 1000000, c=50, P=16`), after all phase13
+work (packed encodings, int counters, try-read fast path):
+
+| Op | Synap rps | Redis rps | Synap/Redis |
+|---|---:|---:|---:|
+| LPUSH | 655,022 | 537,634 | **1.22** |
+| INCR | 793,651 | 688,073 | **1.15** |
+| SET | 802,139 | 765,306 | **1.05** |
+| GET | 810,811 | 847,458 | 0.96 |
+| LPOP | 806,452 | 882,353 | 0.91 |
+| RPOP | 761,421 | 914,634 | 0.83 |
+| RPUSH | 643,777 | 955,414 | 0.67 † |
+| SADD | 403,226 | 724,638 | 0.56 ‡ |
+
+† **RPUSH**: the gap is Redis's own asymmetry, not ours — its listpack *append*
+(RPUSH 955k) is a bare memcpy while its *prepend* (LPUSH 537k) pays a memmove;
+Synap is symmetric (~650k both directions). ‡ **SADD**: `redis-benchmark -t
+sadd` uses a **fixed key** (`myset`) with randomized members — it measures
+inserting 150k members into ONE big set (HashSet growth/resize pauses vs
+Redis's incremental rehash), not small-set creation. The packed small-set
+encoding targets the realistic many-small-sets shape, which this harness does
+not exercise. Both are recorded as understood structural gaps (big-set
+incremental rehash / bulk-append tuning) rather than open mysteries.
+
 The **native SynapRPC** path shows the same shape (`synap-bench … 1000000`,
 c=50, P=16): SET 535k (+13% over its single-key 473k), GET 599k, INCR 519k —
 randomizing keys makes the native protocol *faster*, confirming the sharding
