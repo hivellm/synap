@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Reply serialization, metrics and waiter-notify hot paths de-allocated**
+  (phase12 round 4). RESP3 reply headers and integer replies are formatted into
+  a stack buffer (itoa-style) instead of `format!` — no `String` per reply; the
+  per-command Prometheus `with_label_values` lookups (label hash + internal
+  `RwLock`, ×3/command) are pre-resolved into cached handles; the RESP3 server
+  loop no longer allocates the uppercased command name; and list/zset pushes
+  skip the blocked-waiter map entirely until a blocking pop has registered.
+  Measured (`-P 16`, median-of-3): INCR 746k → 793k, LPOP 750k → 815k, RPUSH
+  678k → 753k rps.
 - **Collection-store per-op stats are now lock-free atomics** (phase12
   Redis-parity perf). `ListStore` and `SetStore` bumped a counter under a global
   `Arc<RwLock<Stats>>` on every mutating op, so all list/set writes across every

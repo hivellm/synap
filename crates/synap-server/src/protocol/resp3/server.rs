@@ -156,10 +156,18 @@ async fn handle_connection(
             continue;
         }
 
-        let cmd_upper = args[0]
-            .as_str()
-            .map(|s| s.to_ascii_uppercase())
-            .unwrap_or_default();
+        // Uppercase the command into a stack buffer — no per-command String
+        // (mirrors the dispatcher). Longer-than-buffer names are unknown commands.
+        let mut cmd_buf = [0u8; 32];
+        let cmd_upper: &str = match args[0].as_bytes() {
+            Some(raw) if raw.len() <= cmd_buf.len() => {
+                for (i, &c) in raw.iter().enumerate() {
+                    cmd_buf[i] = c.to_ascii_uppercase();
+                }
+                std::str::from_utf8(&cmd_buf[..raw.len()]).unwrap_or("")
+            }
+            _ => "",
+        };
 
         // AUTH command — handled before dispatch.
         // Redis AUTH: `AUTH <password>` (default user) or `AUTH <user> <password>`.
@@ -240,7 +248,7 @@ async fn handle_connection(
         // Per-command ACL (phase6h): destructive/admin commands require an admin
         // user when auth is enforced. With auth disabled the binary port is
         // trusted (loopback by default), so no restriction is applied.
-        if state.require_auth && crate::auth::command_requires_admin(&cmd_upper) {
+        if state.require_auth && crate::auth::command_requires_admin(cmd_upper) {
             let is_admin = auth_user.as_ref().map(|u| u.is_admin).unwrap_or(false);
             if !is_admin {
                 writer
@@ -279,7 +287,7 @@ async fn handle_connection(
             response,
             synap_protocol::resp3::parser::Resp3Value::Error(_)
         );
-        metrics::record_resp3_command(&cmd_upper, !is_err, elapsed);
+        metrics::record_resp3_command(cmd_upper, !is_err, elapsed);
         metrics::resp3_bytes(0, written); // read bytes tracked per-frame below
 
         // Slow-command warning (threshold: 1 ms).

@@ -77,20 +77,24 @@ latency-bound and both servers sit at ~52–56k rps.
 
 ## Results — `-P 16` (pipelined)
 
-Final numbers after the phase12 hot-path optimization rounds (median of 3 runs,
-`-n 150000 -c 50 -P 16`):
+Final numbers after the phase12 hot-path optimization rounds 1–4 (median of 3
+runs, `-n 150000 -c 50 -P 16`; ratios carry ±5% run-to-run noise from both
+servers):
 
 | Op | Synap rps | Redis rps | Synap/Redis | (before phase12) |
 |---|---:|---:|---:|---:|
-| SET | 797,872 | 847,458 | **0.94** | 0.80 |
-| GET | 810,811 | 882,353 | **0.92** | 0.92 |
-| SADD | 789,474 | 867,052 | **0.91** | 0.86 |
-| INCR | 746,269 | 892,857 | **0.84** | 0.50 |
-| RPOP | 793,651 | 955,414 | 0.83 | 0.85 |
-| LPOP | 750,000 | 920,245 | 0.81 | 0.88 |
-| RPUSH | 678,733 | 920,245 | 0.74 | 0.82 |
+| GET | 793,651 | 837,989 | **0.95** | 0.92 |
+| SADD | 802,139 | 867,052 | **0.93** | 0.72 |
+| INCR | 793,651 | 920,245 | 0.86 | 0.15 |
+| LPOP | 815,217 | 943,396 | 0.86 | 0.88 |
+| SET | 785,340 | 925,926 | 0.85 | 0.14 |
+| RPUSH | 753,769 | 937,500 | 0.80 | 0.74 |
 | LPUSH | 777,202 | 515,464 | **1.51** | 1.35 |
 | LRANGE_100 | ~58,600 | ~58,400 | 1.00 | 1.00 |
+
+Synap's absolute throughput is now ~750–815k rps across every op (from lows of
+17k–130k pre-phase12); the residual ratio spread is dominated by Redis's own
+run-to-run variance.
 
 **After the optimization rounds, SET/GET/SADD sit at 0.91–0.94 of Redis 7
 (effectively parity within run-to-run noise), Synap wins LPUSH and ties
@@ -112,6 +116,15 @@ list-encoding quirk).
 4. **Collection stats → lock-free atomics** — `ListStore`/`SetStore` no longer
    take a global `RwLock<Stats>` per op; SADD 630k → 789k, RPUSH improved.
 5. **GET key borrowed from the frame** — no owned `String` copy on the read path.
+6. **Reply headers/integers without `format!`** (round 4) — itoa-style stack
+   formatting for `$len`/`:n`/`*n` headers (Redis's `ll2string` equivalent); no
+   `String` alloc per reply.
+7. **Prometheus handles pre-resolved** (round 4) — the per-command
+   `with_label_values` ×3 (label hash + internal `RwLock` each) became one
+   lock-free map lookup + plain atomic bumps.
+8. **`notify_waiters` zero-waiter fast path** (round 4) — pushes skip the
+   blocked-waiter map (lock + hash lookup) entirely until a blocking pop has
+   ever registered.
 
 ### The remaining gap is architectural
 

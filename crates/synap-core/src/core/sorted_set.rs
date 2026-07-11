@@ -470,6 +470,9 @@ pub struct SortedSetStore {
     /// Per-key broadcast channels used to wake `BZPOPMIN`/`BZPOPMAX` waiters when
     /// a member is added to a key (mirrors the list store's blocking-pop notify).
     notify_tx: Arc<RwLock<HashMap<String, tokio::sync::broadcast::Sender<()>>>>,
+    /// Number of keys with a notify channel — lets `notify_waiters` skip the map
+    /// entirely when no blocking pop has ever registered (the common case).
+    notify_channels: std::sync::atomic::AtomicU64,
     /// Optional keyspace-notification publisher (Redis `notify-keyspace-events`).
     keyspace_notifier: Option<Arc<crate::core::KeyspaceNotifier>>,
 }
@@ -501,12 +504,23 @@ impl SortedSetStore {
             mem: None,
             mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
             notify_tx: Arc::new(RwLock::new(HashMap::new())),
+            notify_channels: std::sync::atomic::AtomicU64::new(0),
             keyspace_notifier: None,
         }
     }
 
     /// Wake any `BZPOPMIN`/`BZPOPMAX` waiters blocked on `key`.
+    ///
+    /// Fast path: skip the lock + lookup entirely while no blocking pop has ever
+    /// registered a channel — the common case, so ZADD never touches the map.
     fn notify_waiters(&self, key: &str) {
+        if self
+            .notify_channels
+            .load(std::sync::atomic::Ordering::Relaxed)
+            == 0
+        {
+            return;
+        }
         if let Some(tx) = self.notify_tx.read().get(key) {
             let _ = tx.send(());
         }
@@ -517,7 +531,11 @@ impl SortedSetStore {
         let mut notify = self.notify_tx.write();
         notify
             .entry(key.to_string())
-            .or_insert_with(|| tokio::sync::broadcast::channel(100).0)
+            .or_insert_with(|| {
+                self.notify_channels
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                tokio::sync::broadcast::channel(100).0
+            })
             .subscribe()
     }
 

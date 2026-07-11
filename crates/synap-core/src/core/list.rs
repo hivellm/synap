@@ -343,6 +343,9 @@ pub struct ListStore {
     /// Broadcast channel for notifying blocked waiters
     /// Key: list key
     notify_tx: Arc<RwLock<HashMap<String, broadcast::Sender<()>>>>,
+    /// Number of keys with a notify channel — lets `notify_waiters` skip the
+    /// map entirely when no blocking pop has ever registered (the common case).
+    notify_channels: AtomicU64,
     /// Shared cross-datatype memory budget (audit M-018).
     mem: Option<crate::core::GlobalMemory>,
     mem_bytes: Arc<std::sync::atomic::AtomicI64>,
@@ -380,6 +383,7 @@ impl ListStore {
             shards,
             stats: Arc::new(AtomicListStats::default()),
             notify_tx: Arc::new(RwLock::new(HashMap::new())),
+            notify_channels: AtomicU64::new(0),
             mem: None,
             mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
             keyspace_notifier: None,
@@ -457,8 +461,15 @@ impl ListStore {
         &self.shards[self.shard_index(key)]
     }
 
-    /// Notify blocked waiters on a key
+    /// Notify blocked waiters on a key.
+    ///
+    /// Fast path: when no blocking pop has ever registered a channel
+    /// (`notify_channels == 0` — the common case for non-blocking workloads),
+    /// skip the lock + hash lookup entirely, so LPUSH/RPUSH never touch the map.
     fn notify_waiters(&self, key: &str) {
+        if self.notify_channels.load(Ordering::Relaxed) == 0 {
+            return;
+        }
         if let Some(tx) = self.notify_tx.read().get(key) {
             let _ = tx.send(());
         }
@@ -467,9 +478,10 @@ impl ListStore {
     /// Create or get broadcast channel for a key
     fn get_or_create_channel(&self, key: &str) -> broadcast::Receiver<()> {
         let mut notify = self.notify_tx.write();
-        let tx = notify
-            .entry(key.to_string())
-            .or_insert_with(|| broadcast::channel(100).0);
+        let tx = notify.entry(key.to_string()).or_insert_with(|| {
+            self.notify_channels.fetch_add(1, Ordering::Relaxed);
+            broadcast::channel(100).0
+        });
         tx.subscribe()
     }
 

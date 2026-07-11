@@ -70,15 +70,17 @@ impl<W: AsyncWrite + Unpin> Resp3Writer<W> {
     }
 
     pub async fn write_integer(&mut self, n: i64) -> std::io::Result<()> {
-        let payload = format!(":{n}\r\n");
-        self.bytes_written += payload.len();
-        self.inner.write_all(payload.as_bytes()).await
+        let mut nb = [0u8; 24];
+        let line = fmt_num_line(&mut nb, b':', n);
+        self.bytes_written += line.len();
+        self.inner.write_all(line).await
     }
 
     pub async fn write_bulk(&mut self, data: &[u8]) -> std::io::Result<()> {
-        let header = format!("${}\r\n", data.len());
+        let mut nb = [0u8; 24];
+        let header = fmt_num_line(&mut nb, b'$', data.len() as i64);
         self.bytes_written += header.len() + data.len() + 2;
-        self.inner.write_all(header.as_bytes()).await?;
+        self.inner.write_all(header).await?;
         self.inner.write_all(data).await?;
         self.inner.write_all(b"\r\n").await
     }
@@ -130,18 +132,58 @@ impl<W: AsyncWrite + Unpin> AsyncWrite for ByteCounter<'_, W> {
     }
 }
 
+/// Render `<prefix><n>\r\n` into `buf` back-to-front and return the filled
+/// slice — an itoa-style stack formatter so integer replies and bulk/aggregate
+/// headers never allocate (Redis does the same with `ll2string`).
+/// 24 bytes fit: prefix + sign + 20 digits (i64::MIN) + CRLF.
+#[inline]
+fn fmt_num_line(buf: &mut [u8; 24], prefix: u8, n: i64) -> &[u8] {
+    let mut pos = buf.len() - 2;
+    buf[pos] = b'\r';
+    buf[pos + 1] = b'\n';
+    let neg = n < 0;
+    let mut v = n.unsigned_abs();
+    loop {
+        pos -= 1;
+        buf[pos] = b'0' + (v % 10) as u8;
+        v /= 10;
+        if v == 0 {
+            break;
+        }
+    }
+    if neg {
+        pos -= 1;
+        buf[pos] = b'-';
+    }
+    pos -= 1;
+    buf[pos] = prefix;
+    &buf[pos..]
+}
+
 async fn write_value<W: AsyncWrite + Unpin>(w: &mut W, value: &Resp3Value) -> std::io::Result<()> {
+    // Stack buffer for integer replies and length headers — no per-reply alloc.
+    let mut nb = [0u8; 24];
     match value {
-        Resp3Value::SimpleString(s) => w.write_all(format!("+{s}\r\n").as_bytes()).await,
-        Resp3Value::Error(e) => w.write_all(format!("-{e}\r\n").as_bytes()).await,
-        Resp3Value::Integer(n) => w.write_all(format!(":{n}\r\n").as_bytes()).await,
+        // SimpleString/Error write in parts: the sink is buffered (BufWriter) in
+        // the server, so each write_all is a memcpy into the buffer, not a syscall.
+        Resp3Value::SimpleString(s) => {
+            w.write_all(b"+").await?;
+            w.write_all(s.as_bytes()).await?;
+            w.write_all(b"\r\n").await
+        }
+        Resp3Value::Error(e) => {
+            w.write_all(b"-").await?;
+            w.write_all(e.as_bytes()).await?;
+            w.write_all(b"\r\n").await
+        }
+        Resp3Value::Integer(n) => w.write_all(fmt_num_line(&mut nb, b':', *n)).await,
         Resp3Value::Double(f) => w.write_all(format!(",{f}\r\n").as_bytes()).await,
         Resp3Value::Boolean(b) => {
             let ch = if *b { 't' } else { 'f' };
             w.write_all(format!("#{ch}\r\n").as_bytes()).await
         }
         Resp3Value::BulkString(data) => {
-            w.write_all(format!("${}\r\n", data.len()).as_bytes())
+            w.write_all(fmt_num_line(&mut nb, b'$', data.len() as i64))
                 .await?;
             w.write_all(data).await?;
             w.write_all(b"\r\n").await
@@ -149,14 +191,14 @@ async fn write_value<W: AsyncWrite + Unpin>(w: &mut W, value: &Resp3Value) -> st
         // Serialised byte-for-byte identically to BulkString; the payload is a
         // shared buffer carried from the store with no intermediate copy.
         Resp3Value::BulkShared(data) => {
-            w.write_all(format!("${}\r\n", data.len()).as_bytes())
+            w.write_all(fmt_num_line(&mut nb, b'$', data.len() as i64))
                 .await?;
             w.write_all(data).await?;
             w.write_all(b"\r\n").await
         }
         Resp3Value::Null => w.write_all(b"_\r\n").await,
         Resp3Value::Array(items) => {
-            w.write_all(format!("*{}\r\n", items.len()).as_bytes())
+            w.write_all(fmt_num_line(&mut nb, b'*', items.len() as i64))
                 .await?;
             for item in items {
                 Box::pin(write_value(w, item)).await?;
@@ -164,7 +206,7 @@ async fn write_value<W: AsyncWrite + Unpin>(w: &mut W, value: &Resp3Value) -> st
             Ok(())
         }
         Resp3Value::Set(items) => {
-            w.write_all(format!("~{}\r\n", items.len()).as_bytes())
+            w.write_all(fmt_num_line(&mut nb, b'~', items.len() as i64))
                 .await?;
             for item in items {
                 Box::pin(write_value(w, item)).await?;
@@ -172,7 +214,7 @@ async fn write_value<W: AsyncWrite + Unpin>(w: &mut W, value: &Resp3Value) -> st
             Ok(())
         }
         Resp3Value::Map(pairs) => {
-            w.write_all(format!("%{}\r\n", pairs.len()).as_bytes())
+            w.write_all(fmt_num_line(&mut nb, b'%', pairs.len() as i64))
                 .await?;
             for (k, v) in pairs {
                 Box::pin(write_value(w, k)).await?;
@@ -183,7 +225,8 @@ async fn write_value<W: AsyncWrite + Unpin>(w: &mut W, value: &Resp3Value) -> st
         Resp3Value::Verbatim(enc, data) => {
             // =<len>\r\n<enc>:<data>\r\n
             let total = 4 + data.len(); // "enc:" prefix
-            w.write_all(format!("={total}\r\n").as_bytes()).await?;
+            w.write_all(fmt_num_line(&mut nb, b'=', total as i64))
+                .await?;
             w.write_all(enc.as_bytes()).await?;
             w.write_all(b":").await?;
             w.write_all(data).await?;

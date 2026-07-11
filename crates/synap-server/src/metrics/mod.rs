@@ -571,8 +571,93 @@ pub fn set_queue_gauges(queue: &str, depth: i64, dlq: i64) {
 
 // ── RESP3 helpers ─────────────────────────────────────────────────────────────
 
+/// Pre-resolved metric handles for one command (`with_label_values` children are
+/// cheap clonable Arcs). Resolving per call costs a label hash + `RwLock` read
+/// inside prometheus ×3 per command; caching turns the hot path into one
+/// lock-free HashMap lookup + plain atomic bumps.
+struct CmdMetricHandles {
+    ok: prometheus::IntCounter,
+    err: prometheus::IntCounter,
+    duration: prometheus::Histogram,
+}
+
+/// Commands worth pre-resolving (the hot set). Anything else falls back to the
+/// dynamic prometheus lookup — same behaviour, just slower.
+const HOT_COMMANDS: &[&str] = &[
+    "GET",
+    "SET",
+    "DEL",
+    "EXISTS",
+    "INCR",
+    "DECR",
+    "INCRBY",
+    "DECRBY",
+    "MGET",
+    "MSET",
+    "EXPIRE",
+    "TTL",
+    "PING",
+    "LPUSH",
+    "RPUSH",
+    "LPOP",
+    "RPOP",
+    "LRANGE",
+    "LLEN",
+    "SADD",
+    "SREM",
+    "SISMEMBER",
+    "SMEMBERS",
+    "SCARD",
+    "SPOP",
+    "HSET",
+    "HGET",
+    "HDEL",
+    "HGETALL",
+    "ZADD",
+    "ZRANGE",
+    "ZSCORE",
+    "ZREM",
+    "APPEND",
+    "GETSET",
+    "STRLEN",
+];
+
+fn hot_handles(
+    counters: &prometheus::IntCounterVec,
+    durations: &prometheus::HistogramVec,
+) -> std::collections::HashMap<&'static str, CmdMetricHandles> {
+    HOT_COMMANDS
+        .iter()
+        .map(|&cmd| {
+            (
+                cmd,
+                CmdMetricHandles {
+                    ok: counters.with_label_values(&[cmd, "ok"]),
+                    err: counters.with_label_values(&[cmd, "err"]),
+                    duration: durations.with_label_values(&[cmd]),
+                },
+            )
+        })
+        .collect()
+}
+
+static RESP3_CMD_HANDLES: std::sync::OnceLock<
+    std::collections::HashMap<&'static str, CmdMetricHandles>,
+> = std::sync::OnceLock::new();
+
 /// Record one RESP3 command completion.
 pub fn record_resp3_command(command: &str, ok: bool, duration_secs: f64) {
+    let cache = RESP3_CMD_HANDLES
+        .get_or_init(|| hot_handles(&RESP3_COMMANDS_TOTAL, &RESP3_COMMAND_DURATION));
+    if let Some(h) = cache.get(command) {
+        if ok {
+            h.ok.inc()
+        } else {
+            h.err.inc()
+        }
+        h.duration.observe(duration_secs);
+        return;
+    }
     let status = if ok { "ok" } else { "err" };
     RESP3_COMMANDS_TOTAL
         .with_label_values(&[command, status])
@@ -610,6 +695,19 @@ pub fn resp3_bytes(read: usize, written: usize) {
 
 /// Record one SynapRPC command completion.
 pub fn record_synap_rpc_command(command: &str, ok: bool, duration_secs: f64) {
+    static HANDLES: std::sync::OnceLock<std::collections::HashMap<&'static str, CmdMetricHandles>> =
+        std::sync::OnceLock::new();
+    let cache =
+        HANDLES.get_or_init(|| hot_handles(&SYNAP_RPC_COMMANDS_TOTAL, &SYNAP_RPC_COMMAND_DURATION));
+    if let Some(h) = cache.get(command) {
+        if ok {
+            h.ok.inc()
+        } else {
+            h.err.inc()
+        }
+        h.duration.observe(duration_secs);
+        return;
+    }
     let status = if ok { "ok" } else { "err" };
     SYNAP_RPC_COMMANDS_TOTAL
         .with_label_values(&[command, status])
