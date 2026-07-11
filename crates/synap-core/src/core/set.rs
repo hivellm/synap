@@ -24,6 +24,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const SHARD_COUNT: usize = 64;
 
@@ -155,10 +156,48 @@ pub struct SetStats {
     pub sdiff_count: u64,
 }
 
+/// Lock-free per-op counters (phase12) — bumping a counter no longer takes a
+/// global `RwLock`. Structural totals are recomputed on demand in
+/// [`SetStore::stats`], so only the counters live here.
+#[derive(Default)]
+struct AtomicSetStats {
+    sadd_count: AtomicU64,
+    srem_count: AtomicU64,
+    sismember_count: AtomicU64,
+    smembers_count: AtomicU64,
+    scard_count: AtomicU64,
+    spop_count: AtomicU64,
+    srandmember_count: AtomicU64,
+    smove_count: AtomicU64,
+    sinter_count: AtomicU64,
+    sunion_count: AtomicU64,
+    sdiff_count: AtomicU64,
+}
+
+impl AtomicSetStats {
+    fn snapshot(&self) -> SetStats {
+        SetStats {
+            total_sets: 0,
+            total_members: 0,
+            sadd_count: self.sadd_count.load(Ordering::Relaxed),
+            srem_count: self.srem_count.load(Ordering::Relaxed),
+            sismember_count: self.sismember_count.load(Ordering::Relaxed),
+            smembers_count: self.smembers_count.load(Ordering::Relaxed),
+            scard_count: self.scard_count.load(Ordering::Relaxed),
+            spop_count: self.spop_count.load(Ordering::Relaxed),
+            srandmember_count: self.srandmember_count.load(Ordering::Relaxed),
+            smove_count: self.smove_count.load(Ordering::Relaxed),
+            sinter_count: self.sinter_count.load(Ordering::Relaxed),
+            sunion_count: self.sunion_count.load(Ordering::Relaxed),
+            sdiff_count: self.sdiff_count.load(Ordering::Relaxed),
+        }
+    }
+}
+
 /// Sharded set store with 64-way concurrency
 pub struct SetStore {
     shards: Vec<Arc<RwLock<HashMap<String, SetValue>>>>,
-    stats: Arc<RwLock<SetStats>>,
+    stats: Arc<AtomicSetStats>,
     /// Shared cross-datatype memory budget (audit M-018).
     mem: Option<crate::core::GlobalMemory>,
     mem_bytes: Arc<std::sync::atomic::AtomicI64>,
@@ -194,7 +233,7 @@ impl SetStore {
 
         Self {
             shards,
-            stats: Arc::new(RwLock::new(SetStats::default())),
+            stats: Arc::new(AtomicSetStats::default()),
             mem: None,
             mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
             keyspace_notifier: None,
@@ -278,19 +317,19 @@ impl SetStore {
         let shard = self.shard(key);
         let mut map = shard.write();
 
-        // Check expiration first
-        if let Some(existing_set) = map.get(key) {
-            if existing_set.is_expired() {
-                map.remove(key);
+        // Fast path: existing, live set — single `get_mut`, no `key.to_string()`.
+        // Only allocate the key (and hit `entry`) when the set is missing or
+        // expired (the cold path).
+        let added = match map.get_mut(key) {
+            Some(set) if !set.is_expired() => set.add(members),
+            _ => {
+                let mut set = SetValue::new(None);
+                let added = set.add(members);
+                map.insert(key.to_string(), set);
+                added
             }
-        }
-
-        let set = map
-            .entry(key.to_string())
-            .or_insert_with(|| SetValue::new(None));
-
-        let added = set.add(members);
-        self.stats.write().sadd_count += 1;
+        };
+        self.stats.sadd_count.fetch_add(1, Ordering::Relaxed);
 
         drop(map);
         if added > 0 {
@@ -313,7 +352,7 @@ impl SetStore {
         }
 
         let removed = set.remove(&members);
-        self.stats.write().srem_count += 1;
+        self.stats.srem_count.fetch_add(1, Ordering::Relaxed);
 
         // Remove empty sets
         if set.is_empty() {
@@ -339,7 +378,7 @@ impl SetStore {
             return Err(SynapError::KeyExpired);
         }
 
-        self.stats.write().sismember_count += 1;
+        self.stats.sismember_count.fetch_add(1, Ordering::Relaxed);
         Ok(set.is_member(&member))
     }
 
@@ -355,7 +394,7 @@ impl SetStore {
             return Err(SynapError::KeyExpired);
         }
 
-        self.stats.write().smembers_count += 1;
+        self.stats.smembers_count.fetch_add(1, Ordering::Relaxed);
         Ok(set.members())
     }
 
@@ -400,7 +439,7 @@ impl SetStore {
             return Err(SynapError::KeyExpired);
         }
 
-        self.stats.write().scard_count += 1;
+        self.stats.scard_count.fetch_add(1, Ordering::Relaxed);
         Ok(set.len())
     }
 
@@ -419,7 +458,7 @@ impl SetStore {
 
         let count = count.unwrap_or(1);
         let result = set.pop(count);
-        self.stats.write().spop_count += 1;
+        self.stats.spop_count.fetch_add(1, Ordering::Relaxed);
 
         // Remove empty sets
         if set.is_empty() {
@@ -442,7 +481,7 @@ impl SetStore {
         }
 
         let count = count.unwrap_or(1);
-        self.stats.write().srandmember_count += 1;
+        self.stats.srandmember_count.fetch_add(1, Ordering::Relaxed);
         Ok(set.random_members(count))
     }
 
@@ -487,7 +526,7 @@ impl SetStore {
             dest_set.members.insert(member);
             dest_set.updated_at = SetValue::current_timestamp();
 
-            self.stats.write().smove_count += 1;
+            self.stats.smove_count.fetch_add(1, Ordering::Relaxed);
             return Ok(true);
         }
 
@@ -541,7 +580,7 @@ impl SetStore {
         dest_set.members.insert(member);
         dest_set.updated_at = SetValue::current_timestamp();
 
-        self.stats.write().smove_count += 1;
+        self.stats.smove_count.fetch_add(1, Ordering::Relaxed);
         Ok(true)
     }
 
@@ -574,7 +613,7 @@ impl SetStore {
             }
         }
 
-        self.stats.write().sinter_count += 1;
+        self.stats.sinter_count.fetch_add(1, Ordering::Relaxed);
         Ok(result.into_iter().collect())
     }
 
@@ -596,7 +635,7 @@ impl SetStore {
             }
         }
 
-        self.stats.write().sunion_count += 1;
+        self.stats.sunion_count.fetch_add(1, Ordering::Relaxed);
         Ok(result.into_iter().collect())
     }
 
@@ -628,7 +667,7 @@ impl SetStore {
             }
         }
 
-        self.stats.write().sdiff_count += 1;
+        self.stats.sdiff_count.fetch_add(1, Ordering::Relaxed);
         Ok(result.into_iter().collect())
     }
 
@@ -682,7 +721,7 @@ impl SetStore {
 
     /// Get statistics
     pub fn stats(&self) -> SetStats {
-        let mut stats = self.stats.read().clone();
+        let mut stats = self.stats.snapshot();
 
         // Count total sets and members
         let mut total_sets = 0;

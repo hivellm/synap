@@ -23,6 +23,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::sync::broadcast;
 use tokio::time::timeout;
@@ -290,10 +291,55 @@ pub struct ListStats {
     pub brpop_count: u64,
 }
 
+/// Lock-free per-op counters (phase12). Bumping a counter no longer takes a
+/// global `RwLock` on the whole stats struct — every list mutation contended on
+/// that one lock. The structural totals (`total_lists`/`total_elements`) are
+/// recomputed on demand in [`ListStore::stats`], so only the counters live here.
+#[derive(Default)]
+struct AtomicListStats {
+    lpush_count: AtomicU64,
+    rpush_count: AtomicU64,
+    lpop_count: AtomicU64,
+    rpop_count: AtomicU64,
+    lrange_count: AtomicU64,
+    llen_count: AtomicU64,
+    lindex_count: AtomicU64,
+    lset_count: AtomicU64,
+    ltrim_count: AtomicU64,
+    lrem_count: AtomicU64,
+    linsert_count: AtomicU64,
+    rpoplpush_count: AtomicU64,
+    blpop_count: AtomicU64,
+    brpop_count: AtomicU64,
+}
+
+impl AtomicListStats {
+    fn snapshot(&self) -> ListStats {
+        ListStats {
+            total_lists: 0,
+            total_elements: 0,
+            lpush_count: self.lpush_count.load(Ordering::Relaxed),
+            rpush_count: self.rpush_count.load(Ordering::Relaxed),
+            lpop_count: self.lpop_count.load(Ordering::Relaxed),
+            rpop_count: self.rpop_count.load(Ordering::Relaxed),
+            lrange_count: self.lrange_count.load(Ordering::Relaxed),
+            llen_count: self.llen_count.load(Ordering::Relaxed),
+            lindex_count: self.lindex_count.load(Ordering::Relaxed),
+            lset_count: self.lset_count.load(Ordering::Relaxed),
+            ltrim_count: self.ltrim_count.load(Ordering::Relaxed),
+            lrem_count: self.lrem_count.load(Ordering::Relaxed),
+            linsert_count: self.linsert_count.load(Ordering::Relaxed),
+            rpoplpush_count: self.rpoplpush_count.load(Ordering::Relaxed),
+            blpop_count: self.blpop_count.load(Ordering::Relaxed),
+            brpop_count: self.brpop_count.load(Ordering::Relaxed),
+        }
+    }
+}
+
 /// Sharded list store with 64-way concurrency
 pub struct ListStore {
     shards: Vec<Arc<RwLock<HashMap<String, ListValue>>>>,
-    stats: Arc<RwLock<ListStats>>,
+    stats: Arc<AtomicListStats>,
     /// Broadcast channel for notifying blocked waiters
     /// Key: list key
     notify_tx: Arc<RwLock<HashMap<String, broadcast::Sender<()>>>>,
@@ -332,7 +378,7 @@ impl ListStore {
 
         Self {
             shards,
-            stats: Arc::new(RwLock::new(ListStats::default())),
+            stats: Arc::new(AtomicListStats::default()),
             notify_tx: Arc::new(RwLock::new(HashMap::new())),
             mem: None,
             mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
@@ -454,7 +500,7 @@ impl ListStore {
         }
 
         let len = list.len();
-        self.stats.write().lpush_count += 1;
+        self.stats.lpush_count.fetch_add(1, Ordering::Relaxed);
 
         // Notify blocked waiters
         drop(map);
@@ -491,7 +537,7 @@ impl ListStore {
         }
 
         let len = list.len();
-        self.stats.write().rpush_count += 1;
+        self.stats.rpush_count.fetch_add(1, Ordering::Relaxed);
 
         // Notify blocked waiters
         drop(map);
@@ -530,7 +576,7 @@ impl ListStore {
             map.remove(key);
         }
 
-        self.stats.write().lpop_count += 1;
+        self.stats.lpop_count.fetch_add(1, Ordering::Relaxed);
 
         drop(map);
         if result.is_empty() {
@@ -570,7 +616,7 @@ impl ListStore {
             map.remove(key);
         }
 
-        self.stats.write().rpop_count += 1;
+        self.stats.rpop_count.fetch_add(1, Ordering::Relaxed);
 
         drop(map);
         if result.is_empty() {
@@ -593,7 +639,7 @@ impl ListStore {
             return Err(SynapError::KeyExpired);
         }
 
-        self.stats.write().lrange_count += 1;
+        self.stats.lrange_count.fetch_add(1, Ordering::Relaxed);
         Ok(list.lrange(start, stop))
     }
 
@@ -609,7 +655,7 @@ impl ListStore {
             return Err(SynapError::KeyExpired);
         }
 
-        self.stats.write().llen_count += 1;
+        self.stats.llen_count.fetch_add(1, Ordering::Relaxed);
         Ok(list.len())
     }
 
@@ -625,7 +671,7 @@ impl ListStore {
             return Err(SynapError::KeyExpired);
         }
 
-        self.stats.write().lindex_count += 1;
+        self.stats.lindex_count.fetch_add(1, Ordering::Relaxed);
         list.lindex(index)
             .cloned()
             .ok_or(SynapError::IndexOutOfRange)
@@ -644,7 +690,7 @@ impl ListStore {
             return Err(SynapError::KeyExpired);
         }
 
-        self.stats.write().lset_count += 1;
+        self.stats.lset_count.fetch_add(1, Ordering::Relaxed);
         list.lset(index, value)
     }
 
@@ -661,7 +707,7 @@ impl ListStore {
             return Err(SynapError::KeyExpired);
         }
 
-        self.stats.write().ltrim_count += 1;
+        self.stats.ltrim_count.fetch_add(1, Ordering::Relaxed);
         list.ltrim(start, stop);
 
         // Remove empty lists
@@ -685,7 +731,7 @@ impl ListStore {
             return Err(SynapError::KeyExpired);
         }
 
-        self.stats.write().lrem_count += 1;
+        self.stats.lrem_count.fetch_add(1, Ordering::Relaxed);
         let removed = list.lrem(count, &value);
 
         // Remove empty lists
@@ -715,7 +761,7 @@ impl ListStore {
             return Err(SynapError::KeyExpired);
         }
 
-        self.stats.write().linsert_count += 1;
+        self.stats.linsert_count.fetch_add(1, Ordering::Relaxed);
         list.linsert(before, &pivot, value)
     }
 
@@ -774,7 +820,7 @@ impl ListStore {
 
             dest_list.lpush(value.clone());
 
-            self.stats.write().rpoplpush_count += 1;
+            self.stats.rpoplpush_count.fetch_add(1, Ordering::Relaxed);
 
             drop(map);
             self.notify_waiters(destination);
@@ -830,7 +876,7 @@ impl ListStore {
 
         dest_list.lpush(value.clone());
 
-        self.stats.write().rpoplpush_count += 1;
+        self.stats.rpoplpush_count.fetch_add(1, Ordering::Relaxed);
 
         drop(first_map);
         drop(second_map);
@@ -849,7 +895,7 @@ impl ListStore {
         for key in &keys {
             if let Ok(mut values) = self.lpop(key, Some(1)) {
                 if !values.is_empty() {
-                    self.stats.write().blpop_count += 1;
+                    self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
                     return Ok((key.clone(), values.remove(0)));
                 }
             }
@@ -883,7 +929,7 @@ impl ListStore {
 
             match result {
                 Ok(Ok(value)) => {
-                    self.stats.write().blpop_count += 1;
+                    self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
                     Ok(value)
                 }
                 Ok(Err(e)) => Err(e),
@@ -904,7 +950,7 @@ impl ListStore {
                 for key in &keys {
                     if let Ok(mut values) = self.lpop(key, Some(1)) {
                         if !values.is_empty() {
-                            self.stats.write().blpop_count += 1;
+                            self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
                             return Ok((key.clone(), values.remove(0)));
                         }
                     }
@@ -971,7 +1017,7 @@ impl ListStore {
         for key in &keys {
             if let Ok(mut values) = self.rpop(key, Some(1)) {
                 if !values.is_empty() {
-                    self.stats.write().brpop_count += 1;
+                    self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
                     return Ok((key.clone(), values.remove(0)));
                 }
             }
@@ -1002,7 +1048,7 @@ impl ListStore {
 
             match result {
                 Ok(Ok(value)) => {
-                    self.stats.write().brpop_count += 1;
+                    self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
                     Ok(value)
                 }
                 Ok(Err(e)) => Err(e),
@@ -1020,7 +1066,7 @@ impl ListStore {
                 for key in &keys {
                     if let Ok(mut values) = self.rpop(key, Some(1)) {
                         if !values.is_empty() {
-                            self.stats.write().brpop_count += 1;
+                            self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
                             return Ok((key.clone(), values.remove(0)));
                         }
                     }
@@ -1031,7 +1077,7 @@ impl ListStore {
 
     /// Get statistics
     pub fn stats(&self) -> ListStats {
-        let mut stats = self.stats.read().clone();
+        let mut stats = self.stats.snapshot();
 
         // Count total lists and elements
         let mut total_lists = 0;

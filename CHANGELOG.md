@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Collection-store per-op stats are now lock-free atomics** (phase12
+  Redis-parity perf). `ListStore` and `SetStore` bumped a counter under a global
+  `Arc<RwLock<Stats>>` on every mutating op, so all list/set writes across every
+  key contended on one lock. The per-op counters are now `AtomicU64`s (structural
+  totals are still recomputed on demand in `stats()`), matching the lock-free
+  `AtomicKVStats`. `SADD` also drops its get-then-entry double lookup for a single
+  `get_mut` fast-path. Measured (`-P 16`): `SADD` 630k → 775k rps (0.72 → 0.87 of
+  Redis 7), `RPUSH` 722k → 772k (0.83).
 - **Hot command-path allocations trimmed** (phase12 Redis-parity perf). The RESP3
   and SynapRPC dispatchers no longer allocate a `String` per command to uppercase
   the name (a stack buffer is used); `INCR`/`DECR` parse the integer straight from
