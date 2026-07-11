@@ -5,7 +5,108 @@ All notable changes to Synap will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0] - 2026-07-11
+
+The **v1.0.0 hardening line**: a `crates/` workspace restructure plus a deep
+security / durability / correctness / performance audit (findings M-001…M-018)
+fixed for the 1.0 release.
+
+### Migration guide
+- **Workspace split into `crates/` (breaking for Rust library consumers).** The
+  monolithic `synap-server` crate was split into `synap-core` (in-memory data
+  engine), `synap-protocol` (RESP3 + SynapRPC wire types/codecs), and
+  `synap-server` (HTTP/WS/MCP + dispatch). Rust code that imported
+  `synap_server::core::*` or `synap_server::protocol::*` should move to
+  `synap_core::*` / `synap_protocol::*`. The old paths still resolve via umbrella
+  re-exports kept on `synap_server` for the transition, so existing imports keep
+  compiling — but new code should depend on the focused crates directly. The
+  Rust SDK (`synap-sdk`) now shares `synap-protocol`'s wire types (no public API
+  change).
+- **SynapRPC default bind moved to loopback (config migration).** The SynapRPC
+  listener now defaults to `127.0.0.1` (matching RESP3) instead of `0.0.0.0`. If
+  you relied on the binary protocol being reachable from other hosts, set
+  `synap_rpc.host: "0.0.0.0"` explicitly (and enable auth). The shipped
+  `config/config.yml` binds both binary listeners to loopback by default.
+
+### Added
+- **Keyspace notifications (`notify-keyspace-events`)**. A new
+  `server.notify_keyspace_events` Redis-style flag string (`K` keyspace, `E`
+  keyevent, `g$lshzxe`/`A` classes) enables publishing `__keyspace@0__:<key>`
+  (payload = event) and `__keyevent@0__:<event>` (payload = key) through the
+  Pub/Sub router, so `PSUBSCRIBE __keyspace@0__:*` observes changes. Empty (the
+  default) disables them with zero write-path overhead. Events cover KV
+  string/generic/expired (`set`, `del`, `expire`, `persist`, `incrby`/`decrby`,
+  `append`, `setrange`, `expired`) and the collection types — hash (`hset`,
+  `hdel`), list (`lpush`, `rpush`, `lpop`, `rpop`), set (`sadd`, `srem`), and
+  sorted set (`zadd`, `zrem`).
+- **Sorted-set blocking pops `BZPOPMIN` / `BZPOPMAX`** (core) with a per-key
+  notify woken by `ZADD`, mirroring the list blocking-pop mechanism.
+- **Blocking pops over the wire (`BLPOP` / `BRPOP` / `BRPOPLPUSH` / `BZPOPMIN` /
+  `BZPOPMAX`)** on the RESP3 and SynapRPC protocols. The last argument is the
+  timeout in seconds (`0` blocks until an element arrives, Redis semantics);
+  the call awaits the existing per-key broadcast notify. Reply is `[key, value]`
+  (lists) / `[key, member, score]` (sorted sets), or nil on timeout.
+- **Collection cursor scans `HSCAN` / `SSCAN` / `ZSCAN`** over the RESP3 and
+  SynapRPC wire protocols, with Redis-style `MATCH` (glob) and `COUNT`. The
+  cursor is an offset into a stably-sorted snapshot; `0` signals completion. A
+  shared byte-level glob matcher (`*`, `?`, `[...]` classes, escapes) backs
+  `MATCH`. (REST exposes non-cursored `HGETALL`/`HKEYS`/`HVALS` equivalents.)
+- **LFU eviction policies `allkeys-lfu` / `volatile-lfu`** (core). Volatile values
+  carry an access-frequency counter bumped on every read; eviction samples and
+  evicts the lowest-frequency key. (Like the existing LRU policies, the counter is
+  tracked on volatile keys.)
+- **Cluster mode initializes from config** (issue #232). A `cluster:` config
+  section now builds the `ClusterTopology` + `SlotMigrationManager` and wires them
+  into the KV store (hash-slot routing) and `AppState` when `cluster.enabled`; a
+  single node owns all 16384 slots until peers join. `INFO cluster` reports the
+  node id, known nodes, and slot coverage. `ClusterConfig` fields all carry serde
+  defaults so a partial/legacy `cluster:` block still loads. Disabled by default.
+- **Cluster consensus/migration hardening** (issue #233). `ClusterConfig::from_env`
+  now loads every cluster field from `SYNAP_CLUSTER_*` environment variables
+  (invalid values fall back to defaults) via a testable getter. Slot-migration
+  cancel performs an explicit rollback: the non-destructive copy model keeps the
+  source keyspace authoritative, so cancel marks the migration Failed and resets
+  progress without data loss. The Raft vote/heartbeat and failover
+  detect/promote logic is verified by tests. (Multi-node Raft election over the
+  wire is tracked as a follow-up.)
+- **Cluster quota inter-node RPC** (issue #231). The cluster quota coordinator's
+  two stubs are now a real length-prefixed bincode TCP RPC: a follower queries the
+  master for a user's authoritative quota (`GetQuota`) and reports accumulated
+  usage deltas (`ApplyDeltas`), which the master aggregates. Deltas are cleared
+  only after the master acks (no silent loss); with no master configured a
+  follower falls back to a permissive quota and keeps deltas pending.
+
+- **Streams: retention bounded by committed consumer offset** (audit M-012).
+  On overflow, streams previously evicted the oldest event regardless of
+  consumer progress, silently losing unread data. Events the slowest tracked
+  consumer has not read are now protected: the room buffer grows up to a new
+  `max_unread_buffer_size` hard cap (default 10× the soft `max_buffer_size`)
+  instead of dropping them, and any forced drop at the cap is surfaced via
+  `RoomStats.dropped` (a real lagging-consumer loss signal, not steady-state
+  noise). With no subscribers the room stays a plain ring buffer. See
+  `docs/broker-retention-and-prefetch.md`.
+- **Queues: per-consumer prefetch/QoS with fair dispatch** (audit M-013). A new
+  per-queue `prefetch_limit` caps how many unacked messages a single consumer
+  may hold; a consumer at its limit is throttled until it acks, which in the
+  pull model also yields fair dispatch (its share flows to other consumers).
+  `0` = unlimited (default). Configurable globally (`queue.prefetch_limit`) and
+  per-queue at creation. The reported consumer count is now the real number of
+  consumers holding in-flight messages instead of a hardcoded `1`.
+- **Replication is actually wired into the running server** (audit M-005).
+  `MasterNode`/`ReplicaNode` are now instantiated from config and writes are
+  propagated to replicas; previously the replication flags were accepted but no
+  node was ever constructed and no write was replicated. A replica converges to
+  the master for **every datatype** — KV, hash, list, set, sorted-set, queue and
+  stream — by applying each `Operation` through the same shared applier the WAL
+  recovery path uses, so the two can't diverge. Replication is **decoupled from
+  the WAL**: a shared record hook always forwards writes to replicas and only
+  logs to the WAL when persistence is enabled, so a master replicates even with
+  `persistence.enabled = false`. `INFO replication` now reports the live role,
+  connected replica count, offset, and (on a replica) master link status and
+  lag. See `docs/replication.md`.
+- **Snapshots persist all datatypes** (audit M-001). Point-in-time snapshots now
+  include Hash, List, Set and Sorted-Set sections (previously only KV/Queue/
+  Stream), so those collections survive a restart.
 
 ### Changed
 - **Bulk arguments are parsed directly into shared `Arc<[u8]>` buffers**
@@ -64,134 +165,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unchanged). Added `KVStore::mget_shared`; `mget` is a thin `to_vec` wrapper over
   it. Large-value reads over RESP3/SynapRPC no longer copy the payload.
 
-### Fixed
-- **RESP3/SynapRPC throughput: `TCP_NODELAY` + buffered writes** (found by the
-  live Redis benchmark). Connections now set `TCP_NODELAY`, and both the RESP3
-  and SynapRPC write halves are wrapped in a `BufWriter` so a pipelined burst of
-  replies coalesces into one syscall (the SynapRPC writer also drains its response
-  channel before flushing and now encodes each frame once instead of twice).
-  Without these, Nagle's algorithm stalled every multi-segment bulk reply ~40 ms
-  on a delayed ACK — non-pipelined RESP3 `GET`/`LRANGE` ran at ~1.1k rps (now
-  ~56k, on par with Redis 7) and pipelined (`-P 16`) `GET` was capped at ~17k rps
-  (now ~833k, ~90% of Redis). Pipelined SynapRPC `GET` rose ~23% (448k→552k).
-  Native SynapRPC stays ~3× faster than the RESP3 compatibility path per op.
-- **Replication: replica joining mid-write-stream no longer loses writes**
-  (issue #234). The master now registers a joining replica in the fan-out set
-  before snapshotting (so writes during snapshot transfer are buffered to it),
-  and the replica deduplicates by offset. Also fixed a partial-sync framing bug
-  where the command was written without the length prefix the replica expected,
-  so partial syncs were misparsed and applied nothing. A replica joining a live
-  master now converges to the full dataset (`test_concurrent_writes_during_sync`
-  re-enabled and asserts all 500 keys).
-
-### Added
-- **Keyspace notifications (`notify-keyspace-events`)**. A new
-  `server.notify_keyspace_events` Redis-style flag string (`K` keyspace, `E`
-  keyevent, `g$lshzxe`/`A` classes) enables publishing `__keyspace@0__:<key>`
-  (payload = event) and `__keyevent@0__:<event>` (payload = key) through the
-  Pub/Sub router, so `PSUBSCRIBE __keyspace@0__:*` observes changes. Empty (the
-  default) disables them with zero write-path overhead. Events cover KV
-  string/generic/expired (`set`, `del`, `expire`, `persist`, `incrby`/`decrby`,
-  `append`, `setrange`, `expired`) and the collection types — hash (`hset`,
-  `hdel`), list (`lpush`, `rpush`, `lpop`, `rpop`), set (`sadd`, `srem`), and
-  sorted set (`zadd`, `zrem`).
-- **Sorted-set blocking pops `BZPOPMIN` / `BZPOPMAX`** (core) with a per-key
-  notify woken by `ZADD`, mirroring the list blocking-pop mechanism.
-- **Blocking pops over the wire (`BLPOP` / `BRPOP` / `BRPOPLPUSH` / `BZPOPMIN` /
-  `BZPOPMAX`)** on the RESP3 and SynapRPC protocols. The last argument is the
-  timeout in seconds (`0` blocks until an element arrives, Redis semantics);
-  the call awaits the existing per-key broadcast notify. Reply is `[key, value]`
-  (lists) / `[key, member, score]` (sorted sets), or nil on timeout.
-- **Collection cursor scans `HSCAN` / `SSCAN` / `ZSCAN`** over the RESP3 and
-  SynapRPC wire protocols, with Redis-style `MATCH` (glob) and `COUNT`. The
-  cursor is an offset into a stably-sorted snapshot; `0` signals completion. A
-  shared byte-level glob matcher (`*`, `?`, `[...]` classes, escapes) backs
-  `MATCH`. (REST exposes non-cursored `HGETALL`/`HKEYS`/`HVALS` equivalents.)
-- **LFU eviction policies `allkeys-lfu` / `volatile-lfu`** (core). Volatile values
-  carry an access-frequency counter bumped on every read; eviction samples and
-  evicts the lowest-frequency key. (Like the existing LRU policies, the counter is
-  tracked on volatile keys.)
-- **Cluster mode initializes from config** (issue #232). A `cluster:` config
-  section now builds the `ClusterTopology` + `SlotMigrationManager` and wires them
-  into the KV store (hash-slot routing) and `AppState` when `cluster.enabled`; a
-  single node owns all 16384 slots until peers join. `INFO cluster` reports the
-  node id, known nodes, and slot coverage. `ClusterConfig` fields all carry serde
-  defaults so a partial/legacy `cluster:` block still loads. Disabled by default.
-- **Cluster consensus/migration hardening** (issue #233). `ClusterConfig::from_env`
-  now loads every cluster field from `SYNAP_CLUSTER_*` environment variables
-  (invalid values fall back to defaults) via a testable getter. Slot-migration
-  cancel performs an explicit rollback: the non-destructive copy model keeps the
-  source keyspace authoritative, so cancel marks the migration Failed and resets
-  progress without data loss. The Raft vote/heartbeat and failover
-  detect/promote logic is verified by tests. (Multi-node Raft election over the
-  wire is tracked as a follow-up.)
-- **Cluster quota inter-node RPC** (issue #231). The cluster quota coordinator's
-  two stubs are now a real length-prefixed bincode TCP RPC: a follower queries the
-  master for a user's authoritative quota (`GetQuota`) and reports accumulated
-  usage deltas (`ApplyDeltas`), which the master aggregates. Deltas are cleared
-  only after the master acks (no silent loss); with no master configured a
-  follower falls back to a permissive quota and keeps deltas pending.
-
-## [1.0.0] - 2026-07-09
-
-The **v1.0.0 hardening line**: a `crates/` workspace restructure plus a deep
-security / durability / correctness / performance audit (findings M-001…M-018)
-fixed for the 1.0 release.
-
-### Migration guide
-
-- **Workspace split into `crates/` (breaking for Rust library consumers).** The
-  monolithic `synap-server` crate was split into `synap-core` (in-memory data
-  engine), `synap-protocol` (RESP3 + SynapRPC wire types/codecs), and
-  `synap-server` (HTTP/WS/MCP + dispatch). Rust code that imported
-  `synap_server::core::*` or `synap_server::protocol::*` should move to
-  `synap_core::*` / `synap_protocol::*`. The old paths still resolve via umbrella
-  re-exports kept on `synap_server` for the transition, so existing imports keep
-  compiling — but new code should depend on the focused crates directly. The
-  Rust SDK (`synap-sdk`) now shares `synap-protocol`'s wire types (no public API
-  change).
-- **SynapRPC default bind moved to loopback (config migration).** The SynapRPC
-  listener now defaults to `127.0.0.1` (matching RESP3) instead of `0.0.0.0`. If
-  you relied on the binary protocol being reachable from other hosts, set
-  `synap_rpc.host: "0.0.0.0"` explicitly (and enable auth). The shipped
-  `config/config.yml` binds both binary listeners to loopback by default.
-
-### Added
-
-- **Streams: retention bounded by committed consumer offset** (audit M-012).
-  On overflow, streams previously evicted the oldest event regardless of
-  consumer progress, silently losing unread data. Events the slowest tracked
-  consumer has not read are now protected: the room buffer grows up to a new
-  `max_unread_buffer_size` hard cap (default 10× the soft `max_buffer_size`)
-  instead of dropping them, and any forced drop at the cap is surfaced via
-  `RoomStats.dropped` (a real lagging-consumer loss signal, not steady-state
-  noise). With no subscribers the room stays a plain ring buffer. See
-  `docs/broker-retention-and-prefetch.md`.
-- **Queues: per-consumer prefetch/QoS with fair dispatch** (audit M-013). A new
-  per-queue `prefetch_limit` caps how many unacked messages a single consumer
-  may hold; a consumer at its limit is throttled until it acks, which in the
-  pull model also yields fair dispatch (its share flows to other consumers).
-  `0` = unlimited (default). Configurable globally (`queue.prefetch_limit`) and
-  per-queue at creation. The reported consumer count is now the real number of
-  consumers holding in-flight messages instead of a hardcoded `1`.
-- **Replication is actually wired into the running server** (audit M-005).
-  `MasterNode`/`ReplicaNode` are now instantiated from config and writes are
-  propagated to replicas; previously the replication flags were accepted but no
-  node was ever constructed and no write was replicated. A replica converges to
-  the master for **every datatype** — KV, hash, list, set, sorted-set, queue and
-  stream — by applying each `Operation` through the same shared applier the WAL
-  recovery path uses, so the two can't diverge. Replication is **decoupled from
-  the WAL**: a shared record hook always forwards writes to replicas and only
-  logs to the WAL when persistence is enabled, so a master replicates even with
-  `persistence.enabled = false`. `INFO replication` now reports the live role,
-  connected replica count, offset, and (on a replica) master link status and
-  lag. See `docs/replication.md`.
-- **Snapshots persist all datatypes** (audit M-001). Point-in-time snapshots now
-  include Hash, List, Set and Sorted-Set sections (previously only KV/Queue/
-  Stream), so those collections survive a restart.
-
-### Changed
-
 - **Workspace restructured into `crates/`** (Vectorizer/Nexus layout): first-party
   crates `synap-core`, `synap-protocol`, `synap-server`, `synap-cli`,
   `synap-migrate` under `crates/`, with the Rust SDK at `sdks/rust`. The pure
@@ -214,7 +187,6 @@ fixed for the 1.0 release.
   mlua 0.12, rmcp 2.1, plus batched TS SDK and tower-http/CI bumps).
 
 ### Performance
-
 - **O(1) stream consume seek** (audit M-016). Consuming from an offset now indexes
   straight into the ring buffer (`offset − min_offset`) instead of linearly
   scanning the whole buffer on every poll.
@@ -231,6 +203,24 @@ fixed for the 1.0 release.
   to replace the system allocator process-wide; off by default.
 
 ### Fixed
+- **RESP3/SynapRPC throughput: `TCP_NODELAY` + buffered writes** (found by the
+  live Redis benchmark). Connections now set `TCP_NODELAY`, and both the RESP3
+  and SynapRPC write halves are wrapped in a `BufWriter` so a pipelined burst of
+  replies coalesces into one syscall (the SynapRPC writer also drains its response
+  channel before flushing and now encodes each frame once instead of twice).
+  Without these, Nagle's algorithm stalled every multi-segment bulk reply ~40 ms
+  on a delayed ACK — non-pipelined RESP3 `GET`/`LRANGE` ran at ~1.1k rps (now
+  ~56k, on par with Redis 7) and pipelined (`-P 16`) `GET` was capped at ~17k rps
+  (now ~833k, ~90% of Redis). Pipelined SynapRPC `GET` rose ~23% (448k→552k).
+  Native SynapRPC stays ~3× faster than the RESP3 compatibility path per op.
+- **Replication: replica joining mid-write-stream no longer loses writes**
+  (issue #234). The master now registers a joining replica in the fan-out set
+  before snapshotting (so writes during snapshot transfer are buffered to it),
+  and the replica deduplicates by offset. Also fixed a partial-sync framing bug
+  where the command was written without the length prefix the replica expected,
+  so partial syncs were misparsed and applied nothing. A replica joining a live
+  master now converges to the full dataset (`test_concurrent_writes_during_sync`
+  re-enabled and asserts all 500 keys).
 
 - **`maxmemory` accounts for all datatypes** (audit M-018). The budget tracked
   only the KV store, so collections/brokers could blow far past the limit. A
@@ -261,7 +251,6 @@ fixed for the 1.0 release.
   persist via their own path).
 
 ### Security
-
 - **Authentication enforced on the RESP3 and SynapRPC listeners** (audit M-003,
   M-004). RESP3 auth was stubbed to always-authenticated and SynapRPC had no auth
   at all — any client on the port could run `FLUSHALL`/`KEYS`. Both now gate
