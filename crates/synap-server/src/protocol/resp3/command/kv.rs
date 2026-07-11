@@ -52,11 +52,13 @@ pub(super) async fn cmd_get(state: &AppState, args: &[Resp3Value]) -> Resp3Value
     if args.len() < 2 {
         return err_wrong_args("GET");
     }
-    let key = match arg_str(args, 1) {
+    // Borrow the key straight from the parsed frame — GET needs only `&str`, so
+    // there's no reason to allocate an owned `String` copy on the read hot path.
+    let key = match args[1].as_str() {
         Some(k) => k,
         None => return Resp3Value::Error("ERR key must be a string".into()),
     };
-    match state.kv_store.get_shared(&key).await {
+    match state.kv_store.get_shared(key).await {
         // Carry the store's shared buffer straight to the wire — no copy.
         Ok(Some(v)) => Resp3Value::BulkShared(v),
         Ok(None) => Resp3Value::Null,
