@@ -125,6 +125,11 @@ list-encoding quirk).
 8. **`notify_waiters` zero-waiter fast path** (round 4) — pushes skip the
    blocked-waiter map (lock + hash lookup) entirely until a blocking pop has
    ever registered.
+9. **Bulk args parsed directly into `Arc<[u8]>`** (round 5,
+   phase13 parse-bulk-into-arc) — the SET value is born shared in the parser
+   and stored via a refcount bump; the `Vec → Arc` re-alloc + full value memcpy
+   per write is gone. Round-5 medians: RESP3 SET 810k / GET 819k / INCR 802k
+   (0.92) / SADD (0.94); native SynapRPC SET 467k → 496k.
 
 ### The remaining gap is architectural
 
