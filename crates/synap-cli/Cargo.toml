@@ -23,3 +23,16 @@ tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter"] }
 synap-sdk = { path = "../../sdks/rust" }
 
+# Static OpenSSL for the aarch64-linux release cross-build; the `vendored`
+# feature propagates to every openssl-sys in the graph. Target-scoped so
+# `--all-features` on dev machines / x86_64 CI never builds OpenSSL from
+# source (native-tls only links OpenSSL on Linux anyway).
+[target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dependencies]
+openssl = { version = "0.10", features = ["vendored"], optional = true }
+
+[features]
+# Build OpenSSL from source instead of linking the system library.
+# Required when cross-compiling (e.g. aarch64-unknown-linux-gnu on an
+# x86_64 runner, where no target-arch libssl-dev exists).
+vendored-openssl = ["dep:openssl"]
+

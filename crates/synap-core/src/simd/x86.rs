@@ -21,8 +21,7 @@ pub unsafe fn popcount_avx2(bytes: &[u8]) -> u64 {
     );
     let low_mask = _mm256_set1_epi8(0x0f);
     let mut acc = _mm256_setzero_si256();
-    let chunks = bytes.chunks_exact(32);
-    let tail = chunks.remainder();
+    let (chunks, tail) = bytes.as_chunks::<32>();
     for chunk in chunks {
         // SAFETY: chunk is exactly 32 bytes; loadu does not require alignment.
         let v = unsafe { _mm256_loadu_si256(chunk.as_ptr() as *const __m256i) };

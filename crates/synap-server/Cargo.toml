@@ -71,6 +71,13 @@ sysinfo = { version = "0.39", default-features = false, features = ["system"] } 
 # Testing
 tempfile = "3.15"
 
+# Static OpenSSL for the aarch64-linux release cross-build; the `vendored`
+# feature propagates to every openssl-sys in the graph. Target-scoped so
+# `--all-features` on dev machines / x86_64 CI never builds OpenSSL from
+# source (native-tls only links OpenSSL on Linux anyway).
+[target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dependencies]
+openssl = { version = "0.10", features = ["vendored"], optional = true }
+
 [features]
 # Enable S2S (Server-to-Server) tests that require a running Synap server
 # These tests are excluded from CI/CD by default
@@ -81,6 +88,10 @@ bench = []
 redis-bench = []
 # Use mimalloc as the global allocator (opt-in). Build with `--features mimalloc`.
 mimalloc = ["dep:mimalloc"]
+# Build OpenSSL from source instead of linking the system library.
+# Required when cross-compiling (e.g. aarch64-unknown-linux-gnu on an
+# x86_64 runner, where no target-arch libssl-dev exists).
+vendored-openssl = ["dep:openssl"]
 
 [dev-dependencies]
 criterion = { version = "0.7", features = ["async_tokio"] }

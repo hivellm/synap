@@ -235,6 +235,14 @@ fixed for the 1.0 release.
   to replace the system allocator process-wide; off by default.
 
 ### Fixed
+- **Release CI: aarch64-linux cross-build and nightly clippy.** The
+  `aarch64-unknown-linux-gnu` release job failed because `openssl-sys`
+  cannot link the host's x86_64 libssl when cross-compiling — new opt-in
+  `vendored-openssl` feature on `synap-server`/`synap-cli` (builds OpenSSL
+  from source), enabled only for that matrix entry. SIMD helpers migrated
+  from `chunks_exact(N)` to `as_chunks::<N>()` to satisfy the new nightly
+  `clippy::chunks_exact_to_as_chunks` lint (also drops a redundant
+  `try_into().expect()` in the scalar popcount path).
 - **SDK 1.0 audit: two real client bugs fixed, all suites green against the
   1.0.0 image.** Python SDK's entire KV module still called the legacy
   `/api/stream` endpoint the server no longer serves — every `kv.*` call

@@ -8,15 +8,9 @@
 #[inline]
 pub fn popcount_slice(bytes: &[u8]) -> u64 {
     let mut count: u64 = 0;
-    let chunks = bytes.chunks_exact(8);
-    let remainder = chunks.remainder();
+    let (chunks, remainder) = bytes.as_chunks::<8>();
     for chunk in chunks {
-        let v = u64::from_ne_bytes(
-            chunk
-                .try_into()
-                .expect("chunks_exact(8) always yields 8-byte chunks"),
-        );
-        count += v.count_ones() as u64;
+        count += u64::from_ne_bytes(*chunk).count_ones() as u64;
     }
     for &b in remainder {
         count += b.count_ones() as u64;

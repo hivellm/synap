@@ -8,8 +8,7 @@ use std::arch::wasm32::*;
 #[inline]
 pub fn popcount_simd128(bytes: &[u8]) -> u64 {
     let mut acc: u64 = 0;
-    let chunks = bytes.chunks_exact(16);
-    let tail = chunks.remainder();
+    let (chunks, tail) = bytes.as_chunks::<16>();
     for chunk in chunks {
         // SAFETY: chunk is exactly 16 bytes.
         let v = unsafe { v128_load(chunk.as_ptr() as *const v128) };
