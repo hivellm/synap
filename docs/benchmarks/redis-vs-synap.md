@@ -167,6 +167,11 @@ sharded stores parallelize while Redis stays serial on one thread
 ties GET. Redis itself gets *slower* multi-key (cache misses across a 1M-key
 dict); Synap's shards absorb it.
 
+The **native SynapRPC** path shows the same shape (`synap-bench … 1000000`,
+c=50, P=16): SET 535k (+13% over its single-key 473k), GET 599k, INCR 519k —
+randomizing keys makes the native protocol *faster*, confirming the sharding
+headroom.
+
 Two honest findings the sweep exposed (tracked as
 `phase13_write-scalability-under-contention`):
 
