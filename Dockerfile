@@ -20,12 +20,12 @@
 #   "Missing supply chain attestation(s)" Scout finding):
 #     docker buildx build \
 #       --sbom=true --provenance=mode=max \
-#       -t hivehub/synap:0.12.0 -t hivehub/synap:latest --load .
+#       -t hivehub/synap:1.0.0 -t hivehub/synap:latest --load .
 #
 #   Build multi-arch (AMD64 + ARM64) and push with attestations:
 #     docker buildx build --platform linux/amd64,linux/arm64 \
 #       --sbom=true --provenance=mode=max \
-#       -t hivehub/synap:0.12.0 -t hivehub/synap:latest --push .
+#       -t hivehub/synap:1.0.0 -t hivehub/synap:latest --push .
 #
 #   Run container (all three protocols):
 #     docker run -d --name synap-server \
@@ -61,7 +61,7 @@
 # ============================================================================
 # Stage 1: Builder
 # ============================================================================
-FROM rust:1.85-alpine AS builder
+FROM rust:1-alpine AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
@@ -97,12 +97,16 @@ COPY .cargo/config.toml ./.cargo/config.toml
 
 # Copy manifest files first (for better Docker layer caching)
 COPY Cargo.toml Cargo.lock rust-toolchain.toml ./
+COPY crates/synap-core/Cargo.toml ./crates/synap-core/
+COPY crates/synap-protocol/Cargo.toml ./crates/synap-protocol/
 COPY crates/synap-server/Cargo.toml ./crates/synap-server/
 COPY crates/synap-cli/Cargo.toml ./crates/synap-cli/
 COPY crates/synap-migrate/Cargo.toml ./crates/synap-migrate/
 COPY sdks/rust/Cargo.toml ./sdks/rust/
 
 # Copy source code (needed for cargo to validate workspace)
+COPY crates/synap-core/src ./crates/synap-core/src
+COPY crates/synap-protocol/src ./crates/synap-protocol/src
 COPY crates/synap-server/src ./crates/synap-server/src
 COPY crates/synap-cli/src ./crates/synap-cli/src
 COPY crates/synap-migrate/src ./crates/synap-migrate/src

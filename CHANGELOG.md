@@ -223,6 +223,14 @@ fixed for the 1.0 release.
   to replace the system allocator process-wide; off by default.
 
 ### Fixed
+- **Docker production build repaired for the `crates/` workspace.** The
+  Dockerfile's builder stage still copied only `synap-server`/`synap-cli`/
+  `synap-migrate` and did not include the `synap-core` and `synap-protocol`
+  crates introduced by the workspace restructure, so the official image could
+  not build; the base also pinned `rust:1.85-alpine`, below the new 1.92 MSRV.
+  Now copies the full workspace and builds from `rust:1-alpine` (current
+  stable; the nightly toolchain is installed on top as before). `DOCKER_README`
+  refreshed for 1.0.0 (tags, feature list, measured Redis-comparison table).
 - **RESP3/SynapRPC throughput: `TCP_NODELAY` + buffered writes** (found by the
   live Redis benchmark). Connections now set `TCP_NODELAY`, and both the RESP3
   and SynapRPC write halves are wrapped in a `BufWriter` so a pipelined burst of

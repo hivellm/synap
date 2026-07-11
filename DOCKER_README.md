@@ -8,13 +8,34 @@
 
 Synap is a modern, production-ready in-memory data platform built in Rust that provides:
 
-- 💾 **Key-Value Store** - Redis-compatible operations with radix tree storage
+- 💾 **Key-Value Store** - Redis-compatible operations (SET/GET/INCR, TTL/PX, MULTI/EXEC,
+  SCAN cursors, LFU/LRU eviction, zero-copy reads, integer-encoded counters)
 - 📨 **Message Queues** - RabbitMQ-style queues with ACK/NACK guarantees
 - 📡 **Event Streams** - Kafka-style partitioned streams with consumer groups
-- 🔔 **Pub/Sub** - Topic-based messaging with wildcard support
-- 🔐 **Authentication** - Production-ready security with users, API keys, and permissions
-- 💪 **Persistence** - WAL + Snapshots for durability
-- 🔄 **Replication** - Master-slave replication for high availability
+- 🔔 **Pub/Sub** - Topic-based messaging with wildcards + Redis-style keyspace
+  notifications (`notify-keyspace-events`)
+- 🧱 **Collections** - Hashes, Lists, Sets, Sorted Sets (blocking pops
+  BLPOP/BZPOPMIN, HSCAN/SSCAN/ZSCAN, packed small-collection encodings),
+  Bitmaps, HyperLogLog, Geospatial
+- 🔐 **Authentication** - Users, API keys, per-command ACLs
+- 💪 **Persistence** - WAL (group commit) + snapshots covering every datatype
+- 🔄 **Replication** - Master-replica with safe mid-stream replica joins
+
+### ⚡ Performance (v1.0, measured vs Redis 7.4)
+
+Same `redis-benchmark` harness against both servers in Docker
+(`-r 1000000 -c 50 -P 16`, median-of-3 — see
+[`docs/benchmarks/redis-vs-synap.md`](https://github.com/hivellm/synap/blob/main/docs/benchmarks/redis-vs-synap.md)):
+
+| Workload | Synap vs Redis 7 |
+|---|---|
+| Multi-key SET / INCR / LPUSH | **1.05–1.22× faster** |
+| Multi-key GET / LPOP | parity (0.91–0.96) |
+| High concurrency (c=200) SET / GET / INCR | **1.03–1.19× faster** |
+| Single hot key (Redis's best case) | 0.85–0.95 (parity band) |
+
+Synap's 64-way sharded, multi-core architecture pulls ahead exactly where real
+workloads live: many keys, many connections.
 
 ## 🚀 Quick Start
 
@@ -68,8 +89,8 @@ volumes:
 ## 📋 Supported Tags
 
 - `latest` - Latest stable release
-- `0.12.0` - Specific version tag
-- `0.12.x` - Version series tags
+- `1.0.0` - The 1.0 release (crates workspace, security/durability audit, Redis-parity performance)
+- `0.13.0` / `0.12.0` - Previous releases
 
 All images support multi-architecture builds:
 - `linux/amd64` - Intel/AMD 64-bit
@@ -281,7 +302,7 @@ volumes:
 # Check server health
 curl http://localhost:15500/health
 
-# Response: {"service":"synap","status":"healthy","version":"0.12.0"}
+# Response: {"service":"synap","status":"healthy","version":"1.0.0"}
 ```
 
 ### Prometheus Metrics
@@ -363,7 +384,7 @@ version: '3.8'
 
 services:
   synap:
-    image: hivehub/synap:0.12.0
+    image: hivehub/synap:1.0.0
     container_name: synap-production
     ports:
       - "15500:15500"  # HTTP/REST
@@ -468,7 +489,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](https:
 - **Supply chain**: SBOM + provenance (SLSA) attestations published
   alongside every tag — built with `docker buildx --sbom=true
   --provenance=mode=max`. Verify with `docker buildx imagetools
-  inspect hivehub/synap:0.12.0 --format "{{ json .SBOM }}"`.
+  inspect hivehub/synap:1.0.0 --format "{{ json .SBOM }}"`.
 
 ---
 
