@@ -86,7 +86,7 @@ pub async fn recover(
             let sets = SetStore::new();
             for (key, set_value) in snapshot.set_data {
                 // Restore set by adding all members
-                let members: Vec<Vec<u8>> = set_value.members.into_iter().collect();
+                let members: Vec<Vec<u8>> = set_value.into_members();
                 if !members.is_empty() {
                     sets.sadd(&key, members)?;
                 }

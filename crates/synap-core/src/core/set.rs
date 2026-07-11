@@ -29,16 +29,88 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 const SHARD_COUNT: usize = 64;
 
+/// Packed-encoding thresholds for small sets (mirrors the list encoding; the
+/// Redis intset/listpack analogue).
+const MAX_PACKED_SET_ENTRIES: usize = 128;
+const MAX_PACKED_SET_ELEM: usize = 64;
+
+/// Storage representation for a set (phase13 contiguous encoding).
+///
+/// Small sets are stored **packed**: `[u32 LE len][bytes]…` unique entries in
+/// one contiguous buffer — no `HashSet` allocation per small key, membership by
+/// bounded scan (≤128 entries). Past the thresholds the set upgrades one-way to
+/// the `ahash` `HashSet` representation.
+#[derive(Debug, Clone)]
+enum SetRepr {
+    Packed { buf: Vec<u8>, count: usize },
+    Hash(HashSet<Vec<u8>, AHashState>),
+}
+
+impl SetRepr {
+    /// Iterate the packed entries as byte slices.
+    fn packed_iter(buf: &[u8]) -> impl Iterator<Item = &[u8]> {
+        let mut pos = 0usize;
+        std::iter::from_fn(move || {
+            if pos + 4 > buf.len() {
+                return None;
+            }
+            let len =
+                u32::from_le_bytes([buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]]) as usize;
+            let start = pos + 4;
+            pos = start + len;
+            buf.get(start..start + len)
+        })
+    }
+
+    fn append_entry(buf: &mut Vec<u8>, value: &[u8]) {
+        buf.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        buf.extend_from_slice(value);
+    }
+}
+
+/// Serialize the representation as the logical member sequence — the same
+/// encoding the previous `HashSet` field produced, so snapshots stay
+/// byte-compatible in both directions.
+mod set_repr_as_seq {
+    use super::SetRepr;
+    use serde::ser::SerializeSeq;
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(repr: &SetRepr, s: S) -> Result<S::Ok, S::Error> {
+        match repr {
+            SetRepr::Packed { buf, count } => {
+                let mut seq = s.serialize_seq(Some(*count))?;
+                for e in SetRepr::packed_iter(buf) {
+                    seq.serialize_element(e)?;
+                }
+                seq.end()
+            }
+            SetRepr::Hash(h) => {
+                let mut seq = s.serialize_seq(Some(h.len()))?;
+                for e in h {
+                    seq.serialize_element(e)?;
+                }
+                seq.end()
+            }
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<SetRepr, D::Error> {
+        let members = Vec::<Vec<u8>>::deserialize(d)?;
+        Ok(super::SetValue::repr_from_members(members))
+    }
+}
+
 /// Set value stored in a single key
 /// Contains unique members
 ///
-/// The member set is keyed with `ahash` (like the KV store) instead of the
-/// default SipHash — the multi-key SADD benchmark showed the default hasher
-/// tax on every member insert/lookup (phase13 write-scalability).
+/// Small sets use a contiguous packed encoding; large ones an `ahash`-keyed
+/// `HashSet` (phase13 contiguous encoding + write-scalability).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SetValue {
     /// Unique members
-    pub members: HashSet<Vec<u8>, AHashState>,
+    #[serde(rename = "members", with = "set_repr_as_seq")]
+    repr: SetRepr,
     /// TTL for entire set
     pub ttl_secs: Option<u64>,
     /// Creation timestamp
@@ -52,10 +124,73 @@ impl SetValue {
     pub fn new(ttl_secs: Option<u64>) -> Self {
         let now = Self::current_timestamp();
         Self {
-            members: HashSet::default(),
+            repr: SetRepr::Packed {
+                buf: Vec::new(),
+                count: 0,
+            },
             ttl_secs,
             created_at: now,
             updated_at: now,
+        }
+    }
+
+    /// Build the right representation from a known (assumed-unique) member
+    /// sequence (snapshot recovery / deserialization / *STORE results).
+    fn repr_from_members(members: Vec<Vec<u8>>) -> SetRepr {
+        let fits = members.len() <= MAX_PACKED_SET_ENTRIES
+            && members.iter().all(|m| m.len() <= MAX_PACKED_SET_ELEM);
+        if fits {
+            let mut buf = Vec::new();
+            let count = members.len();
+            for m in &members {
+                SetRepr::append_entry(&mut buf, m);
+            }
+            SetRepr::Packed { buf, count }
+        } else {
+            SetRepr::Hash(members.into_iter().collect())
+        }
+    }
+
+    /// Upgrade to the `HashSet` representation (one-way) and return it.
+    fn ensure_hash(&mut self) -> &mut HashSet<Vec<u8>, AHashState> {
+        if let SetRepr::Packed { buf, .. } = &self.repr {
+            let members: HashSet<Vec<u8>, AHashState> =
+                SetRepr::packed_iter(buf).map(|m| m.to_vec()).collect();
+            self.repr = SetRepr::Hash(members);
+        }
+        match &mut self.repr {
+            SetRepr::Hash(h) => h,
+            SetRepr::Packed { .. } => unreachable!("just upgraded"),
+        }
+    }
+
+    /// Consume into the logical member sequence (snapshot recovery).
+    pub fn into_members(self) -> Vec<Vec<u8>> {
+        match self.repr {
+            SetRepr::Packed { buf, .. } => SetRepr::packed_iter(&buf).map(|m| m.to_vec()).collect(),
+            SetRepr::Hash(h) => h.into_iter().collect(),
+        }
+    }
+
+    /// Collect the members into an owned `HashSet` (set-algebra base).
+    pub fn to_hash_set(&self) -> HashSet<Vec<u8>, AHashState> {
+        match &self.repr {
+            SetRepr::Packed { buf, .. } => SetRepr::packed_iter(buf).map(|m| m.to_vec()).collect(),
+            SetRepr::Hash(h) => h.clone(),
+        }
+    }
+
+    /// Replace the whole membership (S*STORE results).
+    pub fn replace_members(&mut self, members: Vec<Vec<u8>>) {
+        self.updated_at = Self::current_timestamp();
+        self.repr = Self::repr_from_members(members);
+    }
+
+    /// Total payload bytes across members (memory accounting).
+    pub fn member_bytes(&self) -> usize {
+        match &self.repr {
+            SetRepr::Packed { buf, count } => buf.len().saturating_sub(4 * count),
+            SetRepr::Hash(h) => h.iter().map(Vec::len).sum(),
         }
     }
 
@@ -79,60 +214,103 @@ impl SetValue {
 
     /// Get number of members
     pub fn len(&self) -> usize {
-        self.members.len()
+        match &self.repr {
+            SetRepr::Packed { count, .. } => *count,
+            SetRepr::Hash(h) => h.len(),
+        }
     }
 
     /// Check if set is empty
     pub fn is_empty(&self) -> bool {
-        self.members.is_empty()
+        self.len() == 0
+    }
+
+    /// Add one member. Returns true when it was not already present.
+    pub fn insert_one(&mut self, member: Vec<u8>) -> bool {
+        self.updated_at = Self::current_timestamp();
+        match &mut self.repr {
+            SetRepr::Packed { buf, count } => {
+                if SetRepr::packed_iter(buf).any(|m| m == member.as_slice()) {
+                    return false;
+                }
+                if *count < MAX_PACKED_SET_ENTRIES && member.len() <= MAX_PACKED_SET_ELEM {
+                    SetRepr::append_entry(buf, &member);
+                    *count += 1;
+                    true
+                } else {
+                    self.ensure_hash().insert(member)
+                }
+            }
+            SetRepr::Hash(h) => h.insert(member),
+        }
     }
 
     /// Add member(s), returns number of members added
     pub fn add(&mut self, members: Vec<Vec<u8>>) -> usize {
+        members
+            .into_iter()
+            .filter(|m| self.insert_one(m.clone()))
+            .count()
+    }
+
+    /// Remove one member. Returns true when it was present.
+    pub fn remove_one(&mut self, member: &[u8]) -> bool {
         self.updated_at = Self::current_timestamp();
-        let mut added = 0;
-        for member in members {
-            if self.members.insert(member) {
-                added += 1;
+        match &mut self.repr {
+            SetRepr::Packed { buf, count } => {
+                let mut pos = 0usize;
+                while pos + 4 <= buf.len() {
+                    let len =
+                        u32::from_le_bytes([buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]])
+                            as usize;
+                    let start = pos + 4;
+                    if buf.get(start..start + len) == Some(member) {
+                        buf.drain(pos..start + len);
+                        *count -= 1;
+                        return true;
+                    }
+                    pos = start + len;
+                }
+                false
             }
+            SetRepr::Hash(h) => h.remove(member),
         }
-        added
     }
 
     /// Remove member(s), returns number of members removed
     pub fn remove(&mut self, members: &[Vec<u8>]) -> usize {
-        self.updated_at = Self::current_timestamp();
-        members.iter().filter(|m| self.members.remove(*m)).count()
+        members.iter().filter(|m| self.remove_one(m)).count()
     }
 
     /// Check if member exists
     pub fn is_member(&self, member: &[u8]) -> bool {
-        self.members.contains(member)
+        match &self.repr {
+            SetRepr::Packed { buf, .. } => SetRepr::packed_iter(buf).any(|m| m == member),
+            SetRepr::Hash(h) => h.contains(member),
+        }
     }
 
     /// Get all members
     pub fn members(&self) -> Vec<Vec<u8>> {
-        self.members.iter().cloned().collect()
+        match &self.repr {
+            SetRepr::Packed { buf, .. } => SetRepr::packed_iter(buf).map(|m| m.to_vec()).collect(),
+            SetRepr::Hash(h) => h.iter().cloned().collect(),
+        }
     }
 
     /// Pop random member
     pub fn pop(&mut self, count: usize) -> Vec<Vec<u8>> {
         self.updated_at = Self::current_timestamp();
-        let mut result = Vec::new();
-        let members: Vec<_> = self.members.iter().cloned().collect();
-
-        for member in members.iter().take(count) {
-            if self.members.remove(member) {
-                result.push(member.clone());
-            }
+        let taken: Vec<Vec<u8>> = self.members().into_iter().take(count).collect();
+        for m in &taken {
+            self.remove_one(m);
         }
-
-        result
+        taken
     }
 
     /// Get random member(s) without removing
     pub fn random_members(&self, count: usize) -> Vec<Vec<u8>> {
-        let mut members: Vec<_> = self.members.iter().cloned().collect();
+        let mut members = self.members();
         if count >= members.len() {
             members
         } else {
@@ -276,9 +454,7 @@ impl SetStore {
         for shard in self.shards.iter() {
             for (key, v) in shard.read().iter() {
                 total += key.len();
-                for m in v.members.iter() {
-                    total += m.len();
-                }
+                total += v.member_bytes();
             }
         }
         total
@@ -508,7 +684,7 @@ impl SetStore {
                 return Err(SynapError::KeyExpired);
             }
 
-            if !source_set.members.remove(&member) {
+            if !source_set.remove_one(&member) {
                 return Ok(false); // Member not in source
             }
 
@@ -528,7 +704,7 @@ impl SetStore {
                 .entry(destination.to_string())
                 .or_insert_with(|| SetValue::new(None));
 
-            dest_set.members.insert(member);
+            dest_set.insert_one(member);
             dest_set.updated_at = SetValue::current_timestamp();
 
             self.stats.smove_count.fetch_add(1, Ordering::Relaxed);
@@ -562,7 +738,7 @@ impl SetStore {
             return Err(SynapError::KeyExpired);
         }
 
-        if !source_set.members.remove(&member) {
+        if !source_set.remove_one(&member) {
             return Ok(false);
         }
 
@@ -582,7 +758,7 @@ impl SetStore {
             .entry(destination.to_string())
             .or_insert_with(|| SetValue::new(None));
 
-        dest_set.members.insert(member);
+        dest_set.insert_one(member);
         dest_set.updated_at = SetValue::current_timestamp();
 
         self.stats.smove_count.fetch_add(1, Ordering::Relaxed);
@@ -603,7 +779,7 @@ impl SetStore {
                 let map = shard.read();
                 map.get(key)
                     .filter(|s| !s.is_expired())
-                    .map(|s| s.members.clone())
+                    .map(|s| s.to_hash_set())
             })
             .collect();
 
@@ -636,7 +812,7 @@ impl SetStore {
             if let Some(set) = map.get(key)
                 && !set.is_expired()
             {
-                result.extend(set.members.iter().cloned());
+                result.extend(set.members());
             }
         }
 
@@ -658,7 +834,7 @@ impl SetStore {
         let mut result = first_map
             .get(first_key)
             .filter(|s| !s.is_expired())
-            .map(|s| s.members.clone())
+            .map(|s| s.to_hash_set())
             .unwrap_or_default();
 
         // Remove members from other sets
@@ -668,7 +844,7 @@ impl SetStore {
             if let Some(set) = map.get(key)
                 && !set.is_expired()
             {
-                result.retain(|member| !set.members.contains(member));
+                result.retain(|member| !set.is_member(member));
             }
         }
 
@@ -686,7 +862,7 @@ impl SetStore {
         let mut map = shard.write();
 
         let mut set = SetValue::new(None);
-        set.members = members.into_iter().collect();
+        set.replace_members(members.into_iter().collect());
         map.insert(destination.to_string(), set);
 
         Ok(count)
@@ -702,7 +878,7 @@ impl SetStore {
         let mut map = shard.write();
 
         let mut set = SetValue::new(None);
-        set.members = members.into_iter().collect();
+        set.replace_members(members.into_iter().collect());
         map.insert(destination.to_string(), set);
 
         Ok(count)
@@ -718,7 +894,7 @@ impl SetStore {
         let mut map = shard.write();
 
         let mut set = SetValue::new(None);
-        set.members = members.into_iter().collect();
+        set.replace_members(members.into_iter().collect());
         map.insert(destination.to_string(), set);
 
         Ok(count)
