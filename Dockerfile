@@ -135,13 +135,28 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cp /usr/src/synap/target/${TARGET_TRIPLE}/release/synap-server /usr/src/synap/synap-server-binary
 
 # ============================================================================
-# Stage 2: Runtime
+# Stage 2: Root filesystem prep
 # ============================================================================
-# Docker Hardened Image: continuously rebuilt with security patches,
-# minimal package surface, and SLSA-aligned supply chain. Closes the
-# "Fixable critical or high vulnerabilities found" Scout finding that
-# Alpine 3.19 was carrying.
-FROM dhi.io/debian-base:trixie-dev
+# Assembles everything the scratch image needs with the right ownership:
+# passwd/group entries for the non-root user, the CA bundle for outbound TLS,
+# and the /data tree. Done here because scratch has no shell to run RUN steps.
+FROM alpine:3.22 AS rootfs
+RUN apk add --no-cache ca-certificates && \
+    echo 'synap:x:1000:' > /rootfs-group && \
+    echo 'synap:x:1000:1000::/app:/sbin/nologin' > /rootfs-passwd && \
+    mkdir -p /rootfs-data/wal /rootfs-data/snapshots && \
+    chown -R 1000:1000 /rootfs-data
+
+# ============================================================================
+# Stage 3: Runtime — FROM scratch
+# ============================================================================
+# The Synap binary is a fully static musl build, so the runtime image carries
+# NOTHING but the binary, its config, the CA bundle and the user database:
+# no distro packages, no shell, no package manager — zero distro CVE surface
+# (previously the debian-base:trixie-dev base shipped 114 packages / 38 CVEs).
+# The HEALTHCHECK runs the server binary itself (`--health-check`, a plain-std
+# HTTP probe) since there is no wget/shell.
+FROM scratch
 
 # Build metadata
 ARG BUILD_DATE
@@ -154,43 +169,17 @@ LABEL org.opencontainers.image.source="https://github.com/hivellm/synap"
 LABEL org.opencontainers.image.vendor="HiveLLM"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
-# Install runtime dependencies (minimal). The Synap binary is a
-# fully static musl build, so we only need ca-certificates for
-# outbound TLS, tzdata for log timestamps, and wget for the
-# HEALTHCHECK below.
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        ca-certificates \
-        tzdata \
-        wget && \
-    apt-get clean && \
-    rm -rf /var/lib/apt/lists/*
+# Minimal user database (non-root) + CA bundle + data tree.
+COPY --from=rootfs /rootfs-passwd /etc/passwd
+COPY --from=rootfs /rootfs-group /etc/group
+COPY --from=rootfs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY --from=rootfs --chown=1000:1000 /rootfs-data /data
 
-# Create non-root user. DHI debian-base ships without the
-# `passwd`/`shadow` package, so groupadd/useradd are not available;
-# write directly to /etc/{passwd,group} instead.
-RUN echo 'synap:x:1000:' >> /etc/group && \
-    echo 'synap:x:1000:1000::/app:/usr/sbin/nologin' >> /etc/passwd
+# Binary + default configuration.
+COPY --from=builder --chown=1000:1000 /usr/src/synap/synap-server-binary /usr/local/bin/synap-server
+COPY --chown=1000:1000 config/config.docker.yml /app/config.yml
 
-# Create directories for data persistence
-RUN mkdir -p /data/wal /data/snapshots && \
-    chown -R synap:synap /data
-
-# Set working directory
 WORKDIR /app
-
-# Copy binary from builder (multi-arch support)
-# Binary is copied to a fixed location in builder stage
-COPY --from=builder --chown=synap:synap /usr/src/synap/synap-server-binary /usr/local/bin/synap-server
-RUN chmod +x /usr/local/bin/synap-server
-
-# Copy default configuration
-COPY config/config.docker.yml /app/config.yml
-
-# Fix permissions
-RUN chown -R synap:synap /app
-
-# Switch to non-root user
 USER synap
 
 # Expose ports
@@ -199,14 +188,13 @@ USER synap
 # 6379:  RESP3 protocol (Redis-compatible wire protocol)
 EXPOSE 15500 15501 6379
 
-# Health check
-# Check if server responds to health endpoint
+# Health check via the server binary's built-in probe (no shell/wget needed).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:15500/health || exit 1
+    CMD ["/usr/local/bin/synap-server", "--health-check"]
 
 # Volume mounts for persistence
 VOLUME ["/data"]
 
 # Default command
-CMD ["synap-server", "--config", "/app/config.yml"]
+CMD ["/usr/local/bin/synap-server", "--config", "/app/config.yml"]
 

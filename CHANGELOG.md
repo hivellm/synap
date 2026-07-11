@@ -109,6 +109,18 @@ fixed for the 1.0 release.
   Stream), so those collections survive a restart.
 
 ### Changed
+- **Docker image rebuilt `FROM scratch` — zero vulnerabilities** (phase14
+  image hardening). Scout flagged 38 CVEs (1 critical) on the published image,
+  all from the `debian-base:trixie-dev` runtime and its apt packages; the Synap
+  binary is fully static and needs none of it. The runtime is now `scratch`
+  (static binary + CA bundle + minimal passwd/group + config; non-root UID
+  1000): **114 packages → 0, 38 CVEs → 0 (Scout 0C/0H/0M/0L), 129MB → 19MB**.
+  The HEALTHCHECK runs the server's new built-in probe (`synap-server
+  --health-check`, a plain-std HTTP GET honouring `SYNAP_HEALTH_ADDR`), so no
+  shell or wget exists in the image. SDK docs refreshed for 1.0: every SDK
+  CHANGELOG gained its `[1.0.0]` entry (Go/Java changelogs created), stale
+  version strings fixed, and quick-start examples now lead with the `synap://`
+  default transport.
 - **Counters are integer-encoded — INCR/DECR allocate nothing** (phase13
   int-encoding-counters, the analogue of Redis `object.c` int encoding). A new
   `StoredValue::Int` variant holds the `i64` plus an inline decimal cache, so

@@ -481,8 +481,12 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](https:
 
 ## 🏷️ Image Details
 
-- **Base Image**: `dhi.io/debian-base:trixie-dev` (Docker Hardened Image)
-- **Size**: ~50MB (compressed) — fully static musl binary
+- **Base Image**: `scratch` — the fully static musl binary ships with no
+  distro at all (no shell, no package manager, zero distro CVE surface;
+  Docker Scout: 0C/0H/0M/0L)
+- **Size**: ~19MB — static binary + CA bundle + config
+- **Health check**: built into the server binary (`synap-server
+  --health-check`) — no wget/shell required
 - **Architecture**: Multi-arch (amd64, arm64)
 - **User**: Non-root (`synap:synap`, UID 1000)
 - **Health Check**: Built-in HTTP health endpoint

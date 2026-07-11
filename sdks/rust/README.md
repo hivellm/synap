@@ -22,7 +22,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-synap-sdk = "0.1"
+synap-sdk = "1.0"
 tokio = { version = "1", features = ["full"] }
 ```
 
@@ -34,8 +34,9 @@ use serde_json::json;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create client
-    let config = SynapConfig::new("http://localhost:15500");
+    // Create client — SynapRPC (the fastest transport) is the default scheme;
+    // resp3:// and http:// URLs are also accepted.
+    let config = SynapConfig::new("synap://localhost:15501");
     let client = SynapClient::new(config)?;
 
     // Key-Value operations

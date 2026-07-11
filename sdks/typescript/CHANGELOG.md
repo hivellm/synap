@@ -4,6 +4,22 @@ All notable changes to the Synap TypeScript SDK will be documented in this file.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-11
+
+### Fixed
+- **`kv.set` leaked non-string values as `"[object Object]"`.** The command
+  mapper coerced objects with `String()`; non-string values are now
+  JSON-encoded on set, matching `kv.get`'s documented auto-parse — objects,
+  arrays, numbers and booleans round-trip transparently.
+- Auth rejection tests probe whether the target server enforces auth and skip
+  against auth-disabled dev servers.
+
+### Changed
+- Version aligned with the Synap server 1.0.0 release. SynapRPC (`synap://host:15501`) is the default transport; RESP3 and HTTP remain available via URL scheme. Test suite verified against the official `hivehub/synap:1.0.0` image.
+- Dev dependencies refreshed (`typescript-eslint` 8.63, vitest/eslint/prettier
+  minors); stale `@types/uuid` removed (uuid ships its own types).
+  TypeScript stays on 6.x (7.x is the new native-compiler major).
+
 ## [0.11.0] - 2026-04-09
 
 ### Added

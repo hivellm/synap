@@ -35,7 +35,7 @@ Official Java client library for [Synap](https://github.com/hivellm/synap) - Hig
 <dependency>
     <groupId>com.hivellm</groupId>
     <artifactId>synap-sdk</artifactId>
-    <version>0.11.1</version>
+    <version>1.0.0</version>
 </dependency>
 ```
 

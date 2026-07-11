@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-11
+
+### Changed
+- Version aligned with the Synap server 1.0.0 release. SynapRPC (`synap://host:15501`) is the default transport; RESP3 and HTTP remain available via URL scheme. Test suite verified against the official `hivehub/synap:1.0.0` image.
+- `Microsoft.CodeAnalysis.NetAnalyzers` 8.0.0 → 9.0.0 (matches the .NET 9 SDK
+  analyzers; the library continues to target net8.0 LTS).
+
 ## [0.11.0] - 2026-04-09
 
 ### Added

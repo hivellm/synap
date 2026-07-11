@@ -32,8 +32,9 @@ composer require hivehub/synap-sdk
 use Synap\SDK\SynapClient;
 use Synap\SDK\SynapConfig;
 
-// Create client
-$config = SynapConfig::create('http://localhost:15500');
+// Create client — SynapRPC (the fastest transport) is the default scheme;
+// resp3:// and http:// URLs are also accepted.
+$config = SynapConfig::create('synap://localhost:15501');
 $client = new SynapClient($config);
 
 // Key-Value operations

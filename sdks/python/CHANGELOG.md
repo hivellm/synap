@@ -106,6 +106,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-11
+
+### Fixed
+- **KV module was silently broken: every `kv.*` call returned `None`.** The
+  module still targeted the legacy `/api/stream` endpoint, which the 1.0
+  server no longer serves. All KV operations now route through
+  `send_command` (native SynapRPC/RESP3, or the HTTP command endpoint), with
+  response-shape normalization and a JSON round-trip contract for non-string
+  values (mirrors the TypeScript SDK).
+
+### Changed
+- Version aligned with the Synap server 1.0.0 release. SynapRPC (`synap://host:15501`) is the default transport; RESP3 and HTTP remain available via URL scheme. Test suite verified against the official `hivehub/synap:1.0.0` image.
+
 ## [0.1.0] - 2025-10-23
 
 ### Added

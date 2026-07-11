@@ -28,8 +28,9 @@ dotnet add package HiveHub.Synap.SDK
 ```csharp
 using Synap.SDK;
 
-// Create client
-var config = SynapConfig.Create("http://localhost:15500");
+// Create client — SynapRPC (the fastest transport) is the default scheme;
+// resp3:// and http:// URLs are also accepted.
+var config = SynapConfig.Create("synap://localhost:15501");
 var client = new SynapClient(config);
 
 // Key-Value operations

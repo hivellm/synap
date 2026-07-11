@@ -54,11 +54,44 @@ struct Args {
     /// Enable auto-reconnect on replica disconnect
     #[arg(long, default_value_t = true)]
     auto_reconnect: bool,
+
+    /// Probe a running server's /health endpoint and exit 0 (healthy) or
+    /// 1 (unhealthy). Lets the Docker HEALTHCHECK run the server binary itself
+    /// on a `scratch` image with no shell or wget. Target address comes from
+    /// SYNAP_HEALTH_ADDR (default "127.0.0.1:15500").
+    #[arg(long, default_value_t = false)]
+    health_check: bool,
+}
+
+/// Plain-std HTTP GET /health probe — no shell, no HTTP client dependency.
+fn run_health_check() -> ! {
+    use std::io::{Read, Write};
+
+    let addr = std::env::var("SYNAP_HEALTH_ADDR").unwrap_or_else(|_| "127.0.0.1:15500".into());
+    let ok = (|| -> std::io::Result<bool> {
+        let mut stream = std::net::TcpStream::connect(&addr)?;
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(3)))?;
+        stream.set_write_timeout(Some(std::time::Duration::from_secs(3)))?;
+        stream.write_all(
+            format!("GET /health HTTP/1.1\r\nHost: {addr}\r\nConnection: close\r\n\r\n").as_bytes(),
+        )?;
+        let mut response = String::new();
+        stream.take(1024).read_to_string(&mut response)?;
+        Ok(response.starts_with("HTTP/1.1 200") || response.starts_with("HTTP/1.0 200"))
+    })()
+    .unwrap_or(false);
+
+    std::process::exit(if ok { 0 } else { 1 });
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    // Health probe mode: exits the process, never starts the server.
+    if args.health_check {
+        run_health_check();
+    }
 
     // Load configuration
     let mut config = if std::path::Path::new(&args.config).exists() {

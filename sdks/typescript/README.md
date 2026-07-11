@@ -41,9 +41,10 @@ pnpm add @hivehub/synap
 ```typescript
 import { Synap } from '@hivehub/synap';
 
-// Create client
+// Create client — SynapRPC (the fastest transport) is the default;
+// omit `url` for synap://127.0.0.1:15501, or pass resp3:// / http:// URLs.
 const synap = new Synap({
-  url: 'http://localhost:15500'
+  url: 'synap://localhost:15501'
 });
 
 // Key-Value operations
@@ -1056,7 +1057,7 @@ Apache License 2.0 - See [LICENSE](../../LICENSE) for details.
 ---
 
 **Status**: ✅ Production Ready  
-**Version**: 0.2.0-beta.1  
+**Version**: 1.0.0  
 **Protocol**: StreamableHTTP  
 **Node.js**: 18+
 

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-07-11
+
+### Changed
+- Version aligned with the Synap server 1.0.0 release. SynapRPC (`synap://host:15501`) is the default transport; RESP3 and HTTP remain available via URL scheme. Test suite verified against the official `hivehub/synap:1.0.0` image.
+- `SynapValue::Bytes` now wraps `Arc<[u8]>` (wire format unchanged) so byte
+  payloads are shared without copies end-to-end.
+
 ## [0.12.0] - 2026-04-29
 
 ### Added
