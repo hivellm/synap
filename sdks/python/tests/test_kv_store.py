@@ -14,7 +14,7 @@ def mock_client() -> SynapClient:
     """Create a mock client."""
     config = SynapConfig("http://localhost:15500")
     client = SynapClient(config)
-    client.execute = AsyncMock()  # type: ignore[method-assign]
+    client.send_command = AsyncMock()  # type: ignore[method-assign]
     return client
 
 
@@ -30,14 +30,15 @@ async def test_set_sends_correct_request(
     mock_client: SynapClient,
 ) -> None:
     """Test set sends correct request."""
-    mock_client.execute.return_value = {}  # type: ignore[attr-defined]
+    mock_client.send_command.return_value = {}  # type: ignore[attr-defined]
 
     await kv_store.set("test-key", "test-value")
 
-    mock_client.execute.assert_called_once()  # type: ignore[attr-defined]
-    call_args = mock_client.execute.call_args  # type: ignore[attr-defined]
+    mock_client.send_command.assert_called_once()  # type: ignore[attr-defined]
+    call_args = mock_client.send_command.call_args  # type: ignore[attr-defined]
     assert call_args[0][0] == "kv.set"
-    assert call_args[0][1] == "test-key"
+    assert call_args[0][1]["key"] == "test-key"
+    assert call_args[0][1]["value"] == "test-value"
 
 
 @pytest.mark.asyncio
@@ -46,12 +47,12 @@ async def test_set_with_ttl(
     mock_client: SynapClient,
 ) -> None:
     """Test set with TTL."""
-    mock_client.execute.return_value = {}  # type: ignore[attr-defined]
+    mock_client.send_command.return_value = {}  # type: ignore[attr-defined]
 
     await kv_store.set("test-key", "test-value", ttl=3600)
 
-    call_args = mock_client.execute.call_args  # type: ignore[attr-defined]
-    assert call_args[0][2]["ttl"] == 3600
+    call_args = mock_client.send_command.call_args  # type: ignore[attr-defined]
+    assert call_args[0][1]["ttl"] == 3600
 
 
 @pytest.mark.asyncio
@@ -60,7 +61,7 @@ async def test_get_returns_value(
     mock_client: SynapClient,
 ) -> None:
     """Test get returns value."""
-    mock_client.execute.return_value = {"value": "test-value"}  # type: ignore[attr-defined]
+    mock_client.send_command.return_value = {"value": "test-value"}  # type: ignore[attr-defined]
 
     result = await kv_store.get("test-key")
 
@@ -73,7 +74,7 @@ async def test_get_returns_none_when_not_found(
     mock_client: SynapClient,
 ) -> None:
     """Test get returns None when not found."""
-    mock_client.execute.return_value = {}  # type: ignore[attr-defined]
+    mock_client.send_command.return_value = {}  # type: ignore[attr-defined]
 
     result = await kv_store.get("nonexistent-key")
 
@@ -86,13 +87,13 @@ async def test_delete_sends_correct_request(
     mock_client: SynapClient,
 ) -> None:
     """Test delete sends correct request."""
-    mock_client.execute.return_value = {}  # type: ignore[attr-defined]
+    mock_client.send_command.return_value = {}  # type: ignore[attr-defined]
 
     await kv_store.delete("test-key")
 
-    call_args = mock_client.execute.call_args  # type: ignore[attr-defined]
-    assert call_args[0][0] == "kv.delete"
-    assert call_args[0][1] == "test-key"
+    call_args = mock_client.send_command.call_args  # type: ignore[attr-defined]
+    assert call_args[0][0] == "kv.del"
+    assert call_args[0][1]["key"] == "test-key"
 
 
 @pytest.mark.asyncio
@@ -101,7 +102,7 @@ async def test_exists_returns_true(
     mock_client: SynapClient,
 ) -> None:
     """Test exists returns True when key exists."""
-    mock_client.execute.return_value = {"exists": True}  # type: ignore[attr-defined]
+    mock_client.send_command.return_value = {"exists": True}  # type: ignore[attr-defined]
 
     result = await kv_store.exists("test-key")
 
@@ -114,7 +115,7 @@ async def test_incr_returns_new_value(
     mock_client: SynapClient,
 ) -> None:
     """Test incr returns new value."""
-    mock_client.execute.return_value = {"value": 42}  # type: ignore[attr-defined]
+    mock_client.send_command.return_value = {"value": 42}  # type: ignore[attr-defined]
 
     result = await kv_store.incr("counter", delta=5)
 
@@ -127,7 +128,7 @@ async def test_decr_returns_new_value(
     mock_client: SynapClient,
 ) -> None:
     """Test decr returns new value."""
-    mock_client.execute.return_value = {"value": 10}  # type: ignore[attr-defined]
+    mock_client.send_command.return_value = {"value": 10}  # type: ignore[attr-defined]
 
     result = await kv_store.decr("counter", delta=3)
 
@@ -140,9 +141,9 @@ async def test_scan_returns_keys(
     mock_client: SynapClient,
 ) -> None:
     """Test scan returns keys."""
-    mock_client.execute.return_value = {"keys": ["user:1", "user:2", "user:3"]}  # type: ignore[attr-defined]
+    mock_client.send_command.return_value = {"keys": ["user:1", "user:2", "user:3"]}  # type: ignore[attr-defined]
 
-    result = await kv_store.scan("user:*", limit=100)
+    result = await kv_store.scan("user:", limit=100)
 
     assert result == ["user:1", "user:2", "user:3"]
 
@@ -153,7 +154,7 @@ async def test_stats_returns_statistics(
     mock_client: SynapClient,
 ) -> None:
     """Test stats returns statistics."""
-    mock_client.execute.return_value = {"total_keys": 100, "memory_usage": 1024}  # type: ignore[attr-defined]
+    mock_client.send_command.return_value = {"total_keys": 100, "memory_usage": 1024}  # type: ignore[attr-defined]
 
     result = await kv_store.stats()
 

@@ -34,6 +34,16 @@ export function mapCommand(
   const s = (key: string): string => String(payload[key] ?? '');
   /** Coerce `payload[key]` to a string number with `def` as fallback. */
   const n = (key: string, def: number): string => String(payload[key] ?? def);
+  /**
+   * Encode a value for storage. The SDK contract (see `kv.get`) is that
+   * non-string values round-trip through JSON — so objects, arrays, numbers and
+   * booleans are `JSON.stringify`ed here, while strings and raw bytes pass
+   * through untouched. (Previously objects leaked as `"[object Object]"`.)
+   */
+  const stored = (v: unknown): unknown =>
+    typeof v === 'string' || v instanceof Uint8Array || Buffer.isBuffer(v)
+      ? v
+      : JSON.stringify(v ?? null);
 
   switch (cmd) {
     // ── KV ────────────────────────────────────────────────────────────────────
@@ -41,7 +51,7 @@ export function mapCommand(
       return { rawCmd: 'GET', args: [s('key')] };
 
     case 'kv.set': {
-      const args: unknown[] = [s('key'), payload['value'] ?? ''];
+      const args: unknown[] = [s('key'), stored(payload['value'] ?? '')];
       if (payload['ttl'] != null) args.push('EX', String(payload['ttl']));
       return { rawCmd: 'SET', args };
     }

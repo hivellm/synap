@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any, TypeVar
 
 if TYPE_CHECKING:
@@ -10,8 +11,48 @@ if TYPE_CHECKING:
 T = TypeVar("T")
 
 
+def _encode_value(value: Any) -> Any:  # noqa: ANN401
+    """Encode a value for storage.
+
+    The SDK contract is that non-string values round-trip through JSON, so
+    dicts/lists/numbers/bools are JSON-encoded here while strings and raw bytes
+    pass through untouched (mirrors the TypeScript SDK).
+    """
+    if isinstance(value, (str, bytes, bytearray)):
+        return value
+    return json.dumps(value)
+
+
+def _field(response: Any, name: str, default: Any = None) -> Any:  # noqa: ANN401
+    """Extract a named field from a command response.
+
+    The native transports return the REST-shaped dict (e.g. ``{"value": ...}``)
+    via ``map_response``; the HTTP command endpoint returns the raw payload
+    directly (a bare string/number/list). Accept both.
+    """
+    if isinstance(response, dict):
+        return response.get(name, default)
+    return response if response is not None else default
+
+
+def _decode_value(raw: Any) -> Any:  # noqa: ANN401
+    """Auto-parse JSON-looking string values (inverse of :func:`_encode_value`)."""
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return raw
+    return raw
+
+
 class KVStore:
     """Key-Value Store operations.
+
+    All commands are routed through :meth:`SynapClient.send_command`, which uses
+    the native transport (SynapRPC/RESP3) when connected via ``synap://`` /
+    ``resp3://`` and the HTTP command endpoint otherwise. (Previously this
+    module talked to a legacy ``/api/stream`` endpoint the 1.0 server no longer
+    serves, so every call silently returned empty results.)
 
     Example:
         >>> await client.kv.set("user:1", "John Doe")
@@ -33,14 +74,13 @@ class KVStore:
 
         Args:
             key: The key to set
-            value: The value to store
+            value: The value to store (non-strings are JSON-encoded)
             ttl: Optional time-to-live in seconds
         """
-        data: dict[str, Any] = {"value": value}
+        payload: dict[str, Any] = {"key": key, "value": _encode_value(value)}
         if ttl is not None:
-            data["ttl"] = ttl
-
-        await self._client.execute("kv.set", key, data)
+            payload["ttl"] = ttl
+        await self._client.send_command("kv.set", payload)
 
     async def get(self, key: str) -> Any:
         """Get a value by key.
@@ -49,10 +89,10 @@ class KVStore:
             key: The key to get
 
         Returns:
-            The value, or None if not found
+            The value (JSON-looking strings are auto-parsed), or None if not found
         """
-        response = await self._client.execute("kv.get", key)
-        return response.get("value")
+        response = await self._client.send_command("kv.get", {"key": key})
+        return _decode_value(_field(response, "value"))
 
     async def delete(self, key: str) -> None:
         """Delete a key.
@@ -60,7 +100,7 @@ class KVStore:
         Args:
             key: The key to delete
         """
-        await self._client.execute("kv.delete", key)
+        await self._client.send_command("kv.del", {"key": key})
 
     async def exists(self, key: str) -> bool:
         """Check if a key exists.
@@ -71,8 +111,8 @@ class KVStore:
         Returns:
             True if the key exists, False otherwise
         """
-        response = await self._client.execute("kv.exists", key)
-        return bool(response.get("exists", False))
+        response = await self._client.send_command("kv.exists", {"key": key})
+        return bool(_field(response, "exists", False))
 
     async def incr(self, key: str, delta: int = 1) -> int:
         """Increment a numeric value.
@@ -84,8 +124,13 @@ class KVStore:
         Returns:
             The new value after incrementing
         """
-        response = await self._client.execute("kv.incr", key, {"delta": delta})
-        return int(response.get("value", 0))
+        if delta == 1:
+            response = await self._client.send_command("kv.incr", {"key": key})
+        else:
+            response = await self._client.send_command(
+                "kv.incrby", {"key": key, "amount": delta}
+            )
+        return int(_field(response, "value", 0))
 
     async def decr(self, key: str, delta: int = 1) -> int:
         """Decrement a numeric value.
@@ -97,8 +142,13 @@ class KVStore:
         Returns:
             The new value after decrementing
         """
-        response = await self._client.execute("kv.decr", key, {"delta": delta})
-        return int(response.get("value", 0))
+        if delta == 1:
+            response = await self._client.send_command("kv.decr", {"key": key})
+        else:
+            response = await self._client.send_command(
+                "kv.decrby", {"key": key, "amount": delta}
+            )
+        return int(_field(response, "value", 0))
 
     async def scan(self, prefix: str, limit: int = 100) -> list[str]:
         """Scan keys by prefix.
@@ -110,8 +160,10 @@ class KVStore:
         Returns:
             List of matching keys
         """
-        response = await self._client.execute("kv.scan", prefix, {"limit": limit})
-        return list(response.get("keys", []))
+        pattern = f"{prefix}*" if prefix else "*"
+        response = await self._client.send_command("kv.keys", {"pattern": pattern})
+        keys = list(_field(response, "keys", []) or [])
+        return keys[:limit]
 
     async def stats(self) -> dict[str, Any]:
         """Get KV store statistics.
@@ -119,4 +171,4 @@ class KVStore:
         Returns:
             Statistics as a dictionary
         """
-        return await self._client.execute("kv.stats", "*")
+        return await self._client.send_command("kv.stats", {})

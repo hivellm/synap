@@ -35,11 +35,12 @@ describe('KV Store (S2S Advanced)', () => {
     it('should handle JSON serialization', async () => {
       const key = `json-${Date.now()}`;
       const obj = { name: 'test', nested: { value: 123 }, array: [1, 2, 3] };
-      const value = JSON.stringify(obj);
 
-      await synap.kv.set(key, value);
+      // SDK contract: objects are JSON-encoded on set and auto-parsed on get —
+      // no manual stringify/parse needed.
+      await synap.kv.set(key, obj);
       const retrieved = await synap.kv.get(key);
-      expect(JSON.parse(retrieved!)).toEqual(obj);
+      expect(retrieved).toEqual(obj);
 
       await synap.kv.del(key);
     });
@@ -78,10 +79,13 @@ describe('KV Store (S2S Advanced)', () => {
       await synap.kv.del(longKey);
     });
 
-    it('should handle numeric strings', async () => {
+    it('should handle numeric values (JSON round-trip)', async () => {
       const key = `numeric-${Date.now()}`;
-      const numericValue = '123456789.99';
+      const numericValue = 123456789.99;
 
+      // SDK contract: get() auto-parses JSON, so numbers round-trip as numbers.
+      // (A raw numeric *string* would come back parsed as a number too — use
+      // Bytes or wrap in an object when the string form must be preserved.)
       await synap.kv.set(key, numericValue);
       const retrieved = await synap.kv.get(key);
       expect(retrieved).toBe(numericValue);

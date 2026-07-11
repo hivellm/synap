@@ -147,9 +147,14 @@ describe('mapCommand', () => {
       expect(result).toEqual({ rawCmd: 'GET', args: ['foo'] });
     });
 
-    it('"kv.set" with {key: "foo", value: {Str: "bar"}} → {rawCmd: "SET", args: ["foo", {Str: "bar"}]}', () => {
+    it('"kv.set" JSON-encodes non-string values (objects round-trip via get\'s auto-parse)', () => {
       const result = mapCommand('kv.set', { key: 'foo', value: { Str: 'bar' } });
-      expect(result).toEqual({ rawCmd: 'SET', args: ['foo', { Str: 'bar' }] });
+      expect(result).toEqual({ rawCmd: 'SET', args: ['foo', '{"Str":"bar"}'] });
+    });
+
+    it('"kv.set" passes string values through untouched', () => {
+      const result = mapCommand('kv.set', { key: 'foo', value: 'bar' });
+      expect(result).toEqual({ rawCmd: 'SET', args: ['foo', 'bar'] });
     });
 
     it('"kv.set" with ttl → includes EX arg', () => {

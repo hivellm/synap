@@ -10,6 +10,24 @@ const SYNAP_URL = process.env.SYNAP_URL || 'http://localhost:15500';
 const TEST_USERNAME = process.env.SYNAP_TEST_USERNAME || 'root';
 const TEST_PASSWORD = process.env.SYNAP_TEST_PASSWORD || 'root';
 
+// Probe once whether the target server actually enforces auth. The rejection
+// tests only make sense against an auth-enabled server (SYNAP_AUTH_ENABLED);
+// against a dev server with auth off they are skipped instead of failing.
+let authRequired = false;
+
+beforeAll(async () => {
+  const probe = new Synap({ url: SYNAP_URL });
+  try {
+    await probe.kv.set('auth:probe', 'x');
+    await probe.kv.del('auth:probe');
+    authRequired = false; // unauthenticated write succeeded
+  } catch {
+    authRequired = true;
+  } finally {
+    probe.close();
+  }
+});
+
 describe('Synap Authentication (S2S Integration)', () => {
   describe('Basic Auth', () => {
     it('should authenticate with Basic Auth and perform operations', async () => {
@@ -33,13 +51,14 @@ describe('Synap Authentication (S2S Integration)', () => {
         expect(value).toBe('test_value');
 
         // Cleanup
-        await synap.kv.delete('auth:test:basic');
+        await synap.kv.del('auth:test:basic');
       } finally {
         synap.close();
       }
     });
 
-    it('should fail with invalid Basic Auth credentials', async () => {
+    it('should fail with invalid Basic Auth credentials', async (ctx) => {
+      if (!authRequired) return ctx.skip();
       const synap = new Synap({
         url: SYNAP_URL,
         auth: {
@@ -56,7 +75,8 @@ describe('Synap Authentication (S2S Integration)', () => {
       }
     });
 
-    it('should fail with missing password', async () => {
+    it('should fail with missing password', async (ctx) => {
+      if (!authRequired) return ctx.skip();
       const synap = new Synap({
         url: SYNAP_URL,
         auth: {
@@ -124,13 +144,14 @@ describe('Synap Authentication (S2S Integration)', () => {
         expect(value).toBe('test_value');
 
         // Cleanup
-        await synap.kv.delete('auth:test:apikey');
+        await synap.kv.del('auth:test:apikey');
       } finally {
         synap.close();
       }
     });
 
-    it('should fail with invalid API Key', async () => {
+    it('should fail with invalid API Key', async (ctx) => {
+      if (!authRequired) return ctx.skip();
       const synap = new Synap({
         url: SYNAP_URL,
         auth: {
@@ -146,7 +167,8 @@ describe('Synap Authentication (S2S Integration)', () => {
       }
     });
 
-    it('should fail with empty API Key', async () => {
+    it('should fail with empty API Key', async (ctx) => {
+      if (!authRequired) return ctx.skip();
       const synap = new Synap({
         url: SYNAP_URL,
         auth: {

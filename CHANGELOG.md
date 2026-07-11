@@ -223,6 +223,19 @@ fixed for the 1.0 release.
   to replace the system allocator process-wide; off by default.
 
 ### Fixed
+- **SDK 1.0 audit: two real client bugs fixed, all suites green against the
+  1.0.0 image.** Python SDK's entire KV module still called the legacy
+  `/api/stream` endpoint the server no longer serves — every `kv.*` call
+  silently returned `None`; it now routes through `send_command` (native
+  SynapRPC/RESP3 or the HTTP command endpoint) with response-shape
+  normalization. TypeScript SDK's `kv.set` leaked non-string values as
+  `"[object Object]"`; values now JSON-encode on set (matching `get`'s
+  documented auto-parse). All 7 SDKs verified at 1.0.0 with SynapRPC as the
+  default transport; test totals: TS 467, Python 177, C# 96, Go
+  unit+integration (3 live transports), Rust 109+30+8 live. Dependencies
+  refreshed across SDKs (typescript-eslint 8.63 lock fix, NetAnalyzers 9,
+  testify 1.11, jackson 2.18.2) and the Rust workspace (`cargo update`,
+  105 crates) — full suite + clippy green after.
 - **Docker production build repaired for the `crates/` workspace.** The
   Dockerfile's builder stage still copied only `synap-server`/`synap-cli`/
   `synap-migrate` and did not include the `synap-core` and `synap-protocol`

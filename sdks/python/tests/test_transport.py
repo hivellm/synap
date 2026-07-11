@@ -82,8 +82,12 @@ class TestFromWire:
         assert _from_wire({"Str": "world"}) == "world"
 
     def test_bytes_envelope(self) -> None:
-        raw = {"Bytes": b"\xde\xad"}
-        assert _from_wire(raw) == b"\xde\xad"
+        # 0xDE 0xAD happens to be valid UTF-8 (U+07AD) and the SDK contract
+        # decodes UTF-8-looking bytes to str...
+        assert _from_wire({"Bytes": b"\xde\xad"}) == "ޭ"
+        # ...while invalid UTF-8 stays raw bytes.
+        raw = {"Bytes": b"\xff\xfe"}
+        assert _from_wire(raw) == b"\xff\xfe"
 
     def test_roundtrip_none(self) -> None:
         assert _from_wire(_to_wire(None)) is None
@@ -236,7 +240,7 @@ async def _run_rpc_server(
         frame_len = struct.unpack_from("<I", len_bytes)[0]
         body = await reader.readexactly(frame_len)
         decoded = msgpack.unpackb(body, raw=False)
-        req_id = decoded[0]
+        req_id = decoded["id"]
         # Send response
         resp = msgpack.packb([req_id, response_payload], use_bin_type=True)
         writer.write(struct.pack("<I", len(resp)) + resp)
@@ -257,10 +261,10 @@ async def test_synaprpc_transport_ok_response() -> None:
         frame_len = struct.unpack_from("<I", len_bytes)[0]
         body = await r.readexactly(frame_len)
         decoded = msgpack.unpackb(body, raw=False)
-        got_request["id"] = decoded[0]
-        got_request["cmd"] = decoded[1]
-        got_request["args"] = decoded[2]
-        resp = msgpack.packb([decoded[0], response_payload], use_bin_type=True)
+        got_request["id"] = decoded["id"]
+        got_request["cmd"] = decoded["command"]
+        got_request["args"] = decoded["args"]
+        resp = msgpack.packb([decoded["id"], response_payload], use_bin_type=True)
         w.write(struct.pack("<I", len(resp)) + resp)
         await w.drain()
         w.close()
@@ -288,7 +292,7 @@ async def test_synaprpc_transport_error_response() -> None:
         frame_len = struct.unpack_from("<I", len_bytes)[0]
         body = await r.readexactly(frame_len)
         decoded = msgpack.unpackb(body, raw=False)
-        resp = msgpack.packb([decoded[0], {"Err": "not found"}], use_bin_type=True)
+        resp = msgpack.packb([decoded["id"], {"Err": "not found"}], use_bin_type=True)
         w.write(struct.pack("<I", len(resp)) + resp)
         await w.drain()
         w.close()
@@ -316,8 +320,8 @@ async def test_synaprpc_transport_wire_args_encoded() -> None:
         frame_len = struct.unpack_from("<I", len_bytes)[0]
         body = await r.readexactly(frame_len)
         decoded = msgpack.unpackb(body, raw=False)
-        received_args.extend(decoded[2])
-        resp = msgpack.packb([decoded[0], {"Ok": "Null"}], use_bin_type=True)
+        received_args.extend(decoded["args"])
+        resp = msgpack.packb([decoded["id"], {"Ok": "Null"}], use_bin_type=True)
         w.write(struct.pack("<I", len(resp)) + resp)
         await w.drain()
         w.close()
