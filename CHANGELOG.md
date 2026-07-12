@@ -247,6 +247,14 @@ fixed for the 1.0 release.
   architectures.
 
 ### Fixed
+- **Flaky auth timing test on loaded CI runners.**
+  `test_password_verification_timing` asserted an absolute wall-clock bound
+  (`diff < 100ms`) over a single sample per case — one macOS scheduler
+  hiccup around a ~250ms bcrypt verify blew it. Now compares the median of
+  5 samples per case under a relative bound (slower path < 4x the faster),
+  which still catches the actual security regression (an early-exit path
+  on wrong passwords would be 100x+ faster) without depending on runner
+  load.
 - **Flaky replication tests under nextest: cross-process port collisions.**
   The five replication/durability integration suites allocated master ports
   from a `static AtomicU16` counter — unique within one process, but nextest

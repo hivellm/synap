@@ -77,22 +77,39 @@ fn test_password_verification_timing() {
         .create_user("user1", "correct_password", false)
         .unwrap();
 
-    // Measure time for correct password
-    let start = Instant::now();
-    let _ = manager.authenticate("user1", "correct_password");
-    let correct_time = start.elapsed();
+    // Median of 5 samples per case: a single wall-clock sample flakes on
+    // loaded CI runners (one scheduler hiccup blew the old absolute
+    // `diff < 100ms` bound on macOS).
+    let median_time = |password: &str| -> Duration {
+        let mut samples: Vec<Duration> = (0..5)
+            .map(|_| {
+                let start = Instant::now();
+                let _ = manager.authenticate("user1", password);
+                start.elapsed()
+            })
+            .collect();
+        samples.sort();
+        samples[2]
+    };
 
-    // Measure time for incorrect password
-    let start = Instant::now();
-    let _ = manager.authenticate("user1", "wrong_password");
-    let incorrect_time = start.elapsed();
+    let correct = median_time("correct_password");
+    let incorrect = median_time("wrong_password");
 
-    // Times should be similar (SHA512 hashing takes similar time)
-    // Allow some variance but should be close
-    let diff = correct_time.abs_diff(incorrect_time);
-
-    // Difference should be small (SHA512 hashing takes similar time regardless)
-    assert!(diff < Duration::from_millis(100));
+    // The security property is the absence of an early-exit fast path: a
+    // wrong password must still pay the full bcrypt verification, so both
+    // medians stay within the same order of magnitude. A relative bound is
+    // immune to absolute wall-clock noise; an early-exit bug would make the
+    // wrong-password path 100x+ faster and still trip this.
+    let (fast, slow) = if correct < incorrect {
+        (correct, incorrect)
+    } else {
+        (incorrect, correct)
+    };
+    assert!(
+        slow < fast * 4,
+        "verification timing asymmetry suggests an early-exit path: \
+         correct={correct:?} incorrect={incorrect:?}"
+    );
 }
 
 #[test]
