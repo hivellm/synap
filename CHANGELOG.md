@@ -246,6 +246,18 @@ fixed for the 1.0 release.
   publishing parity with Vectorizer. Docker Scout: 0C/0H/0M/0L on both
   architectures.
 
+### Changed
+- **Release CI now attaches binaries to the GitHub Release**
+  (Nexus/Vectorizer pipeline). The workflow triggers on
+  `release: published` (plus `workflow_dispatch` for an existing tag) and
+  uses `taiki-e/upload-rust-binary-action` to build and attach
+  `synap-server`/`synap-cli` archives with `.sha256` checksums for Linux
+  x64/arm64, macOS x64/arm64 and Windows x64 — previously artifacts went
+  to workflow-run storage and expired without ever reaching the Release.
+  The aarch64-linux build now runs natively on `ubuntu-24.04-arm` (no
+  cross gcc, no vendored OpenSSL). Structural contract guarded by
+  `scripts/test-release-workflow.py`.
+
 ### Fixed
 - **Flaky auth timing test on loaded CI runners.**
   `test_password_verification_timing` asserted an absolute wall-clock bound

@@ -1,129 +1,161 @@
 name: Release
 
-on:
-  push:
-    tags:
-      - "v*.*.*"
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Version to release (e.g., v0.3.0)"
-        required: true
-        type: string
+# Build and attach release binaries to the GitHub Release, following the
+# Nexus / Vectorizer pipeline (taiki-e/upload-rust-binary-action):
+#   - runs when a Release is PUBLISHED (not on tag push — creating the
+#     GitHub Release is the publish action), or manually for an existing
+#     tag via workflow_dispatch
+#   - each target job is independent: one target failing does not cancel
+#     the others
+#   - aarch64-linux builds NATIVELY on ubuntu-24.04-arm (public-repo
+#     runner) — no cross gcc, no vendored OpenSSL
+#   - every archive ships with a .sha256 checksum asset
 
 permissions:
   contents: write
 
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g., v1.0.0)"
+        required: true
+        type: string
+
+# Resolve the release tag once so every job sees the same value:
+#   - `release:published` → github.ref_name holds the tag
+#   - `workflow_dispatch`  → the free-form `tag` input above
+env:
+  RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  # CI starts cold — incremental compilation only adds artifacts and
+  # slows the build.
+  CARGO_INCREMENTAL: "0"
+
 jobs:
-  build:
-    name: Build Release (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+  build-linux-x86_64-gnu:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          targets: x86_64-unknown-linux-gnu
+      - name: Build and publish synap-server
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: synap-server
+          target: x86_64-unknown-linux-gnu
+          checksum: sha256
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish synap-cli
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: synap-cli
+          target: x86_64-unknown-linux-gnu
+          checksum: sha256
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  # Native arm64 runner (free for public repos) — no cross-compilation
+  # toolchain and no vendored-openssl needed: the system libssl-dev is
+  # the right architecture.
+  build-linux-aarch64-gnu:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev pkg-config
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          targets: aarch64-unknown-linux-gnu
+      - name: Build and publish synap-server
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: synap-server
+          target: aarch64-unknown-linux-gnu
+          checksum: sha256
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish synap-cli
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: synap-cli
+          target: aarch64-unknown-linux-gnu
+          checksum: sha256
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+  build-mac-binaries:
     strategy:
-      # Don't cancel sibling matrix entries when one fails — we need
-      # to be able to publish the macOS / Windows artifacts even if a
-      # Linux runner has a transient issue.
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact_name: synap-linux-x64
-
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            artifact_name: synap-linux-arm64
-            # No aarch64 libssl-dev on the x86_64 runner — build OpenSSL
-            # from source so openssl-sys can cross-compile.
-            cargo_flags: --features vendored-openssl
-
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact_name: synap-windows-x64
-
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact_name: synap-macos-x64
-
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact_name: synap-macos-arm64
-
+          - target: x86_64-apple-darwin
+          - target: aarch64-apple-darwin
+    runs-on: macos-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: nightly
           targets: ${{ matrix.target }}
-
-      - name: Install cross-compilation tools (ARM64 Linux)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu
-
-      - name: Install Rust target
-        run: rustup target add ${{ matrix.target }}
-
-      # Use the Rust-aware cache action. Cargo.lock is gitignored in
-      # this repo, so the prior raw `actions/cache@v4` on target/ keyed
-      # by `hashFiles('**/Cargo.lock')` produced a constant key every
-      # run and ended up restoring a poisoned mix of binaries from
-      # previous tags. Swatinem/rust-cache hashes Cargo.toml manifests,
-      # prunes the target dir of test/build-script artifacts, and
-      # honours the matrix target.
-      - name: Setup Rust cache
-        uses: Swatinem/rust-cache@v2
+      - name: Build and publish synap-server
+        uses: taiki-e/upload-rust-binary-action@v1
         with:
-          key: ${{ matrix.target }}-release
-
-      - name: Build synap-server
-        run: cargo build --release --bin synap-server --target ${{ matrix.target }} ${{ matrix.cargo_flags }}
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-
-      - name: Build synap-cli
-        run: cargo build --release --bin synap-cli --target ${{ matrix.target }} ${{ matrix.cargo_flags }}
-        env:
-          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
-
-      - name: Prepare artifacts (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          mkdir -p dist
-          cp target/${{ matrix.target }}/release/synap-server dist/
-          cp target/${{ matrix.target }}/release/synap-cli dist/
-          cp README.md dist/
-          cp CHANGELOG.md dist/
-          cp LICENSE dist/
-          cp config/config.yml dist/config.example.yml
-          cd dist
-          tar czf ../${{ matrix.artifact_name }}.tar.gz *
-
-      - name: Prepare artifacts (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          New-Item -ItemType Directory -Force -Path dist
-          Copy-Item target\${{ matrix.target }}\release\synap-server.exe dist\
-          Copy-Item target\${{ matrix.target }}\release\synap-cli.exe dist\
-          Copy-Item README.md dist\
-          Copy-Item CHANGELOG.md dist\
-          Copy-Item LICENSE dist\
-          Copy-Item config/config.yml dist\config.example.yml
-          Compress-Archive -Path dist\* -DestinationPath ${{ matrix.artifact_name }}.zip
-
-      - name: Upload artifacts (Unix)
-        if: runner.os != 'Windows'
-        uses: actions/upload-artifact@v7
+          bin: synap-server
+          target: ${{ matrix.target }}
+          checksum: sha256
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish synap-cli
+        uses: taiki-e/upload-rust-binary-action@v1
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_name }}.tar.gz
+          bin: synap-cli
+          target: ${{ matrix.target }}
+          checksum: sha256
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload artifacts (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/upload-artifact@v7
+  build-windows-binaries:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
         with:
-          name: ${{ matrix.artifact_name }}
-          path: ${{ matrix.artifact_name }}.zip
+          ref: ${{ env.RELEASE_TAG }}
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+      - name: Build and publish synap-server
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: synap-server
+          target: x86_64-pc-windows-msvc
+          checksum: sha256
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and publish synap-cli
+        uses: taiki-e/upload-rust-binary-action@v1
+        with:
+          bin: synap-cli
+          target: x86_64-pc-windows-msvc
+          checksum: sha256
+          ref: refs/tags/${{ env.RELEASE_TAG }}
+          token: ${{ secrets.GITHUB_TOKEN }}

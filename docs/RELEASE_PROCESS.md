@@ -6,66 +6,45 @@ This document describes the automated release process for Synap using GitHub Act
 
 ## Release Workflow
 
-The release workflow (`.github/workflows/release.yml`) automatically:
+The release workflow (`.github/workflows/release.yml`) follows the
+Nexus/Vectorizer pipeline: it runs when a **GitHub Release is published**
+(not on tag push) and uses `taiki-e/upload-rust-binary-action` to build,
+archive and **attach the binaries directly to that Release**.
 
-1. **Builds binaries** for multiple platforms:
-   - Linux x64 (GNU)
-   - Linux ARM64 (GNU)
-   - Windows x64 (MSVC)
-   - macOS x64 (Intel)
-   - macOS ARM64 (Apple Silicon)
+1. **Builds binaries** for five targets, each in an independent job (one
+   target failing does not cancel the others):
+   - Linux x64 (GNU) — `ubuntu-latest`
+   - Linux ARM64 (GNU) — **native** `ubuntu-24.04-arm` runner (no
+     cross-compilation, no vendored OpenSSL)
+   - Windows x64 (MSVC) — `windows-latest`
+   - macOS x64 + ARM64 — `macos-latest`
 
-2. **Packages artifacts** for each platform:
-   - `synap-server` binary
-   - `synap-cli` binary
-   - `README.md`, `CHANGELOG.md`, `LICENSE`
-   - `config.example.yml`
-
-3. **Creates release archives**:
-   - `.tar.gz` for Unix systems (Linux, macOS)
-   - `.zip` for Windows
-   - SHA256 checksums for all files
-
-4. **Publishes Docker images** to:
-   - Docker Hub: `hivellm/synap:latest` and `hivellm/synap:VERSION`
-   - GitHub Container Registry: `ghcr.io/hivellm/synap:latest` and `ghcr.io/hivellm/synap:VERSION`
+2. **Attaches to the GitHub Release**, per target:
+   - `synap-server-<target>.tar.gz` (`.zip` on Windows) + `.sha256`
+   - `synap-cli-<target>.tar.gz` (`.zip` on Windows) + `.sha256`
 
 ## How to Create a Release
 
-### Method 1: Git Tag (Recommended)
+### Method 1: Publish a GitHub Release (Recommended)
 
 ```bash
-# Ensure you're on main branch and up to date
-git checkout main
-git pull origin main
+# Ensure main is up to date, version bumped in Cargo.toml and
+# CHANGELOG.md has the release notes, then tag:
+git tag v1.0.0
+git push origin v1.0.0
 
-# Update version in Cargo.toml
-# Update CHANGELOG.md with release notes
-
-# Commit changes
-git add Cargo.toml CHANGELOG.md
-git commit -m "chore: prepare v0.3.0 release"
-
-# Create and push tag
-git tag v0.3.0
-git push origin v0.3.0
-
-# Push commits
-git push origin main
+# Publish the Release (this is what triggers the artifact build):
+gh release create v1.0.0 --title "v1.0.0" --notes-file <(release notes)
 ```
 
-The workflow will automatically trigger and:
-- Build binaries for all platforms
-- Create GitHub Release with artifacts
-- Build and push Docker images
+Publishing the Release triggers the workflow, which attaches all binaries
+and checksums to it.
 
-### Method 2: Manual Workflow Dispatch
+### Method 2: Manual Workflow Dispatch (rebuild an existing release)
 
-1. Go to GitHub Actions
-2. Select "Release" workflow
-3. Click "Run workflow"
-4. Enter version (e.g., `v0.3.0`)
-5. Click "Run"
+1. Go to GitHub Actions → "Release" → "Run workflow"
+2. Enter the existing tag (e.g., `v1.0.0`)
+3. Artifacts are (re)built from that tag and attached to its Release
 
 ## Version Naming Convention
 
@@ -80,13 +59,13 @@ Prerelease tags (`rc`, `beta`, `alpha`) will automatically mark the GitHub Relea
 
 ## Build Matrix
 
-| Platform | Target | Output |
-|----------|--------|--------|
-| Linux x64 | `x86_64-unknown-linux-gnu` | `synap-linux-x64.tar.gz` |
-| Linux ARM64 | `aarch64-unknown-linux-gnu` | `synap-linux-arm64.tar.gz` |
-| Windows x64 | `x86_64-pc-windows-msvc` | `synap-windows-x64.zip` |
-| macOS x64 | `x86_64-apple-darwin` | `synap-macos-x64.tar.gz` |
-| macOS ARM64 | `aarch64-apple-darwin` | `synap-macos-arm64.tar.gz` |
+| Platform | Target | Assets (each + `.sha256`) |
+|----------|--------|---------------------------|
+| Linux x64 | `x86_64-unknown-linux-gnu` | `synap-server-x86_64-unknown-linux-gnu.tar.gz`, `synap-cli-…` |
+| Linux ARM64 | `aarch64-unknown-linux-gnu` | `synap-server-aarch64-unknown-linux-gnu.tar.gz`, `synap-cli-…` |
+| Windows x64 | `x86_64-pc-windows-msvc` | `synap-server-x86_64-pc-windows-msvc.zip`, `synap-cli-…` |
+| macOS x64 | `x86_64-apple-darwin` | `synap-server-x86_64-apple-darwin.tar.gz`, `synap-cli-…` |
+| macOS ARM64 | `aarch64-apple-darwin` | `synap-server-aarch64-apple-darwin.tar.gz`, `synap-cli-…` |
 
 ## Docker Images
 
@@ -115,19 +94,16 @@ docker buildx imagetools inspect hivehub/synap:VERSION
 
 ## Release Assets
 
-Each GitHub Release includes:
+Each GitHub Release includes, per binary (`synap-server`, `synap-cli`)
+and per target:
 
 ```
-synap-linux-x64.tar.gz
-synap-linux-x64.tar.gz.sha256
-synap-linux-arm64.tar.gz
-synap-linux-arm64.tar.gz.sha256
-synap-windows-x64.zip
-synap-windows-x64.zip.sha256
-synap-macos-x64.tar.gz
-synap-macos-x64.tar.gz.sha256
-synap-macos-arm64.tar.gz
-synap-macos-arm64.tar.gz.sha256
+synap-server-x86_64-unknown-linux-gnu.tar.gz        (+ .sha256)
+synap-server-aarch64-unknown-linux-gnu.tar.gz       (+ .sha256)
+synap-server-x86_64-apple-darwin.tar.gz             (+ .sha256)
+synap-server-aarch64-apple-darwin.tar.gz            (+ .sha256)
+synap-server-x86_64-pc-windows-msvc.zip             (+ .sha256)
+synap-cli-<same five targets>                       (+ .sha256)
 ```
 
 ## Verifying Downloads
@@ -136,19 +112,19 @@ Users can verify downloads using SHA256 checksums:
 
 ```bash
 # Linux/macOS
-sha256sum -c synap-linux-x64.tar.gz.sha256
+sha256sum -c synap-server-x86_64-unknown-linux-gnu.tar.gz.sha256
 
 # Windows (PowerShell)
-Get-FileHash synap-windows-x64.zip -Algorithm SHA256
+Get-FileHash synap-server-x86_64-pc-windows-msvc.zip -Algorithm SHA256
 ```
 
 ## Required Secrets
 
-The workflow requires these GitHub secrets:
-
-- `GITHUB_TOKEN` - Automatically provided by GitHub
-- `DOCKER_USERNAME` - Docker Hub username (optional, for Docker Hub push)
-- `DOCKER_PASSWORD` - Docker Hub token (optional, for Docker Hub push)
+- `GITHUB_TOKEN` - Automatically provided by GitHub (attaches assets to
+  the Release)
+- Docker Hub credentials are NOT needed here — Docker publishing is
+  operator-triggered via `scripts/docker-publish.{sh,ps1}` (see the
+  Docker Images section above)
 
 ## Troubleshooting
 
