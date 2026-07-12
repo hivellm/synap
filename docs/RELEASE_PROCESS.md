@@ -90,14 +90,27 @@ Prerelease tags (`rc`, `beta`, `alpha`) will automatically mark the GitHub Relea
 
 ## Docker Images
 
-Docker images are built for `linux/amd64` and `linux/arm64` platforms and pushed to:
+Docker images are published to Docker Hub as `linux/amd64` + `linux/arm64`
+manifest lists with SBOM and provenance attestations:
 
 ```
-hivellm/synap:latest
-hivellm/synap:0.3.0
+hivehub/synap:latest
+hivehub/synap:VERSION
+```
 
-ghcr.io/hivellm/synap:latest
-ghcr.io/hivellm/synap:0.3.0
+Publishing is operator-triggered (not CI) via the publish scripts, which
+handle the buildx multi-platform build, attestations and registry layer
+cache (`hivehub/synap-cache:buildx`):
+
+```bash
+./scripts/docker-publish.sh 1.0.0            # bash
+./scripts/docker-publish.ps1 1.0.0           # PowerShell (Windows)
+```
+
+Verify the published manifest covers both platforms:
+
+```bash
+docker buildx imagetools inspect hivehub/synap:VERSION
 ```
 
 ## Release Assets

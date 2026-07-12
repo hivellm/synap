@@ -6,13 +6,17 @@
 # Supports multi-arch builds (AMD64 + ARM64)
 #
 # Usage:
-#   .\scripts\docker-publish.ps1 [version] [--no-build] [--no-push]
+#   .\scripts\docker-publish.ps1 [version] [-NoBuild] [-NoPush] [-NoCache]
 #
 # Examples:
 #   .\scripts\docker-publish.ps1           # Build and push latest
-#   .\scripts\docker-publish.ps1 0.9.0    # Build and push specific version
-#   .\scripts\docker-publish.ps1 0.9.0 --no-build  # Only push (skip build)
-#   .\scripts\docker-publish.ps1 0.9.0 --no-push   # Only build (skip push)
+#   .\scripts\docker-publish.ps1 1.0.0    # Build and push specific version
+#   .\scripts\docker-publish.ps1 1.0.0 -NoBuild  # Only push (skip build)
+#   .\scripts\docker-publish.ps1 1.0.0 -NoPush   # Only build (skip push)
+#   .\scripts\docker-publish.ps1 1.0.0 -NoCache  # Cold build (ignore registry cache)
+#
+# Produces a linux/amd64 + linux/arm64 manifest list with SBOM and
+# provenance attestations (Docker Scout supply-chain requirements).
 #
 # Requirements:
 #   - Docker with buildx enabled
@@ -23,7 +27,8 @@
 param(
     [string]$Version = "latest",
     [switch]$NoBuild = $false,
-    [switch]$NoPush = $false
+    [switch]$NoPush = $false,
+    [switch]$NoCache = $false
 )
 
 # Configuration
@@ -32,6 +37,9 @@ $Registry = if ($env:DOCKER_REGISTRY) { $env:DOCKER_REGISTRY } else { "hivehub" 
 $DockerUsername = $env:DOCKER_USERNAME
 $DockerPassword = $env:DOCKER_PASSWORD
 $BuildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+# Buildx registry cache (mode=max caches every intermediate layer, not
+# just the final image). Disable with -NoCache for a cold build.
+$CacheRef = if ($env:DOCKER_CACHE_REF) { $env:DOCKER_CACHE_REF } else { "hivehub/synap-cache:buildx" }
 
 # Colors
 function Write-Header { param([string]$Message) Write-Host "============================================================================" -ForegroundColor Blue; Write-Host $Message -ForegroundColor Blue; Write-Host "============================================================================" -ForegroundColor Blue; Write-Host "" }
@@ -64,9 +72,12 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Success "Docker buildx is available"
 
-# Create buildx builder if it doesn't exist
+# Create buildx builder if it doesn't exist. The docker-container driver
+# is required for multi-platform manifest lists and SBOM/provenance
+# attestations (the default docker driver supports neither).
 Write-Info "Setting up buildx builder..."
-docker buildx create --name synap-builder --use 2>&1 | Out-Null
+docker buildx create --name synap-builder --driver docker-container `
+    --platform linux/amd64,linux/arm64 --use 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     # Builder might already exist, try to use it
     docker buildx use synap-builder 2>&1 | Out-Null
@@ -116,14 +127,33 @@ if (-not $NoBuild) {
         $tagArgs += $tag
     }
     
-    $pushFlag = if ($NoPush) { @() } else { @("--push") }
-    
+    $buildFlags = @()
+    if (-not $NoPush) {
+        $buildFlags += "--push"
+    }
+
+    # Registry layer cache: always read; only write when pushing (writing
+    # requires registry credentials, which a -NoPush build may not have).
+    if (-not $NoCache) {
+        Write-Info "Cache: ${CacheRef} (registry, mode=max)"
+        $buildFlags += "--cache-from"
+        $buildFlags += "type=registry,ref=${CacheRef}"
+        if (-not $NoPush) {
+            $buildFlags += "--cache-to"
+            $buildFlags += "type=registry,ref=${CacheRef},mode=max"
+        }
+    } else {
+        Write-Info "Cache: disabled (-NoCache)"
+    }
+
     docker buildx build `
         --platform linux/amd64,linux/arm64 `
         $tagArgs `
         --build-arg BUILD_DATE="$BuildDate" `
         --build-arg VERSION="$Version" `
-        $pushFlag `
+        --sbom=true `
+        --provenance=mode=max `
+        $buildFlags `
         --progress=plain `
         .
     

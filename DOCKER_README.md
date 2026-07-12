@@ -92,9 +92,13 @@ volumes:
 - `1.0.0` - The 1.0 release (crates workspace, security/durability audit, Redis-parity performance)
 - `0.13.0` / `0.12.0` - Previous releases
 
-All images support multi-architecture builds:
-- `linux/amd64` - Intel/AMD 64-bit
-- `linux/arm64` - ARM 64-bit (Apple Silicon, ARM servers)
+`latest` and `1.0.0` are multi-arch manifest lists — a single `docker pull`
+resolves the native image for your platform:
+- `linux/amd64` - Intel/AMD 64-bit (AVX2 SIMD runtime-detected)
+- `linux/arm64` - ARM 64-bit: Apple Silicon, AWS Graviton, Raspberry Pi
+  (NEON SIMD runtime-detected)
+
+Tags `0.13.0` and older are `linux/amd64` only.
 
 ## 🔧 Configuration
 

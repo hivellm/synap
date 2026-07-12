@@ -234,6 +234,18 @@ fixed for the 1.0 release.
 - **Opt-in `mimalloc` global allocator** (F-011a). Build with `--features mimalloc`
   to replace the system allocator process-wide; off by default.
 
+### Added
+- **Multi-arch Docker images (amd64 + arm64).** `hivehub/synap:1.0.0` and
+  `latest` are now `linux/amd64` + `linux/arm64` manifest lists — a single
+  `docker pull` resolves the native image on Apple Silicon / AWS Graviton /
+  Raspberry Pi (NEON SIMD runtime-detected, health probe verified under
+  QEMU). Publish scripts (`scripts/docker-publish.{sh,ps1}`) gained SBOM +
+  provenance attestations (`--sbom=true --provenance=mode=max`), a registry
+  buildx layer cache (`hivehub/synap-cache:buildx`, `--no-cache`/`-NoCache`
+  opt-out) and an explicit multi-platform docker-container builder —
+  publishing parity with Vectorizer. Docker Scout: 0C/0H/0M/0L on both
+  architectures.
+
 ### Fixed
 - **Release CI: aarch64-linux cross-build and nightly clippy.** The
   `aarch64-unknown-linux-gnu` release job failed because `openssl-sys`

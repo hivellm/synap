@@ -7,13 +7,17 @@
 # Supports multi-arch builds (AMD64 + ARM64)
 #
 # Usage:
-#   ./scripts/docker-publish.sh [version] [--no-build] [--no-push]
+#   ./scripts/docker-publish.sh [version] [--no-build] [--no-push] [--no-cache]
 #
 # Examples:
 #   ./scripts/docker-publish.sh           # Build and push latest
-#   ./scripts/docker-publish.sh 0.9.0      # Build and push specific version
-#   ./scripts/docker-publish.sh 0.9.0 --no-build  # Only push (skip build)
-#   ./scripts/docker-publish.sh 0.9.0 --no-push   # Only build (skip push)
+#   ./scripts/docker-publish.sh 1.0.0      # Build and push specific version
+#   ./scripts/docker-publish.sh 1.0.0 --no-build  # Only push (skip build)
+#   ./scripts/docker-publish.sh 1.0.0 --no-push   # Only build (skip push)
+#   ./scripts/docker-publish.sh 1.0.0 --no-cache  # Cold build (ignore registry cache)
+#
+# Produces a linux/amd64 + linux/arm64 manifest list with SBOM and
+# provenance attestations (Docker Scout supply-chain requirements).
 #
 # Requirements:
 #   - Docker with buildx enabled
@@ -36,6 +40,7 @@ NC='\033[0m' # No Color
 VERSION="${1:-latest}"
 NO_BUILD=false
 NO_PUSH=false
+NO_CACHE=false
 
 for arg in "$@"; do
     case $arg in
@@ -47,6 +52,10 @@ for arg in "$@"; do
             NO_PUSH=true
             shift
             ;;
+        --no-cache)
+            NO_CACHE=true
+            shift
+            ;;
     esac
 done
 
@@ -56,6 +65,9 @@ REGISTRY="${DOCKER_REGISTRY:-hivehub}"
 DOCKER_USERNAME="${DOCKER_USERNAME:-}"
 DOCKER_PASSWORD="${DOCKER_PASSWORD:-}"
 BUILD_DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
+# Buildx registry cache (mode=max caches every intermediate layer, not
+# just the final image). Disable with --no-cache for a cold build.
+CACHE_REF="${DOCKER_CACHE_REF:-hivehub/synap-cache:buildx}"
 
 # Helper functions
 print_header() {
@@ -104,10 +116,13 @@ if ! docker buildx version > /dev/null 2>&1; then
 fi
 print_success "Docker buildx is available"
 
-# Create buildx builder if it doesn't exist
+# Create buildx builder if it doesn't exist. The docker-container driver
+# is required for multi-platform manifest lists and SBOM/provenance
+# attestations (the default docker driver supports neither).
 print_info "Setting up buildx builder..."
 if ! docker buildx inspect synap-builder > /dev/null 2>&1; then
-    docker buildx create --name synap-builder --use > /dev/null 2>&1
+    docker buildx create --name synap-builder --driver docker-container \
+        --platform linux/amd64,linux/arm64 --use > /dev/null 2>&1
 else
     docker buildx use synap-builder > /dev/null 2>&1
 fi
@@ -145,18 +160,32 @@ if [ "$NO_BUILD" = false ]; then
     print_info "Building multi-arch Docker image with BuildKit (linux/amd64,linux/arm64)..."
     echo ""
     
-    PUSH_FLAG=""
+    BUILD_FLAGS=()
     if [ "$NO_PUSH" = false ]; then
-        PUSH_FLAG="--push"
+        BUILD_FLAGS+=("--push")
     fi
-    
+
+    # Registry layer cache: always read; only write when pushing (writing
+    # requires registry credentials, which a --no-push build may not have).
+    if [ "$NO_CACHE" = false ]; then
+        print_info "Cache: ${CACHE_REF} (registry, mode=max)"
+        BUILD_FLAGS+=("--cache-from" "type=registry,ref=${CACHE_REF}")
+        if [ "$NO_PUSH" = false ]; then
+            BUILD_FLAGS+=("--cache-to" "type=registry,ref=${CACHE_REF},mode=max")
+        fi
+    else
+        print_info "Cache: disabled (--no-cache)"
+    fi
+
     docker buildx build \
         --platform linux/amd64,linux/arm64 \
         -t "${REGISTRY}/${IMAGE_NAME}:${VERSION}" \
         -t "${REGISTRY}/${IMAGE_NAME}:latest" \
         --build-arg BUILD_DATE="$BUILD_DATE" \
         --build-arg VERSION="$VERSION" \
-        $PUSH_FLAG \
+        --sbom=true \
+        --provenance=mode=max \
+        "${BUILD_FLAGS[@]}" \
         --progress=plain \
         .
     
