@@ -9,18 +9,21 @@
 //! - Stress tests with thousands of operations
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 use synap_server::persistence::types::Operation;
 use synap_server::replication::{MasterNode, NodeRole, ReplicaNode, ReplicationConfig};
 use synap_server::{KVConfig, KVStore};
 use tokio::time::sleep;
 
-static TEST_PORT: AtomicU16 = AtomicU16::new(20000);
-
-/// Helper to get next available test port
+/// Ask the OS for a free ephemeral port. A static counter is NOT safe here:
+/// nextest runs every test in its own process, so each process would restart
+/// the counter at the same base and all tests would race for one port.
 fn next_port() -> u16 {
-    TEST_PORT.fetch_add(1, Ordering::SeqCst)
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("bind ephemeral port")
+        .local_addr()
+        .expect("ephemeral port addr")
+        .port()
 }
 
 /// Helper to create a master node with a unique port

@@ -9,7 +9,6 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::{Duration, Instant};
 
 use synap_server::core::{
@@ -21,10 +20,15 @@ use synap_server::persistence::{PersistenceConfig, PersistenceLayer, recover};
 use synap_server::replication::{MasterNode, NodeRole, ReplicaNode, ReplicationConfig};
 use tokio::time::sleep;
 
-static PORT: AtomicU16 = AtomicU16::new(42000);
-
+/// Ask the OS for a free ephemeral port. A static counter is NOT safe here:
+/// nextest runs every test in its own process, so each process would restart
+/// the counter at the same base and all tests would race for one port.
 fn next_port() -> u16 {
-    PORT.fetch_add(1, Ordering::SeqCst)
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("bind ephemeral port")
+        .local_addr()
+        .expect("ephemeral port addr")
+        .port()
 }
 
 /// A committed EXEC is logged to the WAL as one batch and is fully present after

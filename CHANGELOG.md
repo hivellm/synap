@@ -247,6 +247,14 @@ fixed for the 1.0 release.
   architectures.
 
 ### Fixed
+- **Flaky replication tests under nextest: cross-process port collisions.**
+  The five replication/durability integration suites allocated master ports
+  from a `static AtomicU16` counter — unique within one process, but nextest
+  runs each test in its own process, so every test restarted the counter at
+  the same base and raced for one port; the losers replicated into the void
+  and hit the 10s convergence deadline (CI-intermittent, reproduced locally
+  with `cargo nextest run`). Test helpers now ask the OS for an ephemeral
+  port (`TcpListener::bind("127.0.0.1:0")`) — 39/39 green under nextest.
 - **Release CI: aarch64-linux cross-build and nightly clippy.** The
   `aarch64-unknown-linux-gnu` release job failed because `openssl-sys`
   cannot link the host's x86_64 libssl when cross-compiling — new opt-in
