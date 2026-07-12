@@ -1,4 +1,4 @@
-# Synap SDKs — v0.12.0
+# Synap SDKs — v1.0.0
 
 Official client libraries for [Synap](https://github.com/hivellm/synap) — High-Performance In-Memory Key-Value Store & Message Broker.
 
@@ -8,13 +8,13 @@ All 7 SDKs support **three transports** with auto-detection from URL scheme. **S
 
 | SDK | Language | Package | Version |
 |-----|----------|---------|:-------:|
-| [Rust](rust/) | Rust | `synap-sdk` (crates.io) | 0.12.0 |
-| [TypeScript](typescript/) | TS/JS | `@hivehub/synap` (npm) | 0.12.0 |
-| [Python](python/) | Python 3.11+ | `synap-sdk` (PyPI) | 0.12.0 |
-| [Go](go/) | Go 1.22+ | `github.com/hivellm/synap/sdks/go` | 0.12.0 |
-| [Java](java/) | Java 17+ | `com.hivellm:synap-sdk` (Maven) | 0.12.0 |
-| [PHP](php/) | PHP 8.1+ | `hivellm/synap-sdk` (Packagist) | 0.12.0 |
-| [C#](csharp/) | .NET 8+ | `Synap.SDK` (NuGet) | 0.12.0 |
+| [Rust](rust/) | Rust | `synap-sdk` (crates.io) | 1.0.0 |
+| [TypeScript](typescript/) | TS/JS | `@hivehub/synap` (npm) | 1.0.0 |
+| [Python](python/) | Python 3.11+ | `synap-sdk` (PyPI) | 1.0.0 |
+| [Go](go/) | Go 1.22+ | `github.com/hivellm/synap/sdks/go` | 1.0.0 |
+| [Java](java/) | Java 17+ | `com.hivellm:synap-sdk` (Maven) | 1.0.0 |
+| [PHP](php/) | PHP 8.1+ | `hivellm/synap-sdk` (Packagist) | 1.0.0 |
+| [C#](csharp/) | .NET 8+ | `Synap.SDK` (NuGet) | 1.0.0 |
 
 ## Transport Support
 
@@ -46,23 +46,26 @@ All 7 SDKs support all 3 transports:
 | **List** | x | x | x | x | x | x | x |
 | **Set** | x | x | x | x | x | x | x |
 | **Sorted Set** | x | x | - | - | - | - | - |
-| **Bitmap** | x | x | - | - | - | x | x |
-| **Geospatial** | x | x | - | - | - | x | x |
-| **HyperLogLog** | x | x | - | - | - | x | x |
+| **Bitmap** | x | x | x | - | - | x | x |
+| **Geospatial** | x | x | x | - | - | x | x |
+| **HyperLogLog** | x | x | x | - | - | x | x |
 | **Scripting** | x | x | - | - | - | - | - |
 | **Transactions** | x | x | x | - | - | x | x |
 
 ## Test Coverage
 
+Totals from the 1.0.0 release audit (suites run against the published
+`hivehub/synap:1.0.0` image):
+
 | SDK | Unit/Mock | Integration (real server) | Transports tested |
 |-----|:---------:|:------------------------:|:-----------------:|
-| Rust | 254 | 42 S2S + 8 E2E | HTTP + RPC + RESP3 |
-| Go | 55 | 12 integration | HTTP + RPC + RESP3 |
-| TypeScript | 592 | SET/GET/DEL verified | HTTP + RPC + RESP3 |
-| Python | 394 | SET/GET/DEL verified | HTTP + RPC + RESP3 |
+| Rust | 276 | 44 S2S | HTTP + RPC + RESP3 |
+| Go | 55 | 6 integration | HTTP + RPC + RESP3 |
+| TypeScript | 467 | SET/GET/DEL verified | HTTP + RPC + RESP3 |
+| Python | 177 | SET/GET/DEL verified | HTTP + RPC + RESP3 |
 | PHP | 182 | SET/GET/DEL verified | HTTP + RPC + RESP3 |
 | Java | 36 | - (needs JDK 17) | code verified |
-| C# | 94 | - | build verified |
+| C# | 96 | - | build verified |
 
 ## Quick Start
 
