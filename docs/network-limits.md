@@ -6,7 +6,7 @@ compile-time constants; making them configurable is tracked in `phase6i`.
 
 | Limit | Value | Where | Guards against |
 |-------|-------|-------|----------------|
-| RESP3 bulk / verbatim length | 512 MiB | `synap-protocol` `resp3::parser::MAX_BULK_LEN` | a `$<len>` header claiming gigabytes |
+| RESP3 bulk / verbatim length | 512 MiB | `synap-server` `protocol::resp3::parser::MAX_BULK_LEN` | a `$<len>` header claiming gigabytes |
 | RESP3 aggregate element count | 1,048,576 | `resp3::parser::MAX_AGGREGATE_LEN` | a `*<count>` header pre-allocating a huge Vec |
 | RESP3 protocol line length | 64 KiB | `resp3::parser::MAX_LINE_LEN` | an endless unterminated line |
 | SynapRPC frame body | 512 MiB | `synap-server` `protocol::synap_rpc::config::MAX_FRAME_BYTES` (Thunder `Config::max_frame_bytes`) | a 4-byte length prefix claiming ~4 GiB |
@@ -47,4 +47,4 @@ network:
 The parser/codec caps (`MAX_BULK_LEN`, `MAX_AGGREGATE_LEN`, `MAX_LINE_LEN`,
 `MAX_FRAME_SIZE`) and the per-subscriber pub/sub buffer remain hard-coded at their
 safe defaults — they are security bounds rather than tuning knobs, and live in the
-shared `synap-protocol` / `synap-core` crates.
+`synap-server` protocol layer and the shared `synap-core` crate.

@@ -47,6 +47,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   credentials cannot help. `SynapError` is now `#[non_exhaustive]`: match with a
   `_` arm so future variants do not break your build.
 
+### Removed
+
+- **`crates/synap-protocol` is gone.** It existed only because crates.io rejects
+  path dependencies, so publishing the Rust SDK forced publishing the wire types
+  it imported — and it dragged along the RESP3 parser/writer and the HTTP
+  envelope, meaning Synap published server internals to a public registry as a
+  side effect. The wire types now come from `thunder-rpc`; the RESP3 layer and
+  the envelope moved into `synap-server`, unpublished. Synap releases no longer
+  have a protocol-publish step.
+
+  No deprecation shim is published. `synap-protocol` 1.0.0 stays on crates.io and
+  is entirely self-contained, so anything pinned to it keeps building; to move
+  forward, replace the dependency with
+  `thunder-rpc = { version = "0.2", default-features = false }` and:
+
+  | Was | Is now |
+  |---|---|
+  | `synap_protocol::synap_rpc::types::SynapValue` | `thunder::Value` |
+  | `synap_protocol::synap_rpc::types::{Request, Response}` | `thunder::{Request, Response}` |
+  | `synap_protocol::synap_rpc::codec::{encode_frame, decode_frame}` | `thunder::wire::{encode_frame, decode_frame}` |
+  | `synap_protocol::synap_rpc::codec::MAX_FRAME_SIZE` | `thunder::Config::max_frame_bytes` (per application) |
+  | `synap_protocol::resp3::*` | removed — server-internal, never a client API |
+  | `synap_protocol::envelope::*` | removed — server-internal |
+
+  `thunder::Value::Bytes` carries an `Arc<[u8]>` and is emitted as MessagePack
+  `bin` rather than an array of integers; the legacy form still decodes, so the
+  two ends can be upgraded independently.
+
 ### Fixed
 
 - **A numeric reply arriving as an integer no longer decodes as `0.0`.**

@@ -173,26 +173,29 @@ crates/
 │   ├── kv_store/            # Sharded KV store (TTL, eviction, atomic LRU)
 │   ├── hash · list · set · sorted_set · bitmap · hyperloglog · geospatial
 │   └── queue · stream · pubsub · partition · transaction · consumer_group
-├── synap-protocol/src/      # Pure wire layer (no AppState / storage deps)
-│   ├── resp3/               # RESP3 parser + writer (Resp3Value)
-│   └── synap_rpc/           # MessagePack codec + Request/Response/SynapValue
 ├── synap-server/src/        # HTTP/WS/MCP/UMICP + protocol dispatch
 │   ├── server/handlers/     # REST handlers (kv, hash, list, set, queue, stream, pubsub, …)
-│   ├── protocol/resp3/      # RESP3 listener + command dispatcher (server-side)
-│   ├── protocol/synap_rpc/  # SynapRPC listener + dispatcher
+│   ├── protocol/resp3/      # RESP3 parser/writer + listener + command dispatcher
+│   ├── protocol/synap_rpc/  # SynapRPC command catalog + config + listener (wire: thunder)
 │   ├── persistence/         # WAL (async group-commit) + snapshots
 │   ├── replication/         # master / replica
 │   └── auth/ · hub/         # users/api-keys/ACL + HiveHub.Cloud multi-tenant
 ├── synap-cli/               # Command-line client
 └── synap-migrate/           # Migration utilities
 
-sdks/rust/src/               # Rust SDK — shares synap-protocol wire types
+sdks/rust/src/               # Rust SDK — Thunder's client under the hood
 └── transport/               # SynapRPC / RESP3 / HTTP transports + command mappers
 ```
 
-> Rust library consumers: `synap_server::core::*` / `synap_server::protocol::*`
-> are now `synap_core::*` / `synap_protocol::*` (umbrella re-exports kept on
-> `synap_server` for transition). See the [CHANGELOG](CHANGELOG.md) migration guide.
+> The binary RPC wire layer is **not in this repository**. It is
+> [Thunder](https://github.com/hivellm/thunder) (`thunder-rpc`), the HiveLLM
+> family's shared implementation, which both the server and the Rust SDK depend
+> on — so the two ends of the wire cannot drift.
+>
+> Rust library consumers: `synap_server::core::*` is now `synap_core::*`
+> (umbrella re-exports kept on `synap_server` for transition), and the former
+> `synap-protocol` crate is gone — see the [CHANGELOG](CHANGELOG.md) for the
+> type-by-type migration to `thunder-rpc`.
 
 ## 🚀 Quick Start
 
@@ -545,7 +548,7 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 
 ## 🛠️ Technology Stack
 
-- **Language**: Rust (Edition 2024, workspace of focused crates: `synap-core`, `synap-protocol`, `synap-server`, `synap-cli`, `synap-migrate`)
+- **Language**: Rust (Edition 2024, workspace of focused crates: `synap-core`, `synap-server`, `synap-cli`, `synap-migrate`)
 - **Runtime**: Tokio (async/await)
 - **Web Framework**: Axum
 - **Storage**: 64-way sharded stores (ahash) with `Arc<[u8]>` shared values; radix trie for pub/sub topic routing

@@ -34,15 +34,20 @@ Then the response envelope is unchanged
 
 ## ADDED Requirements
 
-### Requirement: Terminal deprecated shim
-A final `synap-protocol` release SHALL consist solely of `#[deprecated]` re-exports
-of `thunder::wire` under the historical type names, so external code compiling
-against the old crate keeps compiling.
+### Requirement: The crate is deleted, not shimmed
+`crates/synap-protocol` SHALL be removed from the repository entirely. No
+deprecation-shim release is published; the already-published 1.0.0 is
+self-contained and remains available on crates.io for anyone pinned to it.
 
-#### Scenario: External consumer still compiles
-Given a crate that imports `synap_protocol::synap_rpc::types::SynapValue`
-When it builds against the shim version
-Then it compiles with a deprecation warning naming `thunder::wire`
+#### Scenario: The directory is gone
+Given the repository at this release
+When `crates/` is listed
+Then `synap-protocol` is absent
+
+#### Scenario: Migration guidance survives the deletion
+Given an external consumer of `synap_protocol::synap_rpc::types::SynapValue`
+When they consult the release notes
+Then a type-by-type migration table to `thunder-rpc` is present in `CHANGELOG.md`
 
 ### Requirement: SDK publishes without path dependencies
 The Rust SDK SHALL publish with zero path dependencies and zero product-protocol

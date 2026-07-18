@@ -1,4 +1,5 @@
 pub mod auth_handlers;
+pub mod envelope;
 pub mod handlers;
 pub mod mcp_handlers;
 pub mod mcp_server;

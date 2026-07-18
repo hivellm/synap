@@ -30,17 +30,23 @@ shim release, then remove the crate from the workspace.
   (joins the existing `resp3/server.rs` and `resp3/command/`), internal, never published.
 - `crates/synap-protocol/src/envelope.rs` → `crates/synap-server/src/server/envelope.rs`.
 - `crates/synap-protocol/src/synap_rpc/` is deleted — Thunder replaces it.
-- A terminal `synap-protocol` 1.1.0 shim is prepared: `#[deprecated]` re-exports
-  pointing at `thunder::wire`, README notice. Prepared and versioned in this task;
-  published in phase19.
-- `crates/synap-protocol` is removed from the workspace members after the shim is
-  cut, so `cargo publish --dry-run` on the Rust SDK proves zero path dependencies
-  and zero product-protocol packages (amended Gate G2).
+- **`crates/synap-protocol` is deleted outright — no deprecation shim.**
+  Thunder's recipe (§5.4) suggests shipping a terminal release of `#[deprecated]`
+  re-exports, and one was drafted here before being dropped on the owner's call:
+  the crate should simply stop existing, absorbed into the server and the SDK.
+  A shim would be a fourth thing to build, version and reason about, in exchange
+  for saving hypothetical external consumers one find-and-replace.
+  `synap-protocol` 1.0.0 stays on crates.io — crates.io never deletes — and it
+  is entirely self-contained, so anyone pinned to it keeps building indefinitely.
+  The migration table lives in the CHANGELOG instead of in a published artifact.
+- With the crate gone, `cargo publish --dry-run` on the Rust SDK proves zero path
+  dependencies and zero product-protocol packages (amended Gate G2).
 
 ## Impact
 - Affected specs: `.rulebook/tasks/phase13_thunder-protocol-crate-dissolution/specs/workspace-layout/spec.md`
 - Affected code: `crates/synap-protocol/`, `crates/synap-server/src/protocol/resp3/`, `crates/synap-server/src/server/`, `Cargo.toml`
-- Breaking change: YES for external Rust consumers of `synap-protocol` — mitigated
-  by the terminal deprecated shim, which keeps them compiling.
+- Breaking change: YES for external Rust consumers of `synap-protocol`. They are
+  not stranded: the published 1.0.0 is self-contained and keeps building, and the
+  CHANGELOG carries the type-by-type migration table to `thunder-rpc`.
 - User benefit: Synap releases lose their protocol-publish step permanently; the
   RESP3 parser and HTTP envelope stop being public API.

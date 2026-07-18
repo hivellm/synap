@@ -6,8 +6,8 @@
 
 use std::str;
 
+use super::parser::Resp3Value;
 use crate::server::handlers::AppState;
-use synap_protocol::resp3::parser::Resp3Value;
 
 pub mod advanced;
 pub mod collections;
