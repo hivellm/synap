@@ -32,16 +32,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pipeline over one connection instead of serializing behind a mutex, and the
   SDK gains connect/per-call timeouts, the frame cap on encode and decode, lazy
   reconnect and typed auth errors. The public API is unchanged.
+- **The TypeScript SDK's RPC transport is Thunder's client**
+  (`@hivehub/thunder`). The public API is unchanged; `msgpackr` moves from a
+  runtime dependency to a dev dependency, since the SDK no longer implements the
+  codec.
 
 ### Added
 
 - `synap_rpc_connections_refused_total` — accepts refused at the
   `network.max_connections` ceiling, so an engaging limit is visible rather than
   silent.
-- **The Rust SDK authenticates on the RPC port.** `auth_token` (or
-  `username`/`password`) now travels in the RPC handshake; previously the RPC
-  transport never sent `AUTH`, so an SDK client could not reach a
-  `require_auth` deployment on port 15501 at all.
+- **The Rust and TypeScript SDKs authenticate on the RPC port.** Credentials now
+  travel in the RPC handshake; previously the RPC transports never sent `AUTH`,
+  so an SDK client could not reach a `require_auth` deployment on port 15501 at
+  all.
 - `SynapError::Unauthorized` — `NOAUTH` / `WRONGPASS` / `NOPERM` replies are
   distinguishable from a generic `ServerError`, since retrying them without new
   credentials cannot help. `SynapError` is now `#[non_exhaustive]`: match with a
@@ -74,6 +78,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `thunder::Value::Bytes` carries an `Arc<[u8]>` and is emitted as MessagePack
   `bin` rather than an array of integers; the legacy form still decodes, so the
   two ends can be upgraded independently.
+
+### Security
+
+- **The TypeScript SDK no longer allocates from an untrusted length prefix.**
+  Its RPC transport read a 4-byte frame header and allocated whatever it claimed,
+  so a hostile or compromised peer could drive unbounded allocation from a tiny
+  message. Thunder validates the prefix against the 512 MiB cap before
+  allocating anything. (Thunder's inventory found this pattern in 9 of the
+  family's 15 hand-ported SDK transports; the remaining Synap ones are addressed
+  in the Python, C# and Go swaps.)
 
 ### Fixed
 

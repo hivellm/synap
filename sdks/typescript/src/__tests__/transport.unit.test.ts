@@ -136,6 +136,33 @@ describe('toWireValue / fromWireValue (via SynapRpcTransport loopback)', () => {
     const result = await transport.execute('GET', [undefined]);
     expect(result).toBeNull();
   });
+
+  it('rejects a length prefix above the frame cap without allocating the body', async () => {
+    // The pre-Thunder transport read the prefix and allocated whatever it
+    // claimed, so a hostile peer could make the client allocate gigabytes from
+    // 4 bytes. Thunder validates against the cap first.
+    const overCap = 512 * 1024 * 1024 + 1;
+
+    const { server: s, port } = await startServer((_chunk, write) => {
+      // Answer any request with a header claiming more than the cap — and send
+      // only the header, so a client that allocated first would hang forever
+      // waiting for a body that never comes.
+      const lenBuf = Buffer.allocUnsafe(4);
+      lenBuf.writeUInt32LE(overCap, 0);
+      write(lenBuf);
+    });
+    server = s;
+
+    const rssBefore = process.memoryUsage().rss;
+    transport = new SynapRpcTransport('127.0.0.1', port, 5000);
+
+    await expect(transport.execute('GET', ['k'])).rejects.toThrow();
+
+    // The claimed frame is 512 MiB; nothing close to that may have been
+    // allocated on the way to the rejection.
+    const growth = process.memoryUsage().rss - rssBefore;
+    expect(growth).toBeLessThan(64 * 1024 * 1024);
+  });
 });
 
 // ── mapCommand ────────────────────────────────────────────────────────────────
