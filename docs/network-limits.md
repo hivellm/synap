@@ -9,7 +9,7 @@ compile-time constants; making them configurable is tracked in `phase6i`.
 | RESP3 bulk / verbatim length | 512 MiB | `synap-protocol` `resp3::parser::MAX_BULK_LEN` | a `$<len>` header claiming gigabytes |
 | RESP3 aggregate element count | 1,048,576 | `resp3::parser::MAX_AGGREGATE_LEN` | a `*<count>` header pre-allocating a huge Vec |
 | RESP3 protocol line length | 64 KiB | `resp3::parser::MAX_LINE_LEN` | an endless unterminated line |
-| SynapRPC frame body | 512 MiB | `synap-protocol` `synap_rpc::codec::MAX_FRAME_SIZE` | a 4-byte length prefix claiming ~4 GiB |
+| SynapRPC frame body | 512 MiB | `synap-server` `protocol::synap_rpc::config::MAX_FRAME_BYTES` (Thunder `Config::max_frame_bytes`) | a 4-byte length prefix claiming ~4 GiB |
 | Pub/Sub per-subscriber buffer | 1,024 messages | `synap-core` `pubsub::SUBSCRIBER_CHANNEL_CAPACITY` | a slow subscriber growing memory without bound |
 | Concurrent connections (per binary listener) | 10,000 | `synap-server` `resp3::server::MAX_CONNECTIONS` | a connection flood exhausting FDs/memory |
 
@@ -20,7 +20,10 @@ compile-time constants; making them configurable is tracked in `phase6i`.
 - **Pub/Sub buffer**: a subscriber whose bounded channel is full is disconnected
   and counted in the `slow_consumers_dropped` stat, rather than buffered forever.
 - **Max connections**: once the listener's semaphore has no free permits, new
-  connections are refused (dropped) until an existing connection closes.
+  connections are refused (dropped) until an existing connection closes. Both
+  listeners enforce it — RESP3 with its own semaphore, SynapRPC through
+  Thunder's `ListenerConfig::max_connections`. Each refusal on the RPC port
+  increments `synap_rpc_connections_refused_total`.
 
 ## Idle timeout & configurable limits (phase6i)
 

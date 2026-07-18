@@ -13,6 +13,7 @@ workspace = true
 [dependencies]
 synap-core = { path = "../synap-core" }
 synap-protocol = { path = "../synap-protocol" }
+thunder-rpc = { workspace = true, features = ["server"] }
 # Opt-in global allocator (see the `mimalloc` feature). Off by default.
 mimalloc = { version = "0.1", optional = true }
 tokio.workspace = true
@@ -94,6 +95,9 @@ mimalloc = ["dep:mimalloc"]
 vendored-openssl = ["dep:openssl"]
 
 [dev-dependencies]
+# The client half is test-only: the RPC integration tests drive the listener
+# over a real socket with the same Thunder client the SDKs use.
+thunder-rpc = { workspace = true, features = ["client", "server"] }
 criterion = { version = "0.7", features = ["async_tokio"] }
 reqwest = { version = "0.13", features = ["json", "blocking"] }
 tokio-test = "0.4"

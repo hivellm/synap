@@ -5,6 +5,53 @@ All notable changes to Synap will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **SynapRPC now runs on [Thunder](https://github.com/hivellm/thunder)
+  (`thunder-rpc` 0.2.0).** The binary RPC listener's accept loop, writer task,
+  frame codec, session state machine and graceful drain come from the family's
+  shared protocol crate; Synap keeps its command catalog, its authentication
+  store and its ACL. The wire format is unchanged — wire v1 is frozen — and the
+  public REST/RESP3/MCP surfaces are untouched.
+- **`Value::Bytes` is emitted as MessagePack `bin`** instead of an array of
+  integers (~33% smaller on binary payloads). Both forms are still accepted on
+  decode, indefinitely, so pre-1.1 SDK builds keep working against a 1.1 server.
+- **`PING` is answered before authentication.** Thunder's `AUTH`-command
+  handshake carries a pre-auth allowlist of `PING`/`HELLO`/`AUTH`/`QUIT`; the
+  previous server answered `NOAUTH` to a pre-auth `PING`. `NOAUTH` still gates
+  every other command.
+- **`HELLO` is answered by the handshake layer** rather than falling through to
+  the dispatch tree as an unknown command.
+- **The RPC listener shuts down gracefully.** `spawn_synap_rpc_listener` returns
+  a handle whose `stop()` drains in-flight requests before closing; dropping it
+  shuts down without waiting.
+
+### Added
+
+- `synap_rpc_connections_refused_total` — accepts refused at the
+  `network.max_connections` ceiling, so an engaging limit is visible rather than
+  silent.
+
+### Fixed
+
+- **Per-command ACL costs one credential-store lookup per connection**, not one
+  per privileged command. The authenticated user record is resolved at `AUTH`
+  and carried on the session, which also means a session is judged by the
+  identity it authenticated with rather than by whatever the store holds later.
+
+Five capability gaps were found while porting the listener and fixed upstream in
+`thunder-rpc` 0.2.0 before this release, so the swap costs Synap nothing:
+[thunder#1](https://github.com/hivellm/thunder/issues/1) (zero-copy `Bytes`),
+[#2](https://github.com/hivellm/thunder/issues/2) (connection ceiling),
+[#3](https://github.com/hivellm/thunder/issues/3) (per-command metrics hook),
+[#4](https://github.com/hivellm/thunder/issues/4) (session identity) and
+[#5](https://github.com/hivellm/thunder/issues/5) (shareable listener handle).
+The zero-copy `GET`/`SET` path, `network.max_connections`, every
+`synap_rpc_*` metric and graceful shutdown all behave as they did before the
+swap.
+
 ## [1.0.0] - 2026-07-11
 
 The **v1.0.0 hardening line**: a `crates/` workspace restructure plus a deep

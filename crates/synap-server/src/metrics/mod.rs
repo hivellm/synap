@@ -297,6 +297,13 @@ lazy_static! {
         vec![64.0, 128.0, 256.0, 512.0, 1024.0, 4096.0, 16384.0, 65536.0]
     ).expect("metric registration uses a static, unique name");
 
+    /// SynapRPC connections refused at the `network.max_connections` ceiling.
+    pub static ref SYNAP_RPC_CONNECTIONS_REFUSED: IntCounterVec = register_int_counter_vec!(
+        "synap_rpc_connections_refused_total",
+        "SynapRPC connections refused at the max_connections ceiling",
+        &[] as &[&str; 0]
+    ).expect("metric registration uses a static, unique name");
+
     // ============================================================================
     // System Metrics
     // ============================================================================
@@ -727,6 +734,13 @@ pub fn synap_rpc_connection_close() {
     SYNAP_RPC_CONNECTIONS.with_label_values(&["active"]).dec();
 }
 
+/// Track a connection refused at the `network.max_connections` ceiling.
+pub fn synap_rpc_connection_refused() {
+    SYNAP_RPC_CONNECTIONS_REFUSED
+        .with_label_values(&[] as &[&str; 0])
+        .inc();
+}
+
 /// Record incoming + outgoing SynapRPC frame sizes.
 pub fn synap_rpc_frame_sizes(in_bytes: usize, out_bytes: usize) {
     if in_bytes > 0 {
@@ -861,6 +875,7 @@ mod tests {
         synap_rpc_connection_open();
         synap_rpc_frame_sizes(32, 48);
         synap_rpc_connection_close();
+        synap_rpc_connection_refused();
 
         // reset then repopulate broker gauges (scrape-time snapshot pattern).
         reset_broker_gauges();

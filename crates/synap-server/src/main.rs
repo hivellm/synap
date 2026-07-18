@@ -838,15 +838,23 @@ async fn main() -> Result<()> {
     }
 
     // Spawn optional SynapRPC binary TCP listener.
-    if config.synap_rpc.enabled {
+    //
+    // The handle must outlive the request path: Thunder shuts the listener down
+    // when the last handle is dropped, so binding it to a variable that lives
+    // until the process exits is what keeps the port open.
+    let _synap_rpc_listener = if config.synap_rpc.enabled {
         use synap_server::protocol::synap_rpc::server::spawn_synap_rpc_listener;
         let rpc_addr: SocketAddr = format!("{}:{}", config.synap_rpc.host, config.synap_rpc.port)
             .parse()
             .expect("invalid synap_rpc bind address");
-        spawn_synap_rpc_listener(app_state.clone(), rpc_addr, idle_timeout, max_connections)
-            .await?;
+        let handle =
+            spawn_synap_rpc_listener(app_state.clone(), rpc_addr, idle_timeout, max_connections)
+                .await?;
         info!("SynapRPC listener started on {rpc_addr}");
-    }
+        Some(handle)
+    } else {
+        None
+    };
 
     // Create router with rate limiting and authentication
     let app = create_router(
