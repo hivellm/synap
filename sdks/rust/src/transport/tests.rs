@@ -156,10 +156,27 @@ fn wire_value_as_int() {
 #[test]
 fn wire_value_as_float() {
     assert_eq!(WireValue::Float(3.125).as_float(), Some(3.125));
-    // Str that parses as float
-    assert_eq!(WireValue::Str("2.5".into()).as_float(), Some(2.5));
-    assert_eq!(WireValue::Str("not-a-float".into()).as_float(), None);
+    // Thunder's accessor widens `Int`; the pre-Thunder one returned `None`,
+    // which made an integer score decode as 0.0 in the response mapper.
+    assert_eq!(WireValue::Int(7).as_float(), Some(7.0));
+    // It deliberately does not parse strings. RESP3 returns scalars as
+    // strings, so the response mapper does that itself, at the call site —
+    // see the `.or_else(|| …as_str()…parse())` chains in `mapping.rs`.
+    assert_eq!(WireValue::Str("2.5".into()).as_float(), None);
     assert_eq!(WireValue::Null.as_float(), None);
+}
+
+/// The mapper's own coercion is what users actually see, so pin it here:
+/// a score arriving as a string, a float or an integer all decode alike.
+#[test]
+fn map_response_zscore_accepts_every_numeric_shape() {
+    for wire in [WireValue::Str("2.5".into()), WireValue::Float(2.5)] {
+        let v = map_response("sortedset.zscore", wire);
+        assert_eq!(v["score"], json!(2.5));
+    }
+    // An integer score is no longer flattened to 0.0.
+    let v = map_response("sortedset.zscore", WireValue::Int(7));
+    assert_eq!(v["score"], json!(7.0));
 }
 
 #[test]
@@ -348,11 +365,11 @@ async fn run_synap_rpc_server_once(listener: tokio::net::TcpListener, expected_c
         .await
         .expect("read body");
 
-    let req: RpcRequest = rmp_serde::from_slice(&body).expect("decode request");
+    let req: thunder::Request = rmp_serde::from_slice(&body).expect("decode request");
     assert_eq!(req.command, expected_cmd);
 
     // Build response.
-    let resp = RpcResponse {
+    let resp = thunder::Response {
         id: req.id,
         result: Ok(WireValue::Str("testvalue".into())),
     };
@@ -376,7 +393,7 @@ async fn synap_rpc_transport_execute_get() {
 
     tokio::spawn(run_synap_rpc_server_once(listener, "GET"));
 
-    let transport = SynapRpcTransport::new("127.0.0.1", port, Duration::from_secs(5));
+    let transport = SynapRpcTransport::new("127.0.0.1", port, Duration::from_secs(5), None);
     let result = transport
         .execute("GET", vec![WireValue::Str("testkey".into())])
         .await
@@ -396,7 +413,7 @@ async fn synap_rpc_transport_command_uppercased() {
 
     tokio::spawn(run_synap_rpc_server_once(listener, "SET"));
 
-    let transport = SynapRpcTransport::new("127.0.0.1", port, Duration::from_secs(5));
+    let transport = SynapRpcTransport::new("127.0.0.1", port, Duration::from_secs(5), None);
     let _ = transport
         .execute(
             "set",

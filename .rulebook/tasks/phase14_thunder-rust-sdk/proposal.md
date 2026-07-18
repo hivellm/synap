@@ -2,6 +2,11 @@
 
 Source: https://github.com/hivellm/thunder — `docs/analysis/05-protocol-crate-dissolution.md` §5.5 step 2.
 
+> **Sequencing correction.** This task runs **before** phase13, despite the
+> numbering. phase13 deletes `crates/synap-protocol/src/synap_rpc/`, which this
+> SDK still imports (`SynapValue`, `codec`, `Request`, `Response`) — doing 13
+> first would not compile. The real dependency is 14 → 13.
+
 ## Why
 
 `sdks/rust` currently reaches the SynapRPC listener through a hand-written

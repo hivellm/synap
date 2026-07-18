@@ -9,7 +9,7 @@ use url::Url;
 
 use crate::error::{Result, SynapError};
 use crate::transport::{
-    Resp3Transport, SynapRpcTransport, TransportMode, map_command, map_response,
+    Resp3Transport, RpcCredentials, SynapRpcTransport, TransportMode, map_command, map_response,
 };
 use crate::{
     BitmapManager, GeospatialManager, HashManager, HyperLogLogManager, KVStore, ListManager,
@@ -239,6 +239,22 @@ impl SynapConfig {
     }
 }
 
+/// Resolve the RPC handshake credentials from the client configuration.
+///
+/// The same credentials the HTTP transport puts in an `Authorization` header
+/// now travel in the RPC handshake — before the Thunder swap the RPC transport
+/// simply never authenticated, so it could not talk to a `require_auth` server
+/// at all. A token wins over user/password, matching the HTTP precedence.
+fn rpc_credentials(config: &SynapConfig) -> Option<RpcCredentials> {
+    if let Some(token) = &config.auth_token {
+        return Some(RpcCredentials::Token(token.clone()));
+    }
+    match (&config.username, &config.password) {
+        (Some(user), Some(pass)) => Some(RpcCredentials::UserPass(user.clone(), pass.clone())),
+        _ => None,
+    }
+}
+
 // ── Internal transport enum ───────────────────────────────────────────────────
 
 enum Transport {
@@ -295,9 +311,14 @@ impl SynapClient {
 
         let transport = match config.transport {
             TransportMode::Http => Arc::new(Transport::Http),
-            TransportMode::SynapRpc => Arc::new(Transport::SynapRpc(Arc::new(
-                SynapRpcTransport::new(&config.rpc_host, config.rpc_port, config.timeout),
-            ))),
+            TransportMode::SynapRpc => {
+                Arc::new(Transport::SynapRpc(Arc::new(SynapRpcTransport::new(
+                    &config.rpc_host,
+                    config.rpc_port,
+                    config.timeout,
+                    rpc_credentials(&config),
+                ))))
+            }
             TransportMode::Resp3 => Arc::new(Transport::Resp3(Arc::new(Resp3Transport::new(
                 &config.resp3_host,
                 config.resp3_port,

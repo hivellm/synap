@@ -28,11 +28,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a handle whose `stop()` drains in-flight requests before closing; dropping it
   shuts down without waiting.
 
+- **The Rust SDK's RPC transport is Thunder's client.** Concurrent commands now
+  pipeline over one connection instead of serializing behind a mutex, and the
+  SDK gains connect/per-call timeouts, the frame cap on encode and decode, lazy
+  reconnect and typed auth errors. The public API is unchanged.
+
 ### Added
 
 - `synap_rpc_connections_refused_total` — accepts refused at the
   `network.max_connections` ceiling, so an engaging limit is visible rather than
   silent.
+- **The Rust SDK authenticates on the RPC port.** `auth_token` (or
+  `username`/`password`) now travels in the RPC handshake; previously the RPC
+  transport never sent `AUTH`, so an SDK client could not reach a
+  `require_auth` deployment on port 15501 at all.
+- `SynapError::Unauthorized` — `NOAUTH` / `WRONGPASS` / `NOPERM` replies are
+  distinguishable from a generic `ServerError`, since retrying them without new
+  credentials cannot help. `SynapError` is now `#[non_exhaustive]`: match with a
+  `_` arm so future variants do not break your build.
+
+### Fixed
+
+- **A numeric reply arriving as an integer no longer decodes as `0.0`.**
+  `ZSCORE`, `ZINCRBY`, `GEODIST` and `HINCRBYFLOAT` previously coerced an `Int`
+  reply to `0.0`; it now widens to the correct float.
 
 ### Fixed
 

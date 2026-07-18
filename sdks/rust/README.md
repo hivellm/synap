@@ -170,22 +170,35 @@ client.pubsub().subscribe(vec!["news.*"], |msg| async move {
 client.pubsub().publish("news.breaking", serde_json::json!({"title": "Hello"})).await?;
 ```
 
-### Wire types (single source of truth)
+### Transport (single source of truth)
 
-The SynapRPC wire types and frame codec are **not** redefined in the SDK. The
-transport layer imports them directly from the [`synap-protocol`](../../crates/synap-protocol)
-crate that the server also uses:
+The SynapRPC transport is **not** hand-written in the SDK. It is
+[Thunder](https://github.com/hivellm/thunder) — the HiveLLM family's shared
+binary RPC crate (`thunder-rpc`), the same one `synap-server` runs on, so the
+two ends of the wire cannot drift:
 
-- `synap_protocol::synap_rpc::SynapValue` — the dynamically-typed wire value
-  (`Null`/`Bool`/`Int`/`Float`/`Bytes`/`Str`/`Array`/`Map`), aliased internally as
-  `WireValue`.
-- `synap_protocol::synap_rpc::{Request, Response}` — the request/response frames.
-- `synap_protocol::synap_rpc::codec` — the length-prefixed MessagePack framing.
+- `thunder::Value` — the dynamically-typed wire value
+  (`Null`/`Bool`/`Int`/`Float`/`Bytes`/`Str`/`Array`/`Map`), aliased internally
+  as `WireValue`. `Bytes` carries an `Arc<[u8]>`, so a value crosses the SDK
+  without being copied.
+- `thunder::{Request, Response}` — the request/response frames.
+- `thunder::Client` — the multiplexed connection itself.
 
-A server-side change to the wire format therefore reaches the SDK at **compile
-time** instead of drifting silently. These types are crate-internal, so this is
-not part of the SDK's public API — your code keeps using the ergonomic manager
-methods (`client.kv()`, `client.queue()`, …).
+What that buys the SDK, all of it shared with every other language's Thunder
+client rather than reimplemented here:
+
+| | |
+|---|---|
+| **Pipelining** | Concurrent commands multiplex over one connection, demultiplexed by frame id. The previous transport serialized every call behind a mutex. |
+| **Timeouts** | Connect and per-call, both configurable via `SynapConfig::timeout`. |
+| **Frame cap** | 512 MiB, enforced on encode *and* decode, checked against the length prefix before allocating. |
+| **Reconnect** | Lazy, with capped retries; a call whose frame never reached the wire is resent. |
+| **Typed errors** | `NOAUTH` / `WRONGPASS` / `NOPERM` surface as [`SynapError::Unauthorized`], not an opaque string. |
+| **Authentication** | Credentials travel in the connection handshake — the pre-Thunder RPC transport never sent `AUTH` at all, so it could not reach a `require_auth` server on this port. |
+
+These types are crate-internal, so none of this is part of the SDK's public
+API — your code keeps using the ergonomic manager methods (`client.kv()`,
+`client.queue()`, …).
 
 **Intentional divergence — client-side response DTOs.** The domain types in
 `synap_sdk::types` (`Message`, `QueueStats`, `Event`, `StreamStats`,

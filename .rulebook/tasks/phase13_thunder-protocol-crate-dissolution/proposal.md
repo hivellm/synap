@@ -2,6 +2,11 @@
 
 Source: https://github.com/hivellm/thunder — `docs/analysis/05-protocol-crate-dissolution.md`.
 
+> **Sequencing correction.** This task runs **after** phase14, despite the
+> numbering. Deleting `crates/synap-protocol/src/synap_rpc/` requires the Rust
+> SDK to have stopped importing it, which is phase14's job. The real dependency
+> is 14 → 13.
+
 ## Why
 
 `crates/synap-protocol` exists for exactly one reason: the Rust SDK needs the wire
