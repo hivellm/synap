@@ -115,43 +115,6 @@ volumes:
   grafana-data:
 ```
 
-#### Kubernetes Production Setup
-
-**Using Helm**:
-
-```bash
-# Create namespace
-kubectl create namespace synap
-
-# Deploy master
-helm install synap-master ./helm/synap \
-  --namespace synap \
-  --set replication.master.enabled=true \
-  --set config.replication.role=master \
-  --set persistence.size=50Gi \
-  --set resources.limits.memory=8Gi \
-  --set resources.limits.cpu=4000m
-
-# Deploy replicas
-helm install synap-replica ./helm/synap \
-  --namespace synap \
-  --set replication.replica.enabled=true \
-  --set replication.replica.replicaCount=3 \
-  --set config.replication.role=replica \
-  --set persistence.size=50Gi
-```
-
-**With Ingress + TLS**:
-
-```bash
-helm install synap ./helm/synap \
-  --set ingress.enabled=true \
-  --set ingress.className=nginx \
-  --set ingress.hosts[0].host=synap.example.com \
-  --set ingress.tls[0].secretName=synap-tls \
-  --set ingress.tls[0].hosts[0]=synap.example.com
-```
-
 #### Systemd Service (Linux)
 
 **/etc/systemd/system/synap.service**:
@@ -1135,18 +1098,27 @@ Add 50% buffer: **~230 MB**
 **Zero-Downtime Upgrade**:
 
 ```bash
-# 1. Upgrade replicas one by one
-helm upgrade synap-replica-1 synap/synap --set image.tag=0.4.0
-# Wait for health check
-helm upgrade synap-replica-2 synap/synap --set image.tag=0.4.0
-# Wait for health check
+# 1. Upgrade replicas one at a time, waiting for each to report healthy
+docker pull hivehub/synap:1.2.0
 
-# 2. Upgrade master (brief downtime for writes)
-helm upgrade synap-master synap/synap --set image.tag=0.4.0
+docker stop synap-replica-1 && docker rm synap-replica-1
+docker run -d --name synap-replica-1 ... hivehub/synap:1.2.0
+until [ "$(docker inspect synap-replica-1 --format '{{.State.Health.Status}}')" = healthy ]; do
+  sleep 2
+done
+
+# repeat for each replica before touching the master
+
+# 2. Upgrade the master (brief downtime for writes)
+docker stop synap-master && docker rm synap-master
+docker run -d --name synap-master ... hivehub/synap:1.2.0
 
 # 3. Verify replication
 curl http://master:15500/health/replication
 ```
+
+The container's own HEALTHCHECK is what gates each step: it probes `/health`,
+which answers without credentials even when `require_auth` is on.
 
 ---
 

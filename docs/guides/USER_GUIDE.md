@@ -47,7 +47,7 @@ Synap is a **high-performance in-memory data platform** that combines:
 - Master-slave replication
 - WAL + Snapshots for durability
 - Prometheus metrics
-- Docker + Kubernetes support
+- Docker support
 
 ---
 
@@ -90,35 +90,7 @@ services:
 docker-compose up -d
 ```
 
-### Option 2: Kubernetes (Helm)
-
-```bash
-# Add Helm repository
-helm repo add synap https://hivellm.github.io/synap-charts
-helm repo update
-
-# Install
-helm install my-synap synap/synap
-
-# With custom values
-helm install my-synap synap/synap -f values.yaml
-```
-
-**Production Setup** (Master + Replicas):
-```bash
-# Master
-helm install synap-master synap/synap \
-  --set replication.master.enabled=true \
-  --set config.replication.role=master
-
-# Replicas
-helm install synap-replica synap/synap \
-  --set replication.replica.enabled=true \
-  --set replication.replica.replicaCount=2 \
-  --set config.replication.role=replica
-```
-
-### Option 3: Binary Download
+### Option 2: Binary Download
 
 ```bash
 # Download from GitHub Releases
@@ -135,7 +107,7 @@ cd synap
 ./synap-cli
 ```
 
-### Option 4: Build from Source
+### Option 3: Build from Source
 
 ```bash
 # Prerequisites: Rust 1.85+ (Edition 2024)

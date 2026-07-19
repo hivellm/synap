@@ -32,6 +32,15 @@ go, php, and a replay of the pre-Thunder wire. Full results:
   verify — it had no `AUTH` path on the RPC transport and no Thunder package to
   move to. Removing it is better than shipping an SDK no one measures. The
   matrix, the CI job, and the SDK tables no longer mention it.
+- **The Helm chart is gone.** Its documented install path was broken — the guide
+  pointed at `https://hivellm.github.io/synap-charts`, which does not exist — and
+  nothing in CI linted, templated or published it, so it had drifted since 1.0.0.
+  It also modelled a stateful server as a `Deployment` with a `ReadWriteOnce`
+  PVC while offering autoscaling to 10 replicas, which cannot work: the second
+  pod would never get the volume. Kubernetes users should build on the Docker
+  image, which CI now builds and runs on every change. The Kubernetes sections of
+  the user and admin guides went with it, and the rolling-upgrade recipe is
+  rewritten around the container's own health check.
 
 ### Changed
 
