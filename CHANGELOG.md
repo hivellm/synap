@@ -36,6 +36,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   frames with the existing slow-consumer semantics. The server always attaches
   the notifier; `watch.max_inline_value_bytes` in `config.yml`
   (`SYNAP_WATCH_MAX_INLINE_VALUE_BYTES`) tunes the inline cap.
+- **`kv.watch()` in the Rust and TypeScript SDKs.** Rust:
+  `kv().watch(pattern)` / `watch_with_mode` return a `Stream<WatchEvent>` plus
+  a `SubscriptionHandle`, riding a dedicated `KV.WATCH` push connection (with a
+  `/kv/ws` WebSocket fallback for `http://` clients); teardown issues
+  `KV.UNWATCH`. TypeScript: `kv.watch<T>(pattern, { mode })` returns an rxjs
+  `Observable<WatchEvent<T>>` with teardown-on-unsubscribe, plus a
+  `withValueFetch` operator that transparently re-`GET`s truncated or
+  notify-mode envelopes. Both decode the envelope into a typed `WatchEvent`.
 - **In-segment pub/sub globs.** A `*` embedded in a topic segment (`user:*`,
   `sensor-*-temp`) now globs within that level; previously `*` only matched a
   whole `.`-segment, which made wildcard watch impossible for Redis-style `:`

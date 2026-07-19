@@ -245,6 +245,34 @@ let stats = client.kv().stats().await?;
 tracing::info!("Total keys: {}", stats.total_keys);
 ```
 
+### KV Watch (Reactive)
+
+Observe a key — or a wildcard pattern — and receive its **new value** on every
+change, without polling:
+
+```rust
+use futures::StreamExt;
+use synap_sdk::WatchMode;
+
+// Watch one key, or a whole prefix
+let (mut events, handle) = client.kv().watch("user:*");
+
+while let Some(event) = events.next().await {
+    // event: WatchEvent { key, event, version, value, truncated }
+    println!("{} {} v{} = {:?}", event.event, event.key, event.version, event.value);
+}
+
+// Notify-only mode: change signals without value bandwidth (re-GET on demand)
+let (mut signals, _handle) = client.kv().watch_with_mode("hot:key", WatchMode::Notify);
+
+// Tearing down issues KV.UNWATCH and closes the push connection
+handle.unsubscribe();
+```
+
+Delivery is best-effort, latest-value: a watcher that cannot keep up is
+disconnected and must re-`GET` and re-watch. `version` resets when the key is
+deleted, expires or is evicted — version 1 marks a new incarnation.
+
 ### Message Queues
 
 ```rust

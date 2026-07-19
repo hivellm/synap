@@ -315,6 +315,34 @@ const ttl = await synap.kv.ttl('mykey'); // seconds remaining or null
 await synap.kv.persist('mykey');
 ```
 
+### KV Watch (Reactive)
+
+Observe a key — or a wildcard pattern — and receive its **new value** on every
+change, without polling. Requires the `synap://` transport:
+
+```typescript
+import { withValueFetch } from '@hivellm/synap-sdk';
+
+// Watch one key, or a whole prefix
+const subscription = synap.kv.watch<string>('user:*').subscribe((event) => {
+  // event: { key, event, version, value?, truncated? }
+  console.log(`${event.event} ${event.key} v${event.version} =`, event.value);
+});
+
+// Notify-only mode + transparent re-GET for values above the inline cap
+synap.kv
+  .watch<Profile>('user:*', { mode: 'notify' })
+  .pipe(withValueFetch(synap.kv))
+  .subscribe((event) => console.log(event.key, event.value));
+
+// Unsubscribing issues KV.UNWATCH and closes the push connection
+subscription.unsubscribe();
+```
+
+Delivery is best-effort, latest-value: a watcher that cannot keep up is
+disconnected and must re-`GET` and re-watch. `version` resets when the key is
+deleted, expires or is evicted — version 1 marks a new incarnation.
+
 ---
 
 ## Queue System

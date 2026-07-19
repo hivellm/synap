@@ -4,8 +4,42 @@
  * Provides key-value operations using the StreamableHTTP protocol.
  */
 
+import { Observable, concatMap, from, share } from 'rxjs';
 import type { SynapClient } from './client';
-import type { SetOptions, KVStats, ScanResult, JSONValue } from './types';
+import type { SetOptions, KVStats, ScanResult, JSONValue, WatchEvent, WatchOptions } from './types';
+
+/** Terminal watch events: the key no longer exists, so there is nothing to fetch. */
+const TERMINAL_WATCH_EVENTS = new Set(['del', 'expired', 'evicted']);
+
+/**
+ * RxJS operator that transparently re-`GET`s a watch envelope's value when it
+ * arrived without one — truncated (oversized / non-UTF-8) or notify mode.
+ * Terminal events (`del`, `expired`, `evicted`) pass through untouched.
+ *
+ * @example
+ * ```typescript
+ * synap.kv.watch<Profile>('user:*', { mode: 'notify' })
+ *   .pipe(withValueFetch(synap.kv))
+ *   .subscribe((event) => console.log(event.key, event.value));
+ * ```
+ */
+export function withValueFetch<T = JSONValue>(kv: KVStore) {
+  return (source: Observable<WatchEvent<T>>): Observable<WatchEvent<T>> =>
+    source.pipe(
+      concatMap((event) => {
+        if (event.value !== undefined || TERMINAL_WATCH_EVENTS.has(event.event)) {
+          return from([event]);
+        }
+        return from(
+          kv.get<T>(event.key).then((value) => ({
+            ...event,
+            value: value ?? undefined,
+            truncated: false,
+          })),
+        );
+      }),
+    );
+}
 
 /**
  * Key-Value Store client
@@ -223,6 +257,87 @@ export class KVStore {
    */
   async stats(): Promise<KVStats> {
     return this.client.sendCommand<KVStats>('kv.stats', {});
+  }
+
+  // ==================== REACTIVE WATCH ====================
+
+  /**
+   * Watch a key (or wildcard pattern) and stream its change events.
+   *
+   * Requires the `synap://` transport (SynapRPC server push). Delivery is
+   * best-effort, latest-value: a watcher that cannot keep up is disconnected
+   * by the server and must re-`GET` and re-watch. Use `event.version` to
+   * detect gaps. Unsubscribing the returned Observable issues `KV.UNWATCH`.
+   *
+   * @example
+   * ```typescript
+   * const subscription = synap.kv.watch<string>('user:*').subscribe((event) => {
+   *   console.log(`${event.event} ${event.key} v${event.version} =`, event.value);
+   * });
+   * // later:
+   * subscription.unsubscribe();
+   * ```
+   */
+  watch<T = JSONValue>(pattern: string, options?: WatchOptions): Observable<WatchEvent<T>> {
+    const mode = options?.mode ?? 'value';
+
+    return new Observable<WatchEvent<T>>((subscriber) => {
+      let cancelPush: (() => void) | null = null;
+      let tornDown = false;
+
+      const setup = async () => {
+        try {
+          const rpcFn = (this.client as any).synapRpcTransport;
+          const rpc = typeof rpcFn === 'function' ? rpcFn.call(this.client) : null;
+          if (!rpc) {
+            throw new Error(
+              'kv.watch requires the synap:// transport; over HTTP use the /kv/ws WebSocket endpoint',
+            );
+          }
+
+          const { cancel } = await rpc.watchPush(
+            pattern,
+            mode,
+            (envelope: Record<string, unknown>) => {
+              const rawValue = envelope['value'];
+              // Stored values are raw UTF-8; JSON-encoded ones parse back to
+              // their structured form, mirroring `kv.get`.
+              let value: T | undefined;
+              if (typeof rawValue === 'string') {
+                try {
+                  value = JSON.parse(rawValue) as T;
+                } catch {
+                  value = rawValue as T;
+                }
+              }
+              subscriber.next({
+                key: String(envelope['key'] ?? ''),
+                event: String(envelope['event'] ?? ''),
+                version: Number(envelope['version'] ?? 0),
+                value,
+                truncated: envelope['truncated'] === true,
+              });
+            },
+          );
+
+          if (tornDown) {
+            cancel(); // unsubscribed while the KV.WATCH round-trip was in flight
+          } else {
+            cancelPush = cancel;
+          }
+        } catch (error) {
+          subscriber.error(error);
+        }
+      };
+
+      void setup();
+
+      // Teardown issues KV.UNWATCH and closes the push connection.
+      return () => {
+        tornDown = true;
+        cancelPush?.();
+      };
+    }).pipe(share());
   }
 }
 

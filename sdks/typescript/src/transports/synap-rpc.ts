@@ -284,4 +284,56 @@ export class SynapRpcTransport {
       },
     };
   }
+
+  /**
+   * Open a **dedicated** connection driven by `KV.WATCH` — the watch twin of
+   * {@link subscribePush}. Envelopes arrive as parsed objects via `onEvent`.
+   *
+   * @returns `{ subscriberId, cancel }` — `cancel()` issues `KV.UNWATCH` on
+   *          the same connection (best-effort) and tears it down.
+   */
+  async watchPush(
+    pattern: string,
+    mode: 'value' | 'notify',
+    onEvent: (envelope: Record<string, unknown>) => void,
+  ): Promise<{ subscriberId: string; cancel: () => void }> {
+    const client = await this.dial();
+
+    // Register the hook before KV.WATCH, so an event published between the
+    // server's acknowledgement and the registration cannot slip past.
+    client.onPush((value: Value) => {
+      const frame = fromWireValue(value) as Record<string, unknown> | null;
+      if (!frame || typeof frame !== 'object') return;
+
+      // The bridge encodes the envelope as a JSON string.
+      const rawPayload = frame['payload'];
+      let envelope: unknown = rawPayload;
+      if (typeof rawPayload === 'string') {
+        try {
+          envelope = JSON.parse(rawPayload);
+        } catch {
+          return; // not a watch envelope
+        }
+      }
+      if (envelope && typeof envelope === 'object') {
+        onEvent(envelope as Record<string, unknown>);
+      }
+    });
+
+    const args = mode === 'notify' ? [Value.str(pattern), Value.str('notify')] : [Value.str(pattern)];
+    const result = await client.call('KV.WATCH', args);
+    const subscriberId = Value.asStr(Value.mapGet(result, 'subscriber_id')) ?? '';
+
+    return {
+      subscriberId,
+      cancel: (): void => {
+        // Teardown issues KV.UNWATCH before the socket closes, so the server
+        // drops the routing entry promptly.
+        void client
+          .call('KV.UNWATCH', [Value.str(subscriberId)])
+          .catch(() => undefined)
+          .finally(() => void client.close());
+      },
+    };
+  }
 }

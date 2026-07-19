@@ -487,3 +487,38 @@ export interface HyperLogLogStats {
   total_cardinality: number;
 }
 
+
+// ==================== KV WATCH ====================
+
+/**
+ * One KV watch envelope (`docs/kv-watch.md` in the server repository).
+ *
+ * `value` is the **post-mutation** value and is absent for terminal events
+ * (`del`, `expired`, `evicted`), TTL-only events (`expire`, `persist`), and
+ * envelopes degraded to notify-only (`truncated: true`).
+ */
+export interface WatchEvent<T = JSONValue> {
+  /** The key that changed. */
+  key: string;
+  /** `set`, `del`, `expired`, `evicted`, `expire`, `persist`, `append`, ... */
+  event: string;
+  /**
+   * Per-key counter for gap detection. Resets when the key is deleted,
+   * expires or is evicted — version 1 marks a new incarnation.
+   */
+  version: number;
+  /** The post-mutation value, when inlined. */
+  value?: T;
+  /** `true` when the value was withheld (over the inline cap, or not UTF-8). */
+  truncated?: boolean;
+}
+
+/** Options for `kv.watch()`. */
+export interface WatchOptions {
+  /**
+   * `value` (default): envelopes carry the post-mutation value.
+   * `notify`: the server strips the value per subscription — change signals
+   * without value bandwidth.
+   */
+  mode?: 'value' | 'notify';
+}

@@ -38,6 +38,7 @@ pub mod geospatial;
 pub mod hash;
 pub mod hyperloglog;
 pub mod kv;
+pub mod kv_watch;
 pub mod list;
 pub mod pubsub;
 mod pubsub_reactive;
@@ -63,6 +64,7 @@ pub use geospatial::{
 pub use hash::HashManager;
 pub use hyperloglog::HyperLogLogManager;
 pub use kv::KVStore;
+pub use kv_watch::{WatchEvent, WatchMode};
 pub use list::ListManager;
 pub use pubsub::PubSubManager;
 pub use queue::QueueManager;

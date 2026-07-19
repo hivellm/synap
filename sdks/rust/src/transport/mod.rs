@@ -203,7 +203,46 @@ impl SynapRpcTransport {
         Ok(PushSubscription {
             subscriber_id,
             messages,
-            _client: client,
+            client,
+        })
+    }
+
+    /// Open a dedicated connection, send `KV.WATCH`, and relay push frames —
+    /// the watch twin of [`Self::subscribe_push`]. `mode` is `value` (default,
+    /// `None`) or `notify`.
+    pub(crate) async fn watch_push(
+        &self,
+        pattern: String,
+        mode: Option<String>,
+    ) -> Result<PushSubscription> {
+        let client = self.dial().await?;
+
+        // Register the hook before KV.WATCH, so an event published between the
+        // server's reply and the registration cannot slip past.
+        let (push_tx, messages) = tokio::sync::mpsc::unbounded_channel::<Value>();
+        client.on_push(move |value| {
+            let _ = push_tx.send(value.to_json());
+        });
+
+        let mut args = vec![WireValue::Str(pattern)];
+        if let Some(mode) = mode {
+            args.push(WireValue::Str(mode));
+        }
+        let result = client
+            .call("KV.WATCH", args)
+            .await
+            .map_err(map_client_error)?;
+
+        let subscriber_id = result
+            .map_get("subscriber_id")
+            .and_then(WireValue::as_str)
+            .unwrap_or_default()
+            .to_owned();
+
+        Ok(PushSubscription {
+            subscriber_id,
+            messages,
+            client,
         })
     }
 }
@@ -217,7 +256,22 @@ impl SynapRpcTransport {
 pub(crate) struct PushSubscription {
     pub(crate) subscriber_id: String,
     pub(crate) messages: tokio::sync::mpsc::UnboundedReceiver<Value>,
-    _client: Arc<thunder::Client>,
+    client: Arc<thunder::Client>,
+}
+
+impl PushSubscription {
+    /// Issue `KV.UNWATCH` for this subscription on its own connection, so the
+    /// server drops the routing entry before the socket closes. Best-effort:
+    /// dropping the subscription closes the connection either way.
+    pub(crate) async fn unwatch(&self) {
+        let _ = self
+            .client
+            .call(
+                "KV.UNWATCH",
+                vec![WireValue::Str(self.subscriber_id.clone())],
+            )
+            .await;
+    }
 }
 
 // ── RESP3 transport ───────────────────────────────────────────────────────────

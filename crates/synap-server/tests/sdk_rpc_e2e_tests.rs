@@ -196,3 +196,67 @@ async fn sdk_does_not_reinterpret_a_string_that_looks_like_json() {
         );
     }
 }
+
+#[tokio::test]
+async fn sdk_kv_watch_streams_events_and_unwatches_on_teardown() {
+    use futures_util::StreamExt;
+    use synap_server::core::{KVConfig, KeyWatchNotifier, PubSubRouter};
+
+    let router = Arc::new(PubSubRouter::new());
+    let notifier = Arc::new(KeyWatchNotifier::new(router.clone(), 0));
+    let mut state = test_helper::create_test_app_state();
+    state.kv_store = Arc::new(
+        synap_server::core::KVStore::new(KVConfig::default()).with_watch_notifier(Some(notifier)),
+    );
+    state.pubsub_router = Some(router.clone());
+
+    let (_handle, config) = start(state).await;
+    let client = SynapClient::new(config).expect("client builds");
+
+    let (mut events, watch_handle) = client.kv().watch("watched:*");
+
+    // The KV.WATCH round-trip happens inside the spawned task; wait until the
+    // subscription is registered before writing.
+    for _ in 0..100 {
+        if router.has_subscriber("__watch@0__:watched:1") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        router.has_subscriber("__watch@0__:watched:1"),
+        "the wildcard watch subscription must reach the router"
+    );
+
+    client
+        .kv()
+        .set("watched:1", "hello", None)
+        .await
+        .expect("set succeeds");
+
+    let event = tokio::time::timeout(Duration::from_secs(2), events.next())
+        .await
+        .expect("an event arrives")
+        .expect("the stream stays open");
+    assert_eq!(event.key, "watched:1");
+    assert_eq!(event.event, "set");
+    assert_eq!(event.version, 1);
+    assert!(
+        event.value.as_deref().is_some_and(|v| v.contains("hello")),
+        "the envelope carries the value, got {:?}",
+        event.value
+    );
+
+    // Teardown issues KV.UNWATCH; the router must drop the subscription.
+    watch_handle.unsubscribe();
+    for _ in 0..100 {
+        if !router.has_subscriber("__watch@0__:watched:1") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        !router.has_subscriber("__watch@0__:watched:1"),
+        "unsubscribe must unwind the watch subscription"
+    );
+}

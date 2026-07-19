@@ -5,7 +5,8 @@ instead of learning only that something happened and having to `GET` again.
 
 This document covers the core notifier (`synap-core`) and the server surfaces
 that ride on it: the `KV.WATCH` SynapRPC command and the `/kv/ws` WebSocket
-endpoint. `kv.watch()` in the SDKs is a separate phase.
+endpoint. The Rust and TypeScript SDKs expose it as `kv.watch()` (see each
+SDK's README); the remaining SDKs are separate phases.
 
 ## Why it is not keyspace notifications
 

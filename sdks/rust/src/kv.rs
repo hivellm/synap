@@ -11,7 +11,7 @@ use serde_json::json;
 /// Uses StreamableHTTP protocol for all operations.
 #[derive(Clone)]
 pub struct KVStore {
-    client: SynapClient,
+    pub(crate) client: SynapClient,
 }
 
 impl KVStore {

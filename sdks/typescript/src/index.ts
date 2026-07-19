@@ -75,7 +75,8 @@ export {
 } from './types';
 
 export { SynapClient } from './client';
-export { KVStore } from './kv';
+export { KVStore, withValueFetch } from './kv';
+export type { WatchEvent, WatchOptions } from './types';
 export { HashManager } from './hash';
 export { ListManager } from './list';
 export { SetManager } from './set';
