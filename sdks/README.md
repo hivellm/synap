@@ -1,8 +1,10 @@
-# Synap SDKs — v1.0.0
+# Synap SDKs — v1.2.0
 
 Official client libraries for [Synap](https://github.com/hivellm/synap) — High-Performance In-Memory Key-Value Store & Message Broker.
 
-All 7 SDKs support **three transports** with auto-detection from URL scheme. **SynapRPC is the default** — lowest latency, binary MessagePack framing over persistent TCP.
+All 6 SDKs support **three transports** with auto-detection from URL scheme. **SynapRPC is the default** — lowest latency, binary MessagePack framing over persistent TCP, and since 1.2.0 the same [Thunder](https://github.com/hivellm/thunder) protocol implementation the server runs.
+
+The Go and PHP SDKs live in their own repositories — [`hivellm/synap-sdk-go`](https://github.com/hivellm/synap-sdk-go) and [`hivellm/synap-sdk-php`](https://github.com/hivellm/synap-sdk-php) — and are consumed here as submodules.
 
 ## SDK Overview
 
@@ -44,12 +46,13 @@ All 6 SDKs support all 3 transports:
 | **Hash** | x | x | x | x | x | x |
 | **List** | x | x | x | x | x | x |
 | **Set** | x | x | x | x | x | x |
-| **Sorted Set** | x | x | - | - | - | - | - |
-| **Bitmap** | x | x | x | - | - | x | x |
-| **Geospatial** | x | x | x | - | - | x | x |
-| **HyperLogLog** | x | x | x | - | - | x | x |
-| **Scripting** | x | x | - | - | - | - | - |
-| **Transactions** | x | x | x | - | - | x | x |
+| **KV Watch** | x | x | x | x | x | x |
+| **Sorted Set** | x | x | - | - | - | - |
+| **Bitmap** | x | x | x | - | x | x |
+| **Geospatial** | x | x | x | - | x | x |
+| **HyperLogLog** | x | x | x | - | x | x |
+| **Scripting** | x | x | - | - | - | - |
+| **Transactions** | x | x | x | - | x | x |
 
 ## Test Coverage
 
@@ -109,6 +112,46 @@ $val = $client->kv()->get('key');
 using var client = new SynapClient("synap://localhost:15501");
 await client.KV.SetAsync("key", "value");
 var val = await client.KV.GetAsync("key");
+```
+
+## KV Watch
+
+Every SDK exposes `kv.watch(pattern)`: a stream of value-carrying change
+envelopes (`{ key, event, version, value? }`) over a dedicated `KV.WATCH` push
+connection. Requires the `synap://` transport — HTTP clients use the `/kv/ws`
+WebSocket endpoint directly (the Rust SDK falls back to it automatically).
+`mode: notify` strips the value server-side, per subscription. Closing the
+stream issues `KV.UNWATCH`. Semantics and fan-out cost: [`docs/features/kv-watch.md`](../docs/features/kv-watch.md).
+
+```rust
+let (mut events, handle) = client.kv().watch("user:*");
+while let Some(e) = events.next().await { println!("{} v{} = {:?}", e.key, e.version, e.value); }
+handle.unsubscribe();
+```
+
+```typescript
+const sub = client.kv.watch<Profile>('user:*').subscribe(e => console.log(e.key, e.version, e.value));
+sub.unsubscribe();
+```
+
+```python
+async for e in client.kv.watch("user:*"):
+    print(e.key, e.version, e.value)
+```
+
+```go
+events, stop, _ := client.KV().Watch(ctx, "user:*")
+for e := range events { fmt.Println(e.Key, e.Version, e.Value) }
+stop()
+```
+
+```php
+$client->kv()->watch('user:*', fn ($e) => printf("%s v%d\n", $e->key, $e->version));
+```
+
+```csharp
+await foreach (var e in client.KV.WatchAsync("user:*", ct: cts.Token))
+    Console.WriteLine($"{e.Key} v{e.Version} = {e.Value}");
 ```
 
 ## Authentication

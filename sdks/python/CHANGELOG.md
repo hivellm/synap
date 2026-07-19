@@ -2,6 +2,46 @@
 
 All notable changes to the Synap Python SDK will be documented in this file.
 
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+- **KV watch.** `client.kv.watch(pattern, mode=...)` is an async iterator of
+  typed `WatchEvent` dataclasses, streaming value-carrying change envelopes
+  over a dedicated `KV.WATCH` push connection. `mode="notify"` asks the server
+  to strip values per subscription. Closing the iterator issues `KV.UNWATCH`.
+  SynapRPC only; HTTP clients get a clear error pointing at the `/kv/ws`
+  endpoint.
+
+## [1.2.0] - 2026-07-19
+
+### Changed
+- **The `synap://` transport now runs on [Thunder](https://github.com/hivellm/thunder)**
+  (`hivellm-thunder` 0.2.1), the family's shared binary RPC client — the same
+  protocol implementation the Synap server runs, so the two ends of the wire
+  cannot drift.
+
+### Added
+- Credentials travel in the RPC handshake. The previous transport never sent
+  `AUTH`, so it could not reach a `require_auth` server on 15501 at all.
+- The push hook is registered before `SUBSCRIBE` is sent, so a message published
+  between the server's acknowledgement and the reader starting cannot be lost.
+
+## [1.0.0] - 2026-07-11
+
+### Fixed
+- **KV module was silently broken: every `kv.*` call returned `None`.** The
+  module still targeted the legacy `/api/stream` endpoint, which the 1.0
+  server no longer serves. All KV operations now route through
+  `send_command` (native SynapRPC/RESP3, or the HTTP command endpoint), with
+  response-shape normalization and a JSON round-trip contract for non-string
+  values (mirrors the TypeScript SDK).
+
+### Changed
+- Version aligned with the Synap server 1.0.0 release. SynapRPC (`synap://host:15501`) is the default transport; RESP3 and HTTP remain available via URL scheme. Test suite verified against the official `hivehub/synap:1.0.0` image.
+
 ## [0.11.0] - 2026-04-09
 
 ### Added
@@ -100,38 +140,6 @@ async with SynapClient(config) as client:
 
 ### Changed
 - Ready for PyPI publication
-
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-
-## [Unreleased]
-
-## [1.2.0] - 2026-07-19
-
-### Changed
-- **The `synap://` transport now runs on [Thunder](https://github.com/hivellm/thunder)**
-  (`hivellm-thunder` 0.2.1), the family's shared binary RPC client — the same
-  protocol implementation the Synap server runs, so the two ends of the wire
-  cannot drift.
-
-### Added
-- Credentials travel in the RPC handshake. The previous transport never sent
-  `AUTH`, so it could not reach a `require_auth` server on 15501 at all.
-- The push hook is registered before `SUBSCRIBE` is sent, so a message published
-  between the server's acknowledgement and the reader starting cannot be lost.
-
-## [1.0.0] - 2026-07-11
-
-### Fixed
-- **KV module was silently broken: every `kv.*` call returned `None`.** The
-  module still targeted the legacy `/api/stream` endpoint, which the 1.0
-  server no longer serves. All KV operations now route through
-  `send_command` (native SynapRPC/RESP3, or the HTTP command endpoint), with
-  response-shape normalization and a JSON round-trip contract for non-string
-  values (mirrors the TypeScript SDK).
-
-### Changed
-- Version aligned with the Synap server 1.0.0 release. SynapRPC (`synap://host:15501`) is the default transport; RESP3 and HTTP remain available via URL scheme. Test suite verified against the official `hivehub/synap:1.0.0` image.
 
 ## [0.1.0] - 2025-10-23
 

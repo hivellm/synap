@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **KV watch.** `client.KV.WatchAsync(pattern, mode, cancellationToken)` is an
+  `IAsyncEnumerable<WatchEvent>` of value-carrying change envelopes, streamed
+  over a dedicated `KV.WATCH` push connection. `WatchMode.Notify` asks the
+  server to strip values per subscription. Cancelling the enumeration issues
+  `KV.UNWATCH` before the connection closes. SynapRPC only; HTTP clients get a
+  clear error pointing at the `/kv/ws` endpoint.
+
 ## [1.2.0] - 2026-07-19
 
 ### Changed

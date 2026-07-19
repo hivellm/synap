@@ -4,6 +4,16 @@ All notable changes to the Synap TypeScript SDK will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+- **KV watch.** `kv.watch<T>(pattern, { mode })` returns an rxjs
+  `Observable<WatchEvent<T>>` of value-carrying change envelopes, streamed over
+  a dedicated `KV.WATCH` push connection; unsubscribing issues `KV.UNWATCH` and
+  closes it. `mode: 'notify'` asks the server to strip values per subscription.
+  The exported `withValueFetch` operator transparently re-`GET`s the value for
+  truncated or notify-mode envelopes, so a consumer can treat every event as
+  value-carrying. SynapRPC only; HTTP clients get a clear error pointing at the
+  `/kv/ws` endpoint.
+
 ## [1.2.0] - 2026-07-19
 
 ### Changed

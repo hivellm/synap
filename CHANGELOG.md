@@ -78,6 +78,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@typescript-eslint/eslint-plugin` 8.63.0 → 8.64.0 in the TypeScript SDK.
   No call-site changes: the `bcrypt::hash`/`verify` and `connect_async`/`Message`
   surfaces we use are unchanged across those releases.
+- **`docs/` is organized by audience.** The 30 loose files at the root of
+  `docs/` now sit under `features/`, `internals/`, `operations/`,
+  `development/`, `project/`, `guides/`, `protocol/` and `benchmarks/` — what a
+  document is *for* decides its directory, not which subsystem it touches. The
+  root keeps only what describes the project as a whole (`ARCHITECTURE`,
+  `PROJECT_DAG`, `ROADMAP`, `INDEX`). Every move used `git mv`, and all 31
+  inbound references — README, CHANGELOG, specs, code comments and
+  `config.example.yml` — were repointed.
+- **CI runs the workspace suite once.** `rust-test.yml` duplicated the test job
+  `rust-ci.yml` already runs across the same three OSes, and `rust-lint.yml`
+  compiled the workspace three times for lints that `--all-targets
+  --all-features` already covers. Both redundancies are gone, along with a
+  `cargo-audit` job that queried the same RustSec database `cargo-deny check
+  advisories` already gates on.
 
 ### Fixed
 

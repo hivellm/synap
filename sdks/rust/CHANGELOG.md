@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **KV watch.** `client.kv().watch(pattern)` / `watch_with_mode(pattern, mode)`
+  return a `(Stream<Item = WatchEvent>, SubscriptionHandle)` pair, streaming
+  value-carrying change envelopes over a dedicated `KV.WATCH` push connection —
+  with an automatic `/kv/ws` WebSocket fallback for `http://` clients, so watch
+  works on every transport the SDK speaks. `WatchMode::Notify` asks the server
+  to strip values per subscription (honored on SynapRPC; the WebSocket fallback
+  always delivers value envelopes). `SubscriptionHandle::unsubscribe` issues
+  `KV.UNWATCH`, and dropping the stream tears the connection down.
+
 ## [1.2.0] - 2026-07-19
 
 ### Changed

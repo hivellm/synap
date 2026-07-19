@@ -20,6 +20,7 @@ Synap provides multiple core capabilities in a single, cohesive system:
 - **⏸️ Blocking operations** - BLPOP/BRPOP/BRPOPLPUSH and BZPOPMIN/BZPOPMAX with Redis timeout semantics
 - **🔍 Cursor scans** - SCAN plus HSCAN/SSCAN/ZSCAN with MATCH glob and COUNT
 - **🔔 Keyspace notifications** - Redis-style `notify-keyspace-events` (`__keyspace@0__:*` / `__keyevent@0__:*`) via Pub/Sub
+- **👀 KV Watch** - `KV.WATCH <pattern>` streams **value-carrying** change events (`{ key, event, version, value? }`) over SynapRPC push or the `/kv/ws` WebSocket — a watcher never has to re-`GET`; available in all six SDKs
 - **📨 Acknowledgment Queues** - RabbitMQ-style message queues with delivery guarantees, DLQ, priorities, and per-consumer prefetch/QoS
 - **📡 Event Streams** - Kafka-style partitioned topics with consumer groups, retention policies, and consumer-offset-aware buffering
 - **🔔 Pub/Sub Messaging** - Topic-based publish/subscribe with wildcard support
@@ -577,6 +578,7 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 - **[CLI Guide](docs/guides/CLI_GUIDE.md)** - Synap CLI usage and commands
 - **[Transports](docs/protocol/transports.md)** - SynapRPC / RESP3 / HTTP command-parity matrix
 - **[Transactions](docs/features/transactions.md)** - MULTI/EXEC durability, replication, and isolation
+- **[KV Watch](docs/features/kv-watch.md)** - Value-carrying change streams, modes, version ordering, fan-out cost
 - **[Replication](docs/features/REPLICATION.md)** - Setup, sync semantics, and monitoring
 - **[Memory Accounting](docs/internals/memory-accounting.md)** - `maxmemory` across all datatypes
 - **[Observability](docs/operations/observability.md)** - Prometheus metrics reference
@@ -616,9 +618,13 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 
 ### 📦 SDKs
 
+- **[SDK Index](sdks/README.md)** - All six SDKs: transports, module coverage, quick start
 - **[TypeScript SDK](docs/sdks/TYPESCRIPT.md)** - Node.js and browser support
 - **[Python SDK](docs/sdks/PYTHON.md)** - Async/sync Python client
 - **[Rust SDK](docs/sdks/RUST.md)** - Native Rust client library
+- **[Go SDK](https://github.com/hivellm/synap-sdk-go)** - Standalone repository, vendored here as a submodule
+- **[PHP SDK](https://github.com/hivellm/synap-sdk-php)** - Standalone repository, vendored here as a submodule
+- **[C# SDK](sdks/csharp/README.md)** - .NET 8+ client library
 
 ### 💡 Examples
 
@@ -685,6 +691,7 @@ Redis stays serial):
 | Transactions (MULTI/EXEC/WATCH) | ✅ (durable + replicated) | ✅ | ❌ | ❌ |
 | Blocking Pops (BLPOP/BZPOPMIN…) | ✅ | ✅ | ❌ | ❌ |
 | Keyspace Notifications | ✅ | ✅ | ❌ | ❌ |
+| KV Watch (value-carrying) | ✅ (`KV.WATCH` + `/kv/ws`) | ❌ (notify-only) | ❌ | ❌ |
 | Queues (ACK) | ✅ | ❌ | ✅ | ❌ |
 | Consumer Prefetch/QoS | ✅ | ❌ | ✅ | ❌ |
 | Priority Queues | ✅ (0-9) | ❌ | ✅ | ❌ |
