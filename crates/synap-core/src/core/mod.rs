@@ -20,6 +20,7 @@ pub mod sorted_set;
 pub mod stream;
 pub mod transaction;
 pub mod types;
+pub mod watch;
 
 pub use bitmap::{
     BitfieldOperation, BitfieldOverflow, BitmapOperation, BitmapStats, BitmapStore, BitmapValue,
@@ -56,3 +57,4 @@ pub use sorted_set::{
 pub use stream::{RoomStats, StreamConfig, StreamEvent, StreamManager};
 pub use transaction::{CommittedWrite, Transaction, TransactionCommand, TransactionManager};
 pub use types::{EvictionPolicy, Expiry, KVConfig, KVStats, SetOptions, SetResult, StoredValue};
+pub use watch::{DEFAULT_INLINE_VALUE_CAP, KeyWatchNotifier, WatchEvent};

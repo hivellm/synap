@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### Added
+
+- **KV watch core notifier.** `KeyWatchNotifier` publishes a value-carrying
+  event to `__watch@0__:<key>` on every KV mutation, through the same
+  `PubSubRouter` that already handles fan-out and slow-consumer backpressure.
+  The envelope is `{ key, event, version, value?, truncated? }`.
+
+  It is deliberately not built on keyspace notifications: those carry the event
+  name only, and default to off, so a watch riding them would silently do
+  nothing at the default configuration.
+
+  Partial mutations ship the **resulting** value — `APPEND k "cd"` on `"ab"`
+  delivers `abcd` — so a watcher never has to re-`GET`. Values above the inline
+  cap (64 KiB, configurable) and values that are not UTF-8 are delivered as
+  notify-only with `truncated: true`, rather than multiplying bandwidth by
+  watcher count or handing back mangled bytes.
+
+  When nobody is watching a key the cost is a single router lookup: no envelope,
+  no serialization, no version counter. Documented in `docs/kv-watch.md`.
+- `PubSubRouter::has_subscriber` — an allocation-free existence check, for
+  callers that want to skip building a payload nobody will read.
+
 ## [1.2.0] - 2026-07-19
 
 The SynapRPC binary transport now runs on [Thunder](https://github.com/hivellm/thunder),

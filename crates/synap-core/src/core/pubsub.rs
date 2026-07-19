@@ -333,6 +333,31 @@ impl PubSubRouter {
         })
     }
 
+    /// Whether any subscriber would receive a message published to `topic`.
+    ///
+    /// A cheap existence check for callers that want to skip building a payload
+    /// nobody will read — the KV watch notifier fires on every mutation, so its
+    /// idle cost is exactly this lookup. Unlike the delivery path it clones
+    /// nothing: the exact-match arm tests the subscriber set in place, and the
+    /// wildcard arm stops at the first pattern that matches.
+    pub fn has_subscriber(&self, topic: &str) -> bool {
+        {
+            let topics_map = self.topics.read();
+            if topics_map
+                .get(topic)
+                .is_some_and(|t| !t.subscribers.is_empty())
+            {
+                return true;
+            }
+        }
+
+        let topic_segments: Vec<&str> = topic.split('.').collect();
+        self.wildcard_subs
+            .read()
+            .iter()
+            .any(|sub| sub.compiled_pattern.matches(&topic_segments))
+    }
+
     /// Get statistics
     pub fn get_stats(&self) -> PubSubStats {
         self.stats.read().clone()

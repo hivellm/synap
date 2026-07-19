@@ -47,6 +47,12 @@ pub struct KVStore {
     /// Optional keyspace-notification publisher (Redis `notify-keyspace-events`).
     /// `None` (the default) makes every notify site a single branch with no cost.
     keyspace_notifier: Option<Arc<crate::core::KeyspaceNotifier>>,
+    /// Optional value-carrying watch publisher. Unlike the keyspace notifier
+    /// this has no enable flag once attached — a watch that silently does
+    /// nothing at the default configuration would be worse than none — so its
+    /// idle cost is the router lookup inside
+    /// [`KeyWatchNotifier::notify`](crate::core::KeyWatchNotifier::notify).
+    watch_notifier: Option<Arc<crate::core::KeyWatchNotifier>>,
 }
 
 impl KVStore {
@@ -78,11 +84,44 @@ impl KVStore {
         self
     }
 
+    /// Attach a value-carrying watch publisher so mutating commands broadcast
+    /// the post-mutation value on `__watch@0__:<key>`. A no-op when `notifier`
+    /// is `None`.
+    pub fn with_watch_notifier(
+        mut self,
+        notifier: Option<Arc<crate::core::KeyWatchNotifier>>,
+    ) -> Self {
+        self.watch_notifier = notifier;
+        self
+    }
+
     /// Publish a keyspace notification for `key` if a notifier is attached.
     #[inline]
     fn notify_keyspace(&self, class: crate::core::EventClass, event: &str, key: &str) {
         if let Some(ref n) = self.keyspace_notifier {
             n.notify(class, event, key);
+        }
+    }
+
+    /// Publish a watch event carrying the **post-mutation** value.
+    ///
+    /// `value` is `None` when the key no longer exists. For a partial mutation
+    /// (`APPEND`, `SETRANGE`, `INCR`) it must be the resulting value, not the
+    /// operand, so a watcher never has to re-`GET` to learn what the key holds.
+    #[inline]
+    fn notify_watch(&self, event: &str, key: &str, value: Option<&[u8]>) {
+        if let Some(ref n) = self.watch_notifier {
+            n.notify(event, key, value);
+        }
+    }
+
+    /// Publish a terminal watch event and drop the key's version counter, which
+    /// is what keeps that map bounded by live watched keys.
+    #[inline]
+    fn notify_watch_gone(&self, event: &str, key: &str) {
+        if let Some(ref n) = self.watch_notifier {
+            n.notify(event, key, None);
+            n.forget(key);
         }
     }
 
@@ -142,6 +181,7 @@ impl KVStore {
             mem: None,
             key_locks: Arc::new(crate::core::KeyLockManager::new()),
             keyspace_notifier: None,
+            watch_notifier: None,
         }
     }
 
@@ -176,6 +216,7 @@ impl KVStore {
             mem: None,
             key_locks: Arc::new(crate::core::KeyLockManager::new()),
             keyspace_notifier: None,
+            watch_notifier: None,
         }
     }
 
@@ -332,7 +373,11 @@ impl KVStore {
         // Clone key for cache before moving it into the HashMap.
         let cache_key = self.cache.as_ref().map(|_| key.clone());
         // Clone key for the keyspace notification (published after the lock drops).
-        let notify_key = self.keyspace_notifier.as_ref().map(|_| key.clone());
+        // Cloned for either publisher: keyspace notifications default off, but a
+        // watch notifier is always live once attached, so gating the clone on
+        // the keyspace notifier alone would silently skip every watch event.
+        let notify_key = (self.keyspace_notifier.is_some() || self.watch_notifier.is_some())
+            .then(|| key.clone());
 
         shard.track_ttl(&stored, &key);
         let old = data.insert(key, stored);
@@ -371,6 +416,7 @@ impl KVStore {
         drop(data);
         if let Some(k) = notify_key {
             self.notify_keyspace(crate::core::EventClass::String, "set", &k);
+            self.notify_watch("set", &k, Some(&value));
         }
 
         Ok(())
@@ -659,6 +705,7 @@ impl KVStore {
                 .fetch_sub(removed_size as i64, Ordering::Relaxed);
             drop(data);
             self.notify_keyspace(crate::core::EventClass::Generic, "del", key);
+            self.notify_watch_gone("del", key);
             Ok(true)
         } else {
             Ok(false)
@@ -761,6 +808,8 @@ impl KVStore {
         // Redis fires "incrby"/"decrby" for INCR/DECR-family ops on the string.
         let event = if amount >= 0 { "incrby" } else { "decrby" };
         self.notify_keyspace(crate::core::EventClass::String, event, key);
+        // A partial mutation ships the *resulting* value, not the operand.
+        self.notify_watch(event, key, Some(new_value.to_string().as_bytes()));
 
         Ok(new_value)
     }
@@ -1151,6 +1200,7 @@ impl KVStore {
         // Publish `expired` events after every shard lock has been released.
         for key in expired_notify {
             self.notify_keyspace(crate::core::EventClass::Expired, "expired", &key);
+            self.notify_watch_gone("expired", &key);
         }
     }
 
@@ -1383,6 +1433,7 @@ impl KVStore {
             data.insert(key.to_string(), new_value);
             drop(data);
             self.notify_keyspace(crate::core::EventClass::Generic, "expire", key);
+            self.notify_watch("expire", key, None);
             Ok(true)
         } else {
             Ok(false)
@@ -1402,6 +1453,7 @@ impl KVStore {
             data.insert(key.to_string(), new_value);
             drop(data);
             self.notify_keyspace(crate::core::EventClass::Generic, "persist", key);
+            self.notify_watch("persist", key, None);
             Ok(true)
         } else {
             Ok(false)
@@ -1440,11 +1492,20 @@ impl KVStore {
         let shard = self.get_shard(key);
         let mut data = shard.data.write();
 
+        // A partial mutation must ship the *resulting* value to watchers, not
+        // the operand, so the merged bytes are captured here — but only when a
+        // watch notifier is attached, so the copy is not on the common path.
+        let watching = self.watch_notifier.is_some();
+        let mut watch_value: Option<Vec<u8>> = None;
+
         let new_length = if let Some(stored_value) = data.get_mut(key) {
             if stored_value.is_expired() {
                 // Key expired, treat as new
                 let new_data = value;
                 *stored_value = StoredValue::new(new_data.clone(), None);
+                if watching {
+                    watch_value = Some(new_data.to_vec());
+                }
                 new_data.len()
             } else {
                 // Append to existing (copy-on-write: the Arc payload is immutable).
@@ -1452,6 +1513,9 @@ impl KVStore {
                 let mut merged = stored_value.data().to_vec();
                 merged.extend_from_slice(&value);
                 let len = merged.len();
+                if watching {
+                    watch_value = Some(merged.clone());
+                }
                 stored_value.set_data(merged);
                 len
             }
@@ -1459,6 +1523,9 @@ impl KVStore {
             // Key doesn't exist, create new
             let new_value = StoredValue::new(value.clone(), None);
             data.insert(key.to_string(), new_value);
+            if watching {
+                watch_value = Some(value.to_vec());
+            }
             value.len()
         };
 
@@ -1471,6 +1538,7 @@ impl KVStore {
 
         drop(data);
         self.notify_keyspace(crate::core::EventClass::String, "append", key);
+        self.notify_watch("append", key, watch_value.as_deref());
 
         Ok(new_length)
     }
@@ -1533,6 +1601,11 @@ impl KVStore {
         let shard = self.get_shard(key);
         let mut data = shard.data.write();
 
+        // A partial mutation must ship the *resulting* value to watchers, not
+        // the operand. Captured only when a watch notifier is attached.
+        let watching = self.watch_notifier.is_some();
+        let mut watch_value: Option<Vec<u8>> = None;
+
         let new_length = if let Some(stored_value) = data.get_mut(key) {
             if stored_value.is_expired() {
                 // Key expired, create new string with padding
@@ -1554,6 +1627,9 @@ impl KVStore {
                 // Overwrite at offset
                 bytes[offset..offset + value.len()].copy_from_slice(&value);
                 let len = bytes.len();
+                if watching {
+                    watch_value = Some(bytes.clone());
+                }
                 stored_value.set_data(bytes);
                 len
             }
@@ -1563,6 +1639,9 @@ impl KVStore {
             new_data.extend_from_slice(&value);
             let new_value = StoredValue::new(new_data.clone(), None);
             data.insert(key.to_string(), new_value);
+            if watching {
+                watch_value = Some(new_data.clone());
+            }
             new_data.len()
         };
 
@@ -1575,6 +1654,7 @@ impl KVStore {
 
         drop(data);
         self.notify_keyspace(crate::core::EventClass::String, "setrange", key);
+        self.notify_watch("setrange", key, watch_value.as_deref());
 
         Ok(new_length)
     }
@@ -1643,6 +1723,7 @@ impl KVStore {
 
         drop(data);
         self.notify_keyspace(crate::core::EventClass::String, "set", key);
+        self.notify_watch("set", key, Some(&value));
 
         Ok(old_value)
     }

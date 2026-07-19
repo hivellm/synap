@@ -1,0 +1,100 @@
+# KV Watch — value-carrying key change notifications
+
+Watch lets a client observe a key and receive **the new value** when it changes,
+instead of learning only that something happened and having to `GET` again.
+
+This document covers the core notifier that landed in `synap-core`. The client
+surfaces that ride on it — the SynapRPC command, the WebSocket endpoint and
+`kv.watch()` in the SDKs — are separate phases.
+
+## Why it is not keyspace notifications
+
+Synap already has Redis-compatible keyspace notifications, and they fire on
+every KV mutation. They are the wrong foundation for watch on two counts:
+
+- **They carry the event name only.** The post-mutation value is in scope at the
+  notify site but is not forwarded, so every watcher would have to `GET` after
+  every event — an extra round trip and a race window in which the value can
+  change again.
+- **They default to off.** `notify-keyspace-events` is empty unless configured,
+  so a watch built on them would silently do nothing at the default
+  configuration. Extending the payload with values would also break the Redis
+  semantics the channels exist to provide.
+
+So watch has its own channel family, `__watch@0__:<key>`, published through the
+same `PubSubRouter` — which already solves fan-out, wildcard matching and
+slow-consumer backpressure. Watch is a composition layer, not a new subsystem.
+
+## The envelope
+
+```json
+{
+  "key": "user:1",
+  "event": "set",
+  "version": 7,
+  "value": "alice"
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `key` | The key that changed. |
+| `event` | `set`, `del`, `expired`, `expire`, `persist`, `append`, `setrange`, `incrby`, `decrby`. |
+| `version` | Per-key monotonic counter, starting at 1. |
+| `value` | The post-mutation value. Omitted, not null, when absent. |
+| `truncated` | Present and `true` only when the value was withheld. |
+
+For a **partial mutation** — `APPEND`, `SETRANGE`, `INCR`/`DECR` — the value is
+the **resulting** value, never the operand. `APPEND k "cd"` on a key holding
+`"ab"` delivers `abcd`. A watcher never has to re-`GET` to learn what the key
+now holds.
+
+## Semantics
+
+**Best-effort, latest-value.** A watcher that cannot keep up is disconnected by
+the router's existing bounded-channel policy; it must re-`GET` and re-subscribe.
+Replay is a streams feature, and streams are the right tool when you need it.
+
+**`version` is how you detect that.** It increases by one per delivered event
+for that key, so a client that sees 7 then 9 knows it missed one. Versions reset
+when a key is deleted or expires — the terminal `del`/`expired` event carries
+its own version first, so the reset is never ambiguous in context.
+
+**Values are withheld above a cap.** Broadcasting a value to N watchers
+multiplies bandwidth by value size × N, so above the inline cap (64 KiB by
+default) the event is delivered with no `value` and `truncated: true`. The
+client knows the key changed and re-`GET`s if it wants the payload.
+
+**Non-UTF-8 values are also notify-only.** The envelope's `value` is a string,
+and re-encoding arbitrary bytes lossily would hand the watcher something the key
+does not hold. Such a value is withheld with `truncated: true` for the same
+reason an oversized one is.
+
+## Cost when nobody is watching
+
+The notifier fires on every KV mutation, so its idle cost is what matters. It is
+one `PubSubRouter::has_subscriber` lookup: no envelope is built, nothing is
+serialized, nothing is published, and the key does not even get a version
+counter. The counter map is therefore bounded by the *watched* keyspace, not by
+the store, and entries are dropped when a key is deleted.
+
+`APPEND` and `SETRANGE` need the merged bytes to ship the resulting value, and
+that copy happens only when a notifier is attached.
+
+## Wiring it up
+
+```rust
+use std::sync::Arc;
+use synap_core::core::{KVConfig, KVStore, KeyWatchNotifier, PubSubRouter};
+
+let router = Arc::new(PubSubRouter::new());
+let notifier = Arc::new(KeyWatchNotifier::new(Arc::clone(&router), 0));
+let store = KVStore::new(KVConfig::default())
+    .with_watch_notifier(Some(notifier));
+```
+
+Override the inline cap with `KeyWatchNotifier::with_inline_cap`. A store with
+no notifier attached behaves exactly as before, at no cost.
+
+Subscribing is ordinary pub/sub — `__watch@0__:user:1` for one key, and the
+router's wildcard matching covers patterns.

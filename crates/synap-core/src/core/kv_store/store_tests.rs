@@ -1316,3 +1316,183 @@ async fn test_ttl_heap_stale_entries() {
     let val = store.get("stale-key").await.unwrap();
     assert_eq!(val.as_deref(), Some(b"v2".as_slice()));
 }
+
+// ── KV watch (phase21) ───────────────────────────────────────────────────────
+
+mod watch {
+    use crate::core::{KVConfig, KVStore, KeyWatchNotifier, PubSubRouter, WatchEvent};
+    use std::sync::Arc;
+
+    /// A store with a watch notifier attached, plus the router to subscribe on.
+    fn store_with_watch() -> (KVStore, Arc<PubSubRouter>, Arc<KeyWatchNotifier>) {
+        let router = Arc::new(PubSubRouter::new());
+        let notifier = Arc::new(KeyWatchNotifier::new(Arc::clone(&router), 0));
+        let store =
+            KVStore::new(KVConfig::default()).with_watch_notifier(Some(Arc::clone(&notifier)));
+        (store, router, notifier)
+    }
+
+    /// Subscribe to a key's watch channel and return the receiver.
+    fn watch(
+        router: &PubSubRouter,
+        key: &str,
+    ) -> tokio::sync::mpsc::Receiver<crate::core::pubsub::Message> {
+        let result = router
+            .subscribe(vec![format!("__watch@0__:{key}")])
+            .expect("subscribe succeeds");
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        router.register_connection(result.subscriber_id, tx);
+        rx
+    }
+
+    /// Pull the next delivered message and decode its watch envelope.
+    async fn next_event(
+        rx: &mut tokio::sync::mpsc::Receiver<crate::core::pubsub::Message>,
+    ) -> WatchEvent {
+        let message = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("a watch event arrives")
+            .expect("the channel stays open");
+        serde_json::from_value(message.payload).expect("the payload is a watch envelope")
+    }
+
+    #[tokio::test]
+    async fn set_publishes_the_value_to_a_watcher() {
+        let (store, router, _n) = store_with_watch();
+        let mut rx = watch(&router, "user:1");
+
+        store
+            .set("user:1".to_string(), b"alice".to_vec(), None)
+            .await
+            .expect("set succeeds");
+
+        let event = next_event(&mut rx).await;
+        assert_eq!(event.key, "user:1");
+        assert_eq!(event.event, "set");
+        assert_eq!(event.value.as_deref(), Some("alice"));
+    }
+
+    #[tokio::test]
+    async fn watch_fires_with_keyspace_notifications_disabled() {
+        // The whole point of a separate channel family: keyspace notifications
+        // default off, and watch must not silently depend on them.
+        let (store, router, _n) = store_with_watch();
+        let mut rx = watch(&router, "k");
+
+        store
+            .set("k".to_string(), b"v".to_vec(), None)
+            .await
+            .expect("set succeeds");
+
+        assert_eq!(next_event(&mut rx).await.event, "set");
+    }
+
+    #[tokio::test]
+    async fn append_ships_the_resulting_value_not_the_operand() {
+        let (store, router, _n) = store_with_watch();
+        store
+            .set("k".to_string(), b"ab".to_vec(), None)
+            .await
+            .expect("set succeeds");
+        let mut rx = watch(&router, "k");
+
+        store
+            .append("k", b"cd".to_vec())
+            .await
+            .expect("append succeeds");
+
+        let event = next_event(&mut rx).await;
+        assert_eq!(
+            event.value.as_deref(),
+            Some("abcd"),
+            "a watcher must not have to re-GET to learn the new value"
+        );
+    }
+
+    #[tokio::test]
+    async fn incr_ships_the_resulting_total() {
+        let (store, router, _n) = store_with_watch();
+        store
+            .set("n".to_string(), b"41".to_vec(), None)
+            .await
+            .expect("set succeeds");
+        let mut rx = watch(&router, "n");
+
+        store.incr("n", 1).await.expect("incr succeeds");
+
+        assert_eq!(next_event(&mut rx).await.value.as_deref(), Some("42"));
+    }
+
+    #[tokio::test]
+    async fn versions_increase_across_mutations() {
+        let (store, router, _n) = store_with_watch();
+        let mut rx = watch(&router, "k");
+
+        store
+            .set("k".to_string(), b"v1".to_vec(), None)
+            .await
+            .expect("set succeeds");
+        store
+            .set("k".to_string(), b"v2".to_vec(), None)
+            .await
+            .expect("set succeeds");
+
+        let first = next_event(&mut rx).await;
+        let second = next_event(&mut rx).await;
+        assert!(
+            second.version > first.version,
+            "versions must increase so a client can detect a gap: {} then {}",
+            first.version,
+            second.version
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_publishes_a_terminal_event_without_a_value() {
+        let (store, router, _n) = store_with_watch();
+        store
+            .set("k".to_string(), b"v".to_vec(), None)
+            .await
+            .expect("set succeeds");
+        let mut rx = watch(&router, "k");
+
+        store.delete("k").await.expect("delete succeeds");
+
+        let event = next_event(&mut rx).await;
+        assert_eq!(event.event, "del");
+        assert!(event.value.is_none(), "a deleted key has no value to ship");
+    }
+
+    #[tokio::test]
+    async fn an_oversized_value_degrades_to_notify_only() {
+        let (store, router, _n) = store_with_watch();
+        let mut rx = watch(&router, "big");
+
+        let big = vec![b'x'; crate::core::DEFAULT_INLINE_VALUE_CAP + 1];
+        store
+            .set("big".to_string(), big, None)
+            .await
+            .expect("set succeeds");
+
+        let event = next_event(&mut rx).await;
+        assert!(event.value.is_none(), "the value must be withheld");
+        assert!(event.truncated, "and the watcher told why");
+    }
+
+    #[tokio::test]
+    async fn a_store_without_a_notifier_still_works() {
+        // The notifier is optional; a store without one must behave exactly as
+        // before, with no watch cost at all.
+        let store = KVStore::new(KVConfig::default());
+
+        store
+            .set("k".to_string(), b"v".to_vec(), None)
+            .await
+            .expect("set succeeds");
+
+        assert_eq!(
+            store.get("k").await.expect("get succeeds").as_deref(),
+            Some(b"v".as_slice())
+        );
+    }
+}
