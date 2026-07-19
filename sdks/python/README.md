@@ -93,6 +93,22 @@ config = SynapConfig("http://127.0.0.1:15500")
 client = SynapClient(config)
 ```
 
+### The `synap://` transport is Thunder
+
+The binary transport is not hand-written in this SDK. It is
+[Thunder](https://github.com/hivellm/thunder) (`hivellm-thunder`, imported as
+`thunder_rpc`) — the HiveLLM family's shared binary RPC client, the same
+protocol the Synap server runs on, so the two ends of the wire cannot drift.
+
+| | |
+|---|---|
+| **Pipelining** | Concurrent commands multiplex over one connection, demultiplexed by frame id. |
+| **Frame cap** | 512 MiB, validated against the length prefix **before** allocating. The previous transport called `readexactly()` with whatever a 4-byte prefix claimed. |
+| **Timeouts** | Connect and per-call, both from `SynapConfig.timeout`. |
+| **Reconnect** | Lazy, with capped retries. |
+| **Authentication** | `auth_token` / `username`+`password` travel in the handshake — the previous transport never sent `AUTH`, so it could not reach a `require_auth` server on 15501. |
+| **Push** | `SUBSCRIBE` delivery uses Thunder's push hook, registered before the command is sent, so a message published between the acknowledgement and the reader starting is not lost. |
+
 **Queue, stream and pub/sub over `synap://`:**
 
 ```python

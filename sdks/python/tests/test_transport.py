@@ -17,6 +17,10 @@ from typing import Any
 import msgpack
 import pytest
 
+from thunder_rpc import Value
+
+from synap_sdk.transport_rpc import MAX_FRAME_BYTES
+
 from synap_sdk.transport import (
     Resp3Transport,
     SynapRpcTransport,
@@ -31,63 +35,76 @@ from synap_sdk.transport import (
 
 
 class TestToWire:
-    def test_none_becomes_null_string(self) -> None:
-        assert _to_wire(None) == "Null"
+    """`_to_wire` now produces Thunder `Value`s rather than hand-rolled
+    serde envelopes; the wire bytes are unchanged, the in-process type is not."""
 
-    def test_true_becomes_bool_envelope(self) -> None:
-        assert _to_wire(True) == {"Bool": True}
+    def test_none_becomes_null(self) -> None:
+        assert _to_wire(None) == Value.null()
 
-    def test_false_becomes_bool_envelope(self) -> None:
-        assert _to_wire(False) == {"Bool": False}
+    def test_true_becomes_bool(self) -> None:
+        assert _to_wire(True) == Value.bool(True)
 
-    def test_int_becomes_int_envelope(self) -> None:
-        assert _to_wire(42) == {"Int": 42}
+    def test_false_becomes_bool(self) -> None:
+        assert _to_wire(False) == Value.bool(False)
+
+    def test_bool_is_not_encoded_as_int(self) -> None:
+        # `bool` is an `int` subclass in Python — checking int first would send
+        # `Int(1)` where the server's dispatch tree expects `Bool(true)`.
+        assert _to_wire(True).kind == "bool"
+
+    def test_int_becomes_int(self) -> None:
+        assert _to_wire(42) == Value.int(42)
 
     def test_negative_int(self) -> None:
-        assert _to_wire(-7) == {"Int": -7}
+        assert _to_wire(-7) == Value.int(-7)
 
-    def test_float_becomes_float_envelope(self) -> None:
-        assert _to_wire(3.14) == {"Float": 3.14}
+    def test_float_becomes_float(self) -> None:
+        assert _to_wire(3.14) == Value.float(3.14)
 
-    def test_str_becomes_str_envelope(self) -> None:
-        assert _to_wire("hello") == {"Str": "hello"}
+    def test_str_becomes_str(self) -> None:
+        assert _to_wire("hello") == Value.str("hello")
 
-    def test_bytes_becomes_bytes_envelope(self) -> None:
-        result = _to_wire(b"\x01\x02\x03")
-        # bytes are kept as-is in the envelope (raw bytes object)
-        assert "Bytes" in result
-        assert result["Bytes"] == b"\x01\x02\x03"
+    def test_bytes_becomes_bytes(self) -> None:
+        assert _to_wire(bytes([1, 2, 3])) == Value.bytes(bytes([1, 2, 3]))
 
 
 class TestFromWire:
-    def test_null_string_becomes_none(self) -> None:
-        assert _from_wire("Null") is None
+    def test_null_becomes_none(self) -> None:
+        assert _from_wire(Value.null()) is None
 
     def test_none_becomes_none(self) -> None:
         assert _from_wire(None) is None
 
-    def test_bool_envelope_true(self) -> None:
-        assert _from_wire({"Bool": True}) is True
+    def test_bool_true(self) -> None:
+        assert _from_wire(Value.bool(True)) is True
 
-    def test_bool_envelope_false(self) -> None:
-        assert _from_wire({"Bool": False}) is False
+    def test_bool_false(self) -> None:
+        assert _from_wire(Value.bool(False)) is False
 
-    def test_int_envelope(self) -> None:
-        assert _from_wire({"Int": 99}) == 99
+    def test_int(self) -> None:
+        assert _from_wire(Value.int(99)) == 99
 
-    def test_float_envelope(self) -> None:
-        assert _from_wire({"Float": 1.5}) == 1.5
+    def test_float(self) -> None:
+        assert _from_wire(Value.float(1.5)) == 1.5
 
-    def test_str_envelope(self) -> None:
-        assert _from_wire({"Str": "world"}) == "world"
+    def test_str(self) -> None:
+        assert _from_wire(Value.str("world")) == "world"
 
-    def test_bytes_envelope(self) -> None:
+    def test_bytes(self) -> None:
         # 0xDE 0xAD happens to be valid UTF-8 (U+07AD) and the SDK contract
         # decodes UTF-8-looking bytes to str...
-        assert _from_wire({"Bytes": b"\xde\xad"}) == "ޭ"
+        assert _from_wire(Value.bytes(bytes([0xDE, 0xAD]))) == chr(0x07AD)
         # ...while invalid UTF-8 stays raw bytes.
-        raw = {"Bytes": b"\xff\xfe"}
-        assert _from_wire(raw) == b"\xff\xfe"
+        invalid = bytes([0xFF, 0xFE])
+        assert _from_wire(Value.bytes(invalid)) == invalid
+
+    def test_array(self) -> None:
+        wire = Value.array([Value.int(1), Value.str("two")])
+        assert _from_wire(wire) == [1, "two"]
+
+    def test_map(self) -> None:
+        wire = Value.map([(Value.str("k"), Value.int(7))])
+        assert _from_wire(wire) == {"k": 7}
 
     def test_roundtrip_none(self) -> None:
         assert _from_wire(_to_wire(None)) is None
@@ -105,7 +122,7 @@ class TestFromWire:
         assert _from_wire(_to_wire("synap")) == "synap"
 
     def test_passthrough_plain_value(self) -> None:
-        # Non-envelope, non-null value passes through as-is.
+        # A non-`Value` passes through as-is.
         assert _from_wire(42) == 42
 
 
@@ -240,7 +257,7 @@ async def _run_rpc_server(
         frame_len = struct.unpack_from("<I", len_bytes)[0]
         body = await reader.readexactly(frame_len)
         decoded = msgpack.unpackb(body, raw=False)
-        req_id = decoded["id"]
+        req_id = decoded[0]
         # Send response
         resp = msgpack.packb([req_id, response_payload], use_bin_type=True)
         writer.write(struct.pack("<I", len(resp)) + resp)
@@ -260,11 +277,10 @@ async def test_synaprpc_transport_ok_response() -> None:
         len_bytes = await r.readexactly(4)
         frame_len = struct.unpack_from("<I", len_bytes)[0]
         body = await r.readexactly(frame_len)
+        # Requests are array-encoded structs: [id, command, args] (WIRE-012).
         decoded = msgpack.unpackb(body, raw=False)
-        got_request["id"] = decoded["id"]
-        got_request["cmd"] = decoded["command"]
-        got_request["args"] = decoded["args"]
-        resp = msgpack.packb([decoded["id"], response_payload], use_bin_type=True)
+        got_request["id"], got_request["cmd"], got_request["args"] = decoded
+        resp = msgpack.packb([decoded[0], response_payload], use_bin_type=True)
         w.write(struct.pack("<I", len(resp)) + resp)
         await w.drain()
         w.close()
@@ -292,7 +308,7 @@ async def test_synaprpc_transport_error_response() -> None:
         frame_len = struct.unpack_from("<I", len_bytes)[0]
         body = await r.readexactly(frame_len)
         decoded = msgpack.unpackb(body, raw=False)
-        resp = msgpack.packb([decoded["id"], {"Err": "not found"}], use_bin_type=True)
+        resp = msgpack.packb([decoded[0], {"Err": "not found"}], use_bin_type=True)
         w.write(struct.pack("<I", len(resp)) + resp)
         await w.drain()
         w.close()
@@ -320,8 +336,8 @@ async def test_synaprpc_transport_wire_args_encoded() -> None:
         frame_len = struct.unpack_from("<I", len_bytes)[0]
         body = await r.readexactly(frame_len)
         decoded = msgpack.unpackb(body, raw=False)
-        received_args.extend(decoded["args"])
-        resp = msgpack.packb([decoded["id"], {"Ok": "Null"}], use_bin_type=True)
+        received_args.extend(decoded[2])
+        resp = msgpack.packb([decoded[0], {"Ok": "Null"}], use_bin_type=True)
         w.write(struct.pack("<I", len(resp)) + resp)
         await w.drain()
         w.close()
@@ -332,7 +348,8 @@ async def test_synaprpc_transport_wire_args_encoded() -> None:
     transport = SynapRpcTransport("127.0.0.1", port, timeout=5.0)
     try:
         await transport.execute("SET", ["mykey", "myvalue"])
-        # First arg "mykey" → {"Str": "mykey"}, second → {"Str": "myvalue"}
+        # Decoded with msgpack directly, independently of Thunder: the args
+        # really are externally-tagged on the wire, unchanged by the swap.
         assert received_args[0] == {"Str": "mykey"}
         assert received_args[1] == {"Str": "myvalue"}
     finally:
@@ -458,6 +475,43 @@ async def test_resp3_transport_error_response() -> None:
     try:
         with pytest.raises(Exception, match="ERR command failed"):
             await transport.execute("GET", ["anykey"])
+    finally:
+        await transport.close()
+        server.close()
+        await server.wait_closed()
+
+
+# ── Frame cap ──────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_synaprpc_transport_refuses_over_cap_length_prefix() -> None:
+    """A length prefix above the cap is refused before the body is allocated.
+
+    The pre-Thunder transport called ``readexactly(frame_len)`` with whatever a
+    remote peer's 4-byte prefix claimed, so a tiny message could drive an
+    unbounded allocation. Thunder validates against ``max_frame_bytes`` first.
+    """
+    over_cap = MAX_FRAME_BYTES + 1
+
+    async def handler(r: asyncio.StreamReader, w: asyncio.StreamWriter) -> None:
+        # Read the request, then answer with a header claiming more than the
+        # cap — and send only the header, so a client that allocated first
+        # would wait forever for a body that never arrives.
+        len_bytes = await r.readexactly(4)
+        frame_len = struct.unpack_from("<I", len_bytes)[0]
+        await r.readexactly(frame_len)
+        w.write(struct.pack("<I", over_cap))
+        await w.drain()
+        w.close()
+
+    server = await asyncio.start_server(handler, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+
+    transport = SynapRpcTransport("127.0.0.1", port, timeout=5.0)
+    try:
+        with pytest.raises(Exception):  # noqa: B017, PT011 - any refusal is correct
+            await asyncio.wait_for(transport.execute("GET", ["k"]), timeout=10.0)
     finally:
         await transport.close()
         server.close()
