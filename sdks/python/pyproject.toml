@@ -30,7 +30,7 @@ dependencies = [
     # The shared binary RPC client — the same protocol the Synap server runs
     # on, so the two ends of the wire cannot drift. It owns the MessagePack
     # codec, so the SDK no longer depends on `msgpack` directly.
-    "hivellm-thunder>=0.2.0",
+    "hivellm-thunder>=0.2.1",
 ]
 
 [project.optional-dependencies]

@@ -33,6 +33,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          # sdks/go and sdks/php are submodules. Without this the checkout
+          # leaves them empty and their cells drop out of the matrix silently,
+          # which reads as "nothing to run" rather than "not covered".
+          submodules: recursive
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@nightly
@@ -108,6 +113,11 @@ jobs:
     # same class of bug: only running the container finds them.
     steps:
       - uses: actions/checkout@v7
+        with:
+          # sdks/go and sdks/php are submodules. Without this the checkout
+          # leaves them empty and their cells drop out of the matrix silently,
+          # which reads as "nothing to run" rather than "not covered".
+          submodules: recursive
 
       - name: Build the image
         run: docker build -t synap:ci .
