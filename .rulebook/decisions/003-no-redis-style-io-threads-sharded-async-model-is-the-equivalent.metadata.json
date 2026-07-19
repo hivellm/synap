@@ -1,0 +1,9 @@
+{
+  "id": 3,
+  "slug": "no-redis-style-io-threads-sharded-async-model-is-the-equivalent",
+  "title": "No Redis-style IO threads — sharded async model is the equivalent",
+  "status": "proposed",
+  "date": "2026-07-10",
+  "relatedTasks": [],
+  "supersededBy": null
+}

@@ -1,0 +1,8 @@
+# phase1 baseline: dependabot PRs applied on release branch, closed as superseded
+**Source**: manual
+**Date**: 2026-07-09
+**Related Task**: phase1_v1-dependabot-and-version-baseline
+**Tags**: analysis:synap-v1-release, phase1, dependabot, versioning, release
+phase1_v1-dependabot-and-version-baseline closed the 8 open dependabot PRs (#222-#229) WITHOUT merging them into main. The 3 Cargo bumps (sysinfo 0.33→0.39, mlua 0.11→0.12, rmcp 1.5→2.1) and 5 TS-SDK dev-dep bumps were applied directly as commits on release/v1.0.0 (commit 9cfc073) so main stayed stable while the breaking rmcp 2.1 API migration (model::Content → model::ContentBlock in mcp_handlers.rs + umicp/handlers.rs) was adapted. On 2026-07-09 the PRs were closed via `gh pr close <n> --comment <rationale> --delete-branch`, which also removed each dependabot head branch; verified via `gh api repos/hivellm/synap/branches` that zero dependabot branches and zero open PRs remain. The bumps reach main when release/v1.0.0 is released.
+
+Version-baseline invariant: every workspace member inherits `version.workspace = true` / `edition.workspace = true`; the single source is `[workspace.package]` in root Cargo.toml (now `1.0.0`). Verify with `grep -L "version.workspace" crates/*/Cargo.toml sdks/rust/Cargo.toml` — it must return nothing. Cargo.lock is gitignored here, so a workspace version bump does not produce a tracked lockfile diff.

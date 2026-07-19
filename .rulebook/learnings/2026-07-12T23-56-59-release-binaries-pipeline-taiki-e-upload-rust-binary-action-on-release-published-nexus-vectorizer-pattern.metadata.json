@@ -1,0 +1,17 @@
+{
+  "id": "2026-07-12T23-56-59-release-binaries-pipeline-taiki-e-upload-rust-binary-action-on-release-published-nexus-vectorizer-pattern",
+  "title": "Release binaries pipeline: taiki-e/upload-rust-binary-action on release:published (Nexus/Vectorizer pattern)",
+  "content": "HiveLLM-standard release pipeline for Rust binaries (used by Nexus, Vectorizer, now Synap): trigger on `release: types [published]` + `workflow_dispatch` with a `tag` input resolved once via `env: RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}`; per-target independent jobs each calling `taiki-e/upload-rust-binary-action@v1` per binary with `checksum: sha256` and `ref: refs/tags/${RELEASE_TAG}` — the action builds, archives (tar.gz unix / zip windows) and attaches assets directly to the GitHub Release. Key gotchas: (1) `actions/upload-artifact` does NOT attach to Releases — artifacts expire in run storage (Synap shipped v1.0.0 with zero release binaries because of this); (2) prefer native arm runners (`ubuntu-24.04-arm`, free on public repos) over cross-compile — kills the openssl-sys cross problem entirely (Vectorizer removed aarch64-musl-via-cross as a 'perennial release blocker'); (3) `CARGO_INCREMENTAL: \"0\"` on cold CI builds; (4) guard the workflow contract with a structural test (yaml.safe_load + assertions on triggers/targets/checksums) — text greps for 'forbidden' flags must not match comments.",
+  "source": "manual",
+  "relatedTask": "phase16_release-artifacts-ci",
+  "tags": [
+    "ci",
+    "github-actions",
+    "release",
+    "rust",
+    "taiki-e",
+    "arm64",
+    "pattern"
+  ],
+  "createdAt": "2026-07-12T23:56:59.591Z"
+}

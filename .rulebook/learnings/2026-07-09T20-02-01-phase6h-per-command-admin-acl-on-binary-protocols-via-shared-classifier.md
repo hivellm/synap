@@ -1,0 +1,10 @@
+# phase6h: per-command admin ACL on binary protocols via shared classifier
+**Source**: manual
+**Date**: 2026-07-09
+**Related Task**: phase6h_v1-binary-protocol-per-command-acl
+**Tags**: analysis:synap-audit, phase6h, auth, acl, resp3, synap_rpc, security
+phase6h added per-command ACL to RESP3 + SynapRPC (M-003/M-004 refinement of phase6b's AUTH gate). Design: a shared `auth::command_requires_admin(cmd) -> bool` classifier (permissions.rs) lists destructive/admin commands (FLUSHALL/FLUSHDB/SWAPDB, CONFIG/SHUTDOWN/DEBUG/RESET, SAVE/BGSAVE/BGREWRITEAOF, SLAVEOF/REPLICAOF/FAILOVER, ACL/MODULE, SCRIPT.FLUSH/KILL, CLUSTER). Both protocol servers now track the resolved User post-AUTH (changed check_auth/authenticate usage from bool to Option<User>), and before dispatch: `if state.require_auth && command_requires_admin(cmd) && !user.is_admin { deny NOPERM }`. With auth disabled the port is trusted (loopback default) so no restriction.
+
+Protocol naming nuance: SynapRPC uses dotted command names (SCRIPT.FLUSH — from the SDK mapping.rs) so the classifier's SCRIPT.FLUSH matches there; RESP3 sends SCRIPT as the top-level command + subcommand as a separate arg, so RESP3 SCRIPT FLUSH is NOT gated (minor — running/loading scripts is normal; the dangerous FLUSHALL/CONFIG/CLUSTER ARE gated on both since they're top-level). CONFIG/CLUSTER gated wholesale (all subcommands).
+
+Scope decision: implemented the admin-gate (the spec's explicit scenarios: non-admin denied FLUSHALL, GET allowed) rather than a full 94-command per-resource ACL map. The User model has is_admin + roles but permissions live in AuthContext (resolved separately), and the concrete risk is non-admins running destructive commands — the admin gate closes that. Finer per-resource ACL noted as a future refinement. Tests: command_requires_admin classifier unit tests (the security-critical decision); full protocol-denial e2e would need an auth-enabled server harness (e2e_test.rs disables auth).

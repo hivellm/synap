@@ -1,0 +1,8 @@
+{
+  "id": "2026-07-11T01-51-55-int-encoding-with-an-inline-decimal-cache-satisfies-data-s-borrow-contract",
+  "title": "Int encoding with an inline decimal cache satisfies data()'s borrow contract",
+  "content": "phase13 int-encoding-counters. The blocker for Redis-style int encoding in Synap was StoredValue::data() -> &[u8]: you cannot return a borrow of bytes formatted on demand. Solution: StoredValue::Int { value: i64, buf: [u8; 20], len: u8 } — the variant carries BOTH the integer and an always-current inline decimal rendering. INCR = checked add + re-render into the stack buffer (render_int writes digits back-to-front then copy_within to the front so data() is just &buf[..len]) — zero heap allocation; data() borrows the inline cache like any variant; data_arc() (GET path) materializes a ~20B Arc only on read. 20 bytes fits i64::MIN. Semantics kept Redis-compatible: numeric Persistent upgrades to Int on first INCR (via set_int), Expiring keeps its variant/TTL (set_int swaps bytes only), set_data (APPEND/SETRANGE) degrades Int -> Persistent so a later INCR errors like Redis. Migration risk was low because StoredValue is NOT serialized (snapshots dump logical bytes via data(); recovery recreates Persistent and the first INCR re-upgrades) and all external variant matches were construction-only or matches!(Expiring) in volatile eviction (Int correctly behaves as persistent there). Measured: INCR single-key 815k median-of-5 (0.92, now inside the GET/SET band — the INCR-specific cost is gone), multi-key 806k = 1.18x Redis. Benchmark noise lesson: single runs varied 735k-815k; use median-of-5 with a control op (SET) to separate machine noise from real change.",
+  "source": "manual",
+  "tags": [],
+  "createdAt": "2026-07-11T01:51:55.552Z"
+}

@@ -1,0 +1,15 @@
+{
+  "id": "2026-07-09T13-34-05-broker-parity-audit-fixes-split-into-bounded-core-changes-vs-large-features",
+  "title": "Broker-parity audit fixes split into bounded core changes vs. large features",
+  "content": "phase6f (broker parity) audit findings M-012/M-013/M-016/M-017 decompose into two tiers. Bounded, low-risk core changes were landed this session in crates/synap-core (all gate-green, with unit tests):\n\n- M-016 (a39ae03): stream consume seek is O(limit) via `buffer.range(start_idx..)` where start_idx = (from_offset - min_offset) — offsets are contiguous so no full scan. (tasks.md 1.3)\n- M-017 (eb5672e): per-queue BinaryHeap<Reverse<(ack_deadline, id)>> replaces the O(pending) global-lock sweep; pop only while earliest deadline <= now, lazy-discard stale entries via a deadline-match guard (pending.get(id).ack_deadline == heap deadline). (tasks.md 1.6)\n- M-012 (ec462f1): RoomStats.dropped counts ring-buffer evictions of events still unread by the slowest tracked subscriber (min of subscribers' last_offset) — normal recycling of read events is NOT counted, so non-zero == real lagging-consumer loss. This is the \"explicit drop signal\" half of M-012. (tasks.md 1.2)\n- M-013 (f5e5dc4): honest stats.consumers via per-consumer in-flight map (active_consumers: HashMap<ConsumerId,u32>), incremented in consume() and released in ack()/nack() via release_consumer(). Replaces hardcoded `consumers = 1`. (part of tasks.md 1.5)\n\nThe LARGE remaining features each need a dedicated session and are still unchecked: 1.1 stream disk-segment spill (full durability), 1.4 per-consumer prefetch window, 1.5 fair round-robin dispatch, 1.7 config knobs for spill/prefetch. Anti-pattern avoided: do NOT fake the disk-spill or prefetch model as a bounded change — they alter the consumer/persistence model and belong in their own task with their own spec/tests.",
+  "source": "manual",
+  "relatedTask": "phase6f_v1-broker-parity",
+  "tags": [
+    "analysis:synap-audit",
+    "phase6f",
+    "streams",
+    "queues",
+    "broker-parity"
+  ],
+  "createdAt": "2026-07-09T13:34:05.070Z"
+}

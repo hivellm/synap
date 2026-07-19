@@ -79,6 +79,10 @@ SHA256SUMS
 # Rulebook - ignore runtime data, keep specs and tasks
 /.rulebook/*
 !/.rulebook/specs/
+!/.rulebook/archive/
+!/.rulebook/decisions/
+!/.rulebook/knowledge/
+!/.rulebook/learnings/
 !/.rulebook/tasks/
 !/.rulebook/tasks/**/*.md
 !/.rulebook/rulebook.json

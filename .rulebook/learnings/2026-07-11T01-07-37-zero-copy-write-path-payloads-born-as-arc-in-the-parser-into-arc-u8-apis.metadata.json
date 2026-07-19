@@ -1,0 +1,8 @@
+{
+  "id": "2026-07-11T01-07-37-zero-copy-write-path-payloads-born-as-arc-in-the-parser-into-arc-u8-apis",
+  "title": "Zero-copy write path: payloads born as Arc in the parser + Into<Arc<[u8]>> APIs",
+  "content": "phase13 parse-bulk-into-arc. To remove the per-write Vec->Arc realloc+memcpy without churning call sites: (1) parser allocates the bulk payload as Arc<[u8]> via `unsafe { Arc::new_zeroed_slice(len).assume_init() }` (SAFETY: zeroed u8 is valid; costs the same memset vec![0u8;len] paid) then Arc::get_mut + read_exact — the value is BORN shared; (2) generalize the store constructors/APIs to `impl Into<Arc<[u8]>>` (StoredValue::new, KVStore::set/set_unlocked) — From<Vec<u8>> keeps every existing Vec caller compiling unchanged while Arc callers hit the identity conversion (zero copy); (3) Resp3Value needs manual PartialEq treating BulkString(Vec) == BulkShared(Arc) by bytes, otherwise parser round-trip tests break when the parser switches variants; (4) prove it with ptr-equality: set(Arc::clone(&v)) then get_shared() must return v.as_ptr(). Gotchas: Arc::new_zeroed_slice stabilized in Rust 1.92 -> workspace rust-version bump 1.85->1.92, which UNLOCKED ~110 new clippy lints (collapsible_if via let-chains, is_multiple_of) — budget a `cargo clippy --fix --workspace --all-targets` style commit whenever bumping MSRV. serde path (SynapRPC): rmp-serde must deserialize into Vec first (Arc::from copy is inherent to the adapter); the win there is the dispatch handing the already-deserialized Bytes Arc to the store via clone (arg_shared) instead of to_vec. Result: RESP3 SET 810k/GET 819k/INCR 802k medians; SynapRPC SET +6%.",
+  "source": "manual",
+  "tags": [],
+  "createdAt": "2026-07-11T01:07:37.686Z"
+}

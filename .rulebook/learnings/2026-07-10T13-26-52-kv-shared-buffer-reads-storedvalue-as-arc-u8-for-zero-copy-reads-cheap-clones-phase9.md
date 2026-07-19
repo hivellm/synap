@@ -1,0 +1,19 @@
+# KV shared-buffer reads: StoredValue as Arc<[u8]> for zero-copy reads + cheap clones (phase9)
+**Source**: manual
+**Date**: 2026-07-10
+**Related Task**: phase9_kv-shared-buffer-reads
+**Tags**: kv-store, phase9, M-018, arc, zero-copy, performance, rust
+Task: avoid a full value copy on every KV read (audit M-018 read half). Every GET did value.data().to_vec().
+
+Change: StoredValue's payload Vec<u8> → Arc<[u8]> in BOTH variants (Persistent(Arc<[u8]>), Expiring{data: Arc<[u8]>, ...}). Effects:
+- data() still returns &[u8] (Arc<[u8]> derefs to [u8]; &Arc<[u8]> coerces to &[u8] in return position — no signature change).
+- Clone is now a refcount bump, not a byte copy → GETSET return, cache fill, snapshot iteration, replication clones are cheap.
+- New get_shared(key) -> Result<Option<Arc<[u8]>>>: returns value.data_arc() (Arc::clone, zero copy). get() kept as thin wrapper: get_shared(...).map(|a| a.to_vec()) — one copy for compat, no caller breakage (17 get() callers unchanged).
+- data_mut() removed (can't &mut an Arc): replaced with data_arc() (cheap clone) + set_data(Vec) (copy-on-write). The 2 in-place mutators (APPEND store.rs:~1352, SETRANGE ~1440) build a fresh Vec and set_data it.
+
+Gotchas:
+- Constructors (new/with_expiry/with_expires_at_ms) take Vec<u8> (public API unchanged) and convert via data.into() (Vec<u8> → Arc<[u8]>). Direct StoredValue::Persistent(vec) / Expiring{data: vec} sites need .into() too (found via compiler E0308/E0277).
+- StoredValue is NOT serde-serialized (has AtomicU32); snapshots extract data() bytes separately, so Arc<[u8]> doesn't need serde rc feature.
+- Test: get_shared twice → assert a.as_ptr() == b.as_ptr() proves shared allocation (zero copy). This is the "confirm the copy is eliminated" proof, cheaper than a criterion bench.
+
+Scope split: the protocol-boundary zero-copy (Resp3Value::BulkString(Vec<u8>) → Arc<[u8]>, ~89 construction sites; SynapValue byte variant) is a large ripple → follow-up task phase11_wire-value-zero-copy. HTTP/JSON is inherently copying (serde serializes into the response) — out of scope. Bench large_value_read (get vs get_shared) added to kv_bench.
