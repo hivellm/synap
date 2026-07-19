@@ -14,6 +14,8 @@ Synap is a modern, production-ready in-memory data platform built in Rust that p
 - 📡 **Event Streams** - Kafka-style partitioned streams with consumer groups
 - 🔔 **Pub/Sub** - Topic-based messaging with wildcards + Redis-style keyspace
   notifications (`notify-keyspace-events`)
+- 👁️ **KV Watch** - `kv.watch()` streams the new value on every mutation, so a
+  watcher never has to re-`GET`; over SynapRPC or the `/kv/ws` WebSocket
 - 🧱 **Collections** - Hashes, Lists, Sets, Sorted Sets (blocking pops
   BLPOP/BZPOPMIN, HSCAN/SSCAN/ZSCAN, packed small-collection encodings),
   Bitmaps, HyperLogLog, Geospatial
@@ -75,12 +77,9 @@ services:
       - synap-data:/data
       - ./config.yml:/app/config.yml:ro
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:15500/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+    # No healthcheck block needed — the image ships its own HEALTHCHECK. Do not
+    # override it with a wget/curl probe: the image is built `FROM scratch` and
+    # has no shell and no wget, so such a probe can only ever report unhealthy.
 
 volumes:
   synap-data:
@@ -89,10 +88,13 @@ volumes:
 ## 📋 Supported Tags
 
 - `latest` - Latest stable release
+- `1.2.0` - KV watch, and the SynapRPC binary transport moved onto
+  [Thunder](https://github.com/hivellm/thunder) on both ends of the wire.
+  Wire v1 is unchanged — a pre-1.2.0 client keeps working against a 1.2.0 server
 - `1.0.0` - The 1.0 release (crates workspace, security/durability audit, Redis-parity performance)
 - `0.13.0` / `0.12.0` - Previous releases
 
-`latest` and `1.0.0` are multi-arch manifest lists — a single `docker pull`
+`latest`, `1.2.0` and `1.0.0` are multi-arch manifest lists — a single `docker pull`
 resolves the native image for your platform:
 - `linux/amd64` - Intel/AMD 64-bit (AVX2 SIMD runtime-detected)
 - `linux/arm64` - ARM 64-bit: Apple Silicon, AWS Graviton, Raspberry Pi
@@ -306,7 +308,7 @@ volumes:
 # Check server health
 curl http://localhost:15500/health
 
-# Response: {"service":"synap","status":"healthy","version":"1.0.0"}
+# Response: {"service":"synap","status":"healthy","version":"1.2.0"}
 ```
 
 ### Prometheus Metrics
@@ -388,7 +390,7 @@ version: '3.8'
 
 services:
   synap:
-    image: hivehub/synap:1.0.0
+    image: hivehub/synap:1.2.0
     container_name: synap-production
     ports:
       - "15500:15500"  # HTTP/REST
@@ -404,12 +406,9 @@ services:
       - SYNAP_AUTH_ROOT_USERNAME=${SYNAP_ROOT_USER}
       - SYNAP_AUTH_ROOT_PASSWORD=${SYNAP_ROOT_PASS}
     restart: always
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:15500/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+    # The image's built-in HEALTHCHECK already probes /health every 30s using the
+    # server binary itself. Override it only with `synap-server --health-check`,
+    # never with wget or curl — neither exists in a `scratch` image.
     logging:
       driver: "json-file"
       options:
@@ -471,7 +470,8 @@ docker exec synap-replica ping synap-master
 - **GitHub Repository**: https://github.com/hivellm/synap
 - **Documentation**: https://github.com/hivellm/synap/tree/main/docs
 - **API Reference**: https://github.com/hivellm/synap/tree/main/docs/api
-- **SDKs**: TypeScript, Python, Rust, PHP, C# available
+- **SDKs**: Rust, TypeScript, Python, C#, Go and PHP — all six on the same
+  Thunder wire, all six exposing `kv.watch()`
 - **Examples**: https://github.com/hivellm/synap/tree/main/docs/examples
 
 ## 🤝 Support
@@ -497,7 +497,7 @@ This project is licensed under the Apache License 2.0 - see the [LICENSE](https:
 - **Supply chain**: SBOM + provenance (SLSA) attestations published
   alongside every tag — built with `docker buildx --sbom=true
   --provenance=mode=max`. Verify with `docker buildx imagetools
-  inspect hivehub/synap:1.0.0 --format "{{ json .SBOM }}"`.
+  inspect hivehub/synap:1.2.0 --format "{{ json .SBOM }}"`.
 
 ---
 
