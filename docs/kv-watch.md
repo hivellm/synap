@@ -49,6 +49,9 @@ the **resulting** value, never the operand. `APPEND k "cd"` on a key holding
 `"ab"` delivers `abcd`. A watcher never has to re-`GET` to learn what the key
 now holds.
 
+`expire` and `persist` carry no `value`: they change the TTL, not the value, so
+the watcher already holds the latest one.
+
 ## Semantics
 
 **Best-effort, latest-value.** A watcher that cannot keep up is disconnected by
@@ -59,6 +62,14 @@ Replay is a streams feature, and streams are the right tool when you need it.
 for that key, so a client that sees 7 then 9 knows it missed one. Versions reset
 when a key is deleted or expires — the terminal `del`/`expired` event carries
 its own version first, so the reset is never ambiguous in context.
+
+**Versions are assigned after the shard lock is released**, so two writers
+racing on the same key can publish their events out of order — the event with
+the higher version is not guaranteed to carry the later value. A client should
+treat `version` as a gap and staleness signal, not as a linearization order;
+when the true latest value matters, re-`GET` (or use CAS / key locks on the
+write side). This is the price of keeping the watch lookup off the locked
+mutation path.
 
 **Values are withheld above a cap.** Broadcasting a value to N watchers
 multiplies bandwidth by value size × N, so above the inline cap (64 KiB by

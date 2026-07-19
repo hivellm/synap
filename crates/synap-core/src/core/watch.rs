@@ -51,9 +51,9 @@ pub struct WatchEvent {
     /// within the inline cap.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
-    /// Set when the value was withheld because it exceeded the inline cap. The
-    /// event is still delivered — the client knows the key changed and can
-    /// re-`GET` it.
+    /// Set when the value was withheld — because it exceeded the inline cap or
+    /// is not valid UTF-8. The event is still delivered — the client knows the
+    /// key changed and can re-`GET` it.
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub truncated: bool,
 }
@@ -110,9 +110,10 @@ impl KeyWatchNotifier {
     /// Publish a watch event for `key`.
     ///
     /// `value` is the **post-mutation** value, or `None` when the key no longer
-    /// exists (`del`, `expired`). For a partial mutation — `APPEND`, `SETRANGE`,
-    /// `INCR` — it must be the resulting value, not the operand, so a watcher
-    /// never has to re-`GET` to learn what the key now holds.
+    /// exists (`del`, `expired`) or the event does not change it (`expire`,
+    /// `persist`). For a partial mutation — `APPEND`, `SETRANGE`, `INCR` — it
+    /// must be the resulting value, not the operand, so a watcher never has to
+    /// re-`GET` to learn what the key now holds.
     ///
     /// Nothing is serialized and nothing is published when no subscriber matches
     /// the key's channel: an idle key costs one router lookup, which is what
