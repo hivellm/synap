@@ -10,6 +10,15 @@ Supports three transports, auto-detected from the URL scheme:
 | **RESP3** (Redis-compatible) | `resp3://host:6379` | |
 | HTTP/REST (fallback) | `http://host:15500` | |
 
+> **On the SynapRPC transport.** Synap's other SDKs now get this transport from
+> [Thunder](https://github.com/hivellm/thunder), the family's shared binary RPC
+> implementation. The Go client is written but not yet consumable — its module
+> path does not resolve ([thunder#9](https://github.com/hivellm/thunder/issues/9))
+> — so this SDK keeps its own transport for now. It is kept at wire parity: it
+> decodes both the canonical MessagePack `bin` form of `Bytes` that Synap 1.1.0+
+> emits and the legacy array-of-integers form, and it enforces the server's
+> 512 MiB frame cap against the length prefix before allocating.
+
 ## Requirements
 
 - Go 1.22+

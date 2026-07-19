@@ -89,11 +89,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whatever it claimed, so a hostile or compromised peer could drive unbounded
   allocation from a tiny message. Thunder validates the prefix against the
   512 MiB cap before allocating anything. (Thunder's inventory found this
-  pattern in 9 of the family's 15 hand-ported SDK transports; the remaining
-  Synap ones are addressed in the C# and Go swaps.)
+  pattern in 9 of the family's 15 hand-ported SDK transports.)
+
+### Not in this release
+
+- **The C# and Go SDKs keep their hand-written transports.** Both swaps are
+  blocked on Thunder packaging, not on anything in Synap: `HiveLLM.Thunder`
+  0.2.0 was never pushed to NuGet
+  ([thunder#8](https://github.com/hivellm/thunder/issues/8)), and the Go module
+  path `github.com/hivellm/thunder-go` does not resolve
+  ([thunder#9](https://github.com/hivellm/thunder/issues/9)). Both SDKs were
+  verified against a Thunder-based server and interoperate correctly; the Go one
+  needed the `Bytes` fix below to do so. They move to Thunder once the packages
+  ship.
 
 ### Fixed
 
+- **The Go SDK decodes the server's new `Bytes` encoding.** It understood only
+  the legacy array-of-integers form, so against a 1.1.0 server every binary
+  value would have come back as a raw `[]byte` instead of a `string`. It now
+  accepts both forms, so it interoperates with servers on either side of the
+  change. Its frame cap also moves from 64 MiB to 512 MiB to match the server's,
+  which it had been under-cutting — rejecting frames the server considered
+  legitimate.
 - **A numeric reply arriving as an integer no longer decodes as `0.0`.**
   `ZSCORE`, `ZINCRBY`, `GEODIST` and `HINCRBYFLOAT` previously coerced an `Int`
   reply to `0.0`; it now widens to the correct float.

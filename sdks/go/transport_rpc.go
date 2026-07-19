@@ -14,6 +14,15 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
+// maxFrameBytes is the frame-body cap, matching the server's
+// `protocol::synap_rpc::config::MAX_FRAME_BYTES`. It is validated against the
+// length prefix before the body buffer is allocated, so a hostile peer cannot
+// drive an unbounded allocation from four bytes.
+//
+// It was 64 MiB here while the server accepted 512 MiB, which meant this client
+// rejected large frames the server considered legitimate.
+const maxFrameBytes = 512 * 1024 * 1024
+
 // toSynapWireMap converts a Go value to serde's externally-tagged format:
 //
 //	nil     → "Null"
@@ -72,21 +81,32 @@ func unwrapSynapValue(v interface{}) interface{} {
 		return val
 	}
 	if val, has := m["Bytes"]; has {
-		if arr, ok := val.([]interface{}); ok {
-			b := make([]byte, len(arr))
-			for i, x := range arr {
+		// Two encodings reach us, and both must decode to the same string.
+		//
+		// Since 1.1.0 the server emits `Bytes` as MessagePack `bin`, which
+		// decodes straight to []byte — ~33% smaller on the wire. Before that it
+		// emitted an array of integers (Rust's rmp_serde Vec<u8> form), which a
+		// pre-1.1.0 server still sends, so that path is kept indefinitely.
+		switch b := val.(type) {
+		case []byte:
+			return string(b)
+		case string:
+			return b
+		case []interface{}:
+			out := make([]byte, len(b))
+			for i, x := range b {
 				switch n := x.(type) {
 				case int8:
-					b[i] = byte(n)
+					out[i] = byte(n)
 				case uint8:
-					b[i] = n
+					out[i] = n
 				case int64:
-					b[i] = byte(n)
+					out[i] = byte(n)
 				case uint64:
-					b[i] = byte(n)
+					out[i] = byte(n)
 				}
 			}
-			return string(b)
+			return string(out)
 		}
 		return val
 	}
@@ -211,7 +231,7 @@ func (t *SynapRpcTransport) Execute(ctx context.Context, cmd string, args []inte
 			return nil, fmt.Errorf("SynapRPC read header: %w", err)
 		}
 		respLen := binary.LittleEndian.Uint32(header)
-		if respLen > 64*1024*1024 {
+		if respLen > maxFrameBytes {
 			t.conn.Close()
 			t.conn = nil
 			return nil, fmt.Errorf("SynapRPC frame too large: %d", respLen)
