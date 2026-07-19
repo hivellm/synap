@@ -2,6 +2,7 @@ using System.Buffers.Binary;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using HiveLLM.Thunder;
 
 namespace Synap.SDK.Tests;
 
@@ -12,130 +13,158 @@ namespace Synap.SDK.Tests;
 public sealed class TransportTests
 {
     // =========================================================================
-    // WireValue.ToWire — plain → wire-tagged representation
+    // WireValue.ToWire — CLR value → Thunder Value
+    //
+    // The externally-tagged encoding these used to assert is Thunder's now;
+    // what stays Synap's is the mapping from the CLR types its command mappers
+    // produce, which is what these pin.
     // =========================================================================
 
     [Fact]
-    public void ToWire_Null_ReturnsNullString()
+    public void ToWire_Null_ReturnsNullValue()
     {
-        var result = WireValue.ToWire(null);
-        Assert.Equal("Null", result);
+        Assert.Equal(ValueKind.Null, WireValue.ToWire(null).Kind);
     }
 
     [Fact]
-    public void ToWire_True_ReturnsBoolDict()
+    public void ToWire_True_ReturnsBool()
     {
-        var result = WireValue.ToWire(true);
-        var dict = Assert.IsType<Dictionary<string, object?>>(result);
-        Assert.Equal(true, dict["Bool"]);
+        Assert.Equal(true, WireValue.ToWire(true).AsBool());
     }
 
     [Fact]
-    public void ToWire_False_ReturnsBoolDict()
+    public void ToWire_False_ReturnsBool()
     {
-        var result = WireValue.ToWire(false);
-        var dict = Assert.IsType<Dictionary<string, object?>>(result);
-        Assert.Equal(false, dict["Bool"]);
+        Assert.Equal(false, WireValue.ToWire(false).AsBool());
     }
 
     [Fact]
-    public void ToWire_Long42_ReturnsIntDict()
+    public void ToWire_Long42_ReturnsInt()
     {
-        var result = WireValue.ToWire(42L);
-        var dict = Assert.IsType<Dictionary<string, object?>>(result);
-        Assert.Equal(42L, dict["Int"]);
+        Assert.Equal(42L, WireValue.ToWire(42L).AsInt());
     }
 
     [Fact]
-    public void ToWire_Double_ReturnsFloatDict()
+    public void ToWire_Int_WidensToInt64()
     {
-        var result = WireValue.ToWire(3.14);
-        var dict = Assert.IsType<Dictionary<string, object?>>(result);
-        Assert.Equal(3.14, dict["Float"]);
+        Assert.Equal(42L, WireValue.ToWire(42).AsInt());
     }
 
     [Fact]
-    public void ToWire_String_ReturnsStrDict()
+    public void ToWire_Double_ReturnsFloat()
     {
-        var result = WireValue.ToWire("hello");
-        var dict = Assert.IsType<Dictionary<string, object?>>(result);
-        Assert.Equal("hello", dict["Str"]);
+        Assert.Equal(3.14, WireValue.ToWire(3.14).AsFloat());
     }
 
     [Fact]
-    public void ToWire_Bytes_ReturnsBytesDict()
+    public void ToWire_String_ReturnsStr()
+    {
+        Assert.Equal("hello", WireValue.ToWire("hello").AsStr());
+    }
+
+    [Fact]
+    public void ToWire_Bytes_ReturnsBytes()
     {
         var bytes = new byte[] { 1, 2, 3 };
-        var result = WireValue.ToWire(bytes);
-        var dict = Assert.IsType<Dictionary<string, object?>>(result);
-        Assert.Same(bytes, dict["Bytes"]);
+        Assert.Equal(bytes, WireValue.ToWire(bytes).AsBytes());
     }
 
     // =========================================================================
-    // WireValue.FromWire — wire-tagged → plain value
+    // WireValue.FromWire — Thunder Value → CLR value
     // =========================================================================
 
     [Fact]
-    public void FromWire_NullString_ReturnsNull()
+    public void FromWire_NullValue_ReturnsNull()
     {
-        var result = WireValue.FromWire("Null");
-        Assert.Null(result);
+        Assert.Null(WireValue.FromWire(Value.Null));
     }
 
     [Fact]
     public void FromWire_Null_ReturnsNull()
     {
-        var result = WireValue.FromWire(null);
-        Assert.Null(result);
+        Assert.Null(WireValue.FromWire(null));
     }
 
     [Fact]
-    public void FromWire_BoolTrueDict_ReturnsTrue()
+    public void FromWire_BoolTrue_ReturnsTrue()
     {
-        var wire = new Dictionary<object, object?> { ["Bool"] = true };
-        var result = WireValue.FromWire(wire);
-        Assert.Equal(true, result);
+        Assert.Equal(true, WireValue.FromWire(Value.Bool(true)));
     }
 
     [Fact]
-    public void FromWire_BoolFalseDict_ReturnsFalse()
+    public void FromWire_BoolFalse_ReturnsFalse()
     {
-        var wire = new Dictionary<object, object?> { ["Bool"] = false };
-        var result = WireValue.FromWire(wire);
-        Assert.Equal(false, result);
+        Assert.Equal(false, WireValue.FromWire(Value.Bool(false)));
     }
 
     [Fact]
-    public void FromWire_IntDict_ReturnsLong()
+    public void FromWire_Int_ReturnsLong()
     {
-        var wire = new Dictionary<object, object?> { ["Int"] = 42L };
-        var result = WireValue.FromWire(wire);
-        Assert.Equal(42L, result);
+        Assert.Equal(42L, WireValue.FromWire(Value.Int(42)));
     }
 
     [Fact]
-    public void FromWire_FloatDict_ReturnsDouble()
+    public void FromWire_Float_ReturnsDouble()
     {
-        var wire = new Dictionary<object, object?> { ["Float"] = 3.14 };
-        var result = WireValue.FromWire(wire);
-        Assert.Equal(3.14, result);
+        Assert.Equal(3.14, WireValue.FromWire(Value.Float(3.14)));
     }
 
     [Fact]
-    public void FromWire_StrDict_ReturnsString()
+    public void FromWire_Str_ReturnsString()
     {
-        var wire = new Dictionary<object, object?> { ["Str"] = "hello" };
-        var result = WireValue.FromWire(wire);
-        Assert.Equal("hello", result);
+        Assert.Equal("hello", WireValue.FromWire(Value.Str("hello")));
     }
 
     [Fact]
-    public void FromWire_BytesDict_ReturnsByteArray()
+    public void FromWire_Utf8Bytes_ReturnsString()
     {
-        var bytes = new byte[] { 4, 5, 6 };
-        var wire = new Dictionary<object, object?> { ["Bytes"] = bytes };
-        var result = WireValue.FromWire(wire);
-        Assert.Same(bytes, result);
+        // The SDK surface is string-oriented, so UTF-8 payloads decode to text.
+        var bytes = Encoding.UTF8.GetBytes("hello");
+        Assert.Equal("hello", WireValue.FromWire(Value.Bytes(bytes)));
+    }
+
+    [Fact]
+    public void FromWire_NonUtf8Bytes_StaysBinary()
+    {
+        // 0xFF 0xFE is not valid UTF-8; it must survive as bytes rather than
+        // being mangled into replacement characters.
+        var bytes = new byte[] { 0xFF, 0xFE };
+        Assert.Equal(bytes, WireValue.FromWire(Value.Bytes(bytes)));
+    }
+
+    [Fact]
+    public void FromWire_Array_ReturnsList()
+    {
+        var wire = Value.Array(Value.Int(1), Value.Str("two"));
+        var result = Assert.IsType<List<object?>>(WireValue.FromWire(wire));
+        Assert.Equal(new object?[] { 1L, "two" }, result);
+    }
+
+    [Fact]
+    public void FromWire_Map_ReturnsDictionary()
+    {
+        var wire = Value.Map((Value.Str("k"), Value.Int(7)));
+        var result = Assert.IsType<Dictionary<string, object?>>(WireValue.FromWire(wire));
+        Assert.Equal(7L, result["k"]);
+    }
+
+    // =========================================================================
+    // Protocol configuration
+    // =========================================================================
+
+    [Fact]
+    public void SynapConfig_MatchesWhatTheServerDeclares()
+    {
+        // These values are declared independently in the server's
+        // `synap_config()`; a silent change on either side desynchronises them.
+        var config = SynapRpcTransport.SynapConfig();
+        Assert.Equal("synap", config.Scheme);
+        Assert.Equal(15501, config.DefaultPort);
+        Assert.Equal(Handshake.AuthCommand, config.Handshake);
+        Assert.Equal(HelloStyle.NotUsed, config.HelloStyle);
+        Assert.Equal(PushPolicy.Enabled, config.Push);
+        Assert.Equal(ErrorConvention.Resp3Prefixes, config.ErrorCodes);
+        Assert.Equal(512 * 1024 * 1024, config.MaxFrameBytes);
     }
 
     // =========================================================================
@@ -353,6 +382,48 @@ public sealed class TransportTests
         listener.Stop();
 
         Assert.Equal("testvalue", result);
+    }
+
+    [Fact]
+    public async Task SynapRpcTransport_RefusesOverCapLengthPrefix()
+    {
+        // The pre-Thunder transport ran `new byte[msgLen]` with whatever a
+        // remote peer's four bytes claimed, so a tiny message could drive an
+        // unbounded allocation. Thunder validates against the cap first.
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var port = ((IPEndPoint)listener.LocalEndpoint).Port;
+
+        var serverTask = Task.Run(async () =>
+        {
+            using var serverClient = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
+            using var serverStream = serverClient.GetStream();
+
+            // Drain the request so the client is waiting on a reply.
+            var lenBuf = new byte[4];
+            await MsgPack.ReadExact(serverStream, lenBuf, CancellationToken.None).ConfigureAwait(false);
+            var msgLen = BinaryPrimitives.ReadUInt32LittleEndian(lenBuf);
+            await MsgPack.ReadExact(serverStream, new byte[msgLen], CancellationToken.None)
+                .ConfigureAwait(false);
+
+            // Answer with a header claiming more than the cap, and no body at
+            // all — a client that allocated first would block forever here.
+            var overCap = new byte[4];
+            BinaryPrimitives.WriteUInt32LittleEndian(overCap, (uint)SynapRpcTransport.MaxFrameBytes + 1);
+            await serverStream.WriteAsync(overCap, CancellationToken.None).ConfigureAwait(false);
+            await serverStream.FlushAsync(CancellationToken.None).ConfigureAwait(false);
+
+            // Hold the connection open so the refusal is the client's doing.
+            await Task.Delay(TimeSpan.FromSeconds(2), CancellationToken.None).ConfigureAwait(false);
+        });
+
+        using var transport = new SynapRpcTransport("127.0.0.1", port, timeoutSeconds: 10);
+
+        await Assert.ThrowsAnyAsync<Exception>(
+            () => transport.ExecuteAsync("GET", ["k"], CancellationToken.None));
+
+        listener.Stop();
+        await serverTask;
     }
 
     // =========================================================================

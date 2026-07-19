@@ -33,5 +33,5 @@ pub use replication::{
     MasterNode, NodeRole, ReplicaNode, ReplicationConfig, ReplicationLog, ReplicationStats,
 };
 pub use scripting::ScriptManager;
+pub use server::envelope::{Request, Response};
 pub use server::{AppState, create_router, get_mcp_tools, handle_mcp_tool, init_metrics};
-pub use synap_protocol::{Request, Response};

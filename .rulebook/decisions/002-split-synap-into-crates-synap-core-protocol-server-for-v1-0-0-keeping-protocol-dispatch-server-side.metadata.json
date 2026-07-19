@@ -1,0 +1,14 @@
+{
+  "id": 2,
+  "slug": "split-synap-into-crates-synap-core-protocol-server-for-v1-0-0-keeping-protocol-dispatch-server-side",
+  "title": "Split Synap into crates/synap-{core,protocol,server} for v1.0.0, keeping protocol dispatch server-side",
+  "status": "proposed",
+  "date": "2026-07-08",
+  "relatedTasks": [
+    "phase2_v1-workspace-skeleton",
+    "phase3_v1-extract-synap-protocol",
+    "phase4_v1-extract-synap-core",
+    "phase5_v1-wire-rust-sdk-to-protocol"
+  ],
+  "supersededBy": null
+}

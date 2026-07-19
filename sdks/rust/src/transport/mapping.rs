@@ -1,4 +1,4 @@
-use super::WireValue;
+use super::{WireValue, WireValueExt};
 use serde_json::{Value, json};
 
 // ── Command mapper ────────────────────────────────────────────────────────────

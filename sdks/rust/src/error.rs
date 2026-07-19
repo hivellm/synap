@@ -6,7 +6,11 @@ use thiserror::Error;
 pub type Result<T> = std::result::Result<T, SynapError>;
 
 /// Synap SDK error types
+///
+/// Marked `#[non_exhaustive]`: match with a `_` arm, so a new variant in a
+/// future minor release does not break your build.
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum SynapError {
     /// HTTP request error
     #[error("HTTP error: {0}")]
@@ -23,6 +27,14 @@ pub enum SynapError {
     /// Server returned an error
     #[error("Server error: {0}")]
     ServerError(String),
+
+    /// Authentication or authorization was refused.
+    ///
+    /// Raised for handshake rejections and for `NOAUTH` / `WRONGPASS` /
+    /// `NOPERM` replies, which are worth distinguishing from a generic
+    /// [`Self::ServerError`]: retrying without new credentials cannot help.
+    #[error("Unauthorized: {0}")]
+    Unauthorized(String),
 
     /// Key not found
     #[error("Key not found: {0}")]

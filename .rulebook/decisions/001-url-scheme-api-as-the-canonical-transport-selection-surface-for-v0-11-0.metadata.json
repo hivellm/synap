@@ -1,0 +1,11 @@
+{
+  "id": 1,
+  "slug": "url-scheme-api-as-the-canonical-transport-selection-surface-for-v0-11-0",
+  "title": "URL-scheme API as the canonical transport selection surface for v0.11.0",
+  "status": "proposed",
+  "date": "2026-04-09",
+  "relatedTasks": [
+    "phase3_full-rpc-resp3-parity-and-url-schemes"
+  ],
+  "supersededBy": null
+}

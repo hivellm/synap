@@ -5,6 +5,228 @@ All notable changes to Synap will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.2.0] - 2026-07-19
+
+The SynapRPC binary transport now runs on [Thunder](https://github.com/hivellm/thunder),
+the HiveLLM family's shared protocol, on both ends of the wire: the server
+listener and all six SDKs. Wire v1 is frozen and
+unchanged — a pre-1.2.0 client keeps working against a 1.2.0 server, verified by
+the `legacy` cell of the interop matrix rather than asserted.
+
+The **Go** and **PHP** SDKs are on Thunder too, and each now lives in its own
+repository — [`hivellm/synap-sdk-go`](https://github.com/hivellm/synap-sdk-go)
+(v1.2.0) and [`hivellm/synap-sdk-php`](https://github.com/hivellm/synap-sdk-php)
+(v1.2.1) — consumed here as submodules. All six SDKs run the same protocol
+implementation as the server, so no hand-written binary transport is left.
+
+Every cell of the interop matrix is green — rust, typescript, python, csharp,
+go, php, and a replay of the pre-Thunder wire. Full results:
+`docs/thunder-interop-matrix.md`.
+
+### Removed
+
+- **The Java SDK is gone.** It was never published to Maven Central, so nothing
+  downstream depended on it, and it was the one SDK the interop matrix could not
+  verify — it had no `AUTH` path on the RPC transport and no Thunder package to
+  move to. Removing it is better than shipping an SDK no one measures. The
+  matrix, the CI job, and the SDK tables no longer mention it.
+- **The Helm chart is gone.** Its documented install path was broken — the guide
+  pointed at `https://hivellm.github.io/synap-charts`, which does not exist — and
+  nothing in CI linted, templated or published it, so it had drifted since 1.0.0.
+  It also modelled a stateful server as a `Deployment` with a `ReadWriteOnce`
+  PVC while offering autoscaling to 10 replicas, which cannot work: the second
+  pod would never get the volume. Kubernetes users should build on the Docker
+  image, which CI now builds and runs on every change. The Kubernetes sections of
+  the user and admin guides went with it, and the rolling-upgrade recipe is
+  rewritten around the container's own health check.
+
+### Changed
+
+- **SynapRPC now runs on [Thunder](https://github.com/hivellm/thunder)
+  (`thunder-rpc` 0.2.1).** The binary RPC listener's accept loop, writer task,
+  frame codec, session state machine and graceful drain come from the family's
+  shared protocol crate; Synap keeps its command catalog, its authentication
+  store and its ACL. The wire format is unchanged — wire v1 is frozen — and the
+  public REST/RESP3/MCP surfaces are untouched.
+- **`Value::Bytes` is emitted as MessagePack `bin`** instead of an array of
+  integers (~33% smaller on binary payloads). Both forms are still accepted on
+  decode, indefinitely, so pre-1.1 SDK builds keep working against a 1.1 server.
+- **`PING` is answered before authentication.** Thunder's `AUTH`-command
+  handshake carries a pre-auth allowlist of `PING`/`HELLO`/`AUTH`/`QUIT`; the
+  previous server answered `NOAUTH` to a pre-auth `PING`. `NOAUTH` still gates
+  every other command.
+- **`HELLO` is answered by the handshake layer** rather than falling through to
+  the dispatch tree as an unknown command.
+- **The RPC listener shuts down gracefully.** `spawn_synap_rpc_listener` returns
+  a handle whose `stop()` drains in-flight requests before closing; dropping it
+  shuts down without waiting.
+
+- **The Rust SDK's RPC transport is Thunder's client.** Concurrent commands now
+  pipeline over one connection instead of serializing behind a mutex, and the
+  SDK gains connect/per-call timeouts, the frame cap on encode and decode, lazy
+  reconnect and typed auth errors. The public API is unchanged.
+- **The TypeScript SDK's RPC transport is Thunder's client**
+  (`@hivehub/thunder`). The public API is unchanged; `msgpackr` moves from a
+  runtime dependency to a dev dependency, since the SDK no longer implements the
+  codec.
+- **The Python SDK's RPC transport is Thunder's client** (`hivellm-thunder`,
+  imported as `thunder_rpc`). The public API is unchanged; `msgpack` moves from
+  a runtime dependency to a dev dependency for the same reason.
+- **The C# SDK's RPC transport is Thunder's client** (`HiveLLM.Thunder`). The
+  public API is unchanged; the SDK's hand-written MessagePack encoder is gone
+  from the shipped package (it now lives in the test project, where it still
+  decodes frames independently of Thunder).
+
+### Added
+
+- **A cross-SDK interop matrix** (`scripts/interop/`) — one server build
+  measured against every SDK plus a pre-Thunder client, each completing
+  authenticate → `SET`/`GET` with a binary value → `SUBSCRIBE`/`PUBLISH` → an
+  error round-trip. Each SDK's own suite passes in isolation; this is the only
+  thing that checks they still agree with each other and with the server.
+  Results and the open cells are recorded in `docs/thunder-interop-matrix.md`.
+- `synap_rpc_connections_refused_total` — accepts refused at the
+  `network.max_connections` ceiling, so an engaging limit is visible rather than
+  silent.
+- **The Rust, TypeScript and Python SDKs authenticate on the RPC port.**
+  Credentials now travel in the RPC handshake; previously the RPC transports
+  never sent `AUTH`, so an SDK client could not reach a `require_auth`
+  deployment on port 15501 at all.
+- `SynapError::Unauthorized` — `NOAUTH` / `WRONGPASS` / `NOPERM` replies are
+  distinguishable from a generic `ServerError`, since retrying them without new
+  credentials cannot help. `SynapError` is now `#[non_exhaustive]`: match with a
+  `_` arm so future variants do not break your build.
+
+### Removed
+
+- **`crates/synap-protocol` is gone.** It existed only because crates.io rejects
+  path dependencies, so publishing the Rust SDK forced publishing the wire types
+  it imported — and it dragged along the RESP3 parser/writer and the HTTP
+  envelope, meaning Synap published server internals to a public registry as a
+  side effect. The wire types now come from `thunder-rpc`; the RESP3 layer and
+  the envelope moved into `synap-server`, unpublished. Synap releases no longer
+  have a protocol-publish step.
+
+  No deprecation shim is published. `synap-protocol` 1.0.0 stays on crates.io and
+  is entirely self-contained, so anything pinned to it keeps building; to move
+  forward, replace the dependency with
+  `thunder-rpc = { version = "0.2", default-features = false }` and:
+
+  | Was | Is now |
+  |---|---|
+  | `synap_protocol::synap_rpc::types::SynapValue` | `thunder::Value` |
+  | `synap_protocol::synap_rpc::types::{Request, Response}` | `thunder::{Request, Response}` |
+  | `synap_protocol::synap_rpc::codec::{encode_frame, decode_frame}` | `thunder::wire::{encode_frame, decode_frame}` |
+  | `synap_protocol::synap_rpc::codec::MAX_FRAME_SIZE` | `thunder::Config::max_frame_bytes` (per application) |
+  | `synap_protocol::resp3::*` | removed — server-internal, never a client API |
+  | `synap_protocol::envelope::*` | removed — server-internal |
+
+  `thunder::Value::Bytes` carries an `Arc<[u8]>` and is emitted as MessagePack
+  `bin` rather than an array of integers; the legacy form still decodes, so the
+  two ends can be upgraded independently.
+
+### Security
+
+- **The TypeScript, Python and C# SDKs no longer allocate from an untrusted
+  length prefix.** Their RPC transports read a 4-byte frame header and allocated
+  whatever it claimed, so a hostile or compromised peer could drive unbounded
+  allocation from a tiny message. Thunder validates the prefix against the
+  512 MiB cap before allocating anything. (Thunder's inventory found this
+  pattern in 9 of the family's 15 hand-ported SDK transports.) The Go SDK
+  already had a cap; see below for its own correction.
+
+### Not in this release
+
+- **The Go SDK keeps its hand-written transport.** The swap is blocked on
+  Thunder packaging, not on anything in Synap: the module path
+  `github.com/hivellm/thunder-go` does not resolve
+  ([thunder#9](https://github.com/hivellm/thunder/issues/9)). It was verified
+  against a Thunder-based server and interoperates correctly — it needed the
+  `Bytes` fix below to do so. It moves to Thunder once the module ships.
+
+### Fixed
+
+- **The Docker image builds again.** The `Dockerfile` still copied
+  `crates/synap-protocol/`, which was dissolved into the server and the SDK
+  earlier in this release, so every image build failed at that `COPY` — the
+  release would have shipped without a working container. Nothing caught it
+  because no CI job builds the image.
+- **An authenticated deployment no longer reports itself unhealthy.** `/health`
+  and `/metrics` are declared "always public" at their route definitions, but
+  the auth middleware is a layer over the whole router, so under `require_auth`
+  they answered `401` like any other path. The container's own HEALTHCHECK
+  sends an unauthenticated `GET /health`, so the container stayed `unhealthy`
+  forever and an orchestrator would restart a server that was serving
+  perfectly. A liveness probe cannot require credentials — the RPC port already
+  answers `PING` before authentication for the same reason.
+
+Both of the above were found by running the release image with authentication
+required, which nothing in CI does.
+
+The rest of this block was found by the cross-SDK interop matrix
+(`scripts/interop/`, results in `docs/thunder-interop-matrix.md`). None of it
+was introduced by the Thunder swap — the matrix is the first thing that ran
+every SDK against one authenticated server and compared the results.
+
+- **The Go and PHP SDKs can reach an authenticated server over `synap://`.**
+  Neither RPC transport ever sent `AUTH`, so against a `require_auth`
+  deployment on 15501 every single command came back `NOAUTH` — the transport
+  was unusable, not degraded. Both now send the credentials the HTTP transport
+  already carried in its `Authorization` header, on every connect including
+  reconnects, so a replaced socket is not silently downgraded to anonymous.
+- **Pub/sub over RPC works from the PHP SDK.** Its `SUBSCRIBE` was sent with
+  `id = 0xFFFFFFFF` — the reserved server-push sentinel — which the server
+  refuses outright (`ERR request id u32::MAX is reserved for server push
+  frames`). It now uses an ordinary request id; the sentinel identifies frames
+  coming *from* the server and was never an address a client could send to.
+- **Binary values survive the round trip in the TypeScript, Go and PHP SDKs.**
+  TypeScript decoded `Bytes` as UTF-8 unconditionally, so every invalid
+  sequence became U+FFFD and `deadbeef` came back as `adfdfd` — corrupted and
+  unrecoverable. Go and PHP packed non-UTF-8 strings as MessagePack `str`,
+  which the server decoded lossily or rejected outright. Bytes that are not
+  valid UTF-8 now travel as `bin` and decode back as raw bytes.
+- **The Rust SDK reads back a structured value it wrote.** `set(k, vec![…])`
+  followed by `get::<Vec<u8>>(k)` failed: the transport JSON-encodes a
+  structured value into a string on the way out and nothing re-parsed it on the
+  way back. The re-parse is attempted only after the direct decode has already
+  failed, so a value that genuinely is a string — including one that looks like
+  JSON, such as `"123"` or `"[1,2]"` — still decodes as that string.
+- **Pub/sub over RPC works from the C# SDK.** Its `SUBSCRIBE` was sent with
+  `id = 0xFFFFFFFF` — the reserved server-push sentinel. A Thunder server
+  refuses a request carrying that id, so the subscription would have failed
+  outright against a 1.2.0 server. Thunder allocates a normal request id and
+  routes push frames by the sentinel, which is what it is for.
+- **The Go SDK decodes the server's new `Bytes` encoding.** It understood only
+  the legacy array-of-integers form, so against a 1.2.0 server every binary
+  value would have come back as a raw `[]byte` instead of a `string`. It now
+  accepts both forms, so it interoperates with servers on either side of the
+  change. Its frame cap also moves from 64 MiB to 512 MiB to match the server's,
+  which it had been under-cutting — rejecting frames the server considered
+  legitimate.
+- **A numeric reply arriving as an integer no longer decodes as `0.0`.**
+  `ZSCORE`, `ZINCRBY`, `GEODIST` and `HINCRBYFLOAT` previously coerced an `Int`
+  reply to `0.0`; it now widens to the correct float.
+
+### Fixed
+
+- **Per-command ACL costs one credential-store lookup per connection**, not one
+  per privileged command. The authenticated user record is resolved at `AUTH`
+  and carried on the session, which also means a session is judged by the
+  identity it authenticated with rather than by whatever the store holds later.
+
+Five capability gaps were found while porting the listener and fixed upstream in
+`thunder-rpc` 0.2.0 before this release, so the swap costs Synap nothing:
+[thunder#1](https://github.com/hivellm/thunder/issues/1) (zero-copy `Bytes`),
+[#2](https://github.com/hivellm/thunder/issues/2) (connection ceiling),
+[#3](https://github.com/hivellm/thunder/issues/3) (per-command metrics hook),
+[#4](https://github.com/hivellm/thunder/issues/4) (session identity) and
+[#5](https://github.com/hivellm/thunder/issues/5) (shareable listener handle).
+The zero-copy `GET`/`SET` path, `network.max_connections`, every
+`synap_rpc_*` metric and graceful shutdown all behave as they did before the
+swap.
+
 ## [1.0.0] - 2026-07-11
 
 The **v1.0.0 hardening line**: a `crates/` workspace restructure plus a deep
@@ -3022,7 +3244,9 @@ These limitations will be addressed in future phases.
 - Documentation
 - Security
 
-[Unreleased]**: https://github.com/hivellm/synap/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/hivellm/synap/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/hivellm/synap/compare/v1.0.0...v1.2.0
+[1.0.0]: https://github.com/hivellm/synap/compare/v0.8.1...v1.0.0
 [0.8.1]: https://github.com/hivellm/synap/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/hivellm/synap/compare/v0.7.0-rc2...v0.8.0
 [0.7.0-rc2]: https://github.com/hivellm/synap/compare/v0.7.0-rc1...v0.7.0-rc2

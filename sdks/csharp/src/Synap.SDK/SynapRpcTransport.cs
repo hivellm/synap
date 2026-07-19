@@ -1,61 +1,107 @@
-using System.Buffers.Binary;
-using System.Collections.Concurrent;
-using System.Net.Sockets;
-using System.Text;
+using System.Runtime.CompilerServices;
+using System.Threading.Channels;
+using HiveLLM.Thunder;
 using Synap.SDK.Exceptions;
 using Synap.SDK.Transports;
 
 namespace Synap.SDK;
 
+/// <summary>
+/// SynapRPC transport, backed by <see href="https://github.com/hivellm/thunder">Thunder</see>.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The wire layer is not implemented here. <c>HiveLLM.Thunder</c> is the HiveLLM
+/// family's shared binary RPC client — the same protocol the Synap server runs
+/// on, so the two ends of the wire cannot drift.
+/// </para>
+/// <para>
+/// What Thunder brings that the hand-written transport did not: the frame cap
+/// validated against the length prefix <i>before</i> allocating (this transport
+/// called <c>new byte[msgLen]</c> with whatever a remote peer's four bytes
+/// claimed); a real handshake, so the SDK can authenticate on the RPC port; and
+/// a push hook for <c>SUBSCRIBE</c>. It also removes the SDK's hand-rolled
+/// MessagePack encoder.
+/// </para>
+/// </remarks>
 internal sealed class SynapRpcTransport : ITransport
 {
-    private readonly string _host;
-    private readonly int _port;
-    private readonly TimeSpan _timeout;
-    private TcpClient? _tcp;
-    private NetworkStream? _stream;
-    private Task? _readerTask;
-    private CancellationTokenSource? _cts;
-    private readonly ConcurrentDictionary<uint, TaskCompletionSource<object?>> _pending = new();
-    private long _nextId;
+    /// <summary>Frame-body cap, matching the server's <c>MAX_FRAME_BYTES</c>.</summary>
+    internal const int MaxFrameBytes = 512 * 1024 * 1024;
+
+    /// <summary>Default SynapRPC port.</summary>
+    internal const int DefaultRpcPort = 15501;
+
+    private readonly string _endpoint;
+    private readonly ClientConfig _clientConfig;
     private readonly SemaphoreSlim _connectLock = new(1, 1);
-    private readonly SemaphoreSlim _writeLock = new(1, 1);
+
+    private ThunderClient? _client;
     private bool _disposed;
 
-    internal SynapRpcTransport(string host, int port, int timeoutSeconds)
+    internal SynapRpcTransport(string host, int port, int timeoutSeconds, Credentials? credentials = null)
     {
-        _host = host;
-        _port = port;
-        _timeout = TimeSpan.FromSeconds(timeoutSeconds);
+        _endpoint = $"synap://{host}:{port}";
+        var timeout = TimeSpan.FromSeconds(timeoutSeconds);
+        _clientConfig = new ClientConfig
+        {
+            ConnectTimeout = timeout,
+            CallTimeout = timeout,
+            Credentials = credentials,
+            ClientName = "synap-csharp-sdk",
+        };
     }
 
-    private async Task EnsureConnectedAsync(CancellationToken ct)
+    /// <summary>
+    /// How Synap uses the Thunder wire, mirroring the server's <c>synap_config()</c>.
+    /// </summary>
+    /// <remarks>
+    /// Thunder ships one standard and zero product knowledge, so this
+    /// description lives in Synap's own repository. Every divergence from the
+    /// standard is explicit: Synap authenticates with <c>AUTH</c> rather than a
+    /// mandatory <c>HELLO</c>, it ships a push-producing command
+    /// (<c>SUBSCRIBE</c>), its errors use the Redis-compatible prefixes it
+    /// shares with its RESP3 port, and its frame cap is 512 MiB rather than 64.
+    /// </remarks>
+    internal static Config SynapConfig() => Config.Standard() with
     {
-#pragma warning disable CA1508 // analyzer cannot track field writes across async boundaries
-        if (_stream is not null)
+        Scheme = "synap",
+        DefaultPort = DefaultRpcPort,
+        Handshake = Handshake.AuthCommand,
+        HelloStyle = HelloStyle.NotUsed,
+        Push = PushPolicy.Enabled,
+        ErrorCodes = ErrorConvention.Resp3Prefixes,
+        MaxFrameBytes = MaxFrameBytes,
+    };
+
+    /// <summary>Dial a fresh Thunder client against the configured endpoint.</summary>
+    private async Task<ThunderClient> DialAsync(CancellationToken ct)
+    {
+        try
         {
-            return;
+            return await ThunderClient.ConnectAsync(_endpoint, SynapConfig(), _clientConfig, ct)
+                .ConfigureAwait(false);
+        }
+        catch (ThunderException ex)
+        {
+            throw ToSynapException(ex);
+        }
+    }
+
+    /// <summary>The shared client, dialed on first use.</summary>
+    private async Task<ThunderClient> EnsureConnectedAsync(CancellationToken ct)
+    {
+        var existing = _client;
+        if (existing is not null)
+        {
+            return existing;
         }
 
         await _connectLock.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (_stream is not null)
-            {
-                return;
-            }
-#pragma warning restore CA1508
-
-            var tcp = new TcpClient
-            {
-                ReceiveTimeout = (int)_timeout.TotalMilliseconds,
-                SendTimeout = (int)_timeout.TotalMilliseconds,
-            };
-            await tcp.ConnectAsync(_host, _port, ct).ConfigureAwait(false);
-            _tcp = tcp;
-            _stream = tcp.GetStream();
-            _cts = new CancellationTokenSource();
-            _readerTask = RunReaderAsync(_cts.Token);
+            _client ??= await DialAsync(ct).ConfigureAwait(false);
+            return _client;
         }
         finally
         {
@@ -63,223 +109,128 @@ internal sealed class SynapRpcTransport : ITransport
         }
     }
 
-    private async Task RunReaderAsync(CancellationToken ct)
-    {
-        try
-        {
-            while (!ct.IsCancellationRequested && _stream is not null)
-            {
-                // 4-byte LE length prefix
-                var lenBuf = new byte[4];
-                await MsgPack.ReadExact(_stream, lenBuf, ct).ConfigureAwait(false);
-                var msgLen = BinaryPrimitives.ReadUInt32LittleEndian(lenBuf);
-
-                var msgBuf = new byte[msgLen];
-                await MsgPack.ReadExact(_stream, msgBuf, ct).ConfigureAwait(false);
-
-                using var ms = new MemoryStream(msgBuf);
-                var decoded = await MsgPack.DecodeAsync(ms, ct).ConfigureAwait(false);
-
-                if (decoded is object?[] arr && arr.Length >= 2)
-                {
-                    var id = (uint)Convert.ToInt64(arr[0], System.Globalization.CultureInfo.InvariantCulture);
-                    if (_pending.TryRemove(id, out var tcs))
-                    {
-                        if (arr[1] is Dictionary<object, object?> resultMap)
-                        {
-                            if (resultMap.TryGetValue("Ok", out var okVal))
-                            {
-                                tcs.SetResult(WireValue.FromWire(okVal));
-                            }
-                            else if (resultMap.TryGetValue("Err", out var errVal))
-                            {
-                                tcs.SetException(SynapException.ServerError(errVal?.ToString() ?? "Unknown error"));
-                            }
-                            else
-                            {
-                                tcs.SetResult(arr[1]);
-                            }
-                        }
-                        else
-                        {
-                            tcs.SetResult(arr[1]);
-                        }
-                    }
-                }
-            }
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Normal shutdown
-        }
-        catch (IOException ex)
-        {
-            FailAllPending(ex.Message);
-        }
-        catch (SocketException ex)
-        {
-            FailAllPending(ex.Message);
-        }
-        catch (SynapException ex)
-        {
-            FailAllPending(ex.Message);
-        }
-    }
-
-    private void FailAllPending(string message)
-    {
-        foreach (var tcs in _pending.Values)
-        {
-            tcs.TrySetException(SynapException.NetworkError(message));
-        }
-
-        _pending.Clear();
-    }
-
-    /// <summary>Executes a command over SynapRPC and returns the plain (unwrapped) result.</summary>
+    /// <summary>
+    /// Execute a command and return the decoded response.
+    /// </summary>
+    /// <remarks>
+    /// Concurrent callers multiplex over the one connection, demultiplexed by
+    /// frame id; the demultiplexer, timeouts and reconnect all come from Thunder.
+    /// </remarks>
     public async Task<object?> ExecuteAsync(string command, object?[] args, CancellationToken ct = default)
     {
-        await EnsureConnectedAsync(ct).ConfigureAwait(false);
+        ArgumentNullException.ThrowIfNull(command);
+        ArgumentNullException.ThrowIfNull(args);
 
-        var id = (uint)Interlocked.Increment(ref _nextId);
-        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-        _pending[id] = tcs;
+        var client = await EnsureConnectedAsync(ct).ConfigureAwait(false);
+
+        var wireArgs = new Value[args.Length];
+        for (var i = 0; i < args.Length; i++)
+        {
+            wireArgs[i] = WireValue.ToWire(args[i]);
+        }
 
         try
         {
-            // Wrap args as WireValues
-            var wireArgs = Array.ConvertAll(args, WireValue.ToWire);
-
-            // Build request: [id, COMMAND, [wireArgs...]]
-            var request = new object?[] { (long)id, command, wireArgs };
-            var msgBytes = MsgPack.Encode(request);
-
-            var lenBuf = new byte[4];
-            BinaryPrimitives.WriteUInt32LittleEndian(lenBuf, (uint)msgBytes.Length);
-
-            await _writeLock.WaitAsync(ct).ConfigureAwait(false);
-            try
-            {
-                var stream = _stream!;
-                await stream.WriteAsync(lenBuf, ct).ConfigureAwait(false);
-                await stream.WriteAsync(msgBytes, ct).ConfigureAwait(false);
-                await stream.FlushAsync(ct).ConfigureAwait(false);
-            }
-            finally
-            {
-                _writeLock.Release();
-            }
-
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            linked.CancelAfter(_timeout);
-            return await tcs.Task.WaitAsync(linked.Token).ConfigureAwait(false);
+            var result = await client.CallAsync(command.ToUpperInvariant(), wireArgs, ct)
+                .ConfigureAwait(false);
+            return WireValue.FromWire(result);
         }
-        catch
+        catch (ThunderException ex)
         {
-            _pending.TryRemove(id, out _);
-            throw;
+            throw ToSynapException(ex);
         }
     }
 
     /// <summary>
-    /// Opens a dedicated server-push TCP connection, sends a SUBSCRIBE frame,
-    /// and yields push messages as an async stream.
-    ///
-    /// Push frames from the server use id == 0xFFFFFFFF (U32_MAX) as a sentinel.
-    /// The stream completes when the cancellation token is cancelled or the
-    /// connection is closed by the server.
+    /// Opens a dedicated server-push connection, sends SUBSCRIBE, and yields
+    /// push messages as an async stream.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The push hook is registered before SUBSCRIBE is sent, so a message
+    /// published between the server's acknowledgement and the reader starting
+    /// cannot be lost.
+    /// </para>
+    /// <para>
+    /// The previous implementation sent SUBSCRIBE with <c>id = 0xFFFFFFFF</c> —
+    /// the reserved push sentinel. A Thunder server refuses a request carrying
+    /// that id, so the old frame would have been rejected outright. Thunder
+    /// allocates a normal request id and routes push frames by the sentinel,
+    /// which is what the sentinel is for.
+    /// </para>
+    /// </remarks>
     /// <param name="topics">Topic patterns to subscribe to.</param>
     /// <param name="cancellationToken">Token used to stop the stream.</param>
     /// <returns>An async stream of push-message dictionaries.</returns>
     internal async IAsyncEnumerable<Dictionary<string, object?>> SubscribePushAsync(
         IEnumerable<string> topics,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        const uint PushId = 0xFFFF_FFFF;
+        ArgumentNullException.ThrowIfNull(topics);
 
-        using var tcp = new TcpClient
+        var client = await DialAsync(cancellationToken).ConfigureAwait(false);
+        try
         {
-            ReceiveTimeout = (int)_timeout.TotalMilliseconds,
-            SendTimeout    = (int)_timeout.TotalMilliseconds,
-        };
+            // Unbounded is safe here: the producer is one connection's reader
+            // task, and the consumer is the caller's `await foreach`.
+            var channel = Channel.CreateUnbounded<Dictionary<string, object?>>(
+                new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
 
-        await tcp.ConnectAsync(_host, _port, cancellationToken).ConfigureAwait(false);
-        var stream = tcp.GetStream();
+            client.OnPush(value =>
+            {
+                var topic = value.MapGet("topic")?.AsStr();
+                if (topic is null)
+                {
+                    return;
+                }
 
-        // Build SUBSCRIBE frame: [PushId, "SUBSCRIBE", [topic, ...]]
-        var wireTopics = topics.Select(t => WireValue.ToWire(t)).Cast<object?>().ToArray();
-        var request    = new object?[] { (long)PushId, "SUBSCRIBE", wireTopics };
-        var msgBytes   = MsgPack.Encode(request);
-        var lenBuf     = new byte[4];
-        BinaryPrimitives.WriteUInt32LittleEndian(lenBuf, (uint)msgBytes.Length);
+                channel.Writer.TryWrite(new Dictionary<string, object?>(StringComparer.Ordinal)
+                {
+                    ["topic"] = topic,
+                    ["payload"] = value.MapGet("payload")?.AsStr(),
+                    ["id"] = value.MapGet("id")?.AsStr() ?? string.Empty,
+                    ["timestamp"] = value.MapGet("timestamp")?.AsInt() ?? 0L,
+                });
+            });
 
-        await stream.WriteAsync(lenBuf, cancellationToken).ConfigureAwait(false);
-        await stream.WriteAsync(msgBytes, cancellationToken).ConfigureAwait(false);
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-
-        // Read SUBSCRIBE ack (id will be PushId)
-        var ackLenBuf = new byte[4];
-        await MsgPack.ReadExact(stream, ackLenBuf, cancellationToken).ConfigureAwait(false);
-        var ackLen = BinaryPrimitives.ReadUInt32LittleEndian(ackLenBuf);
-        var ackBuf = new byte[ackLen];
-        await MsgPack.ReadExact(stream, ackBuf, cancellationToken).ConfigureAwait(false);
-
-        using var ackMs = new MemoryStream(ackBuf);
-        var ack = await MsgPack.DecodeAsync(ackMs, cancellationToken).ConfigureAwait(false);
-        if (ack is object?[] ackArr && ackArr.Length >= 2 &&
-            ackArr[1] is Dictionary<object, object?> ackMap && ackMap.TryGetValue("Err", out var ackErr))
-        {
-            throw SynapException.ServerError(ackErr?.ToString() ?? "SUBSCRIBE failed");
-        }
-
-        // Read push frames until cancellation
-        while (!cancellationToken.IsCancellationRequested)
-        {
-            var frameLenBuf = new byte[4];
+            var topicValues = topics.Select(Value.Str).ToArray();
             try
             {
-                await MsgPack.ReadExact(stream, frameLenBuf, cancellationToken).ConfigureAwait(false);
+                await client.CallAsync("SUBSCRIBE", topicValues, cancellationToken)
+                    .ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (ThunderException ex)
             {
-                yield break;
-            }
-            catch (IOException)
-            {
-                yield break;
+                throw ToSynapException(ex);
             }
 
-            var frameLen = BinaryPrimitives.ReadUInt32LittleEndian(frameLenBuf);
-            var frameBuf = new byte[frameLen];
-            await MsgPack.ReadExact(stream, frameBuf, cancellationToken).ConfigureAwait(false);
-
-            using var ms = new MemoryStream(frameBuf);
-            var decoded = await MsgPack.DecodeAsync(ms, cancellationToken).ConfigureAwait(false);
-
-            if (decoded is not object?[] pushArr || pushArr.Length < 2)
+            await foreach (var message in channel.Reader
+                .ReadAllAsync(cancellationToken)
+                .ConfigureAwait(false))
             {
-                continue;
-            }
-
-            var frameId = (uint)Convert.ToInt64(pushArr[0], System.Globalization.CultureInfo.InvariantCulture);
-            if (frameId != PushId)
-            {
-                continue; // Not a push frame
-            }
-
-            var value = WireValue.FromWire(
-                pushArr[1] is Dictionary<object, object?> env && env.TryGetValue("Ok", out var okVal)
-                    ? okVal
-                    : pushArr[1]);
-
-            if (value is Dictionary<string, object?> msgDict)
-            {
-                yield return msgDict;
+                yield return message;
             }
         }
-
+        finally
+        {
+            // Whether the caller stopped enumerating, cancelled, or the stream
+            // faulted, the dedicated connection goes with it.
+            client.Close();
+        }
     }
+
+    /// <summary>Map a Thunder error onto the SDK's exception type.</summary>
+    /// <remarks>
+    /// <c>NOAUTH</c> / <c>WRONGPASS</c> / <c>NOPERM</c> arrive as
+    /// <see cref="ThunderAuthException"/> because the config selects the RESP3
+    /// prefix convention; the server's message travels verbatim either way, so
+    /// callers matching on those prefixes keep working.
+    /// </remarks>
+    private static SynapException ToSynapException(ThunderException ex) => ex switch
+    {
+        ThunderAuthException or ThunderServerException => SynapException.ServerError(ex.Message),
+        _ => SynapException.ServerError($"SynapRPC: {ex.Message}"),
+    };
 
     public void Dispose()
     {
@@ -289,15 +240,8 @@ internal sealed class SynapRpcTransport : ITransport
         }
 
         _disposed = true;
-        _cts?.Cancel();
-        _stream?.Dispose();
-        _tcp?.Dispose();
-        _cts?.Dispose();
+        _client?.Close();
+        _client = null;
         _connectLock.Dispose();
-        _writeLock.Dispose();
     }
 }
-
-// ---------------------------------------------------------------------------
-// RESP3 transport — Redis-compatible text protocol over TCP
-// ---------------------------------------------------------------------------

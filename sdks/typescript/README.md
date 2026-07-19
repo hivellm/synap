@@ -130,6 +130,22 @@ const client = new SynapClient('resp3://127.0.0.1:6379');
 const client = new SynapClient('http://127.0.0.1:15500');
 ```
 
+### The `synap://` transport is Thunder
+
+The binary transport is not hand-written in this SDK. It is
+[Thunder](https://github.com/hivellm/thunder) (`@hivehub/thunder`) — the HiveLLM
+family's shared binary RPC client, the same protocol the Synap server runs on,
+so the two ends of the wire cannot drift apart.
+
+| | |
+|---|---|
+| **Pipelining** | Concurrent commands multiplex over one connection, demultiplexed by frame id. |
+| **Frame cap** | 512 MiB, validated against the length prefix **before** allocating. The previous transport allocated whatever a 4-byte prefix claimed. |
+| **Timeouts** | Connect and per-call, both from the client's `timeout` option. |
+| **Reconnect** | Lazy, with capped retries. |
+| **Authentication** | `auth` credentials travel in the handshake — the previous transport never sent `AUTH`, so it could not reach a `require_auth` server on 15501. |
+| **Push** | `SUBSCRIBE` delivery uses Thunder's push hook, registered before the command is sent rather than after a fixed delay. |
+
 **Queue, stream and pub/sub over `synap://`:**
 
 ```typescript

@@ -53,6 +53,12 @@ synap/
 
 > Workspace members: `crates/*` + `sdks/rust`. First-party crates live under
 > `crates/` (Vectorizer/Nexus layout); the Rust SDK stays at `sdks/rust`.
+>
+> The binary RPC wire layer is **not in this workspace**: it is
+> [Thunder](https://github.com/hivellm/thunder) (`thunder-rpc`), a registry
+> dependency shared by the server and the Rust SDK. Do not reintroduce a
+> `synap-protocol` crate — it was dissolved deliberately, because publishing the
+> SDK forced publishing the protocol crate on every wire-touching release.
 
 ## synap-server Module Layers
 

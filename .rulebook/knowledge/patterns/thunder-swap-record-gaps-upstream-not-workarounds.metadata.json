@@ -1,0 +1,19 @@
+{
+  "id": "thunder-swap-record-gaps-upstream-not-workarounds",
+  "type": "pattern",
+  "title": "Adopting a shared protocol library: file the gap, then annotate the mitigation",
+  "category": "architecture",
+  "description": "When swapping a hand-maintained subsystem for a shared library, never absorb a capability gap silently. For each gap: open an upstream issue with the call site and a suggested API shape, implement the mitigation, and comment the mitigation at the call site naming the upstream request. Phase12's Thunder server swap produced five (hivellm/thunder#1-#5): Value::Bytes(Vec<u8>) killing the zero-copy GET/SET path, no per-listener max_connections, no per-command metrics hook, Principal carrying only a name, and ListenerHandle::stop(self) blocking a shared observer. All five were fixed upstream within a day (thunder-rpc 0.1.2/0.2.0) and every mitigation was reverted before release. Write the issue first, then the mitigation - the issue is what gets the workaround deleted.",
+  "example": "/// Before the Thunder swap this was a refcount bump: `SynapValue::Bytes` held\n/// an `Arc<[u8]>`, so a SET moved the decoded argument into the store without\n/// copying it. `thunder::Value::Bytes` owns a `Vec<u8>`, so the buffer is\n/// copied once here instead — tracked upstream as the `Arc<[u8]>` payload\n/// request on hivellm/thunder.\nfn arg_shared(args: &[SynapValue], idx: usize) -> Result<Arc<[u8]>, String> {\n    match args.get(idx) {\n        Some(SynapValue::Bytes(b)) => Ok(b.as_slice().into()),\n        // ...\n    }\n}",
+  "whenToUse": "Any adoption of a shared/external library that replaces first-party code with its own opinions — protocol crates, runtimes, storage engines.",
+  "whenNotToUse": "Cosmetic API differences with no behavioral or performance consequence; noise upstream costs more than it returns.",
+  "createdAt": "2026-07-18T00:00:00.000Z",
+  "tags": [
+    "thunder",
+    "rpc",
+    "protocol",
+    "dependency-adoption",
+    "phase12"
+  ],
+  "source": "manual"
+}

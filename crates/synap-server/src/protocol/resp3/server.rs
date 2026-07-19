@@ -87,8 +87,8 @@ async fn handle_connection(
     use tokio::io::BufReader;
 
     use super::command::dispatch;
-    use synap_protocol::resp3::parser::{Resp3Value, parse_from_reader, parse_inline};
-    use synap_protocol::resp3::writer::Resp3Writer;
+    use super::parser::{Resp3Value, parse_from_reader, parse_inline};
+    use super::writer::Resp3Writer;
 
     let peer = stream.peer_addr()?;
     // Disable Nagle's algorithm (like Redis). A bulk reply is written as several
@@ -283,10 +283,7 @@ async fn handle_connection(
         let written = writer.bytes_written() - before_write;
 
         // Record metrics.
-        let is_err = matches!(
-            response,
-            synap_protocol::resp3::parser::Resp3Value::Error(_)
-        );
+        let is_err = matches!(response, super::parser::Resp3Value::Error(_));
         metrics::record_resp3_command(cmd_upper, !is_err, elapsed);
         metrics::resp3_bytes(0, written); // read bytes tracked per-frame below
 

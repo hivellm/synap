@@ -64,9 +64,12 @@ impl crate::pubsub::PubSubManager {
             // ── SynapRPC native push path ─────────────────────────────────────
             if let Some(rpc) = client.synap_rpc_transport() {
                 match rpc.subscribe_push(topics_clone).await {
-                    Ok((_sub_id, mut push_rx)) => {
+                    // `subscription` owns the connection: holding it for the
+                    // life of this loop is what keeps the push socket open.
+                    Ok(mut subscription) => {
+                        let push_rx = &mut subscription.messages;
                         tracing::debug!(
-                            sub_id = %_sub_id,
+                            sub_id = %subscription.subscriber_id,
                             "PubSub SynapRPC push connection established"
                         );
                         loop {

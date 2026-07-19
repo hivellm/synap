@@ -4,6 +4,24 @@ All notable changes to the Synap TypeScript SDK will be documented in this file.
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-07-19
+
+### Changed
+- **The `synap://` transport now runs on [Thunder](https://github.com/hivellm/thunder)**
+  (`@hivehub/thunder` 0.2.1), the family's shared binary RPC client — the same
+  protocol implementation the Synap server runs, so the two ends of the wire
+  cannot drift.
+
+### Added
+- Credentials travel in the RPC handshake. The previous transport never sent
+  `AUTH`, so it could not reach a `require_auth` server on 15501 at all.
+
+### Fixed
+- **Binary values survive the round trip.** `Bytes` were decoded as UTF-8
+  unconditionally, so every invalid sequence became U+FFFD and `deadbeef` came
+  back as `adfdfd` — corrupted and unrecoverable. Bytes that are valid UTF-8
+  still decode to a string; anything else stays a `Buffer`.
+
 ## [1.0.0] - 2026-07-11
 
 ### Fixed

@@ -95,6 +95,22 @@ var client = new SynapClient(SynapConfig.Create("resp3://127.0.0.1:6379"));
 var client = new SynapClient(SynapConfig.Create("http://127.0.0.1:15500"));
 ```
 
+### The `synap://` transport is Thunder
+
+The binary transport is not hand-written in this SDK. It is
+[Thunder](https://github.com/hivellm/thunder) (`HiveLLM.Thunder`) — the HiveLLM
+family's shared binary RPC client, the same protocol the Synap server runs on,
+so the two ends of the wire cannot drift.
+
+| | |
+|---|---|
+| **Pipelining** | Concurrent commands multiplex over one connection, demultiplexed by frame id. |
+| **Frame cap** | 512 MiB, validated against the length prefix **before** allocating. The previous transport ran `new byte[msgLen]` with whatever a 4-byte prefix claimed. |
+| **Timeouts** | Connect and per-call, both from `SynapConfig.Timeout`. |
+| **Reconnect** | Lazy, with capped retries. |
+| **Authentication** | `WithAuthToken` / `WithBasicAuth` credentials travel in the handshake — the previous transport never sent `AUTH`, so it could not reach a `require_auth` server on 15501. |
+| **Push** | `SUBSCRIBE` delivery uses Thunder's push hook. The previous implementation sent SUBSCRIBE with `id = 0xFFFFFFFF`, the reserved push sentinel, which a Thunder server refuses outright. |
+
 **Queue, stream and pub/sub over `synap://`:**
 
 ```csharp

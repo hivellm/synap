@@ -1,321 +1,236 @@
-//! SynapRPC binary TCP server accept loop.
+//! SynapRPC listener — Synap's command catalog on Thunder's transport.
 //!
-//! Each connection receives `Request` frames (4-byte LE length + MessagePack
-//! body) and responds with `Response` frames in the same format.
-//! Multiple in-flight requests per connection are supported via
-//! `tokio::spawn` per request.
+//! The accept loop, per-connection writer task, frame codec, session state
+//! machine and graceful drain all belong to [`thunder::server`]. What lives
+//! here is the [`Dispatch`] implementation that binds Synap's engine to it:
+//! command routing, credential validation, the per-command ACL, the SUBSCRIBE
+//! push bridge, and the Prometheus export.
 //!
 //! # Metrics collected
 //! - `synap_rpc_connections` — active connection gauge
+//! - `synap_rpc_connections_refused_total` — accepts refused at the ceiling
 //! - `synap_rpc_commands_total` — per-command counters (ok/err)
 //! - `synap_rpc_command_duration_seconds` — per-command latency histogram
 //! - `synap_rpc_frame_size_bytes_in` / `synap_rpc_frame_size_bytes_out`
 //!
+//! All of them are fed by [`SynapMetrics`], Thunder's `MetricsObserver` hook,
+//! which fires where the listener records its own counters — after the response
+//! has left the socket, with the frame sizes the codec already measured.
+//!
 //! # Tracing
-//! - Each connection gets a `tracing::info_span!("rpc.conn", peer)`.
-//! - Each request gets a `tracing::debug_span!("rpc.req", id, cmd)`.
+//! - Each request gets a `tracing::debug_span!("rpc.req", cmd)`.
 //! - Commands slower than 1 ms are logged at WARN level.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::Duration;
 
-use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
-use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use thunder::server::{
+    AuthError, Credentials, Dispatch, ListenerConfig, ListenerHandle, MetricsObserver, Principal,
+    ServerInfo, Session, spawn_listener,
+};
 
+use crate::auth::User;
 use crate::core::pubsub::Message as PubSubMessage;
 use crate::metrics;
 use crate::server::handlers::AppState;
 
-use super::dispatch::dispatch;
-use synap_protocol::synap_rpc::codec::{encode_frame, read_request};
-use synap_protocol::synap_rpc::types::{Response, SynapValue};
+use super::dispatch::run_command;
+use super::{SynapValue, synap_config};
 
-/// Extract a UTF-8 string from a `SynapValue` for the AUTH handshake.
-fn rpc_str(v: &SynapValue) -> Option<String> {
-    match v {
-        SynapValue::Str(s) => Some(s.clone()),
-        SynapValue::Bytes(b) => String::from_utf8(b.to_vec()).ok(),
-        _ => None,
+/// Commands slower than this are logged at WARN and counted as slow.
+const SLOW_COMMAND_THRESHOLD: Duration = Duration::from_millis(1);
+
+/// Bridges Thunder's listener counters onto Synap's Prometheus registry.
+///
+/// Thunder calls this at the same point it records its own series — after a
+/// successful write — so the two never disagree, and the per-command label and
+/// per-frame sizes stay available (they are not reconstructible from totals).
+struct SynapMetrics;
+
+impl MetricsObserver for SynapMetrics {
+    fn command_completed(
+        &self,
+        command: &str,
+        in_bytes: usize,
+        out_bytes: usize,
+        duration: Duration,
+        is_error: bool,
+    ) {
+        metrics::record_synap_rpc_command(command, !is_error, duration.as_secs_f64());
+        metrics::synap_rpc_frame_sizes(in_bytes, out_bytes);
+        if duration > SLOW_COMMAND_THRESHOLD {
+            tracing::warn!(
+                cmd = %command,
+                elapsed_ms = duration.as_secs_f64() * 1_000.0,
+                "SynapRPC slow command"
+            );
+        }
+    }
+
+    fn connection_opened(&self) {
+        metrics::synap_rpc_connection_open();
+    }
+
+    fn connection_closed(&self) {
+        metrics::synap_rpc_connection_close();
+    }
+
+    fn connection_refused(&self) {
+        metrics::synap_rpc_connection_refused();
+    }
+
+    fn push_emitted(&self, out_bytes: usize) {
+        metrics::synap_rpc_frame_sizes(0, out_bytes);
+    }
+}
+
+/// Synap's product integration with Thunder (SRV-020): one trait, three hooks.
+struct SynapDispatch {
+    state: Arc<AppState>,
+}
+
+impl Dispatch for SynapDispatch {
+    /// The user record resolved once at `AUTH` and carried on the session, so
+    /// the per-command ACL reads memory instead of re-querying the store — and
+    /// judges the identity captured at authentication rather than whatever the
+    /// store holds later.
+    type Identity = User;
+
+    async fn dispatch(
+        &self,
+        session: &Session<User>,
+        command: &str,
+        args: Vec<SynapValue>,
+    ) -> Result<SynapValue, String> {
+        // Per-command ACL (phase6h): destructive/admin commands require an
+        // admin user when auth is enforced. With auth disabled the port is
+        // trusted. Thunder has already gated un-authenticated sessions.
+        if self.state.require_auth && crate::auth::command_requires_admin(command) {
+            let is_admin = session.with_principal(|p| p.is_some_and(|p| p.identity.is_admin));
+            if !is_admin {
+                return Err("NOPERM this command requires admin privileges".to_string());
+            }
+        }
+
+        let result = {
+            let span = tracing::debug_span!("rpc.req", cmd = %command);
+            let _guard = span.enter();
+            run_command(&self.state, command, args).await
+        };
+
+        // After SUBSCRIBE succeeds, bridge the connection's push channel to the
+        // pubsub router so publish() reaches this client.
+        if command.eq_ignore_ascii_case("SUBSCRIBE")
+            && let Ok(ref value) = result
+        {
+            self.bridge_subscription(session, value);
+        }
+
+        result
+    }
+
+    async fn authenticate(&self, creds: Credentials) -> Result<Principal<User>, AuthError> {
+        // `AUTH <password>` authenticates the default user; `AUTH <user> <pass>`
+        // names one. Thunder parses the frame; the credential store stays ours
+        // (SRV-012).
+        let (user, pass) = match creds {
+            Credentials::UserPass(u, p) => (u, p),
+            Credentials::ApiKey(p) | Credentials::Token(p) => ("default".to_string(), p),
+            Credentials::None => return Err(AuthError::InvalidCredentials),
+        };
+
+        let Some(manager) = self.state.user_manager.as_ref() else {
+            // Auth was requested against a deployment with no user store —
+            // there is nothing that could validate it.
+            return Err(AuthError::InvalidCredentials);
+        };
+
+        // The only credential-store lookup per connection; the record it
+        // returns rides the session from here on.
+        manager
+            .authenticate(&user, &pass)
+            .map(|u| Principal::with_identity(u.username.clone(), u))
+            .map_err(|_| AuthError::InvalidCredentials)
+    }
+}
+
+impl SynapDispatch {
+    /// Register this connection's push channel with the pubsub router, so
+    /// published messages reach it as Thunder push frames (`id == PUSH_ID`).
+    fn bridge_subscription(&self, session: &Session<User>, response: &SynapValue) {
+        let Some(subscriber_id) = response
+            .map_get("subscriber_id")
+            .and_then(SynapValue::as_str)
+            .map(str::to_owned)
+        else {
+            return;
+        };
+        let (Some(router), Some(push)) = (self.state.pubsub_router.as_ref(), session.push_sender())
+        else {
+            return;
+        };
+
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<PubSubMessage>(
+            crate::core::pubsub::SUBSCRIBER_CHANNEL_CAPACITY,
+        );
+        router.register_connection(subscriber_id, tx);
+
+        let push = push.clone();
+        tokio::spawn(async move {
+            while let Some(msg) = rx.recv().await {
+                let frame = SynapValue::Map(vec![
+                    (SynapValue::Str("topic".into()), SynapValue::Str(msg.topic)),
+                    (
+                        SynapValue::Str("payload".into()),
+                        SynapValue::Str(msg.payload.to_string()),
+                    ),
+                    (SynapValue::Str("id".into()), SynapValue::Str(msg.id)),
+                    (
+                        SynapValue::Str("timestamp".into()),
+                        SynapValue::Int(msg.timestamp as i64),
+                    ),
+                ]);
+                if push.push(frame).await.is_err() {
+                    break; // connection closed
+                }
+            }
+        });
     }
 }
 
 /// Spawn the SynapRPC TCP listener on `addr`.
 ///
-/// Returns immediately; the listener runs as a background task.
+/// The accept loop runs as a background task. The returned handle must be kept
+/// alive for the listener's lifetime; [`ListenerHandle::stop`] drains it
+/// gracefully, and dropping it shuts down without waiting.
 pub async fn spawn_synap_rpc_listener(
     state: AppState,
     addr: SocketAddr,
-    idle_timeout: std::time::Duration,
+    idle_timeout: Duration,
     max_connections: usize,
-) -> std::io::Result<()> {
-    let listener = TcpListener::bind(addr).await?;
-    tracing::info!("SynapRPC server listening on {addr}");
-    let limiter = Arc::new(tokio::sync::Semaphore::new(max_connections));
-
-    tokio::spawn(async move {
-        loop {
-            match listener.accept().await {
-                Ok((stream, peer)) => {
-                    // Refuse the connection if we are already at capacity.
-                    let permit = match Arc::clone(&limiter).try_acquire_owned() {
-                        Ok(p) => p,
-                        Err(_) => {
-                            tracing::warn!(peer = %peer, "SynapRPC max connections reached, refusing");
-                            drop(stream);
-                            continue;
-                        }
-                    };
-                    metrics::synap_rpc_connection_open();
-                    tracing::debug!(peer = %peer, "SynapRPC connection accepted");
-                    let state = state.clone();
-                    tokio::spawn(async move {
-                        let _permit = permit; // released when this connection ends
-                        let span = tracing::info_span!("rpc.conn", peer = %peer);
-                        let _guard = span.enter();
-                        if let Err(e) = handle_connection(stream, state, idle_timeout).await {
-                            tracing::debug!(peer = %peer, error = %e, "SynapRPC connection error");
-                        }
-                        metrics::synap_rpc_connection_close();
-                        tracing::debug!(peer = %peer, "SynapRPC connection closed");
-                    });
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "SynapRPC accept error");
-                }
-            }
-        }
+) -> std::io::Result<Arc<ListenerHandle>> {
+    let require_auth = state.require_auth;
+    let dispatch = Arc::new(SynapDispatch {
+        state: Arc::new(state),
     });
 
-    Ok(())
-}
-
-async fn handle_connection(
-    stream: TcpStream,
-    state: AppState,
-    idle_timeout: std::time::Duration,
-) -> std::io::Result<()> {
-    let peer = stream.peer_addr()?;
-    // Disable Nagle's algorithm so length-prefixed replies aren't held ~40ms
-    // waiting for a delayed ACK (see the RESP3 server for the full rationale).
-    let _ = stream.set_nodelay(true);
-    let (read_half, write_half) = stream.into_split();
-    let mut reader = BufReader::new(read_half);
-
-    // Writer channel: dispatch tasks send (response, metadata) here; a
-    // dedicated writer task serialises them to the socket in arrival order.
-    let (tx, mut rx) = mpsc::channel::<(Response, String, f64, usize)>(64);
-    // Buffer the write half so a pipelined burst of responses is coalesced into
-    // one syscall: the writer drains everything already queued, then flushes once
-    // (mirrors the RESP3 server). A raw write half would emit one `write()` per
-    // response and cap pipelined throughput.
-    let mut writer = BufWriter::new(write_half);
-
-    // Writer task — receives (response, command, elapsed_secs, in_frame_bytes).
-    let write_task = tokio::spawn(async move {
-        // Encode + buffer one response; returns false on a fatal write error.
-        async fn emit(
-            writer: &mut BufWriter<tokio::net::tcp::OwnedWriteHalf>,
-            response: Response,
-            command: String,
-            elapsed: f64,
-            in_bytes: usize,
-        ) -> bool {
-            let is_err = response.result.is_err();
-            match encode_frame(&response) {
-                Ok(frame) => {
-                    let out_bytes = frame.len();
-                    if let Err(e) = writer.write_all(&frame).await {
-                        tracing::debug!(error = %e, "SynapRPC write error");
-                        return false;
-                    }
-                    metrics::record_synap_rpc_command(&command, !is_err, elapsed);
-                    metrics::synap_rpc_frame_sizes(in_bytes, out_bytes);
-                    if elapsed > 0.001 {
-                        tracing::warn!(cmd = %command, elapsed_ms = elapsed * 1_000.0, "SynapRPC slow command");
-                    }
-                    true
-                }
-                Err(e) => {
-                    tracing::error!(cmd = %command, error = %e, "SynapRPC encode error");
-                    true
-                }
-            }
-        }
-
-        'outer: while let Some((response, command, elapsed, in_bytes)) = rx.recv().await {
-            if !emit(&mut writer, response, command, elapsed, in_bytes).await {
-                break;
-            }
-            // Drain any responses already queued (a pipelined burst) before flushing.
-            while let Ok((response, command, elapsed, in_bytes)) = rx.try_recv() {
-                if !emit(&mut writer, response, command, elapsed, in_bytes).await {
-                    break 'outer;
-                }
-            }
-            if let Err(e) = writer.flush().await {
-                tracing::debug!(error = %e, "SynapRPC flush error");
-                break;
-            }
-        }
-    });
-
-    // Shared state — Arc so each request task can clone it cheaply.
-    let state = Arc::new(state);
-
-    // Per-connection auth flag + resolved user (for per-command ACL, phase6h).
-    // The read loop is sequential, so AUTH and the gate checks below serialize
-    // ahead of the per-request tasks.
-    let mut authenticated = !state.require_auth;
-    let mut auth_user: Option<crate::auth::User> = None;
-
-    // Read loop — one task per request for concurrency.
-    loop {
-        // Read the next frame, bounded by the idle timeout (slow-loris
-        // resistance, phase6i). A zero timeout disables the bound.
-        let read = if idle_timeout.is_zero() {
-            read_request(&mut reader).await
-        } else {
-            match tokio::time::timeout(idle_timeout, read_request(&mut reader)).await {
-                Ok(r) => r,
-                Err(_) => {
-                    tracing::debug!(peer = %peer, "SynapRPC idle timeout, closing connection");
-                    break;
-                }
-            }
-        };
-        let req = match read {
-            Ok(r) => r,
-            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break, // clean EOF
-            Err(e) => {
-                tracing::debug!(peer = %peer, error = %e, "SynapRPC read error");
-                break;
-            }
-        };
-
-        // Approximate in-frame size: rmp_serde encoding of the request.
-        let in_bytes = rmp_serde::to_vec(&req).map(|b| b.len() + 4).unwrap_or(0);
-        let command = req.command.clone();
-
-        // AUTH is handled inline (serialized ahead of request tasks).
-        // `AUTH <password>` (default user) or `AUTH <user> <password>`.
-        if req.command.eq_ignore_ascii_case("AUTH") {
-            let creds: Option<(String, String)> = match req.args.as_slice() {
-                [p] => rpc_str(p).map(|p| ("default".to_string(), p)),
-                [u, p, ..] => match (rpc_str(u), rpc_str(p)) {
-                    (Some(u), Some(p)) => Some((u, p)),
-                    _ => None,
-                },
-                _ => None,
-            };
-            let resolved = match (&creds, &state.user_manager) {
-                (Some((u, p)), Some(um)) => um.authenticate(u, p).ok(),
-                _ => None,
-            };
-            let response = if let Some(user) = resolved {
-                authenticated = true;
-                auth_user = Some(user);
-                Response::ok(req.id, SynapValue::Str("OK".into()))
-            } else {
-                Response::err(
-                    req.id,
-                    "WRONGPASS invalid username-password pair or user is disabled.".to_string(),
-                )
-            };
-            let _ = tx.send((response, command, 0.0, in_bytes)).await;
-            continue;
-        }
-
-        // Reject every other command until the connection has authenticated.
-        if !authenticated {
-            let response = Response::err(req.id, "NOAUTH Authentication required.".to_string());
-            let _ = tx.send((response, command, 0.0, in_bytes)).await;
-            continue;
-        }
-
-        // Per-command ACL (phase6h): destructive/admin commands require an admin
-        // user when auth is enforced. With auth disabled the port is trusted.
-        if state.require_auth && crate::auth::command_requires_admin(&req.command) {
-            let is_admin = auth_user.as_ref().map(|u| u.is_admin).unwrap_or(false);
-            if !is_admin {
-                let response = Response::err(
-                    req.id,
-                    "NOPERM this command requires admin privileges".to_string(),
-                );
-                let _ = tx.send((response, command, 0.0, in_bytes)).await;
-                continue;
-            }
-        }
-
-        let state = Arc::clone(&state);
-        let tx = tx.clone();
-
-        tokio::spawn(async move {
-            let start = Instant::now();
-            let is_subscribe = req.command == "SUBSCRIBE";
-            let span = tracing::debug_span!("rpc.req", id = req.id, cmd = %req.command);
-            let response = {
-                let _g = span.enter();
-                dispatch(&state, req).await
-            };
-            let elapsed = start.elapsed().as_secs_f64();
-
-            // After SUBSCRIBE succeeds, register the connection's write channel
-            // with the pubsub router so that publish() delivers push frames.
-            if is_subscribe && let Ok(SynapValue::Map(ref pairs)) = response.result {
-                let sub_id = pairs.iter().find_map(|(k, v)| {
-                    if k.as_str() == Some("subscriber_id") {
-                        v.as_str().map(str::to_owned)
-                    } else {
-                        None
-                    }
-                });
-                if let (Some(sub_id), Some(router)) = (sub_id, state.pubsub_router.as_ref()) {
-                    let router = Arc::clone(router);
-                    let (push_tx, mut push_rx) = tokio::sync::mpsc::channel::<PubSubMessage>(
-                        crate::core::pubsub::SUBSCRIBER_CHANNEL_CAPACITY,
-                    );
-                    router.register_connection(sub_id, push_tx);
-                    let tx_push = tx.clone();
-                    tokio::spawn(async move {
-                        while let Some(msg) = push_rx.recv().await {
-                            let push_value = SynapValue::Map(vec![
-                                (SynapValue::Str("topic".into()), SynapValue::Str(msg.topic)),
-                                (
-                                    SynapValue::Str("payload".into()),
-                                    SynapValue::Str(msg.payload.to_string()),
-                                ),
-                                (SynapValue::Str("id".into()), SynapValue::Str(msg.id)),
-                                (
-                                    SynapValue::Str("timestamp".into()),
-                                    SynapValue::Int(msg.timestamp as i64),
-                                ),
-                            ]);
-                            let push_response = Response {
-                                id: u32::MAX,
-                                result: Ok(push_value),
-                            };
-                            if tx_push
-                                .send((push_response, "_push".to_string(), 0.0, 0))
-                                .await
-                                .is_err()
-                            {
-                                break; // writer task gone — connection closed
-                            }
-                        }
-                    });
-                }
-            }
-
-            let _ = tx.send((response, command, elapsed, in_bytes)).await;
-        });
+    let mut listener_config = ListenerConfig::new(addr)
+        .with_max_connections(max_connections)
+        .with_observer(Arc::new(SynapMetrics));
+    listener_config.idle_timeout = idle_timeout;
+    listener_config.slow_threshold = SLOW_COMMAND_THRESHOLD;
+    if !require_auth {
+        listener_config = listener_config.open();
     }
 
-    // Drop sender so the writer task can finish.
-    drop(tx);
-    let _ = write_task.await;
+    let info = ServerInfo {
+        name: "synap".to_string(),
+        version: env!("CARGO_PKG_VERSION").to_string(),
+    };
 
-    tracing::debug!(peer = %peer, "SynapRPC connection closed");
-    Ok(())
+    let handle = spawn_listener(dispatch, synap_config(), info, listener_config).await?;
+    tracing::info!("SynapRPC server listening on {}", handle.local_addr());
+
+    Ok(Arc::new(handle))
 }

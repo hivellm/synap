@@ -1,0 +1,63 @@
+# Server configuration for the Thunder interop matrix.
+#
+# One build, one config, every SDK measured against it. Checked in rather than
+# generated so a red cell can be reproduced exactly.
+#
+# Ports are deliberately off the defaults (15500/15501/6379) so running the
+# matrix neither uses nor disturbs a developer's own server.
+#
+# Authentication is ON and REQUIRED: the pre-Thunder RPC transports never sent
+# `AUTH` at all, so an open server would have hidden that bug in every SDK
+# instead of surfacing it in the `auth` column.
+
+server:
+  host: "127.0.0.1"
+  port: 25500
+  websocket_enabled: true
+
+synap_rpc:
+  enabled: true
+  host: "127.0.0.1"
+  port: 25501
+
+resp3:
+  enabled: true
+  host: "127.0.0.1"
+  port: 26379
+
+auth:
+  enabled: true
+  require_auth: true
+  root:
+    username: "root"
+    password: "interop-secret"
+    enabled: true
+
+kv_store:
+  max_memory_mb: 256
+  eviction_policy: "allkeys-lru"
+  ttl_cleanup_interval_ms: 100
+
+queue:
+  enabled: true
+  max_depth: 10000
+  ack_deadline_secs: 30
+  default_max_retries: 3
+  default_priority: 5
+
+logging:
+  level: "info"
+  format: "pretty"
+
+protocols:
+  streamable_http:
+    enabled: true
+    path: "/api/v1/command"
+  rest:
+    enabled: true
+    prefix: "/kv"
+
+rate_limit:
+  enabled: false
+  requests_per_second: 100000
+  burst_size: 100000

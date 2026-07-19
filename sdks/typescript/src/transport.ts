@@ -14,7 +14,7 @@ export {
   fromWireValue,
 } from './transports/synap-rpc';
 
-export type { WireValue } from './transports/synap-rpc';
+export type { RpcCredentials, WireValue } from './transports/synap-rpc';
 
 export { Resp3Transport } from './transports/resp3';
 

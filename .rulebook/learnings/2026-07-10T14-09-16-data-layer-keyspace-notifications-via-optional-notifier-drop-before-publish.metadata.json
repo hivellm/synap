@@ -1,0 +1,8 @@
+{
+  "id": "2026-07-10T14-09-16-data-layer-keyspace-notifications-via-optional-notifier-drop-before-publish",
+  "title": "Data-layer keyspace notifications via optional notifier + drop-before-publish",
+  "content": "Wiring Redis-style keyspace notifications into Synap: put an Option<Arc<KeyspaceNotifier>> on each datatype store with a with_keyspace_notifier builder (None default = one no-op branch, zero write-path overhead), and emit at the DATA layer (store mutation methods) rather than per-protocol-dispatch — one emit site covers RESP3, SynapRPC, REST, and internal ops. Two rules that mattered: (1) always drop the shard write lock BEFORE calling notifier.notify() so pubsub delivery never runs under the store lock — often required wrapping the locked region in a block { ... } and returning a value, since methods had multiple early returns. (2) Build the PubSubRouter BEFORE the stores in main.rs so the notifier can share it; the notifier is only constructed when KeyspaceEventFlags::parse(cfg).is_active() (needs a K/E target AND a class), otherwise None. Testing without subscribers: assert PubSubRouter::get_stats().messages_published increments by 2 per event (keyspace + keyevent). Collection-store constructors are built at ~4 sites in main.rs (recovered / fresh-after-recovery-failure / persistence-disabled / fallback) — attach the notifier at every one.",
+  "source": "manual",
+  "tags": [],
+  "createdAt": "2026-07-10T14:09:16.407Z"
+}

@@ -28,7 +28,7 @@
 #   docker-compose up -d
 #
 # Test Authentication:
-#   ./scripts/test-docker-auth.sh
+#   ./scripts/docker/test-docker-auth.sh
 #
 # ============================================================================
 

@@ -24,7 +24,25 @@ import {
   mapCommand,
   mapResponse,
 } from './transport';
-import type { TransportMode } from './transport';
+import type { RpcCredentials, TransportMode } from './transport';
+
+// ── Credentials ───────────────────────────────────────────────────────────────
+
+/**
+ * Resolve the RPC handshake credentials from the client's auth options.
+ *
+ * The same credentials the HTTP transport puts in an `Authorization` header now
+ * travel in the RPC handshake — before the Thunder swap the RPC transport never
+ * authenticated at all, so it could not reach a `require_auth` server on 15501.
+ */
+function rpcCredentials(auth: AuthOptions | undefined): RpcCredentials | undefined {
+  if (!auth) return undefined;
+  if (auth.type === 'api_key' && auth.apiKey) return { apiKey: auth.apiKey };
+  if (auth.type === 'basic' && auth.username && auth.password) {
+    return { username: auth.username, password: auth.password };
+  }
+  return undefined;
+}
 
 // ── Internal sealed transport discriminant ────────────────────────────────────
 
@@ -68,7 +86,7 @@ export class SynapClient {
       this.baseUrl = `http://${host}:15500`;
       this.transport = {
         kind: 'synaprpc',
-        impl: new SynapRpcTransport(host, port, this.timeout),
+        impl: new SynapRpcTransport(host, port, this.timeout, rpcCredentials(options.auth)),
       };
     } else if (rawUrl.startsWith('resp3://')) {
       const [host, port] = SynapClient.parseHostPort(rawUrl.slice('resp3://'.length), 6_379);
@@ -89,6 +107,7 @@ export class SynapClient {
               options.rpcHost ?? '127.0.0.1',
               options.rpcPort ?? 15_501,
               this.timeout,
+              rpcCredentials(options.auth),
             ),
           };
           break;
@@ -112,7 +131,7 @@ export class SynapClient {
       this.baseUrl = `http://${host}:15500`;
       this.transport = {
         kind: 'synaprpc',
-        impl: new SynapRpcTransport(host, port, this.timeout),
+        impl: new SynapRpcTransport(host, port, this.timeout, rpcCredentials(options.auth)),
       };
     } else {
       // Legacy: no URL but explicit options.transport override, or an unrecognised
@@ -127,6 +146,7 @@ export class SynapClient {
               options.rpcHost ?? '127.0.0.1',
               options.rpcPort ?? 15_501,
               this.timeout,
+              rpcCredentials(options.auth),
             ),
           };
           break;

@@ -7,6 +7,7 @@ import base64
 import uuid
 
 import httpx
+from thunder_rpc import Credentials
 
 from synap_sdk.config import SynapConfig
 from synap_sdk.exceptions import SynapException, UnsupportedCommandError
@@ -24,6 +25,21 @@ from synap_sdk.modules.geospatial import GeospatialManager
 from synap_sdk.modules.transaction import TransactionManager
 
 _NativeTransport = Union[SynapRpcTransport, Resp3Transport]
+
+
+def _rpc_credentials(config: SynapConfig) -> Credentials | None:
+    """Resolve the RPC handshake credentials from the client configuration.
+
+    The same credentials the HTTP transport puts in an ``Authorization`` header
+    now travel in the RPC handshake — before the Thunder swap the RPC transport
+    never authenticated, so it could not reach a ``require_auth`` server on
+    15501 at all. A token wins over user/password, matching HTTP's precedence.
+    """
+    if config.auth_token:
+        return Credentials.api_key(config.auth_token)
+    if config.username and config.password:
+        return Credentials.user_pass(config.username, config.password)
+    return None
 
 
 class SynapClient:
@@ -73,7 +89,10 @@ class SynapClient:
         self._native: _NativeTransport | None = None
         if config.transport == "synaprpc":
             self._native = SynapRpcTransport(
-                config.rpc_host, config.rpc_port, float(config.timeout)
+                config.rpc_host,
+                config.rpc_port,
+                float(config.timeout),
+                _rpc_credentials(config),
             )
         elif config.transport == "resp3":
             self._native = Resp3Transport(

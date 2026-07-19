@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.92%2B)-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/tests-1800%2B-brightgreen.svg)](docs/TESTING.md)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](CHANGELOG.md)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
 
@@ -75,13 +75,13 @@ Synap provides multiple core capabilities in a single, cohesive system:
 - **🤖 AI Integration**: MCP support for Cursor, Claude Desktop, and AI assistants
 - **🌊 StreamableHTTP Protocol**: Simple HTTP-based streaming protocol
 - **🔌 WebSocket Support**: Persistent connections for real-time updates
-- **📚 Multi-language SDKs**: TypeScript, Python, Rust (with reactive PubSub), PHP, and C# clients with full authentication support
+- **📚 Multi-language SDKs**: TypeScript, Python, Rust (with reactive PubSub), Go, PHP, and C# clients with full authentication support
 - **📖 Rich Examples**: Chat, event broadcasting, task queues, authentication examples, and more
 
 ### 🔗 Protocol Support
 
 Synap supports **three wire transports**. All SDKs (Rust, TypeScript, Python,
-PHP, C#) select the transport via URL scheme — no separate builder options required.
+Go, PHP, C#) select the transport via URL scheme — no separate builder options required.
 
 | URL scheme    | Port    | Framing                       | When to use                                             |
 |---------------|---------|-------------------------------|---------------------------------------------------------|
@@ -95,6 +95,15 @@ PHP, C#) select the transport via URL scheme — no separate builder options req
 > preserves integer/float/bool/bytes types on the wire (no stringification).
 > All commands — KV, queues, streams, pub/sub, transactions, scripts,
 > geospatial, HyperLogLog — are fully supported on every transport.
+>
+> Since 1.2.0 the `synap://` wire is **[Thunder](https://github.com/hivellm/thunder)**
+> — the HiveLLM family's shared binary RPC — on both ends: the server listener
+> and the Rust, TypeScript, Python and C# SDKs run the same protocol
+> implementation, so the two halves of a connection cannot drift. Wire v1 is
+> frozen; a pre-1.2.0 client still interoperates. Every SDK — Rust,
+> TypeScript, Python, C#, Go and PHP — runs the same protocol implementation,
+> verified against one server build by the interop matrix, see
+> `docs/thunder-interop-matrix.md`.
 >
 > ```ts
 > // TypeScript
@@ -173,26 +182,29 @@ crates/
 │   ├── kv_store/            # Sharded KV store (TTL, eviction, atomic LRU)
 │   ├── hash · list · set · sorted_set · bitmap · hyperloglog · geospatial
 │   └── queue · stream · pubsub · partition · transaction · consumer_group
-├── synap-protocol/src/      # Pure wire layer (no AppState / storage deps)
-│   ├── resp3/               # RESP3 parser + writer (Resp3Value)
-│   └── synap_rpc/           # MessagePack codec + Request/Response/SynapValue
 ├── synap-server/src/        # HTTP/WS/MCP/UMICP + protocol dispatch
 │   ├── server/handlers/     # REST handlers (kv, hash, list, set, queue, stream, pubsub, …)
-│   ├── protocol/resp3/      # RESP3 listener + command dispatcher (server-side)
-│   ├── protocol/synap_rpc/  # SynapRPC listener + dispatcher
+│   ├── protocol/resp3/      # RESP3 parser/writer + listener + command dispatcher
+│   ├── protocol/synap_rpc/  # SynapRPC command catalog + config + listener (wire: thunder)
 │   ├── persistence/         # WAL (async group-commit) + snapshots
 │   ├── replication/         # master / replica
 │   └── auth/ · hub/         # users/api-keys/ACL + HiveHub.Cloud multi-tenant
 ├── synap-cli/               # Command-line client
 └── synap-migrate/           # Migration utilities
 
-sdks/rust/src/               # Rust SDK — shares synap-protocol wire types
+sdks/rust/src/               # Rust SDK — Thunder's client under the hood
 └── transport/               # SynapRPC / RESP3 / HTTP transports + command mappers
 ```
 
-> Rust library consumers: `synap_server::core::*` / `synap_server::protocol::*`
-> are now `synap_core::*` / `synap_protocol::*` (umbrella re-exports kept on
-> `synap_server` for transition). See the [CHANGELOG](CHANGELOG.md) migration guide.
+> The binary RPC wire layer is **not in this repository**. It is
+> [Thunder](https://github.com/hivellm/thunder) (`thunder-rpc`), the HiveLLM
+> family's shared implementation, which both the server and the Rust SDK depend
+> on — so the two ends of the wire cannot drift.
+>
+> Rust library consumers: `synap_server::core::*` is now `synap_core::*`
+> (umbrella re-exports kept on `synap_server` for transition), and the former
+> `synap-protocol` crate is gone — see the [CHANGELOG](CHANGELOG.md) for the
+> type-by-type migration to `thunder-rpc`.
 
 ## 🚀 Quick Start
 
@@ -263,10 +275,10 @@ docker run -d \
 **Multi-Architecture Build**:
 ```bash
 # Build and push multi-arch images (AMD64 + ARM64)
-./scripts/docker-publish.sh 1.0.0
+./scripts/docker/docker-publish.sh 1.2.0
 
 # Or using PowerShell
-.\scripts\docker-publish.ps1 1.0.0
+.\scripts\docker\docker-publish.ps1 1.2.0
 ```
 
 **Docker Compose**:
@@ -284,7 +296,7 @@ docker-compose up -d
 
 **Available Images**:
 - `hivehub/synap:latest` - Latest stable release
-- `hivehub/synap:<version>` - Specific version (e.g. `hivehub/synap:1.0.0`)
+- `hivehub/synap:<version>` - Specific version (e.g. `hivehub/synap:1.2.0`)
 - Supports `linux/amd64` and `linux/arm64` architectures
 
 📖 **For detailed Docker documentation, see [DOCKER_README.md](DOCKER_README.md)**
@@ -545,7 +557,7 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 
 ## 🛠️ Technology Stack
 
-- **Language**: Rust (Edition 2024, workspace of focused crates: `synap-core`, `synap-protocol`, `synap-server`, `synap-cli`, `synap-migrate`)
+- **Language**: Rust (Edition 2024, workspace of focused crates: `synap-core`, `synap-server`, `synap-cli`, `synap-migrate`)
 - **Runtime**: Tokio (async/await)
 - **Web Framework**: Axum
 - **Storage**: 64-way sharded stores (ahash) with `Arc<[u8]>` shared values; radix trie for pub/sub topic routing

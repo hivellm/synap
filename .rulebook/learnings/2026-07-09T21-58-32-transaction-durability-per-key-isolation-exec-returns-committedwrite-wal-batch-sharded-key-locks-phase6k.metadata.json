@@ -1,0 +1,19 @@
+{
+  "id": "2026-07-09T21-58-32-transaction-durability-per-key-isolation-exec-returns-committedwrite-wal-batch-sharded-key-locks-phase6k",
+  "title": "Transaction durability + per-key isolation: exec returns CommittedWrite, WAL batch, sharded key locks (phase6k)",
+  "content": "Problem (audit M-010): MULTI/EXEC executed directly on the stores — a committed EXEC was never written to the WAL or replicated (lost on crash, not replicated), and the phase6d EXEC mutex serialized transactions vs each other but NOT vs non-transactional writers.\n\nSolution:\n1. exec surfaces committed effects. TransactionManager::exec (synap-core) now returns (results, Vec<CommittedWrite>). CommittedWrite is a datatype-agnostic core enum (KvSet/KvDel/HashSet/HashDel/HashIncrBy/ListPush/ListPop/SetAdd/SetRem). Non-deterministic commands are resolved to their concrete effect: KVIncr → CommittedWrite::KvSet{resulting value} (there is no Operation::KVIncr; mirrors how the plain INCR handler logs log_kv_set(new_value)). HashIncrBy keeps the delta (Operation::HashIncrBy exists and replays deterministically in order). DAG note: core can't reference server's persistence Operation, so exec returns a core type and the SERVER maps it.\n2. Server persistence hook. PersistenceLayer::log_transaction(&[CommittedWrite]) maps each to an Operation, maybe_replicate()s all (decoupled from WAL, phase6j), and WAL-appends them as one batch. Called from all 5 EXEC entry points (REST kv.rs, RESP3 advanced.rs, SynapRPC advanced.rs, admin_cmd.rs, mcp_handlers.rs).\n3. WAL batch API. AsyncWAL channel message became enum WriteRequest{Single,Batch}. append_batch(ops) sends one Batch; writer_loop writes a batch's ops back-to-back within one drain (contiguous in the WAL) and confirms once after the group-commit fsync → EXEC durable all-or-nothing; with fsync=Always it's fsynced before EXEC acks.\n4. Per-key isolation. New KeyLockManager (synap-core key_lock.rs): 1024 sharded tokio::sync::Mutex (async, safe across await; FNV-1a key→shard; multi-key lock in ascending shard order = deadlock-free). Injected into KVStore (Arc field + key_locks() accessor). exec acquires lock_keys(union of its keys) held across execute_commands. To avoid re-entrant deadlock, exec calls set_unlocked/delete_unlocked/incr_unlocked; the PUBLIC set/delete/incr/getset acquire the key lock then call the unlocked body (decr delegates to public incr; incr_unlocked handles negative delta). So a plain SET k during an EXEC touching k waits → ordered strictly before/after.\n\nScope: KV-keyspace isolation (the spec's testable scenario is plain SET). Collection commands in an EXEC run under the serialized exec_lock + internally-atomic store ops.\n\nTests (tests/transaction_durability_tests.rs): committed_transaction_survives_crash (log_transaction → drop → recover → assert KV/hash/set incl. INCR-as-SET), committed_transaction_reaches_replica (master + replication-only persistence layer with persistence.enabled=false → log_transaction → replica converges), plain_write_is_isolated_from_held_key_lock (hold key_locks().lock_key then assert a spawned plain set blocks until release). Isolation is deterministic by holding the lock rather than racing timing.\n\nGotcha: adding an async per-key lock to the KV write hot path (set/delete/incr/getset) — sharded tokio Mutex, uncontended cost is small vs the SET work; GET is unlocked (reads need no isolation).",
+  "source": "manual",
+  "relatedTask": "phase6k_v1-transaction-durability-and-per-key-isolation",
+  "tags": [
+    "transactions",
+    "persistence",
+    "replication",
+    "phase6k",
+    "analysis:synap-audit",
+    "M-010",
+    "key-lock",
+    "wal",
+    "rust"
+  ],
+  "createdAt": "2026-07-09T21:58:32.491Z"
+}

@@ -1,0 +1,154 @@
+name: Interop Matrix
+
+# Cross-SDK regression gate for the SynapRPC wire.
+#
+# Each SDK's own suite runs elsewhere and passes in isolation. This is the only
+# job that starts one server build and measures every client against it, so a
+# change that desynchronises an SDK from the server fails here rather than in a
+# user's deployment. It is also what caught the missing AUTH, the lossy Bytes
+# decode and the reserved-push-id SUBSCRIBE — see docs/thunder-interop-matrix.md.
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'crates/synap-server/src/protocol/**'
+      - 'sdks/**'
+      - 'scripts/interop/**'
+      - '.github/workflows/interop-matrix.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'crates/synap-server/src/protocol/**'
+      - 'sdks/**'
+      - 'scripts/interop/**'
+      - '.github/workflows/interop-matrix.yml'
+  workflow_dispatch:
+
+jobs:
+  matrix:
+    name: Every SDK against one server
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # sdks/go and sdks/php are submodules. Without this the checkout
+          # leaves them empty and their cells drop out of the matrix silently,
+          # which reads as "nothing to run" rather than "not covered".
+          submodules: recursive
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, sockets
+
+      # The driver needs the release binary; it refuses to run without it.
+      - name: Build the server
+        run: cargo build --release -p synap-server
+
+      - name: Build the Rust interop client
+        run: cargo build --release -p synap-sdk --example interop
+
+      - name: Build the TypeScript SDK
+        working-directory: sdks/typescript
+        run: npm ci && npm run build
+
+      - name: Install the Python SDK dependencies
+        working-directory: sdks/python
+        run: pip install -e .
+
+      - name: Install the PHP SDK dependencies
+        working-directory: sdks/php
+        run: composer install --no-interaction --no-progress
+
+      - name: Run the matrix
+        run: |
+          python scripts/interop/run-matrix.py \
+            rust typescript python csharp php legacy \
+            --json interop-results.json
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interop-results
+          path: interop-results.json
+
+  container:
+    name: The release image builds, runs, and answers
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    # The image shipped broken for an entire release cycle — the Dockerfile
+    # still copied a crate that had been dissolved — because nothing in CI
+    # built it. And once it built, an authenticated deployment reported itself
+    # unhealthy, because /health sat behind the auth middleware. Both are the
+    # same class of bug: only running the container finds them.
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # sdks/go and sdks/php are submodules. Without this the checkout
+          # leaves them empty and their cells drop out of the matrix silently,
+          # which reads as "nothing to run" rather than "not covered".
+          submodules: recursive
+
+      - name: Build the image
+        run: docker build -t synap:ci .
+
+      - name: Run it with authentication required
+        run: |
+          docker run -d --name synap-ci \
+            -p 15500:15500 -p 15501:15501 \
+            -v "$PWD/scripts/interop/server-config.docker.yml:/app/config.yml:ro" \
+            synap:ci
+
+      - name: Wait for the container to report healthy
+        run: |
+          for _ in $(seq 1 60); do
+            status=$(docker inspect synap-ci --format '{{.State.Health.Status}}')
+            [ "$status" = "healthy" ] && exit 0
+            [ "$status" = "unhealthy" ] && break
+            sleep 5
+          done
+          echo "container never became healthy (last status: ${status:-unknown})"
+          docker logs synap-ci
+          exit 1
+
+      - name: An unauthenticated probe must still answer
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:15500/health)
+          [ "$code" = "200" ] || { echo "GET /health returned $code, expected 200"; exit 1; }
+
+      - name: A data path must still demand credentials
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:15500/kv/stats)
+          [ "$code" = "200" ] && { echo "GET /kv/stats answered without credentials"; exit 1; }
+          exit 0
+
+      - name: Dump the logs on failure
+        if: failure()
+        run: docker logs synap-ci

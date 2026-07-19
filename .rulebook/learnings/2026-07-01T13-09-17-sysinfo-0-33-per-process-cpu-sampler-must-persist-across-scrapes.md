@@ -1,0 +1,6 @@
+# sysinfo 0.33 per-process CPU sampler must persist across scrapes
+**Source**: manual
+**Date**: 2026-07-01
+**Related Task**: phase1_broker-observability-metrics
+**Tags**: rust, sysinfo, metrics, cargo-profile, issue-196, issue-211
+sysinfo 0.33 API for per-process metrics: use `default-features=false, features=["system"]` to avoid pulling disk/network/component code. Get pid via `sysinfo::get_current_pid()` (Result), then `sys.refresh_processes_specifics(ProcessesToUpdate::Some(&[pid]), true, ProcessRefreshKind::everything())` and read `Process::memory()`/`virtual_memory()` (BYTES since 0.30) and `cpu_usage()` (f32, 100=one core). Crucial: `cpu_usage()` is a DELTA between the two most recent refreshes of that process, so the System instance must be kept ALIVE across scrapes (store it in a `static OnceLock<Mutex<System>>`) — a fresh System per scrape always reports 0% CPU. First scrape after start also reports 0. For target/ hygiene (issue #211): `[profile.dev] debug="line-tables-only"` keeps file:line in panics while cutting debuginfo size; validate a Cargo.toml profile change fast with `cargo metadata --no-deps` (no compile).

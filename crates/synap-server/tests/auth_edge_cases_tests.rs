@@ -1169,3 +1169,56 @@ async fn test_cleanup_expired_api_keys() {
     let cleaned = api_key_manager.cleanup_expired();
     assert!(cleaned >= 2);
 }
+
+// ==================== Public Probe Endpoints ====================
+
+/// `/health` and `/metrics` are declared "always public" at their route
+/// definitions, but the auth middleware is a layer over the whole router, so
+/// under `require_auth` they answered 401 like every other path.
+///
+/// That broke the container's own HEALTHCHECK, which sends an unauthenticated
+/// `GET /health`: an authenticated deployment reported `unhealthy` forever, and
+/// an orchestrator would restart a server that was serving perfectly. Found by
+/// running the release image with auth required.
+#[tokio::test]
+async fn health_and_metrics_answer_without_credentials_under_require_auth() {
+    let (base_url, _users, _keys) = spawn_test_server_with_auth(true, true).await;
+    let client = reqwest::Client::new();
+
+    for path in ["/health", "/metrics"] {
+        let response = client
+            .get(format!("{base_url}{path}"))
+            .send()
+            .await
+            .expect("request completes");
+
+        assert_eq!(
+            response.status(),
+            200,
+            "{path} must answer an unauthenticated probe, got {}",
+            response.status()
+        );
+    }
+}
+
+/// The exemption is exactly two paths — it must not become a hole that lets an
+/// unauthenticated caller reach data.
+#[tokio::test]
+async fn the_public_exemption_does_not_leak_to_data_paths() {
+    let (base_url, _users, _keys) = spawn_test_server_with_auth(true, true).await;
+    let client = reqwest::Client::new();
+
+    for path in ["/kv/stats", "/health/../kv/stats", "/healthz"] {
+        let response = client
+            .get(format!("{base_url}{path}"))
+            .send()
+            .await
+            .expect("request completes");
+
+        assert_ne!(
+            response.status(),
+            200,
+            "{path} must not be reachable without credentials"
+        );
+    }
+}

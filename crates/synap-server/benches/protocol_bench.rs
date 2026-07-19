@@ -23,7 +23,7 @@ use std::net::TcpStream;
 use std::time::Duration;
 
 use criterion::{Criterion, Throughput, criterion_group, criterion_main};
-use synap_protocol::synap_rpc::types::{Request, Response, SynapValue};
+use thunder::{Request, Response, Value as SynapValue};
 
 // ── endpoint helpers ──────────────────────────────────────────────────────────
 

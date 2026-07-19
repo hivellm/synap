@@ -1,4 +1,4 @@
-use super::{AppState, SynapValue, arg_bytes, arg_int, arg_shared, arg_str};
+use super::{AppState, SynapValue, arg_bytes, arg_int, arg_shared, arg_str, shared_to_value};
 
 pub(super) async fn run(
     state: &AppState,
@@ -31,8 +31,7 @@ pub(super) async fn run(
                 .kv_store
                 .get_shared(&key)
                 .await
-                // Carry the store's shared buffer to the wire — no copy.
-                .map(|opt| opt.map(SynapValue::from).unwrap_or(SynapValue::Null))
+                .map(|opt| opt.map(shared_to_value).unwrap_or(SynapValue::Null))
                 .map_err(|e| e.to_string())
         }
         "DEL" => {
@@ -153,7 +152,7 @@ pub(super) async fn run(
                     SynapValue::Array(
                         values
                             .into_iter()
-                            .map(|opt| opt.map(SynapValue::from).unwrap_or(SynapValue::Null))
+                            .map(|opt| opt.map(shared_to_value).unwrap_or(SynapValue::Null))
                             .collect(),
                     )
                 })

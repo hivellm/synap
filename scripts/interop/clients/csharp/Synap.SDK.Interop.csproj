@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Must match the InternalsVisibleTo entry in Synap.SDK.csproj so this
+         cell can drive SynapRpcTransport directly, like the other cells. -->
+    <AssemblyName>Synap.SDK.Interop</AssemblyName>
+    <RootNamespace>Synap.SDK.Interop</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../../../sdks/csharp/src/Synap.SDK/Synap.SDK.csproj" />
+  </ItemGroup>
+
+</Project>

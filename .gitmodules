@@ -1,0 +1,6 @@
+[submodule "sdks/go"]
+	path = sdks/go
+	url = https://github.com/hivellm/synap-sdk-go
+[submodule "sdks/php"]
+	path = sdks/php
+	url = https://github.com/hivellm/synap-sdk-php

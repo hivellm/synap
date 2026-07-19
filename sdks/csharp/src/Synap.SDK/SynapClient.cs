@@ -19,6 +19,31 @@ namespace Synap.SDK;
 /// </summary>
 public sealed class SynapClient : IDisposable
 {
+    /// <summary>
+    /// Resolve the RPC handshake credentials from the client configuration.
+    /// </summary>
+    /// <remarks>
+    /// The same credentials the HTTP transport puts in an <c>Authorization</c>
+    /// header now travel in the RPC handshake — before the Thunder swap the RPC
+    /// transport never authenticated, so it could not reach a
+    /// <c>require_auth</c> server on 15501 at all. A token wins over
+    /// user/password, matching the HTTP precedence.
+    /// </remarks>
+    private static HiveLLM.Thunder.Credentials? RpcCredentials(SynapConfig config)
+    {
+        if (!string.IsNullOrWhiteSpace(config.AuthToken))
+        {
+            return HiveLLM.Thunder.Credentials.ApiKey(config.AuthToken);
+        }
+
+        if (!string.IsNullOrWhiteSpace(config.Username) && !string.IsNullOrWhiteSpace(config.Password))
+        {
+            return HiveLLM.Thunder.Credentials.UserPass(config.Username, config.Password);
+        }
+
+        return null;
+    }
+
     private readonly HttpClient _httpClient;
     private readonly SynapConfig _config;
     private readonly bool _disposeHttpClient;
@@ -85,7 +110,8 @@ public sealed class SynapClient : IDisposable
             // Instantiate native transport based on configured mode.
             _transport = config.Transport switch
             {
-                TransportMode.SynapRpc => new SynapRpcTransport(config.RpcHost, config.RpcPort, config.Timeout),
+                TransportMode.SynapRpc => new SynapRpcTransport(
+                    config.RpcHost, config.RpcPort, config.Timeout, RpcCredentials(config)),
                 TransportMode.Resp3    => new Resp3Transport(config.Resp3Host, config.Resp3Port, config.Timeout),
                 _                      => null,
             };

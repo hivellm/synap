@@ -1,268 +1,240 @@
 /**
- * Synap TypeScript SDK - SynapRPC Transport
+ * Synap TypeScript SDK — SynapRPC transport.
  *
- * Persistent TCP connection using the SynapRPC binary protocol:
- *   wire frame = 4-byte LE length prefix  +  MessagePack body
+ * The wire layer is **not implemented here**. It is
+ * [Thunder](https://github.com/hivellm/thunder) (`@hivehub/thunder`) — the
+ * HiveLLM family's shared binary RPC client, the same protocol the Synap
+ * server runs on, so the two ends cannot drift.
  *
- * Request body (msgpack array):  [id: u32, command: string, args: WireValue[]]
- * Response body (msgpack array): [id: u32, {Ok: WireValue} | {Err: string}]
+ * What Thunder brings that the hand-written transport did not:
  *
- * WireValue encoding mirrors Rust's rmp_serde externally-tagged enum format:
- *   Null     → bare string  "Null"
- *   Str(x)   → {Str: x}
- *   Int(n)   → {Int: n}
- *   Float(f) → {Float: f}
- *   Bool(b)  → {Bool: b}
- *   Bytes(b) → {Bytes: b}
- *   Array(a) → {Array: [WireValue, ...]}
- *   Map(m)   → {Map: [[WireValue, WireValue], ...]}
+ * - the frame cap validated against the length prefix **before** allocating,
+ *   closing an unbounded-allocation hole that a remote peer could trigger;
+ * - a real handshake, so the SDK can authenticate on the RPC port;
+ * - connect and per-call timeouts, and lazy reconnect with capped retries;
+ * - a push hook, replacing the previous `setTimeout(50)` guess at when the
+ *   SUBSCRIBE acknowledgement had arrived.
+ *
+ * What stays here is Synap's own: the plain-JS ↔ wire value conversion the
+ * SDK's command mappers speak.
  */
 
-import * as net from 'net';
-import { pack, unpack } from 'msgpackr';
+import {
+  Client,
+  Config,
+  Value,
+  type ClientOptions,
+  type Credentials,
+} from '@hivehub/thunder';
 
-// ── Wire value codec ──────────────────────────────────────────────────────────
-
-/** Serde externally-tagged WireValue as produced/consumed by the Rust server. */
-export type WireValue =
-  | 'Null'
-  | { Str: string }
-  | { Int: number }
-  | { Float: number }
-  | { Bool: boolean }
-  | { Bytes: Uint8Array | Buffer }
-  | { Array: WireValue[] }
-  | { Map: [WireValue, WireValue][] };
+// ── Wire values ───────────────────────────────────────────────────────────────
 
 /**
- * Encode a plain JavaScript value as the externally-tagged WireValue envelope
- * expected by the Synap server.
+ * The wire value model, re-exported from Thunder.
+ *
+ * Previously a hand-written mirror of Rust's externally-tagged serde encoding
+ * (`'Null' | {Str: string} | …`). Thunder owns the encoding now, so this is its
+ * discriminated union (`{kind: 'str', value: string}`), and the tagging details
+ * are no longer the SDK's business.
+ */
+export type WireValue = Value;
+
+/** Largest integer that survives a `bigint` → `number` round-trip intact. */
+const MAX_SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+const MIN_SAFE = -MAX_SAFE;
+
+/**
+ * Encode a plain JavaScript value as a Thunder {@link Value}.
+ *
+ * Integers become `Int`, other numbers `Float`, byte arrays `Bytes`, plain
+ * objects an ordered `Map` keyed by string — matching what the Synap server's
+ * dispatch tree expects for each argument position.
  */
 export function toWireValue(v: unknown): WireValue {
-  if (v === null || v === undefined) return 'Null';
-  if (typeof v === 'string') return { Str: v };
-  if (typeof v === 'boolean') return { Bool: v };
+  if (v === null || v === undefined) return Value.null();
+  if (typeof v === 'string') return Value.str(v);
+  if (typeof v === 'boolean') return Value.bool(v);
+  if (typeof v === 'bigint') return Value.int(v);
   if (typeof v === 'number') {
-    return Number.isInteger(v) ? { Int: v } : { Float: v };
+    return Number.isInteger(v) ? Value.int(v) : Value.float(v);
   }
-  if (v instanceof Uint8Array || Buffer.isBuffer(v)) return { Bytes: v };
-  if (Array.isArray(v)) return { Array: v.map(toWireValue) };
+  if (v instanceof Uint8Array) return Value.bytes(v);
+  if (Buffer.isBuffer(v)) return Value.bytes(new Uint8Array(v));
+  if (Array.isArray(v)) return Value.array(v.map(toWireValue));
   if (typeof v === 'object') {
     const pairs = Object.entries(v as Record<string, unknown>).map(
-      ([k, val]): [WireValue, WireValue] => [{ Str: k }, toWireValue(val)],
+      ([k, val]): [WireValue, WireValue] => [Value.str(k), toWireValue(val)],
     );
-    return { Map: pairs };
+    return Value.map(pairs);
   }
-  return { Str: String(v) };
+  return Value.str(String(v));
 }
 
 /**
- * Decode an externally-tagged WireValue envelope back to a plain JS value.
- * Bytes values that look like UTF-8 strings are decoded to string for SDK consumers.
+ * Decode a Thunder {@link Value} back to a plain JS value.
+ *
+ * `Bytes` decode as UTF-8 when they are valid UTF-8 -- Synap's SDK surface is
+ * string-oriented -- and stay a `Buffer` when they are not. Decoding
+ * unconditionally replaced every invalid sequence with U+FFFD, so a binary
+ * value came back corrupted and unrecoverable: `deadbeef` read back as
+ * `adfdfd`.
+ *
+ * `Int` narrows to `number` when it fits safely and stays a `bigint` when it
+ * does not, so a value outside ±2^53 is never silently corrupted.
  */
+const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
 export function fromWireValue(wire: unknown): unknown {
-  if (wire === 'Null' || wire === null || wire === undefined) return null;
-  if (typeof wire === 'object') {
-    const w = wire as Record<string, unknown>;
-    if ('Str' in w) return w['Str'];
-    if ('Int' in w) return w['Int'];
-    if ('Float' in w) return w['Float'];
-    if ('Bool' in w) return w['Bool'];
-    if ('Bytes' in w) {
-      const b = w['Bytes'];
-      if (b instanceof Uint8Array || Buffer.isBuffer(b)) {
-        return Buffer.from(b as Uint8Array).toString('utf8');
+  const value = wire as Value | undefined;
+  if (value === null || value === undefined) return null;
+
+  switch (value.kind) {
+    case 'null':
+      return null;
+    case 'str':
+      return value.value;
+    case 'bool':
+      return value.value;
+    case 'float':
+      return value.value;
+    case 'int':
+      return value.value >= MIN_SAFE && value.value <= MAX_SAFE
+        ? Number(value.value)
+        : value.value;
+    case 'bytes':
+      try {
+        return UTF8_STRICT.decode(value.value);
+      } catch {
+        return Buffer.from(value.value);
       }
-      if (Array.isArray(b)) {
-        return Buffer.from(b as number[]).toString('utf8');
-      }
-      return b;
-    }
-    if ('Array' in w) {
-      return (w['Array'] as unknown[]).map(fromWireValue);
-    }
-    if ('Map' in w) {
-      const pairs = w['Map'] as [unknown, unknown][];
+    case 'array':
+      return value.value.map(fromWireValue);
+    case 'map': {
       const obj: Record<string, unknown> = {};
-      for (const [k, val] of pairs) {
+      for (const [k, val] of value.value) {
         obj[String(fromWireValue(k))] = fromWireValue(val);
       }
       return obj;
     }
+    default:
+      return wire;
   }
-  return wire;
 }
 
-// ── Pending request tracker ───────────────────────────────────────────────────
+// ── Protocol configuration ────────────────────────────────────────────────────
 
-interface Pending {
-  resolve: (value: unknown) => void;
-  reject: (err: Error) => void;
+/**
+ * How Synap uses the Thunder wire, mirroring the server's `synap_config()`.
+ *
+ * Thunder ships one standard and zero product knowledge, so this description
+ * lives in Synap's own repository. Every divergence from `Config.standard()` is
+ * explicit: Synap authenticates with `AUTH` rather than a mandatory `HELLO`, it
+ * ships a push-producing command (`SUBSCRIBE`), its errors use the
+ * Redis-compatible prefixes it shares with its RESP3 port, and its frame cap is
+ * 512 MiB rather than 64.
+ */
+export function synapConfig(): Config {
+  return Config.standard()
+    .withScheme('synap')
+    .withPort(15_501)
+    .withHandshake('auth_command')
+    .withHelloStyle('not_used')
+    .withPush('enabled')
+    .withErrorCodes('resp3_prefixes')
+    .withMaxFrameBytes(512 * 1024 * 1024);
+}
+
+/** Credentials for the RPC handshake, resolved from the SDK's auth options. */
+export interface RpcCredentials {
+  username?: string;
+  password?: string;
+  apiKey?: string;
+}
+
+function toThunderCredentials(creds: RpcCredentials | undefined): Credentials | undefined {
+  if (!creds) return undefined;
+  if (creds.apiKey) return { type: 'apiKey', apiKey: creds.apiKey };
+  if (creds.username && creds.password) {
+    return { type: 'userPass', user: creds.username, pass: creds.password };
+  }
+  return undefined;
 }
 
 // ── SynapRpcTransport ─────────────────────────────────────────────────────────
 
-/** Maximum reconnect attempts before an execute call throws. */
-const MAX_RECONNECT_ATTEMPTS = 2;
-
 /**
  * Persistent, multiplexed TCP connection to the SynapRPC listener.
  *
- * - Lazy connect: the socket is opened on the first `execute()` call.
- * - Auto-reconnect: up to {@link MAX_RECONNECT_ATTEMPTS} attempts on failure.
- * - Multiplexing: concurrent requests are tracked by numeric request ID.
+ * Lazily connected on the first `execute()`; concurrent calls pipeline over the
+ * single connection and are demultiplexed by frame id.
  */
 export class SynapRpcTransport {
-  private readonly host: string;
-  private readonly port: number;
-  private readonly timeoutMs: number;
+  private readonly endpoint: string;
+  private readonly options: ClientOptions;
 
-  private socket: net.Socket | null = null;
-  private nextId = 1;
-  private readonly pending = new Map<number, Pending>();
-  private readBuffer = Buffer.alloc(0);
+  private client: Client | null = null;
+  /** In-flight connect, so concurrent first calls dial exactly once. */
+  private connecting: Promise<Client> | null = null;
 
-  constructor(host: string, port: number, timeoutMs: number) {
-    this.host = host;
-    this.port = port;
-    this.timeoutMs = timeoutMs;
+  constructor(host: string, port: number, timeoutMs: number, credentials?: RpcCredentials) {
+    this.endpoint = `synap://${host}:${port}`;
+    this.options = {
+      connectTimeoutMs: timeoutMs,
+      callTimeoutMs: timeoutMs,
+      clientName: 'synap-typescript-sdk',
+      credentials: toThunderCredentials(credentials),
+    };
   }
 
-  // ── Internal connection management ─────────────────────────────────────────
-
-  private connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const sock = new net.Socket();
-      sock.setTimeout(this.timeoutMs);
-
-      sock.once('connect', () => {
-        this.socket = sock;
-        this.readBuffer = Buffer.alloc(0);
-        resolve();
-      });
-
-      sock.on('data', (chunk: Buffer) => {
-        this.readBuffer = Buffer.concat([this.readBuffer, chunk]);
-        this.drainFrames();
-      });
-
-      sock.on('error', (err) => {
-        this.socket = null;
-        for (const { reject: rej } of this.pending.values()) {
-          rej(err);
-        }
-        this.pending.clear();
-        reject(err);
-      });
-
-      sock.on('close', () => {
-        this.socket = null;
-        for (const { reject: rej } of this.pending.values()) {
-          rej(new Error('SynapRPC connection closed'));
-        }
-        this.pending.clear();
-      });
-
-      sock.on('timeout', () => {
-        sock.destroy(new Error('SynapRPC connection timeout'));
-      });
-
-      sock.connect(this.port, this.host);
-    });
+  /** Dial a fresh Thunder client against the configured endpoint. */
+  private dial(): Promise<Client> {
+    return Client.connect(this.endpoint, synapConfig(), this.options);
   }
 
-  private drainFrames(): void {
-    while (this.readBuffer.length >= 4) {
-      const frameLen = this.readBuffer.readUInt32LE(0);
-      if (this.readBuffer.length < 4 + frameLen) break;
-
-      const frameBody = this.readBuffer.subarray(4, 4 + frameLen);
-      this.readBuffer = this.readBuffer.subarray(4 + frameLen);
-
-      let decoded: unknown;
-      try {
-        decoded = unpack(frameBody);
-      } catch {
-        // Corrupt frame — drop the connection so state resets cleanly.
-        this.socket?.destroy();
-        continue;
-      }
-
-      // Response: [id, {Ok: WireValue} | {Err: string}]
-      const resp = decoded as [number, Record<string, unknown>];
-      const [id, resultEnv] = resp;
-      const pend = this.pending.get(id);
-      if (!pend) continue;
-      this.pending.delete(id);
-
-      if ('Ok' in resultEnv) {
-        pend.resolve(fromWireValue(resultEnv['Ok']));
-      } else {
-        pend.reject(new Error(String(resultEnv['Err'] ?? 'unknown server error')));
-      }
+  /** The shared client, dialed once on first use. */
+  private async ensureClient(): Promise<Client> {
+    if (this.client) return this.client;
+    if (!this.connecting) {
+      this.connecting = this.dial()
+        .then((client) => {
+          this.client = client;
+          return client;
+        })
+        .finally(() => {
+          this.connecting = null;
+        });
     }
+    return this.connecting;
   }
-
-  private async ensureConnected(attempt = 0): Promise<void> {
-    if (this.socket && !this.socket.destroyed) return;
-    try {
-      await this.connect();
-    } catch (err) {
-      if (attempt < MAX_RECONNECT_ATTEMPTS - 1) {
-        await this.ensureConnected(attempt + 1);
-      } else {
-        throw err;
-      }
-    }
-  }
-
-  // ── Public API ──────────────────────────────────────────────────────────────
 
   /**
-   * Execute `cmd` with `args` on the remote server and return the decoded response.
+   * Execute `cmd` with `args` and return the decoded response.
    *
    * @param cmd  Redis-style command name, e.g. `"SET"`, `"HGET"`.
-   * @param args Command arguments as plain JS values; they are encoded as WireValues on the wire.
-   * @returns    The decoded response (plain JS value, WireValue envelope stripped).
+   * @param args Command arguments as plain JS values.
+   * @returns    The decoded response as a plain JS value.
    */
   async execute(cmd: string, args: unknown[]): Promise<unknown> {
-    await this.ensureConnected();
-
-    const id = this.nextId++;
-    const wireArgs = args.map(toWireValue);
-    // Request msgpack array: [id, command, args]
-    const body = pack([id, cmd.toUpperCase(), wireArgs]);
-    const lenBuf = Buffer.allocUnsafe(4);
-    lenBuf.writeUInt32LE(body.length, 0);
-    const frame = Buffer.concat([lenBuf, body]);
-
-    return new Promise<unknown>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
-      this.socket!.write(frame, (writeErr) => {
-        if (writeErr) {
-          this.pending.delete(id);
-          reject(writeErr);
-        }
-      });
-    });
+    const client = await this.ensureClient();
+    const result = await client.call(cmd.toUpperCase(), args.map(toWireValue));
+    return fromWireValue(result);
   }
 
-  /**
-   * Close the persistent TCP socket and reject all pending requests.
-   */
+  /** Close the connection and fail anything still in flight. */
   close(): void {
-    this.socket?.destroy();
-    this.socket = null;
+    const client = this.client;
+    this.client = null;
+    void client?.close();
   }
 
   /**
-   * Open a **dedicated** TCP connection for server-push pub/sub delivery.
+   * Open a **dedicated** connection for server-push pub/sub delivery.
    *
-   * Sends a SUBSCRIBE frame on a new socket, waits for the initial
-   * acknowledgement (subscriber_id), then relays push frames (id === 0xFFFFFFFF)
-   * to `onMessage` until `cancel()` is called.
+   * The push hook is registered before `SUBSCRIBE` is sent, so a message
+   * published between the server's acknowledgement and the registration cannot
+   * slip past — the previous implementation waited 50 ms and hoped.
    *
-   * @returns `{ subscriberId, cancel }` — call `cancel()` to tear down the push socket.
+   * @returns `{ subscriberId, cancel }` — call `cancel()` to tear the push
+   *          connection down.
    */
   async subscribePush(
     topics: string[],
@@ -273,103 +245,43 @@ export class SynapRpcTransport {
       timestamp: number;
     }) => void,
   ): Promise<{ subscriberId: string; cancel: () => void }> {
-    const sock = await new Promise<net.Socket>((resolve, reject) => {
-      const s = new net.Socket();
-      s.setTimeout(this.timeoutMs);
-      s.once('connect', () => resolve(s));
-      s.once('error', reject);
-      s.on('timeout', () => s.destroy(new Error('subscribePush connect timeout')));
-      s.connect(this.port, this.host);
-    });
+    const client = await this.dial();
 
-    // Send SUBSCRIBE frame.
-    const id = this.nextId++;
-    const wireArgs = topics.map(toWireValue);
-    const body = pack([id, 'SUBSCRIBE', wireArgs]);
-    const lenBuf = Buffer.allocUnsafe(4);
-    lenBuf.writeUInt32LE(body.length, 0);
-    sock.write(Buffer.concat([lenBuf, body]));
+    client.onPush((value: Value) => {
+      const frame = fromWireValue(value) as Record<string, unknown> | null;
+      if (!frame || typeof frame !== 'object') return;
 
-    let readBuf = Buffer.alloc(0);
-    let subscriberId = '';
-    let pushMode = false;
-    let cancelled = false;
-
-    const cancel = (): void => {
-      cancelled = true;
-      sock.destroy();
-    };
-
-    sock.on('data', (chunk: Buffer) => {
-      if (cancelled) return;
-      readBuf = Buffer.concat([readBuf, chunk]);
-
-      while (readBuf.length >= 4) {
-        const frameLen = readBuf.readUInt32LE(0);
-        if (readBuf.length < 4 + frameLen) break;
-
-        const frameBody = readBuf.subarray(4, 4 + frameLen);
-        readBuf = readBuf.subarray(4 + frameLen);
-
-        let decoded: unknown;
+      // The server encodes the payload as a JSON string; hand callers the
+      // parsed value when it parses, and the raw string when it does not.
+      const rawPayload = frame['payload'];
+      let payload: unknown = rawPayload;
+      if (typeof rawPayload === 'string') {
         try {
-          decoded = unpack(frameBody);
+          payload = JSON.parse(rawPayload);
         } catch {
-          continue;
-        }
-
-        const resp = decoded as [number, Record<string, unknown>];
-        const [frameId, resultEnv] = resp;
-
-        if (!pushMode) {
-          // Initial SUBSCRIBE response — capture subscriber_id.
-          if ('Ok' in resultEnv) {
-            const val = fromWireValue(resultEnv['Ok']);
-            if (val && typeof val === 'object' && 'subscriber_id' in (val as object)) {
-              subscriberId = String(
-                (val as Record<string, unknown>)['subscriber_id'] ?? '',
-              );
-            }
-          }
-          pushMode = true;
-          continue;
-        }
-
-        // Push frames carry id === 0xFFFFFFFF (u32::MAX).
-        if (frameId === 0xffffffff && 'Ok' in resultEnv) {
-          const val = fromWireValue(resultEnv['Ok']) as Record<string, unknown>;
-          if (val && typeof val === 'object') {
-            const topic = String(val['topic'] ?? '');
-            const payloadRaw = val['payload'];
-            let payload: unknown = payloadRaw;
-            if (typeof payloadRaw === 'string') {
-              try {
-                payload = JSON.parse(payloadRaw);
-              } catch {
-                payload = payloadRaw;
-              }
-            }
-            onMessage({
-              topic,
-              payload,
-              id: String(val['id'] ?? ''),
-              timestamp: Number(val['timestamp'] ?? 0),
-            });
-          }
+          payload = rawPayload;
         }
       }
+
+      onMessage({
+        topic: String(frame['topic'] ?? ''),
+        payload,
+        id: String(frame['id'] ?? ''),
+        timestamp: Number(frame['timestamp'] ?? 0),
+      });
     });
 
-    sock.on('error', () => {
-      /* push stream error — connection closed */
-    });
-    sock.on('close', () => {
-      /* push stream ended */
-    });
+    const result = await client.call(
+      'SUBSCRIBE',
+      topics.map((t) => Value.str(t)),
+    );
+    const subscriberId = Value.asStr(Value.mapGet(result, 'subscriber_id')) ?? '';
 
-    // Allow time for the initial SUBSCRIBE acknowledgement.
-    await new Promise<void>((resolve) => setTimeout(resolve, 50));
-
-    return { subscriberId, cancel };
+    return {
+      subscriberId,
+      cancel: (): void => {
+        void client.close();
+      },
+    };
   }
 }

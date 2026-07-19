@@ -4,8 +4,8 @@
 //! `SynapValue` result.  Mirrors the RESP3 command dispatcher but operates on
 //! the binary `SynapValue` type instead of `Resp3Value`.
 
+use super::{Request, Response, SynapValue};
 use crate::server::handlers::AppState;
-use synap_protocol::synap_rpc::types::{Request, Response, SynapValue};
 
 mod advanced;
 mod collections;
@@ -22,6 +22,18 @@ pub async fn dispatch(state: &AppState, req: Request) -> Response {
         Ok(v) => Response::ok(req.id, v),
         Err(e) => Response::err(req.id, e),
     }
+}
+
+/// Run one command — the entry point Thunder's `Dispatch` implementation calls.
+///
+/// Frame-level concerns (ids, encoding, error rendering) belong to Thunder, so
+/// this hands back the bare `Result` rather than a `Response`.
+pub async fn run_command(
+    state: &AppState,
+    command: &str,
+    args: Vec<SynapValue>,
+) -> Result<SynapValue, String> {
+    run(state, command, args).await
 }
 
 async fn run(state: &AppState, command: &str, args: Vec<SynapValue>) -> Result<SynapValue, String> {
@@ -79,7 +91,9 @@ fn arg_bytes(args: &[SynapValue], idx: usize) -> Result<Vec<u8>, String> {
 }
 
 /// Extract an argument as a shared buffer — a refcount bump for `Bytes` args
-/// (no copy; phase13 parse-bulk-into-arc write path), copying only for `Str`.
+/// (no copy; the phase13 parse-bulk-into-arc write path), copying only for
+/// `Str`. `thunder::Value::Bytes` carries an `Arc<[u8]>` from 0.2.0, so the
+/// decoded argument moves into the store without a memcpy.
 fn arg_shared(args: &[SynapValue], idx: usize) -> Result<std::sync::Arc<[u8]>, String> {
     match args.get(idx) {
         Some(SynapValue::Bytes(b)) => Ok(std::sync::Arc::clone(b)),
@@ -87,6 +101,12 @@ fn arg_shared(args: &[SynapValue], idx: usize) -> Result<std::sync::Arc<[u8]>, S
         Some(_) => Err(format!("ERR argument {idx} must be bytes")),
         None => Err(format!("ERR missing argument {idx}")),
     }
+}
+
+/// Carry a stored buffer to the wire — the reply path's counterpart to
+/// [`arg_shared`], also a refcount bump (the phase11 wire-value zero-copy path).
+fn shared_to_value(buf: std::sync::Arc<[u8]>) -> SynapValue {
+    SynapValue::Bytes(buf)
 }
 
 fn arg_int(args: &[SynapValue], idx: usize) -> Result<i64, String> {

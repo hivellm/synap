@@ -1,0 +1,15 @@
+{
+  "id": "2026-07-08T15-57-21-synap-protocol-is-wire-dispatch-fused-only-parser-writer-codec-types-are-extractable",
+  "title": "Synap protocol/ is wire+dispatch fused; only parser/writer/codec/types are extractable",
+  "content": "Key discovery of analysis synap-v1-release: synap-server/src/protocol/ (8,289 LOC, 19 files) looks like a self-contained wire module but is not. resp3/command/advanced.rs imports AppState, crate::core::geospatial::DistanceUnit and crate::scripting::ScriptExecContext; synap_rpc/dispatch/mod.rs:8 imports crate::server::handlers::AppState; resp3/command/mod.rs is a 1,157-LOC AppState-bound dispatcher. Any future extraction of a synap-protocol crate must take ONLY envelope.rs, resp3/parser.rs, resp3/writer.rs, the RESP value type, synap_rpc/codec.rs and synap_rpc/types.rs. Also: the prior docs/analysis/synap-vs-redis findings are stale — RESP3 (94 commands, port 6379), SynapRPC (MessagePack, 15501), eviction (6 policies) and the GET/SET hot-path fixes are already shipped; do not re-implement them. Remaining real gaps: blocking ops (BLPOP family), PSUBSCRIBE/keyspace notifications, SCAN cursors, LFU, allocator/IO-thread tuning, parallel MGET/MSET.",
+  "source": "manual",
+  "tags": [
+    "analysis:synap-v1-release",
+    "workspace-split",
+    "protocol",
+    "resp3",
+    "redis-parity",
+    "v1.0.0"
+  ],
+  "createdAt": "2026-07-08T15:57:21.865Z"
+}

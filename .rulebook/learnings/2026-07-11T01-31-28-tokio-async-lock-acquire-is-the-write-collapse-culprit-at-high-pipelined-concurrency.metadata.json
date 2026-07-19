@@ -1,0 +1,8 @@
+{
+  "id": "2026-07-11T01-31-28-tokio-async-lock-acquire-is-the-write-collapse-culprit-at-high-pipelined-concurrency",
+  "title": "tokio async lock acquire is the write-collapse culprit at high pipelined concurrency",
+  "content": "phase13 write-scalability. Finding: with ~3200 in-flight pipelined writes (redis-benchmark -r 1M, c=200, P=16), Synap SET collapsed to 0.24 of Redis while GET (no async lock) WON at 1.16. Root cause was NOT the parking_lot shard data lock as first hypothesized — it was the per-key tokio::sync::RwLock read acquire: read_owned().await goes through tokio's semaphore queue+waker machinery on EVERY write, and at thousands of concurrent acquisitions the scheduling overhead dominates. Fix (tiny): try_read_owned() fast path first — when no EXEC holds/waits the shard (the overwhelmingly common case), the guard is granted synchronously with one atomic op, zero scheduler interaction; fall back to .await only on contention. Result: SET 153k -> 742k (1.19x Redis at c=200!), INCR 112k -> 675k (1.03x). Lesson: in tokio hot paths, ALWAYS try_lock first and .await only on failure — an uncontended async lock acquire is far more expensive than an uncontended sync one, and the cost explodes with in-flight task count. Also: SetStore SipHash->ahash (shard map + member HashSet) lifted multi-key SADD 0.57->0.66; the remaining gap is structural (Redis small-set listpack vs full HashSet+SetValue alloc per new key) — encoding work, not hashing. Diagnostic pattern that found it: compare an op WITH the suspect component (SET, has async lock) against one WITHOUT (GET) under the same load shape; GET scaling while SET collapsed pointed straight at the async acquire.",
+  "source": "manual",
+  "tags": [],
+  "createdAt": "2026-07-11T01:31:28.098Z"
+}

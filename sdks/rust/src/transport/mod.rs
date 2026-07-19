@@ -9,7 +9,7 @@
 //! - **Http**: Original JSON-over-HTTP REST transport (fallback for commands
 //!   not yet mapped to a native protocol, e.g. pub/sub, queues, streams).
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
@@ -39,210 +39,185 @@ pub enum TransportMode {
 
 // ── Shared wire types (single source of truth) ────────────────────────────────
 //
-// The SynapRPC value/request/response types and frame codec live in
-// `synap-protocol` and are shared verbatim with the server — no local
-// re-definition, so a server-side wire change reaches the SDK at compile time
-// instead of drifting silently. `WireValue` is kept as a crate-local alias of
-// `SynapValue` so existing call sites and the client-ergonomic accessors
-// (`as_float`/`is_null`/`to_json`, now inherent on `SynapValue`) keep working.
-pub(crate) use synap_protocol::synap_rpc::SynapValue as WireValue;
-use synap_protocol::synap_rpc::codec;
-use synap_protocol::synap_rpc::{Request as RpcRequest, Response as RpcResponse};
+// The value model, `Request`/`Response` and the frame codec belong to
+// `thunder` — the family's shared binary RPC crate, which the Synap server also
+// runs on, so the two halves cannot drift. `WireValue` stays a crate-local
+// alias so existing call sites keep reading the same way; the two Synap-only
+// conveniences live in [`value_ext`].
+pub(crate) use thunder::Value as WireValue;
+
+pub(crate) mod value_ext;
+pub(crate) use value_ext::WireValueExt;
+
+/// Synap's protocol configuration, mirroring the server's `synap_config()`:
+/// `AUTH`-command handshake, push enabled, RESP3-style error prefixes.
+///
+/// Declared here rather than imported so the SDK depends only on registry
+/// crates — `cargo publish` rejects path dependencies, and a Synap SDK that
+/// dragged the server crate to crates.io is exactly what Thunder dissolved.
+fn synap_protocol_config() -> thunder::Config {
+    use thunder::wire::config::{ErrorConvention, Handshake, HelloStyle, PushPolicy};
+    thunder::Config::standard()
+        .scheme("synap")
+        .port(15501)
+        .handshake(Handshake::AuthCommand)
+        .hello_style(HelloStyle::NotUsed)
+        .push(PushPolicy::Enabled)
+        .error_codes(ErrorConvention::Resp3Prefixes)
+        .max_frame_bytes(512 * 1024 * 1024)
+}
+
+/// Credentials for the RPC handshake, resolved from [`SynapConfig`].
+#[derive(Debug, Clone)]
+pub(crate) enum RpcCredentials {
+    /// Bearer token — the same `auth_token` the HTTP transport sends.
+    Token(String),
+    /// `AUTH <user> <pass>`.
+    UserPass(String, String),
+}
+
+/// Map a Thunder client error onto the SDK's error type, preserving the
+/// distinctions callers already match on.
+fn map_client_error(err: thunder::ClientError) -> SynapError {
+    use thunder::ClientError;
+    match err {
+        ClientError::Timeout => SynapError::Timeout,
+        ClientError::Auth { message } => SynapError::Unauthorized(message),
+        // The raw server string, verbatim — callers match on the `NOPERM` /
+        // `ERR …` prefixes exactly as they did before the swap.
+        ClientError::Server { message, .. } => SynapError::ServerError(message),
+        other => SynapError::Other(format!("SynapRPC: {other}")),
+    }
+}
 
 // ── SynapRPC transport ────────────────────────────────────────────────────────
 
-/// Single persistent TCP connection to the SynapRPC listener.
+/// Multiplexed connection to the SynapRPC listener, backed by Thunder's client.
 ///
-/// Reconnects automatically on the first error.
+/// One persistent TCP connection carries every request: calls are demultiplexed
+/// by frame id, so concurrent commands pipeline instead of queueing behind a
+/// mutex. Connect and per-call timeouts, the frame cap, lazy reconnect and
+/// typed auth errors all come from Thunder.
 pub(crate) struct SynapRpcTransport {
-    addr: String,
-    conn: Mutex<Option<TcpStream>>,
-    next_id: AtomicU32,
-    timeout: Duration,
+    endpoint: String,
+    client_config: thunder::ClientConfig,
+    /// Connected on first use — `new` is sync, dialing is not.
+    client: Mutex<Option<Arc<thunder::Client>>>,
 }
 
 impl SynapRpcTransport {
-    pub(crate) fn new(host: &str, port: u16, timeout: Duration) -> Self {
+    pub(crate) fn new(
+        host: &str,
+        port: u16,
+        timeout: Duration,
+        credentials: Option<RpcCredentials>,
+    ) -> Self {
+        let mut client_config = thunder::ClientConfig::new()
+            .connect_timeout(timeout)
+            .call_timeout(timeout)
+            .client_name("synap-rust-sdk");
+
+        // Unlike the pre-Thunder transport, which never authenticated on the
+        // RPC port at all, credentials now travel in the connection handshake.
+        client_config = match credentials {
+            Some(RpcCredentials::Token(token)) => client_config.token(token),
+            Some(RpcCredentials::UserPass(user, pass)) => client_config.user_pass(user, pass),
+            None => client_config,
+        };
+
         Self {
-            addr: format!("{}:{}", host, port),
-            conn: Mutex::new(None),
-            next_id: AtomicU32::new(1),
-            timeout,
+            endpoint: format!("synap://{host}:{port}"),
+            client_config,
+            client: Mutex::new(None),
         }
     }
 
-    async fn do_connect(&self) -> Result<TcpStream> {
-        tokio::time::timeout(self.timeout, TcpStream::connect(&self.addr))
-            .await
-            .map_err(|_| SynapError::Timeout)?
-            .map_err(|e| SynapError::Other(format!("SynapRPC connect {}: {}", self.addr, e)))
+    /// Dial a fresh Thunder client against the configured endpoint.
+    async fn dial(&self) -> Result<Arc<thunder::Client>> {
+        thunder::Client::connect_with(
+            &self.endpoint,
+            synap_protocol_config(),
+            self.client_config.clone(),
+        )
+        .await
+        .map(Arc::new)
+        .map_err(map_client_error)
+    }
+
+    /// The shared client, dialed on first use and replaced if it died.
+    ///
+    /// Thunder reconnects lazily within a live client; this only covers the
+    /// case where the client itself was poisoned beyond recovery.
+    async fn client(&self) -> Result<Arc<thunder::Client>> {
+        let mut guard = self.client.lock().await;
+        if let Some(existing) = guard.as_ref()
+            && existing.is_alive()
+        {
+            return Ok(Arc::clone(existing));
+        }
+        let fresh = self.dial().await?;
+        *guard = Some(Arc::clone(&fresh));
+        Ok(fresh)
     }
 
     /// Send `cmd ARGS…` and return the response value.
     pub(crate) async fn execute(&self, cmd: &str, args: Vec<WireValue>) -> Result<WireValue> {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let req = RpcRequest {
-            id,
-            command: cmd.to_ascii_uppercase(),
-            args,
-        };
-        let frame = codec::encode_frame(&req)
-            .map_err(|e| SynapError::Other(format!("SynapRPC encode: {}", e)))?;
-
-        let mut guard = self.conn.lock().await;
-
-        for attempt in 0..2u8 {
-            if guard.is_none() || attempt == 1 {
-                *guard = Some(self.do_connect().await?);
-            }
-            let stream = guard.as_mut().expect("just set");
-
-            // Write the length-prefixed MessagePack frame (synap-protocol codec).
-            if stream.write_all(&frame).await.is_err() {
-                *guard = None;
-                if attempt == 0 {
-                    continue;
-                }
-                return Err(SynapError::Other("SynapRPC write failed".into()));
-            }
-
-            // Read response frame.
-            let mut len_buf = [0u8; 4];
-            if stream.read_exact(&mut len_buf).await.is_err() {
-                *guard = None;
-                if attempt == 0 {
-                    continue;
-                }
-                return Err(SynapError::Other("SynapRPC read failed".into()));
-            }
-            let resp_len = u32::from_le_bytes(len_buf) as usize;
-            if resp_len > 64 * 1024 * 1024 {
-                *guard = None;
-                return Err(SynapError::Other("SynapRPC frame too large".into()));
-            }
-            let mut resp_body = vec![0u8; resp_len];
-            if stream.read_exact(&mut resp_body).await.is_err() {
-                *guard = None;
-                if attempt == 0 {
-                    continue;
-                }
-                return Err(SynapError::Other("SynapRPC read body failed".into()));
-            }
-
-            let resp: RpcResponse = rmp_serde::from_slice(&resp_body)
-                .map_err(|e| SynapError::Other(format!("SynapRPC decode: {}", e)))?;
-
-            return resp.result.map_err(SynapError::ServerError);
-        }
-
-        Err(SynapError::Other(
-            "SynapRPC: exhausted reconnect attempts".into(),
-        ))
+        let client = self.client().await?;
+        client
+            .call(cmd.to_ascii_uppercase(), args)
+            .await
+            .map_err(map_client_error)
     }
 
-    /// Open a dedicated TCP connection, send SUBSCRIBE, and relay server-push
-    /// frames (`id == u32::MAX`) to the returned channel.
+    /// Open a dedicated connection, send SUBSCRIBE, and relay server-push
+    /// frames (`id == PUSH_ID`) to the returned subscription.
     ///
-    /// Returns `(subscriber_id, push_receiver)`.  The receiver yields each
-    /// push frame as a `serde_json::Value` with fields `topic`, `payload`,
-    /// `id`, and `timestamp`.  The background reader task exits when the TCP
-    /// connection closes or the receiver is dropped.
-    pub(crate) async fn subscribe_push(
-        &self,
-        topics: Vec<String>,
-    ) -> Result<(String, tokio::sync::mpsc::UnboundedReceiver<Value>)> {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let req = RpcRequest {
-            id,
-            command: "SUBSCRIBE".to_owned(),
-            args: topics.iter().map(|t| WireValue::Str(t.clone())).collect(),
-        };
-        let frame = codec::encode_frame(&req)
-            .map_err(|e| SynapError::Other(format!("SynapRPC subscribe encode: {}", e)))?;
+    /// The connection is dedicated so a subscription's push hook never competes
+    /// with the request path, and it is owned by the returned
+    /// [`PushSubscription`] — dropping that closes the socket and ends the
+    /// reader task, with no keeper task or liveness polling in between.
+    pub(crate) async fn subscribe_push(&self, topics: Vec<String>) -> Result<PushSubscription> {
+        let client = self.dial().await?;
 
-        // Dedicated connection — not the shared `conn`.
-        let mut stream = tokio::time::timeout(self.timeout, TcpStream::connect(&self.addr))
-            .await
-            .map_err(|_| SynapError::Timeout)?
-            .map_err(|e| SynapError::Other(format!("SynapRPC subscribe connect: {}", e)))?;
-
-        // Send SUBSCRIBE frame.
-        stream
-            .write_all(&frame)
-            .await
-            .map_err(|_| SynapError::Other("SynapRPC subscribe write failed".into()))?;
-
-        // Read the initial response (subscriber_id etc.).
-        let mut len_buf = [0u8; 4];
-        stream
-            .read_exact(&mut len_buf)
-            .await
-            .map_err(|_| SynapError::Other("SynapRPC subscribe read len failed".into()))?;
-        let resp_len = u32::from_le_bytes(len_buf) as usize;
-        if resp_len > 64 * 1024 * 1024 {
-            return Err(SynapError::Other(
-                "SynapRPC subscribe: initial response frame too large".into(),
-            ));
-        }
-        let mut resp_body = vec![0u8; resp_len];
-        stream
-            .read_exact(&mut resp_body)
-            .await
-            .map_err(|_| SynapError::Other("SynapRPC subscribe read body failed".into()))?;
-
-        let resp: RpcResponse = rmp_serde::from_slice(&resp_body)
-            .map_err(|e| SynapError::Other(format!("SynapRPC subscribe decode: {}", e)))?;
-        let result = resp.result.map_err(SynapError::ServerError)?;
-
-        // Extract subscriber_id from the Map response.
-        let subscriber_id = match &result {
-            WireValue::Map(pairs) => pairs
-                .iter()
-                .find_map(|(k, v)| {
-                    if k.as_str() == Some("subscriber_id") {
-                        v.as_str().map(str::to_owned)
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_default(),
-            _ => String::new(),
-        };
-
-        // Spawn a background task that relays push frames (id == u32::MAX).
-        let (push_tx, push_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
-        tokio::spawn(async move {
-            loop {
-                let mut len_buf = [0u8; 4];
-                if stream.read_exact(&mut len_buf).await.is_err() {
-                    break;
-                }
-                let frame_len = u32::from_le_bytes(len_buf) as usize;
-                if frame_len > 64 * 1024 * 1024 {
-                    break;
-                }
-                let mut frame_body = vec![0u8; frame_len];
-                if stream.read_exact(&mut frame_body).await.is_err() {
-                    break;
-                }
-                let resp: RpcResponse = match rmp_serde::from_slice(&frame_body) {
-                    Ok(r) => r,
-                    Err(_) => break,
-                };
-                // Only forward push frames (server sentinel id).
-                if resp.id == u32::MAX
-                    && let Ok(wire_val) = resp.result
-                    && push_tx.send(wire_val.to_json()).is_err()
-                {
-                    break; // receiver dropped
-                }
-                // Non-push frames on a dedicated subscription connection are
-                // unexpected; skip silently.
-            }
+        // Register the hook before SUBSCRIBE, so a message published between
+        // the server's reply and the registration cannot slip past.
+        let (push_tx, messages) = tokio::sync::mpsc::unbounded_channel::<Value>();
+        client.on_push(move |value| {
+            let _ = push_tx.send(value.to_json());
         });
 
-        Ok((subscriber_id, push_rx))
+        let result = client
+            .call(
+                "SUBSCRIBE",
+                topics.into_iter().map(WireValue::Str).collect(),
+            )
+            .await
+            .map_err(map_client_error)?;
+
+        let subscriber_id = result
+            .map_get("subscriber_id")
+            .and_then(WireValue::as_str)
+            .unwrap_or_default()
+            .to_owned();
+
+        Ok(PushSubscription {
+            subscriber_id,
+            messages,
+            _client: client,
+        })
     }
+}
+
+/// A live SUBSCRIBE, with the connection that serves it.
+///
+/// `messages` yields each push frame as a `serde_json::Value` with fields
+/// `topic`, `payload`, `id` and `timestamp`. Dropping the subscription drops
+/// the client, which closes the connection — so the subscription's lifetime is
+/// the connection's lifetime, stated in the type rather than managed by hand.
+pub(crate) struct PushSubscription {
+    pub(crate) subscriber_id: String,
+    pub(crate) messages: tokio::sync::mpsc::UnboundedReceiver<Value>,
+    _client: Arc<thunder::Client>,
 }
 
 // ── RESP3 transport ───────────────────────────────────────────────────────────

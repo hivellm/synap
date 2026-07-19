@@ -129,12 +129,55 @@ describe('toWireValue / fromWireValue (via SynapRpcTransport loopback)', () => {
     expect(result).toBe('hello');
   });
 
+  it('Buffer (non-UTF-8 bytes) survives the round trip as a Buffer', async () => {
+    // Decoding Bytes as UTF-8 unconditionally replaced every invalid sequence
+    // with U+FFFD, so a binary value came back corrupted and unrecoverable:
+    // deadbeef read back as adfdfd. Found by the cross-SDK interop matrix
+    // (scripts/interop/), where TypeScript was the only red binary cell.
+    const { server: s, port } = await makeEchoServer();
+    server = s;
+    transport = new SynapRpcTransport('127.0.0.1', port, 5000);
+
+    const binary = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
+    const result = await transport.execute('GET', [binary]);
+
+    expect(Buffer.isBuffer(result)).toBe(true);
+    expect((result as Buffer).equals(binary)).toBe(true);
+  });
+
   it('undefined → treated as null (Null) on wire', async () => {
     const { server: s, port } = await makeEchoServer();
     server = s;
     transport = new SynapRpcTransport('127.0.0.1', port, 5000);
     const result = await transport.execute('GET', [undefined]);
     expect(result).toBeNull();
+  });
+
+  it('rejects a length prefix above the frame cap without allocating the body', async () => {
+    // The pre-Thunder transport read the prefix and allocated whatever it
+    // claimed, so a hostile peer could make the client allocate gigabytes from
+    // 4 bytes. Thunder validates against the cap first.
+    const overCap = 512 * 1024 * 1024 + 1;
+
+    const { server: s, port } = await startServer((_chunk, write) => {
+      // Answer any request with a header claiming more than the cap — and send
+      // only the header, so a client that allocated first would hang forever
+      // waiting for a body that never comes.
+      const lenBuf = Buffer.allocUnsafe(4);
+      lenBuf.writeUInt32LE(overCap, 0);
+      write(lenBuf);
+    });
+    server = s;
+
+    const rssBefore = process.memoryUsage().rss;
+    transport = new SynapRpcTransport('127.0.0.1', port, 5000);
+
+    await expect(transport.execute('GET', ['k'])).rejects.toThrow();
+
+    // The claimed frame is 512 MiB; nothing close to that may have been
+    // allocated on the way to the rejection.
+    const growth = process.memoryUsage().rss - rssBefore;
+    expect(growth).toBeLessThan(64 * 1024 * 1024);
   });
 });
 

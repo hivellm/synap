@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "synap_sdk"
-version = "1.0.0"
+version = "1.2.0"
 description = "Official Python SDK for Synap - High-Performance In-Memory Key-Value Store & Message Broker"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -27,11 +27,18 @@ classifiers = [
 
 dependencies = [
     "httpx>=0.28.0",
-    "msgpack>=1.1.0",
+    # The shared binary RPC client — the same protocol the Synap server runs
+    # on, so the two ends of the wire cannot drift. It owns the MessagePack
+    # codec, so the SDK no longer depends on `msgpack` directly.
+    "hivellm-thunder>=0.2.1",
 ]
 
 [project.optional-dependencies]
 dev = [
+    # An independent MessagePack implementation, used by the transport tests to
+    # decode frames without going through Thunder — so they prove wire
+    # compatibility rather than mere self-consistency.
+    "msgpack>=1.1.0",
     "pytest>=9.0.0",
     "pytest-asyncio>=0.24.0",
     "pytest-cov>=6.0.0",
@@ -88,6 +95,13 @@ warn_unused_ignores = true
 warn_no_return = true
 no_implicit_reexport = true
 strict_equality = true
+
+# `thunder_rpc` is fully annotated but ships no `py.typed` marker, so PEP 561
+# makes type checkers ignore those annotations. Filed upstream as
+# hivellm/thunder#7; remove this override once a release includes the marker.
+[[tool.mypy.overrides]]
+module = "thunder_rpc.*"
+ignore_missing_imports = true
 
 [tool.ruff]
 target-version = "py311"

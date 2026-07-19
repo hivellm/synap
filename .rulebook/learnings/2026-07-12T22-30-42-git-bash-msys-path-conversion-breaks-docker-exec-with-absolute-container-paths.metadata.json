@@ -1,0 +1,17 @@
+{
+  "id": "2026-07-12T22-30-42-git-bash-msys-path-conversion-breaks-docker-exec-with-absolute-container-paths",
+  "title": "Git Bash MSYS path conversion breaks docker exec with absolute container paths",
+  "content": "Running `docker exec <container> /usr/local/bin/synap-server --health-check` from Git Bash on Windows fails with exit 127: MSYS rewrites the container-absolute path to `C:/Program Files/Git/usr/local/bin/synap-server` before docker sees it. The failure is silent inside `until` loops with output redirected — it looks like the probe never becomes healthy when in fact every exec is failing locally. Same MSYS mangling previously broke `icacls /reset` (converted `/reset` to a path). Fix: run such commands via PowerShell, or prefix with `MSYS_NO_PATHCONV=1`, or rely on Docker's own HEALTHCHECK status (`docker inspect --format \"{{.State.Health.Status}}\"`), which executes inside the container and is immune. Also validated in this task: a single-platform `docker buildx build --platform linux/arm64 --load` + the image's built-in HEALTHCHECK is a sufficient functional gate for QEMU-emulated arm64 images before publishing a multi-arch manifest (Synap arm64 boots with NEON SIMD runtime-detected; full workspace compile under QEMU took ~35 min with 5 cores).",
+  "source": "manual",
+  "relatedTask": "phase15_docker-multiarch-publish",
+  "tags": [
+    "docker",
+    "windows",
+    "git-bash",
+    "msys",
+    "multiarch",
+    "buildx",
+    "qemu"
+  ],
+  "createdAt": "2026-07-12T22:30:42.238Z"
+}
