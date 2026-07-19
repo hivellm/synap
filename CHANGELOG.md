@@ -5,7 +5,28 @@ All notable changes to Synap will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.2.0] - 2026-07-19
+
+Watching a key is now a first-class operation. `KV.WATCH` streams the resulting
+value on every mutation — so a watcher never has to re-`GET` — and all six SDKs
+expose it (`kv.watch()`), over the SynapRPC push bridge or the `/kv/ws`
+WebSocket. Documented in `docs/features/kv-watch.md`.
+
+The SynapRPC binary transport now runs on [Thunder](https://github.com/hivellm/thunder),
+the HiveLLM family's shared protocol, on both ends of the wire: the server
+listener and all six SDKs. Wire v1 is frozen and
+unchanged — a pre-1.2.0 client keeps working against a 1.2.0 server, verified by
+the `legacy` cell of the interop matrix rather than asserted.
+
+The **Go** and **PHP** SDKs are on Thunder too, and each now lives in its own
+repository — [`hivellm/synap-sdk-go`](https://github.com/hivellm/synap-sdk-go)
+(v1.2.0) and [`hivellm/synap-sdk-php`](https://github.com/hivellm/synap-sdk-php)
+(v1.2.1) — consumed here as submodules. All six SDKs run the same protocol
+implementation as the server, so no hand-written binary transport is left.
+
+Every cell of the interop matrix is green — rust, typescript, python, csharp,
+go, php, and a replay of the pre-Thunder wire. Full results:
+`docs/thunder-interop-matrix.md`.
 
 ### Added
 
@@ -95,6 +116,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **REST string writes no longer inject JSON quotes.** `APPEND`, `SETRANGE`
+  and `GETSET` encoded their operand with `serde_json::to_vec`, while `SET`
+  stores a string as raw UTF-8. Appending `cd` to a key holding `ab` therefore
+  produced `ab"cd"` — length 6, neither what the caller sent nor valid JSON.
+  All four writers now share one `encode_value_bytes` helper, so the rule is
+  stated once instead of re-implemented per handler.
+- **`SET` with `get: true` returns the previous value again.** The response
+  decoded `old_value` with `serde_json::from_slice(...).ok()`, but a value
+  stored as raw UTF-8 is not valid JSON, so the parse failed, `.ok()` discarded
+  the error and the field was omitted — silently, for every plain string. A
+  caller could not tell "no previous value" from "could not decode it". Reads
+  now use the inverse of the write rule; an omitted `old_value` once again
+  means only that the key was absent. Both defects shipped in 1.0.0
+  (`75f4cff`); the `GETSET` integration test had asserted the corrupted form
+  (`"\"initial\""`) as expected output, which is how they survived review.
 - **`SET` with options now fires notifications.** `KVStore::set_with_opts` —
   the path behind the server's SET handler — published neither keyspace nor
   watch events, so the primary write path was invisible to both. It now fires
@@ -109,24 +145,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`FLUSHDB` resets watch version counters.** Counters used to survive a
   flush, so a flushed key's next incarnation continued the old sequence instead
   of restarting at 1 as documented.
-
-## [1.2.0] - 2026-07-19
-
-The SynapRPC binary transport now runs on [Thunder](https://github.com/hivellm/thunder),
-the HiveLLM family's shared protocol, on both ends of the wire: the server
-listener and all six SDKs. Wire v1 is frozen and
-unchanged — a pre-1.2.0 client keeps working against a 1.2.0 server, verified by
-the `legacy` cell of the interop matrix rather than asserted.
-
-The **Go** and **PHP** SDKs are on Thunder too, and each now lives in its own
-repository — [`hivellm/synap-sdk-go`](https://github.com/hivellm/synap-sdk-go)
-(v1.2.0) and [`hivellm/synap-sdk-php`](https://github.com/hivellm/synap-sdk-php)
-(v1.2.1) — consumed here as submodules. All six SDKs run the same protocol
-implementation as the server, so no hand-written binary transport is left.
-
-Every cell of the interop matrix is green — rust, typescript, python, csharp,
-go, php, and a replay of the pre-Thunder wire. Full results:
-`docs/thunder-interop-matrix.md`.
 
 ### Removed
 

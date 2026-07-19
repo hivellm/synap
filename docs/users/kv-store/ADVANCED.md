@@ -129,10 +129,37 @@ curl -X POST http://localhost:15500/kv/persist/user:1
 
 ## String Operations
 
+### How values are encoded
+
+Every REST endpoint that writes a value follows one rule: a **JSON string is
+stored as raw UTF-8**, and any other JSON value (object, array, number,
+boolean) is stored in its JSON form. So `{"value": "cd"}` writes the two bytes
+`cd`, not the four bytes `"cd"`.
+
+This matters when you combine operations. Appending `cd` to a key holding `ab`
+gives exactly `abcd` — the operand is never wrapped in quotes on the way in:
+
+```bash
+curl -X POST http://localhost:15500/kv/set \
+  -H "Content-Type: application/json" \
+  -d '{"key": "user:1", "value": "ab"}'
+
+curl -X POST http://localhost:15500/kv/user:1/append \
+  -H "Content-Type: application/json" \
+  -d '{"value": "cd"}'
+
+curl http://localhost:15500/kv/get/user:1   # "abcd"
+```
+
+Reads apply the inverse: bytes that parse as JSON come back decoded, and bytes
+that do not come back as the string they are. A value that is not valid UTF-8
+cannot be represented in a JSON response — use the RESP3 or SynapRPC transport
+for binary values.
+
 ### Append
 
 ```bash
-curl -X POST http://localhost:15500/kv/append/user:1 \
+curl -X POST http://localhost:15500/kv/user:1/append \
   -H "Content-Type: application/json" \
   -d '{"value": " World"}'
 ```
@@ -140,13 +167,13 @@ curl -X POST http://localhost:15500/kv/append/user:1 \
 ### Get Range (GETRANGE)
 
 ```bash
-curl "http://localhost:15500/kv/getrange/user:1?start=0&end=4"
+curl "http://localhost:15500/kv/user:1/getrange?start=0&end=4"
 ```
 
 ### Set Range (SETRANGE)
 
 ```bash
-curl -X POST http://localhost:15500/kv/setrange/user:1 \
+curl -X POST http://localhost:15500/kv/user:1/setrange \
   -H "Content-Type: application/json" \
   -d '{
     "offset": 0,
@@ -157,12 +184,26 @@ curl -X POST http://localhost:15500/kv/setrange/user:1 \
 ### Get and Set (GETSET)
 
 ```bash
-curl -X POST http://localhost:15500/kv/getset/user:1 \
+curl -X POST http://localhost:15500/kv/user:1/getset \
   -H "Content-Type: application/json" \
   -d '{"value": "New Value"}'
 ```
 
 Returns old value and sets new value atomically.
+
+### Reading the previous value on SET
+
+`SET` with `"get": true` returns whatever the key held before, under
+`old_value`. The field is **omitted** when the key did not exist, so an absent
+`old_value` means "there was nothing here" — not "the value could not be
+decoded".
+
+```bash
+curl -X POST http://localhost:15500/kv/set \
+  -H "Content-Type: application/json" \
+  -d '{"key": "user:1", "value": "second", "get": true}'
+# {"success":true,"key":"user:1","written":true,"old_value":"first"}
+```
 
 ## Memory Operations
 

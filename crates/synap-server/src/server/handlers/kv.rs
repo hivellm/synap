@@ -1,5 +1,43 @@
 use super::*;
 
+/// Encode a request value the way the KV store expects it.
+///
+/// Strings are stored as **raw UTF-8** so a round trip returns the original
+/// string rather than a JSON-encoded form; everything else is JSON-encoded.
+/// Every handler that writes a value must use this, because the read side
+/// ([`decode_stored_value`]) is written against exactly this rule — `APPEND`
+/// used to JSON-encode instead, which turned `SET ab` + `APPEND cd` into
+/// `ab"cd"`.
+fn encode_value_bytes(value: &serde_json::Value) -> Result<Vec<u8>, SynapError> {
+    match value.as_str() {
+        Some(s) => Ok(s.as_bytes().to_vec()),
+        None => {
+            serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))
+        }
+    }
+}
+
+/// Render stored bytes back into JSON — the inverse of [`encode_value_bytes`].
+///
+/// A value written by the string branch is not valid JSON (`first`, not
+/// `"first"`), so parsing it as JSON is the *second* thing to try, not the
+/// first. Doing it the other way round silently dropped every plain string:
+/// the parse failed, the error was discarded, and the caller was told there
+/// had been no previous value at all.
+fn decode_stored_value(bytes: &[u8]) -> Option<serde_json::Value> {
+    match std::str::from_utf8(bytes) {
+        // Stored JSON (objects, arrays, numbers, booleans, null) round-trips
+        // through the parser; a bare string does not, and comes back as itself.
+        Ok(text) => Some(
+            serde_json::from_str::<serde_json::Value>(text)
+                .unwrap_or_else(|_| serde_json::Value::String(text.to_owned())),
+        ),
+        // Not UTF-8: it cannot be rendered as JSON at all. Callers that need
+        // binary values use the binary protocols, which never pass through here.
+        Err(_) => None,
+    }
+}
+
 /// SET endpoint - store a key-value pair
 pub async fn kv_set(
     State(state): State<AppState>,
@@ -18,13 +56,7 @@ pub async fn kv_set(
     let scoped_key =
         crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &req.key);
 
-    // Store strings as raw UTF-8 so round-trips return the original string,
-    // not a JSON-encoded form. Non-string values are JSON-encoded as before.
-    let value_bytes = if let Some(s) = req.value.as_str() {
-        s.as_bytes().to_vec()
-    } else {
-        serde_json::to_vec(&req.value).map_err(|e| SynapError::SerializationError(e.to_string()))?
-    };
+    let value_bytes = encode_value_bytes(&req.value)?;
 
     // Reject oversized values before any allocation in the store
     if let Some(max_bytes) = state.kv_store.config().max_value_size_bytes
@@ -133,9 +165,7 @@ pub async fn kv_set(
     }
 
     // Convert old_value bytes → JSON for the response
-    let old_value_json = result
-        .old_value
-        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+    let old_value_json = result.old_value.as_deref().and_then(decode_stored_value);
 
     Ok(Json(SetResponse {
         success: true,
@@ -359,8 +389,7 @@ pub async fn kv_append(
     let scoped_key =
         crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
 
-    let value_bytes = serde_json::to_vec(&req.value)
-        .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    let value_bytes = encode_value_bytes(&req.value)?;
 
     let length = state.kv_store.append(&scoped_key, value_bytes).await?;
 
@@ -438,8 +467,7 @@ pub async fn kv_setrange(
     let scoped_key =
         crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
 
-    let value_bytes = serde_json::to_vec(&req.value)
-        .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    let value_bytes = encode_value_bytes(&req.value)?;
 
     let length = state
         .kv_store
@@ -502,8 +530,7 @@ pub async fn kv_getset(
     let scoped_key =
         crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
 
-    let value_bytes = serde_json::to_vec(&req.value)
-        .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    let value_bytes = encode_value_bytes(&req.value)?;
 
     let old_value = state
         .kv_store

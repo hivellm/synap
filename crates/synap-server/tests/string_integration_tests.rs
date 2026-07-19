@@ -289,7 +289,11 @@ async fn test_string_getset_returns_previous_and_sets_new_value() {
         .json()
         .await
         .unwrap();
-    assert_eq!(value_new, "\"initial\"");
+    // Was `"\"initial\""`: GETSET JSON-encoded what it wrote while SET stored
+    // strings raw, so the value came back wearing quotes it was never given.
+    // The assertion right above (`value_str == "first"`) reads a SET-written
+    // value and expects no quotes — the same test disagreed with itself.
+    assert_eq!(value_new, "initial");
 
     let res = client
         .get(format!("{}/kv/get/string:getset", base_url))
@@ -297,7 +301,8 @@ async fn test_string_getset_returns_previous_and_sets_new_value() {
         .await
         .unwrap();
     let value_str: String = res.json().await.unwrap();
-    assert_eq!(value_str, "\"second\"");
+    // Was `"\"second\""`, for the same reason as `initial` above.
+    assert_eq!(value_str, "second");
 }
 
 #[tokio::test]
@@ -484,4 +489,189 @@ async fn test_string_setrange_creates_new_key_with_padding() {
     assert_eq!(zero_prefix, 3);
     assert!(value.contains("xyz"));
     assert_eq!(body["length"].as_u64().unwrap(), value.len() as u64);
+}
+
+// ── phase27: REST writers must encode strings the way SET does ──────────────
+//
+// These assert *equality*, not containment. The pre-existing tests above only
+// checked `contains("hello")`, which passes just as happily against the
+// corrupted `"hello"` (quotes included) that APPEND used to write — which is
+// precisely how the defect shipped in v1.0.0.
+
+#[tokio::test]
+async fn append_a_string_does_not_inject_json_quotes() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    client
+        .post(format!("{}/kv/set", base_url))
+        .json(&json!({"key": "enc:append", "value": "ab"}))
+        .send()
+        .await
+        .unwrap();
+
+    let res = client
+        .post(format!("{}/kv/enc:append/append", base_url))
+        .json(&json!({"value": "cd"}))
+        .send()
+        .await
+        .unwrap();
+    let body: serde_json::Value = res.json().await.unwrap();
+
+    let stored: String = client
+        .get(format!("{}/kv/get/enc:append", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(stored, "abcd", "APPEND must not JSON-encode the operand");
+    assert_eq!(body["length"].as_u64().unwrap(), 4);
+}
+
+#[tokio::test]
+async fn getset_stores_the_string_raw() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    client
+        .post(format!("{}/kv/set", base_url))
+        .json(&json!({"key": "enc:getset", "value": "first"}))
+        .send()
+        .await
+        .unwrap();
+
+    client
+        .post(format!("{}/kv/enc:getset/getset", base_url))
+        .json(&json!({"value": "second"}))
+        .send()
+        .await
+        .unwrap();
+
+    let stored: String = client
+        .get(format!("{}/kv/get/enc:getset", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(stored, "second", "GETSET must store the string raw");
+}
+
+#[tokio::test]
+async fn setrange_writes_the_string_raw() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    client
+        .post(format!("{}/kv/set", base_url))
+        .json(&json!({"key": "enc:setrange", "value": "hello world"}))
+        .send()
+        .await
+        .unwrap();
+
+    client
+        .post(format!("{}/kv/enc:setrange/setrange", base_url))
+        .json(&json!({"offset": 6, "value": "synap"}))
+        .send()
+        .await
+        .unwrap();
+
+    let stored: String = client
+        .get(format!("{}/kv/get/enc:setrange", base_url))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        stored, "hello synap",
+        "SETRANGE must not JSON-encode the operand"
+    );
+}
+
+#[tokio::test]
+async fn set_with_get_returns_a_previous_plain_string() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    client
+        .post(format!("{}/kv/set", base_url))
+        .json(&json!({"key": "enc:old", "value": "first"}))
+        .send()
+        .await
+        .unwrap();
+
+    let body: serde_json::Value = client
+        .post(format!("{}/kv/set", base_url))
+        .json(&json!({"key": "enc:old", "value": "second", "get": true}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        body["old_value"], "first",
+        "a previous string must survive to the response, not be dropped \
+         because its raw bytes are not valid JSON"
+    );
+    assert_eq!(body["written"], true);
+}
+
+#[tokio::test]
+async fn set_with_get_returns_a_previous_json_value() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    client
+        .post(format!("{}/kv/set", base_url))
+        .json(&json!({"key": "enc:oldjson", "value": {"a": 1}}))
+        .send()
+        .await
+        .unwrap();
+
+    let body: serde_json::Value = client
+        .post(format!("{}/kv/set", base_url))
+        .json(&json!({"key": "enc:oldjson", "value": "x", "get": true}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        body["old_value"],
+        json!({"a": 1}),
+        "a JSON-stored value must come back decoded, not as its source text"
+    );
+}
+
+#[tokio::test]
+async fn set_with_get_omits_old_value_when_the_key_was_absent() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    let body: serde_json::Value = client
+        .post(format!("{}/kv/set", base_url))
+        .json(&json!({"key": "enc:fresh", "value": "v", "get": true}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+
+    assert!(
+        body.get("old_value").is_none(),
+        "absent must stay absent, so it stays distinguishable from a real value"
+    );
 }
