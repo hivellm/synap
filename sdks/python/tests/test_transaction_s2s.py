@@ -8,6 +8,13 @@ import pytest
 from synap_sdk.client import SynapClient
 from synap_sdk.config import SynapConfig
 
+# Opt-in, matching the other *_s2s.py suites. Without this the module runs
+# unconditionally and fails wherever no server is listening on localhost:15500.
+pytestmark = pytest.mark.skipif(
+    os.getenv("SYNAP_S2S") != "true",
+    reason="S2S tests disabled (set SYNAP_S2S=true to enable)",
+)
+
 
 @pytest.fixture
 def client():

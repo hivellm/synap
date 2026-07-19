@@ -1,0 +1,279 @@
+name: Publish SDKs
+
+# Publishes the four SDKs that live in this repository to their registries when
+# a GitHub Release is published, or on demand for an existing tag.
+#
+# Auth differs per registry, by design:
+#   - crates.io  → API token (secrets.CARGO_REGISTRY_TOKEN) — crates.io has no
+#                  trusted-publishing flow, so this one stays a stored secret
+#   - npm        → Trusted Publisher (OIDC, no stored token)
+#   - PyPI       → Trusted Publisher (OIDC, no stored token)
+#   - NuGet      → Trusted Publisher (OIDC, no stored token)
+#
+# The OIDC jobs are the reason this is a separate workflow from release.yml:
+# `id-token: write` is granted per job here, so the binary-build jobs never see
+# a credential that could publish a package.
+#
+# NOT covered here — `sdks/go` and `sdks/php` are git submodules pointing at
+# their own repositories (hivellm/synap-sdk-go, hivellm/synap-sdk-php). Both
+# publish by tag on those repos (Go via the module proxy, PHP via the Packagist
+# webhook), so nothing in this repository can push them. Tag them there.
+#
+# Every job is independent: a registry outage on one does not block the others.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish from (e.g., v1.2.0)"
+        required: true
+        type: string
+      sdks:
+        description: "Which SDKs to publish"
+        required: false
+        default: all
+        type: choice
+        options: [all, rust, typescript, python, csharp]
+
+# Read-only by default; the two Trusted Publisher jobs widen this themselves.
+permissions:
+  contents: read
+
+env:
+  # `release:published` → github.ref_name holds the tag
+  # `workflow_dispatch`  → the free-form `tag` input above
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  # crates.io — API token.
+  publish-rust:
+    if: github.event_name == 'release' || inputs.sdks == 'all' || inputs.sdks == 'rust'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly
+
+      - uses: Swatinem/rust-cache@v2
+
+      # A tag and a manifest that disagree is how you ship a version whose
+      # contents are not what the number says. Fail before anything is built.
+      - name: Verify the manifest version matches the tag
+        run: |
+          version="${RELEASE_TAG#v}"
+          manifest=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "synap-sdk") | .version')
+          echo "tag=$version manifest=$manifest"
+          if [ "$manifest" != "$version" ]; then
+            echo "::error::synap-sdk is $manifest but the tag says $version"
+            exit 1
+          fi
+
+      - name: Check whether this version is already on crates.io
+        id: check
+        run: |
+          version="${RELEASE_TAG#v}"
+          if curl -sfo /dev/null -H 'User-Agent: synap-release-ci' \
+               "https://crates.io/api/v1/crates/synap-sdk/$version"; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::synap-sdk $version is already on crates.io — skipping"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Test
+        if: steps.check.outputs.published == 'false'
+        run: cargo test -p synap-sdk
+
+      - name: Publish
+        if: steps.check.outputs.published == 'false'
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish -p synap-sdk
+
+  # npm — Trusted Publisher (OIDC). No NODE_AUTH_TOKEN anywhere: npm mints a
+  # short-lived credential from the id-token below, and attaches provenance.
+  publish-typescript:
+    if: github.event_name == 'release' || inputs.sdks == 'all' || inputs.sdks == 'typescript'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: sdks/typescript
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm >= 11.5.1, which is newer than the npm
+      # bundled with any current Node LTS.
+      - name: Upgrade npm
+        run: npm install -g npm@latest
+
+      - name: Verify the manifest version matches the tag
+        run: |
+          version="${RELEASE_TAG#v}"
+          manifest=$(node -p "require('./package.json').version")
+          echo "tag=$version manifest=$manifest"
+          if [ "$manifest" != "$version" ]; then
+            echo "::error::@hivehub/synap is $manifest but the tag says $version"
+            exit 1
+          fi
+
+      - name: Check whether this version is already on npm
+        id: check
+        run: |
+          version="${RELEASE_TAG#v}"
+          if npm view "@hivehub/synap@$version" version > /dev/null 2>&1; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::@hivehub/synap $version is already on npm — skipping"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.check.outputs.published == 'false'
+        run: npm ci
+
+      # `prepublishOnly` reruns build + unit tests during `npm publish`; running
+      # them here too means a failure is attributed to the right step.
+      - name: Test
+        if: steps.check.outputs.published == 'false'
+        run: npm run test:unit
+
+      - name: Publish
+        if: steps.check.outputs.published == 'false'
+        run: npm publish
+
+  # PyPI — Trusted Publisher (OIDC). Configure the publisher on PyPI against
+  # this repository, this workflow filename, and the environment below.
+  publish-python:
+    if: github.event_name == 'release' || inputs.sdks == 'all' || inputs.sdks == 'python'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify the manifest version matches the tag
+        working-directory: sdks/python
+        run: |
+          version="${RELEASE_TAG#v}"
+          manifest=$(python -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          echo "tag=$version manifest=$manifest"
+          if [ "$manifest" != "$version" ]; then
+            echo "::error::synap_sdk is $manifest but the tag says $version"
+            exit 1
+          fi
+
+      - name: Check whether this version is already on PyPI
+        id: check
+        run: |
+          version="${RELEASE_TAG#v}"
+          if curl -sfo /dev/null "https://pypi.org/pypi/synap-sdk/$version/json"; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::synap-sdk $version is already on PyPI — skipping"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install dependencies
+        if: steps.check.outputs.published == 'false'
+        working-directory: sdks/python
+        run: |
+          python -m pip install --upgrade pip build
+          python -m pip install -e ".[dev]"
+
+      # `--no-cov` on purpose. pyproject sets `fail_under = 95`, but the s2s
+      # suites skip without a live Synap server, which drags measured coverage
+      # to ~69% and would fail every publish. Coverage is gated where a server
+      # is available; what gates a publish here is that the tests pass.
+      - name: Test
+        if: steps.check.outputs.published == 'false'
+        working-directory: sdks/python
+        run: pytest --no-cov
+
+      - name: Build distributions
+        if: steps.check.outputs.published == 'false'
+        working-directory: sdks/python
+        run: python -m build
+
+      - name: Publish
+        if: steps.check.outputs.published == 'false'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdks/python/dist
+
+  # NuGet — Trusted Publisher (OIDC). `NuGet/login` exchanges the id-token below
+  # for a short-lived API key, so no long-lived key is stored in this repo.
+  # `vars.NUGET_USER` must hold the nuget.org account that owns the policy.
+  publish-csharp:
+    if: github.event_name == 'release' || inputs.sdks == 'all' || inputs.sdks == 'csharp'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        working-directory: sdks/csharp
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Verify the manifest version matches the tag
+        run: |
+          version="${RELEASE_TAG#v}"
+          manifest=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' src/Synap.SDK/Synap.SDK.csproj | head -1)
+          echo "tag=$version manifest=$manifest"
+          if [ "$manifest" != "$version" ]; then
+            echo "::error::HiveLLM.Synap.SDK is $manifest but the tag says $version"
+            exit 1
+          fi
+
+      - name: Test
+        run: dotnet test --configuration Release
+
+      - name: Pack
+        run: dotnet pack src/Synap.SDK/Synap.SDK.csproj --configuration Release --output ./artifacts
+
+      - name: Exchange the OIDC token for a short-lived NuGet key
+        uses: NuGet/login@v1
+        id: nuget-login
+        with:
+          user: ${{ vars.NUGET_USER }}
+
+      # `--skip-duplicate` makes a rerun a no-op instead of an error when the
+      # version is already on NuGet.
+      - name: Publish
+        run: |
+          dotnet nuget push ./artifacts/*.nupkg \
+            --source https://api.nuget.org/v3/index.json \
+            --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}" \
+            --skip-duplicate

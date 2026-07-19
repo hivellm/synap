@@ -9,10 +9,13 @@ import pytest
 from synap_sdk import SynapClient, SynapConfig
 
 SYNAP_URL = os.getenv('SYNAP_URL', 'http://localhost:15500')
-SKIP_S2S = not os.getenv('SYNAP_URL') and not os.getenv('CI')
+# Opt-in, matching test_pubsub_s2s.py and test_rpc_parity_s2s.py. Keying off
+# `CI` instead would make these run on every CI provider that sets it — where
+# there is no server on localhost:15500 — turning a skip into a failure.
+SKIP_S2S = os.getenv('SYNAP_S2S') != 'true'
 
 
-@pytest.mark.skipif(SKIP_S2S, reason='S2S tests require SYNAP_URL or CI env')
+@pytest.mark.skipif(SKIP_S2S, reason='S2S tests disabled (set SYNAP_S2S=true to enable)')
 class TestBitmapS2S:
     @pytest.fixture
     def client(self):
