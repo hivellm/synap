@@ -7,7 +7,7 @@
       on the reserved push id, and non-UTF-8 strings packed as `str`). Java support was
       dropped entirely on 2026-07-19 (owner's call), so there is no Java cell
 - [x] 1.5 Run the legacy cell: a pre-Thunder SDK build against the new server, proving int-array `Bytes` tolerance
-- [x] 1.6 Record the full matrix result in `docs/thunder-interop-matrix.md`
+- [x] 1.6 Record the full matrix result in `docs/protocol/thunder-interop-matrix.md`
 
 ## 2. Failures
 
@@ -36,10 +36,20 @@
       so this step has no artifact to publish. It also matches the current direction across the
       family: no `-protocol` crate gets published to crates.io
 - [x] 3.5 Run the full quality gate: clippy clean, 89 Rust test binaries green, TypeScript 370, Python 181, C# 102, Go green. The s2s/integration suites in TypeScript, Python and PHP need a live server on the default ports and did not run here; Python's 95% coverage gate fails at 68.98% as a direct consequence of those skips, not of this change
-- [ ] 3.6 Tag `v1.2.0` and verify the release artifacts build
+- [x] 3.6 Tag `v1.2.0` and verify the release artifacts build — tag `v1.2.0` cut from `d9db28c`
+      and the GitHub Release published 2026-07-19. The `Release` workflow (run 29683010668)
+      went green on all five target jobs and attached 20 assets: `synap-server` and `synap-cli`
+      for x86_64/aarch64 linux-gnu, x86_64/aarch64 apple-darwin and x86_64 windows-msvc, each
+      with its `.sha256`. Preconditions on the release commit were all green: `cargo fmt --check`,
+      `cargo clippy --workspace --all-targets -D warnings`, the full `cargo test --workspace`
+      (0 failures), and Rust CI / Rust Linting / Codespell on `d9db28c`
 
 ## 4. Tail (docs + tests — check or waive with tailWaiver)
 
-- [x] 4.1 Update or create documentation covering the implementation — `docs/thunder-interop-matrix.md` records the run and every open cell; `scripts/interop/README.md` covers how to re-run it and how to add a language
-- [x] 4.2 Write tests covering the new behavior — `.github/workflows/interop-matrix.yml` runs the matrix on any change to the protocol, the SDKs or the harness. Regression tests were also added at the unit level for each fix: two in `sdk_rpc_e2e_tests.rs` (structured round trip, and that a JSON-looking string is not reinterpreted) and one in the TypeScript transport suite (non-UTF-8 Buffer survives)
+- [x] 4.1 Update or create documentation covering the implementation — `docs/protocol/thunder-interop-matrix.md` records the run and every open cell; `scripts/interop/README.md` covers how to re-run it and how to add a language
+- [x] 4.2 Write tests covering the new behavior — the matrix harness lives in `scripts/interop/`
+      and is run on demand (`scripts/interop/README.md` covers how). It *was* wired to CI as
+      `.github/workflows/interop-matrix.yml`, but that workflow was removed on 2026-07-19
+      (owner's call, commit `d9db28c`), so the matrix is no longer a per-push gate. What does
+      gate every push are the unit-level regression tests added for each fix: two in `sdk_rpc_e2e_tests.rs` (structured round trip, and that a JSON-looking string is not reinterpreted) and one in the TypeScript transport suite (non-UTF-8 Buffer survives)
 - [x] 4.3 Run tests and confirm they pass — clippy clean; 89 Rust test binaries, TypeScript 370, Python 181, C# 102, Go all green; matrix green on rust, typescript, python, csharp, php and legacy
