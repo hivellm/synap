@@ -1,0 +1,16 @@
+{
+  "id": "containment-assertions-hide-encoding-corruption",
+  "type": "anti-pattern",
+  "title": "Containment assertions hide encoding corruption",
+  "category": "testing",
+  "description": "The REST APPEND/SETRANGE/GETSET handlers JSON-encoded string operands while SET stored them raw, so `SET ab` + `APPEND cd` produced `ab\"cd\"`. It shipped in 1.0.0 and survived review because the tests could not see it: test_string_append asserted `stored_value.contains(\"hello\")`, which is equally true of the corrupted `\"hello\"`. Worse, the GETSET test pinned the corruption as expected output (assert_eq!(value_new, \"\\\"initial\\\"\")) two lines after asserting the un-quoted form for a SET-written value — the test contradicted itself and was trusted anyway. Rules: (1) for anything involving encoding/serialization, assert full equality, never `contains`; (2) when two assertions in one test disagree about the same data's shape, that is a bug report, not a quirk to encode; (3) put an encode/decode rule in ONE helper with its inverse documented next to it — four handlers re-implementing it is what let them drift. Fixed in 8e5b4f9 via encode_value_bytes/decode_stored_value.",
+  "createdAt": "2026-07-19T10:01:17.166Z",
+  "tags": [
+    "rest-api",
+    "testing",
+    "serialization",
+    "kv",
+    "phase27"
+  ],
+  "source": "manual"
+}
