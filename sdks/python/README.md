@@ -174,6 +174,26 @@ stats = await client.kv.stats()
 await client.kv.delete("session:abc")
 ```
 
+### KV Watch
+
+Observe a key — or a wildcard pattern — and receive its **new value** on every
+change, without polling. Requires the `synap://` transport; closing the
+iterator issues `KV.UNWATCH`:
+
+```python
+# Watch one key, or a whole prefix
+async for event in client.kv.watch("user:*"):
+    # event: WatchEvent(key, event, version, value, truncated)
+    print(event.event, event.key, event.version, event.value)
+
+# Notify-only mode: change signals without value bandwidth (re-GET on demand)
+async for event in client.kv.watch("hot:key", mode="notify"):
+    value = await client.kv.get(event.key)
+```
+
+Delivery is best-effort, latest-value; `WatchEvent.version` resets when the key
+is deleted, expires or is evicted — version 1 marks a new incarnation.
+
 ### Message Queues
 
 ```python

@@ -21,6 +21,8 @@ SDK's command mappers speak.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 from typing import Any
 
 from thunder_rpc import (
@@ -256,6 +258,73 @@ class SynapRpcTransport:
         def cancel() -> None:
             """Close the push connection, ending its reader task."""
             asyncio.ensure_future(client.close())  # noqa: RUF006
+
+        return subscriber_id, cancel
+
+    async def watch_push(
+        self,
+        pattern: str,
+        mode: str,
+        on_event: Any,  # Callable[[dict[str, Any]], None]  # noqa: ANN401
+    ) -> tuple[str, Any]:
+        """Open a dedicated push connection driven by ``KV.WATCH``.
+
+        The watch twin of :meth:`subscribe_push`. The push hook is registered
+        *before* ``KV.WATCH`` is sent, so an event published between the
+        server's acknowledgement and the reader starting cannot be lost.
+
+        Args:
+            pattern: Key or wildcard pattern to watch (e.g. ``"user:*"``).
+            mode: ``"value"`` (envelopes carry the value) or ``"notify"``.
+            on_event: Callback invoked with each decoded watch envelope dict
+                (``{key, event, version, value?, truncated?}``).
+
+        Returns:
+            A ``(subscriber_id, cancel_fn)`` tuple. ``cancel_fn()`` issues
+            ``KV.UNWATCH`` (best-effort) and closes the connection.
+        """
+        client = await self._dial()
+
+        def _handle_push(value: Value) -> None:
+            frame = _from_wire(value)
+            if not isinstance(frame, dict):
+                return
+            # The bridge encodes the envelope as a JSON string.
+            payload = frame.get("payload")
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except ValueError:
+                    return
+            if isinstance(payload, dict):
+                on_event(payload)
+
+        client.on_push(_handle_push)
+
+        args = [Value.str(pattern)]
+        if mode != "value":
+            args.append(Value.str(mode))
+        try:
+            result = await client.call("KV.WATCH", args)
+        except ThunderError as exc:
+            await client.close()
+            raise _to_synap_exception(exc) from exc
+
+        subscriber_id_value = result.map_get("subscriber_id")
+        subscriber_id = (
+            subscriber_id_value.as_str() if subscriber_id_value is not None else None
+        ) or ""
+
+        def cancel() -> None:
+            """Issue ``KV.UNWATCH`` and close the push connection."""
+
+            async def _teardown() -> None:
+                # Best-effort: closing the connection unwinds it anyway.
+                with contextlib.suppress(ThunderError):
+                    await client.call("KV.UNWATCH", [Value.str(subscriber_id)])
+                await client.close()
+
+            asyncio.ensure_future(_teardown())  # noqa: RUF006
 
         return subscriber_id, cancel
 

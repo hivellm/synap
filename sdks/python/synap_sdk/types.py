@@ -42,3 +42,28 @@ class StreamEvent:
     data: Any
     timestamp: int = 0
     room: str | None = None
+
+
+@dataclass
+class WatchEvent:
+    """One KV watch envelope (``docs/kv-watch.md`` in the server repository).
+
+    ``value`` is the **post-mutation** value and is ``None`` for terminal
+    events (``del``, ``expired``, ``evicted``), TTL-only events (``expire``,
+    ``persist``), and envelopes degraded to notify-only (``truncated=True``).
+
+    Attributes:
+        key: The key that changed
+        event: What happened (``set``, ``del``, ``expired``, ``evicted``, ...)
+        version: Per-key counter for gap detection; resets when the key is
+            deleted, expires or is evicted — version 1 marks a new incarnation
+        value: The post-mutation value, when inlined
+        truncated: True when the value was withheld (over the inline cap, or
+            not UTF-8)
+    """
+
+    key: str
+    event: str
+    version: int
+    value: str | None = None
+    truncated: bool = False

@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, TypeVar
+
+from synap_sdk.exceptions import SynapException
+from synap_sdk.types import WatchEvent
 
 if TYPE_CHECKING:
     from synap_sdk.client import SynapClient
@@ -172,3 +178,61 @@ class KVStore:
             Statistics as a dictionary
         """
         return await self._client.send_command("kv.stats", {})
+
+    async def watch(
+        self,
+        pattern: str,
+        *,
+        mode: str = "value",
+        queue_size: int = 256,
+    ) -> AsyncIterator[WatchEvent]:
+        """Watch a key (or wildcard pattern) and yield its change events.
+
+        Requires the SynapRPC transport (``synap://`` URL). Delivery is
+        best-effort, latest-value: a watcher that cannot keep up is
+        disconnected by the server and must re-``get`` and re-watch. Use
+        :attr:`WatchEvent.version` to detect gaps. Closing the iterator issues
+        ``KV.UNWATCH``.
+
+        Args:
+            pattern: Key or wildcard pattern (e.g. ``"user:*"``).
+            mode: ``"value"`` (default) or ``"notify"`` — notify envelopes
+                carry no value, so a watcher that only wants change signals
+                pays no value bandwidth.
+            queue_size: Internal queue depth for the push path.
+
+        Yields:
+            :class:`~synap_sdk.types.WatchEvent` per key change.
+
+        Raises:
+            SynapException: When the client is not on the SynapRPC transport.
+
+        Example:
+            >>> async for event in client.kv.watch("user:*"):
+            ...     print(event.event, event.key, event.version, event.value)
+        """
+        rpc = self._client.synap_rpc_transport()
+        if rpc is None:
+            msg = "kv.watch requires the synap:// transport; over HTTP use the /kv/ws WebSocket endpoint"
+            raise SynapException(msg)
+
+        queue: asyncio.Queue[WatchEvent] = asyncio.Queue(maxsize=queue_size)
+
+        def _on_event(envelope: dict[str, Any]) -> None:
+            event = WatchEvent(
+                key=str(envelope.get("key", "")),
+                event=str(envelope.get("event", "")),
+                version=int(envelope.get("version", 0)),
+                value=envelope.get("value"),
+                truncated=bool(envelope.get("truncated", False)),
+            )
+            # Best-effort: the server-side slow-consumer policy is the authority.
+            with contextlib.suppress(asyncio.QueueFull):
+                queue.put_nowait(event)
+
+        _, cancel = await rpc.watch_push(pattern, mode, _on_event)
+        try:
+            while True:
+                yield await queue.get()
+        finally:
+            cancel()
