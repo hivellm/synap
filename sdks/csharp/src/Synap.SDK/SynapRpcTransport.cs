@@ -219,6 +219,92 @@ internal sealed class SynapRpcTransport : ITransport
         }
     }
 
+    /// <summary>
+    /// Opens a dedicated push connection driven by <c>KV.WATCH</c> and yields
+    /// each raw envelope JSON string — the watch twin of
+    /// <see cref="SubscribePushAsync"/>.
+    /// </summary>
+    /// <remarks>
+    /// The push hook is registered before <c>KV.WATCH</c> is sent, so an event
+    /// published between the server's acknowledgement and the reader starting
+    /// cannot be lost. On the way out — cancellation, abandoned enumeration or
+    /// a faulted stream — <c>KV.UNWATCH</c> is issued best-effort before the
+    /// dedicated connection closes.
+    /// </remarks>
+    /// <param name="pattern">Key or wildcard pattern (e.g. <c>user:*</c>).</param>
+    /// <param name="mode"><c>value</c> or <c>notify</c>.</param>
+    /// <param name="cancellationToken">Token used to stop the stream.</param>
+    /// <returns>An async stream of envelope JSON strings.</returns>
+    internal async IAsyncEnumerable<string> WatchPushAsync(
+        string pattern,
+        string mode,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(pattern);
+
+        var client = await DialAsync(cancellationToken).ConfigureAwait(false);
+        var subscriberId = string.Empty;
+        try
+        {
+            var channel = Channel.CreateUnbounded<string>(
+                new UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+
+            client.OnPush(value =>
+            {
+                // The bridge encodes the envelope as a JSON string.
+                var payload = value.MapGet("payload")?.AsStr();
+                if (payload is not null)
+                {
+                    channel.Writer.TryWrite(payload);
+                }
+            });
+
+            var args = mode == "value"
+                ? new[] { Value.Str(pattern) }
+                : new[] { Value.Str(pattern), Value.Str(mode) };
+            try
+            {
+                var result = await client.CallAsync("KV.WATCH", args, cancellationToken)
+                    .ConfigureAwait(false);
+                subscriberId = result.MapGet("subscriber_id")?.AsStr() ?? string.Empty;
+            }
+            catch (ThunderException ex)
+            {
+                throw ToSynapException(ex);
+            }
+
+            await foreach (var envelope in channel.Reader
+                .ReadAllAsync(cancellationToken)
+                .ConfigureAwait(false))
+            {
+                yield return envelope;
+            }
+        }
+        finally
+        {
+            // Teardown issues KV.UNWATCH so the server drops the routing entry
+            // promptly; closing the connection unwinds it anyway, so failures
+            // here are swallowed. The caller's token is likely already
+            // cancelled, hence CancellationToken.None.
+            if (subscriberId.Length > 0)
+            {
+                try
+                {
+                    await client.CallAsync(
+                        "KV.UNWATCH",
+                        new[] { Value.Str(subscriberId) },
+                        CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (ThunderException)
+                {
+                    // The connection may already be gone.
+                }
+            }
+
+            client.Close();
+        }
+    }
+
     /// <summary>Map a Thunder error onto the SDK's exception type.</summary>
     /// <remarks>
     /// <c>NOAUTH</c> / <c>WRONGPASS</c> / <c>NOPERM</c> arrive as

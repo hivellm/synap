@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace Synap.SDK.Modules;
 
@@ -191,6 +191,41 @@ public sealed class KVStore
         }
 
         return new List<string>();
+    }
+
+    /// <summary>
+    /// Watches a key (or wildcard pattern) and streams its change events.
+    /// </summary>
+    /// <remarks>
+    /// Requires the <c>synap://</c> transport (SynapRPC server push). Delivery
+    /// is best-effort, latest-value: a watcher that cannot keep up is
+    /// disconnected by the server and must re-<c>GET</c> and re-watch. Use
+    /// <see cref="Types.WatchEvent.Version"/> to detect gaps. Cancelling the
+    /// enumeration issues <c>KV.UNWATCH</c> and closes the push connection.
+    /// </remarks>
+    /// <param name="pattern">Key or wildcard pattern (e.g. <c>user:*</c>).</param>
+    /// <param name="mode">Delivery mode; <see cref="Types.WatchMode.Notify"/> strips values server-side.</param>
+    /// <param name="cancellationToken">Token used to stop the stream.</param>
+    /// <returns>An async stream of <see cref="Types.WatchEvent"/>.</returns>
+    /// <exception cref="Exceptions.SynapException">When the client is not on the SynapRPC transport.</exception>
+    public async IAsyncEnumerable<Types.WatchEvent> WatchAsync(
+        string pattern,
+        Types.WatchMode mode = Types.WatchMode.Value,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var rpc = _client.GetSynapRpcTransport()
+            ?? throw Exceptions.SynapException.ServerError(
+                "kv watch requires the synap:// transport; over HTTP use the /kv/ws WebSocket endpoint");
+
+        var modeArg = mode == Types.WatchMode.Notify ? "notify" : "value";
+        await foreach (var envelope in rpc.WatchPushAsync(pattern, modeArg, cancellationToken).ConfigureAwait(false))
+        {
+            var decoded = Types.WatchEvent.FromJson(envelope);
+            if (decoded is not null)
+            {
+                yield return decoded;
+            }
+        }
     }
 }
 

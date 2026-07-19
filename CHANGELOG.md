@@ -50,6 +50,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the iterator issues `KV.UNWATCH`. PHP (in `hivellm/synap-sdk-php`):
   `kv()->watch($pattern, $onEvent, $mode)` plus a `watchEvents` Generator,
   with a `WatchEvent` value object and the same UNWATCH-on-exit semantics.
+- **`kv.watch()` in the C# and Go SDKs.** C#:
+  `client.KV.WatchAsync(pattern, mode, ct)` is an `IAsyncEnumerable` of the
+  new `WatchEvent` record; cancelling the enumeration issues `KV.UNWATCH`
+  before the dedicated connection closes. Go (in `hivellm/synap-sdk-go`):
+  `client.KV().Watch(ctx, pattern, opts...)` returns a `WatchEvent` channel
+  with `WithNotifyMode()`, unwinding on context cancel. With these, all six
+  SDKs expose watch.
 - **In-segment pub/sub globs.** A `*` embedded in a topic segment (`user:*`,
   `sensor-*-temp`) now globs within that level; previously `*` only matched a
   whole `.`-segment, which made wildcard watch impossible for Redis-style `:`

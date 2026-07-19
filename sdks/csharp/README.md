@@ -171,6 +171,32 @@ var keys = await client.KV.ScanAsync("user:*", limit: 100);
 var stats = await client.KV.StatsAsync();
 ```
 
+### KV Watch (Reactive)
+
+Observe a key — or a wildcard pattern — and receive its **new value** on every
+change, without polling. Requires the `synap://` transport; cancelling the
+enumeration issues `KV.UNWATCH`:
+
+```csharp
+using var cts = new CancellationTokenSource();
+
+// Watch one key, or a whole prefix
+await foreach (var e in client.KV.WatchAsync("user:*", cancellationToken: cts.Token))
+{
+    // e: WatchEvent { Key, Event, Version, Value, Truncated }
+    Console.WriteLine($"{e.Event} {e.Key} v{e.Version} = {e.Value}");
+}
+
+// Notify-only mode: change signals without value bandwidth (re-GET on demand)
+await foreach (var e in client.KV.WatchAsync("hot:key", WatchMode.Notify, cts.Token))
+{
+    var current = await client.KV.GetAsync<string>(e.Key);
+}
+```
+
+Delivery is best-effort, latest-value; `Version` resets when the key is
+deleted, expires or is evicted — version 1 marks a new incarnation.
+
 ### Message Queues
 
 ```csharp
