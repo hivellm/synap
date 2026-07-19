@@ -1,0 +1,19 @@
+{
+  "id": "scrape-time-broker-gauge-snapshot-with-reset",
+  "type": "pattern",
+  "title": "Scrape-time broker gauge snapshot with reset",
+  "category": "observability",
+  "description": "To expose live broker state (stream length, consumer lag, queue depth) as Prometheus gauges without instrumenting every mutation, inject State<AppState> into the /metrics handler and, on each scrape, call reset_broker_gauges() then repopulate every IntGaugeVec by enumerating the managers (list_rooms/room_stats, list_topics/topic_stats, list_groups/get_offset, list_queues/stats). The reset is essential: gauges keep the last value per label set forever, so a deleted stream/group/queue would otherwise report a frozen stale value. Consumer lag = partition end_offset (high-water-mark) − committed offset, saturating at 0.",
+  "example": "pub async fn update_broker_metrics(state: &AppState) {\n    crate::metrics::reset_broker_gauges();\n    if let Some(sm) = &state.stream_manager {\n        for room in sm.list_rooms().await {\n            if let Ok(s) = sm.room_stats(&room).await {\n                set_stream_gauges(&room, s.message_count as i64, s.max_offset as i64, s.subscriber_count as i64);\n            }\n        }\n    } /* partitions, consumer groups (lag = end - committed), queues … */\n}",
+  "whenToUse": "Exposing current-state broker/registry metrics that are cheap to snapshot on demand.",
+  "whenNotToUse": "High-cardinality or expensive-to-compute state, or rates/counters (use counters incremented at the event site instead).",
+  "createdAt": "2026-07-01T13:08:57.800Z",
+  "tags": [
+    "metrics",
+    "prometheus",
+    "streams",
+    "consumer-groups",
+    "issue-196"
+  ],
+  "source": "manual"
+}
