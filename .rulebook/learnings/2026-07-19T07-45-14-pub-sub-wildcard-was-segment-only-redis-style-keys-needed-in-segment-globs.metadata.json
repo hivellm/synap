@@ -1,0 +1,15 @@
+{
+  "id": "2026-07-19T07-45-14-pub-sub-wildcard-was-segment-only-redis-style-keys-needed-in-segment-globs",
+  "title": "Pub/sub wildcard was segment-only; Redis-style keys needed in-segment globs",
+  "content": "Analysis F-011 claimed wildcard KV watch was free via PubSubRouter's existing matching. False: the matcher is MQTT-style (split on '.', '*' matches one whole segment), so 'user:*' compiled to Exact(\"user:*\") and matched nothing — keys use ':' and never split. Fixed with SegmentMatcher::Glob (pieces around '*', prefix/suffix-anchored greedy match), purely additive since embedded-star patterns previously only matched a literal-star topic. Lesson: validate an analysis claim of 'existing infra covers it' at the exact syntax level (delimiter, segmenting) before promising the feature; also KV.WATCH exists (not WATCH) because WATCH is the transaction command with an indistinguishable arg shape.",
+  "source": "manual",
+  "relatedTask": "phase22_kv-watch-server-endpoints",
+  "tags": [
+    "kv-watch",
+    "pubsub",
+    "wildcards",
+    "phase22",
+    "analysis:kv-watch-observable"
+  ],
+  "createdAt": "2026-07-19T07:45:14.649Z"
+}
