@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-19
+
+The SynapRPC binary transport now runs on [Thunder](https://github.com/hivellm/thunder),
+the HiveLLM family's shared protocol, on both ends of the wire: the server
+listener and the Rust, TypeScript, Python and C# SDKs. Wire v1 is frozen and
+unchanged — a pre-1.1.0 client keeps working against a 1.1.0 server, verified by
+the `legacy` cell of the interop matrix rather than asserted.
+
+**Not on Thunder in this release:** the Go and Java SDKs keep their hand-written
+transports, because Thunder has no package for them yet
+([thunder#9](https://github.com/hivellm/thunder/issues/9)). Both received wire
+and authentication fixes here and interoperate, with one documented limitation:
+**the Go SDK cannot carry a binary value over `synap://`** — `sendRPC` marshals
+the payload through `encoding/json`, which replaces invalid UTF-8 with U+FFFD
+before the value is framed. Use a UTF-8 value, or the HTTP transport, until Go
+moves onto Thunder. The Java cell of the matrix is unverified for lack of a
+toolchain. Full results: `docs/thunder-interop-matrix.md`.
+
 ### Changed
 
 - **SynapRPC now runs on [Thunder](https://github.com/hivellm/thunder)
@@ -3192,7 +3210,9 @@ These limitations will be addressed in future phases.
 - Documentation
 - Security
 
-[Unreleased]**: https://github.com/hivellm/synap/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/hivellm/synap/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/hivellm/synap/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/hivellm/synap/compare/v0.8.1...v1.0.0
 [0.8.1]: https://github.com/hivellm/synap/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/hivellm/synap/compare/v0.7.0-rc2...v0.8.0
 [0.7.0-rc2]: https://github.com/hivellm/synap/compare/v0.7.0-rc1...v0.7.0-rc2

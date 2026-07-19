@@ -1,0 +1,97 @@
+name: Interop Matrix
+
+# Cross-SDK regression gate for the SynapRPC wire.
+#
+# Each SDK's own suite runs elsewhere and passes in isolation. This is the only
+# job that starts one server build and measures every client against it, so a
+# change that desynchronises an SDK from the server fails here rather than in a
+# user's deployment. It is also what caught the missing AUTH, the lossy Bytes
+# decode and the reserved-push-id SUBSCRIBE — see docs/thunder-interop-matrix.md.
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'crates/synap-server/src/protocol/**'
+      - 'sdks/**'
+      - 'scripts/interop/**'
+      - '.github/workflows/interop-matrix.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'crates/synap-server/src/protocol/**'
+      - 'sdks/**'
+      - 'scripts/interop/**'
+      - '.github/workflows/interop-matrix.yml'
+  workflow_dispatch:
+
+jobs:
+  matrix:
+    name: Every SDK against one server
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@nightly
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, sockets
+
+      # The driver needs the release binary; it refuses to run without it.
+      - name: Build the server
+        run: cargo build --release -p synap-server
+
+      - name: Build the Rust interop client
+        run: cargo build --release -p synap-sdk --example interop
+
+      - name: Build the TypeScript SDK
+        working-directory: sdks/typescript
+        run: npm ci && npm run build
+
+      - name: Install the Python SDK dependencies
+        working-directory: sdks/python
+        run: pip install -e .
+
+      - name: Install the PHP SDK dependencies
+        working-directory: sdks/php
+        run: composer install --no-interaction --no-progress
+
+      - name: Run the matrix
+        # java is excluded deliberately: its transport has no Thunder package
+        # and no AUTH path, so it is tracked as unverified in
+        # docs/thunder-interop-matrix.md rather than gating every push.
+        run: |
+          python scripts/interop/run-matrix.py \
+            rust typescript python csharp php legacy \
+            --json interop-results.json
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: interop-results
+          path: interop-results.json

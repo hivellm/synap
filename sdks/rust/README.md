@@ -22,7 +22,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-synap-sdk = "1.0"
+synap-sdk = "1.1"
 tokio = { version = "1", features = ["full"] }
 ```
 
