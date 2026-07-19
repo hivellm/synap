@@ -4,15 +4,13 @@ name: Publish SDKs
 # a GitHub Release is published, or on demand for an existing tag.
 #
 # Auth differs per registry, by design:
-#   - crates.io  → API token (secrets.CARGO_REGISTRY_TOKEN) — crates.io has no
-#                  trusted-publishing flow, so this one stays a stored secret
-#   - npm        → Trusted Publisher (OIDC, no stored token)
-#   - PyPI       → Trusted Publisher (OIDC, no stored token)
-#   - NuGet      → Trusted Publisher (OIDC, no stored token)
+# All four registries authenticate via Trusted Publishing (OIDC) — crates.io,
+# npm, PyPI and NuGet. No long-lived publish credential is stored in this
+# repository; each job exchanges a short-lived GitHub id-token for one.
 #
-# The OIDC jobs are the reason this is a separate workflow from release.yml:
-# `id-token: write` is granted per job here, so the binary-build jobs never see
-# a credential that could publish a package.
+# That is also why this is a separate workflow from release.yml: `id-token:
+# write` is granted per job here, so the binary-build jobs never see a
+# credential that could publish a package.
 #
 # NOT covered here — `sdks/go` and `sdks/php` are git submodules pointing at
 # their own repositories (hivellm/synap-sdk-go, hivellm/synap-sdk-php). Both
@@ -48,10 +46,14 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
-  # crates.io — API token.
+  # crates.io — Trusted Publisher (OIDC). `crates-io-auth-action` exchanges the
+  # id-token below for a token that expires in 30 minutes.
   publish-rust:
     if: github.event_name == 'release' || inputs.sdks == 'all' || inputs.sdks == 'rust'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -93,10 +95,15 @@ jobs:
         if: steps.check.outputs.published == 'false'
         run: cargo test -p synap-sdk
 
+      - name: Exchange the OIDC token for a short-lived crates.io token
+        if: steps.check.outputs.published == 'false'
+        uses: rust-lang/crates-io-auth-action@v1
+        id: crates-auth
+
       - name: Publish
         if: steps.check.outputs.published == 'false'
         env:
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
         run: cargo publish -p synap-sdk
 
   # npm — Trusted Publisher (OIDC). No NODE_AUTH_TOKEN anywhere: npm mints a
