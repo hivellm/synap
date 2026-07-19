@@ -39,7 +39,7 @@ slow-consumer backpressure. Watch is a composition layer, not a new subsystem.
 | Field | Meaning |
 |---|---|
 | `key` | The key that changed. |
-| `event` | `set`, `del`, `expired`, `expire`, `persist`, `append`, `setrange`, `incrby`, `decrby`. |
+| `event` | `set`, `del`, `expired`, `evicted`, `expire`, `persist`, `append`, `setrange`, `incrby`, `decrby`. |
 | `version` | Per-key monotonic counter, starting at 1. |
 | `value` | The post-mutation value. Omitted, not null, when absent. |
 | `truncated` | Present and `true` only when the value was withheld. |
@@ -51,6 +51,13 @@ now holds.
 
 `expire` and `persist` carry no `value`: they change the TTL, not the value, so
 the watcher already holds the latest one.
+
+`expired` fires however the key actually leaves — through the active expiration
+cycle or lazily on a read — and `evicted` fires when the `maxmemory` policy
+removes a key. Both are terminal: the version counter resets like on `del`.
+
+`FLUSHDB` publishes no per-key events (Redis parity), but it does reset every
+version counter, so a flushed key's next incarnation starts at version 1.
 
 ## Semantics
 

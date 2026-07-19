@@ -548,6 +548,12 @@ impl KVStore {
                 .fetch_add(entry_size as i64 - old_size as i64, Ordering::Relaxed);
         }
 
+        // The write happened (NX/XX guards returned early above), so notify
+        // like the plain `set` path does — published after the lock drops.
+        drop(data);
+        self.notify_keyspace(crate::core::EventClass::String, "set", key);
+        self.notify_watch("set", key, Some(&value));
+
         // --- Cache invalidation ---
         if let Some(ref cache) = self.cache {
             let cache_expiry_secs = expiry.map(|e| {
@@ -652,6 +658,14 @@ impl KVStore {
                         self.stats
                             .total_memory_bytes
                             .fetch_sub(removed_size as i64, Ordering::Relaxed);
+                        // Lazy expiration removes the key just like the active
+                        // cycle does, so it must publish the same terminal
+                        // event — after the lock drops.
+                        drop(data);
+                        self.notify_keyspace(crate::core::EventClass::Expired, "expired", key);
+                        self.notify_watch_gone("expired", key);
+                        self.stats.misses.fetch_add(1, Ordering::Relaxed);
+                        return Ok(None);
                     }
                 } else {
                     // Raced: another writer refreshed the key between locks.
@@ -1225,6 +1239,9 @@ impl KVStore {
         let mut freed = 0i64;
         let mut stalled_rounds = 0usize;
         let needed = needed_bytes as i64;
+        // Victims are collected and notified after every shard lock is released,
+        // like the expiration cycle does.
+        let mut evicted_notify: Vec<String> = Vec::new();
 
         'outer: loop {
             let before = freed;
@@ -1345,6 +1362,7 @@ impl KVStore {
                         .fetch_sub(size, Ordering::Relaxed);
                     freed += size;
                     debug!("Evicted key={} size={} policy={:?}", key, size, policy);
+                    evicted_notify.push(key);
                 }
             }
 
@@ -1357,6 +1375,11 @@ impl KVStore {
             } else {
                 stalled_rounds = 0;
             }
+        }
+
+        for key in evicted_notify {
+            self.notify_keyspace(crate::core::EventClass::Evicted, "evicted", &key);
+            self.notify_watch_gone("evicted", &key);
         }
     }
 
@@ -1405,6 +1428,12 @@ impl KVStore {
 
         self.stats.total_keys.store(0, Ordering::Relaxed);
         self.stats.total_memory_bytes.store(0, Ordering::Relaxed);
+
+        // No per-key events on flush (Redis parity), but the version counters
+        // must not survive into the keys' next incarnations.
+        if let Some(ref n) = self.watch_notifier {
+            n.forget_all();
+        }
 
         Ok(count)
     }

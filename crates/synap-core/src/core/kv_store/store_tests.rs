@@ -1480,6 +1480,148 @@ mod watch {
     }
 
     #[tokio::test]
+    async fn set_with_opts_publishes_set_to_a_watcher() {
+        // The server's SET handler goes through set_with_opts, so a miss here
+        // means the primary write path is invisible to watchers.
+        use crate::core::SetOptions;
+        let (store, router, _n) = store_with_watch();
+        let mut rx = watch(&router, "k");
+
+        store
+            .set_with_opts("k", b"v".to_vec(), None, SetOptions::default())
+            .await
+            .expect("set succeeds");
+
+        let event = next_event(&mut rx).await;
+        assert_eq!(event.event, "set");
+        assert_eq!(event.value.as_deref(), Some("v"));
+    }
+
+    #[tokio::test]
+    async fn a_blocked_nx_set_publishes_nothing() {
+        use crate::core::SetOptions;
+        let (store, router, _n) = store_with_watch();
+        let mut rx = watch(&router, "k");
+
+        store
+            .set("k".to_string(), b"v".to_vec(), None)
+            .await
+            .expect("set succeeds");
+        store
+            .set_with_opts(
+                "k",
+                b"blocked".to_vec(),
+                None,
+                SetOptions {
+                    if_absent: true,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("NX set succeeds without writing");
+        store.delete("k").await.expect("delete succeeds");
+
+        // A write that did not happen must not be announced: the blocked NX
+        // set leaves no event between the set and the del.
+        assert_eq!(next_event(&mut rx).await.event, "set");
+        assert_eq!(next_event(&mut rx).await.event, "del");
+    }
+
+    #[tokio::test]
+    async fn lazy_expiration_on_get_publishes_expired() {
+        let (store, router, _n) = store_with_watch();
+        let mut rx = watch(&router, "k");
+
+        store
+            .set("k".to_string(), b"v".to_vec(), Some(1))
+            .await
+            .expect("set succeeds");
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        assert!(
+            store.get("k").await.expect("get succeeds").is_none(),
+            "the key is lazily expired by the read"
+        );
+
+        assert_eq!(next_event(&mut rx).await.event, "set");
+        assert_eq!(
+            next_event(&mut rx).await.event,
+            "expired",
+            "lazy removal must publish the same terminal event as the cycle"
+        );
+
+        // The counter was forgotten, so the next incarnation restarts at 1.
+        store
+            .set("k".to_string(), b"v2".to_vec(), None)
+            .await
+            .expect("set succeeds");
+        assert_eq!(next_event(&mut rx).await.version, 1);
+    }
+
+    #[tokio::test]
+    async fn flushdb_resets_version_counters() {
+        let router = Arc::new(PubSubRouter::new());
+        let notifier = Arc::new(KeyWatchNotifier::new(Arc::clone(&router), 0));
+        let config = KVConfig {
+            allow_flush_commands: true,
+            ..KVConfig::default()
+        };
+        let store = KVStore::new(config).with_watch_notifier(Some(notifier));
+        let mut rx = watch(&router, "k");
+
+        store
+            .set("k".to_string(), b"v".to_vec(), None)
+            .await
+            .expect("set succeeds");
+        store.flushdb().await.expect("flush succeeds");
+        store
+            .set("k".to_string(), b"v2".to_vec(), None)
+            .await
+            .expect("set succeeds");
+
+        assert_eq!(next_event(&mut rx).await.version, 1);
+        assert_eq!(
+            next_event(&mut rx).await.version,
+            1,
+            "a flushed key is a new incarnation — its versions restart"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_evicted_key_publishes_a_terminal_event() {
+        use crate::core::EvictionPolicy;
+        let router = Arc::new(PubSubRouter::new());
+        let notifier = Arc::new(KeyWatchNotifier::new(Arc::clone(&router), 0));
+        let config = KVConfig {
+            max_memory_mb: 1,
+            eviction_policy: EvictionPolicy::AllKeysLru,
+            eviction_sample_size: 10,
+            ..KVConfig::default()
+        };
+        let store = KVStore::new(config).with_watch_notifier(Some(notifier));
+
+        // Watch every key we are about to write, on a single connection, so
+        // whichever victim eviction picks is a watched one.
+        let channels: Vec<String> = (0..30).map(|i| format!("__watch@0__:fill_{i}")).collect();
+        let result = router.subscribe(channels).expect("subscribe succeeds");
+        let (tx, mut rx) = tokio::sync::mpsc::channel(512);
+        router.register_connection(result.subscriber_id, tx);
+
+        // ~1.5 MB against a 1 MB limit — eviction must fire.
+        let big_val = vec![b'x'; 50_000];
+        for i in 0..30 {
+            let _ = store.set(format!("fill_{i}"), big_val.clone(), None).await;
+        }
+
+        loop {
+            let event = next_event(&mut rx).await;
+            if event.event == "evicted" {
+                assert!(event.value.is_none(), "an evicted key has no value");
+                break;
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn a_store_without_a_notifier_still_works() {
         // The notifier is optional; a store without one must behave exactly as
         // before, with no watch cost at all.

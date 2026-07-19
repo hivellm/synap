@@ -167,6 +167,13 @@ impl KeyWatchNotifier {
         self.versions.write().remove(key);
     }
 
+    /// Drop every version counter. Called on `FLUSHDB`, which removes all keys
+    /// without per-key events (Redis parity), so the counters must not survive
+    /// into the keys' next incarnations.
+    pub fn forget_all(&self) {
+        self.versions.write().clear();
+    }
+
     /// Next monotonic version for `key`, starting at 1.
     fn next_version(&self, key: &str) -> u64 {
         if let Some(counter) = self.versions.read().get(key) {
@@ -275,6 +282,20 @@ mod tests {
         n.forget("gone");
 
         assert!(n.versions.read().is_empty());
+    }
+
+    #[test]
+    fn forget_all_resets_every_counter() {
+        let (router, n) = notifier();
+        watch(&router, "a");
+        watch(&router, "b");
+
+        n.notify("set", "a", Some(b"v"));
+        n.notify("set", "b", Some(b"v"));
+        n.forget_all();
+
+        assert!(n.versions.read().is_empty());
+        assert_eq!(n.next_version("a"), 1, "a flushed key restarts at 1");
     }
 
     #[test]

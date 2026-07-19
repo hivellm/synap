@@ -7,8 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [Unreleased]
-
 ### Added
 
 - **KV watch core notifier.** `KeyWatchNotifier` publishes a value-carrying
@@ -30,6 +28,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no serialization, no version counter. Documented in `docs/kv-watch.md`.
 - `PubSubRouter::has_subscriber` — an allocation-free existence check, for
   callers that want to skip building a payload nobody will read.
+
+### Fixed
+
+- **`SET` with options now fires notifications.** `KVStore::set_with_opts` —
+  the path behind the server's SET handler — published neither keyspace nor
+  watch events, so the primary write path was invisible to both. It now fires
+  `set` like the plain path, only when the write actually happened (a blocked
+  `NX`/`XX` stays silent).
+- **Lazy expiration now publishes `expired`.** A key removed by a read used to
+  vanish without the terminal event the active expiration cycle publishes, and
+  its watch version counter leaked.
+- **Eviction now publishes `evicted`.** `maxmemory` victims left keyspace
+  (`EventClass::Evicted` existed but was never fired) and watchers unaware the
+  key was gone; both are notified after the shard locks are released.
+- **`FLUSHDB` resets watch version counters.** Counters used to survive a
+  flush, so a flushed key's next incarnation continued the old sequence instead
+  of restarting at 1 as documented.
 
 ## [1.2.0] - 2026-07-19
 
