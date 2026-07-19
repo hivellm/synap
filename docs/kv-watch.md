@@ -100,6 +100,35 @@ the store, and entries are dropped when a key is deleted.
 `APPEND` and `SETRANGE` need the merged bytes to ship the resulting value, and
 that copy happens only when a notifier is attached.
 
+## Performance
+
+`benches/kv_watch_bench.rs` measures the publish→deliver cost of `notify` as the
+watcher count grows (Criterion; representative local numbers, not a guarantee):
+
+| Watchers on the key | `notify` cost | per watcher |
+|---|---|---|
+| 0 (unwatched) | ~115 ns | — |
+| 1 | ~2.1 µs | 2.1 µs |
+| 10 | ~9 µs | 0.9 µs |
+| 100 | ~94 µs | 0.94 µs |
+| 1000 | ~1.0 ms | 1.0 µs |
+
+Fan-out is linear in the watcher count at roughly a microsecond each, and a
+single wildcard subscription (`user:*`) behaves the same as an exact one. The
+unwatched path is ~20× cheaper than a single delivery because it stops at the
+router lookup. A **stalled** watcher — one whose bounded buffer is never drained
+— does not slow delivery to the others: the router drops it (counted in
+`slow_consumers_dropped`) rather than blocking the publish path, which is what
+makes the best-effort contract hold under a bad client.
+
+## When to use streams instead
+
+Watch is deliberately not durable. If you need every change delivered at least
+once, replayed after a disconnect, or ordered as a total log, use an **event
+stream** (`core/stream.rs`) — a heavier, offset-tracked subsystem built for
+exactly that. Watch is the light, latest-value primitive for cache
+invalidation, live dashboards, and "re-render when this key changes".
+
 ## Watching over SynapRPC
 
 ```

@@ -63,6 +63,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keys. Purely additive: such patterns previously matched nothing useful (only
   a topic containing a literal `*`).
 
+- **KV watch fan-out benchmark and cross-transport interop test.**
+  `benches/kv_watch_bench.rs` measures `notify` fan-out as watcher count grows
+  (linear at ~1µs/watcher; ~115ns idle; a stalled watcher does not slow the
+  rest), documented in `docs/kv-watch.md`. A cross-transport test asserts the
+  SynapRPC push bridge and the `/kv/ws` WebSocket deliver byte-identical
+  envelopes for one mutation, pinning the server-side contract the six SDK
+  decoders target.
+
 ### Fixed
 
 - **`SET` with options now fires notifications.** `KVStore::set_with_opts` —

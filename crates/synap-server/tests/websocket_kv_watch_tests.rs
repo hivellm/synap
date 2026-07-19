@@ -13,9 +13,9 @@ use synap_server::{AppState, KVStore, PubSubRouter, ServerConfig, create_router}
 use tokio::net::TcpListener;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-/// Spawn a test server whose KV store publishes watch events, and return its
-/// base URL and shutdown handle.
-async fn spawn_watch_server() -> (String, tokio::sync::oneshot::Sender<()>) {
+/// Build an AppState whose KV store publishes watch events through a shared
+/// router — the way `main.rs` wires it.
+pub fn watch_app_state() -> AppState {
     let config = ServerConfig::default();
     let kv_config = config.to_kv_config();
 
@@ -44,7 +44,7 @@ async fn spawn_watch_server() -> (String, tokio::sync::oneshot::Sender<()>) {
     let geospatial_store = Arc::new(synap_server::core::GeospatialStore::new(
         sorted_set_store.clone(),
     ));
-    let app_state = AppState {
+    AppState {
         kv_store,
         hash_store,
         list_store,
@@ -69,7 +69,13 @@ async fn spawn_watch_server() -> (String, tokio::sync::oneshot::Sender<()>) {
         user_manager: None,
         require_auth: false,
         replication: None,
-    };
+    }
+}
+
+/// Spawn a test server whose KV store publishes watch events, and return its
+/// base URL and shutdown handle.
+async fn spawn_watch_server() -> (String, tokio::sync::oneshot::Sender<()>) {
+    let app_state = watch_app_state();
 
     let user_manager = Arc::new(UserManager::new());
     let api_key_manager = Arc::new(ApiKeyManager::new());
@@ -204,4 +210,121 @@ async fn ws_watch_without_keys_is_rejected() {
 
     assert!(result.is_err(), "the handshake must fail without ?keys=");
     let _ = shutdown.send(());
+}
+
+/// Cross-transport envelope contract: one mutation, observed over BOTH the
+/// SynapRPC push bridge (via the Rust SDK's `kv().watch()`) and the `/kv/ws`
+/// WebSocket, must decode to byte-identical envelope fields. This is the
+/// server-side half of the interop guarantee — the two protocols cannot drift
+/// from each other — complementing each SDK's own envelope-decode unit tests
+/// which pin the client half against the same documented JSON.
+#[tokio::test]
+async fn rpc_and_websocket_deliver_the_same_envelope() {
+    use futures_util::StreamExt as _;
+    use synap_server::protocol::synap_rpc::server::spawn_synap_rpc_listener;
+
+    // One shared state behind both listeners.
+    let state = watch_app_state();
+
+    // HTTP/WebSocket server.
+    let (user_manager, api_key_manager) =
+        (Arc::new(UserManager::new()), Arc::new(ApiKeyManager::new()));
+    let app = create_router(
+        state.clone(),
+        synap_server::config::RateLimitConfig {
+            enabled: false,
+            requests_per_second: 100,
+            burst_size: 10,
+        },
+        synap_server::config::McpConfig::default(),
+        user_manager,
+        api_key_manager,
+        false,
+        false,
+    );
+    let http_listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let http_addr = http_listener.local_addr().unwrap();
+    let (http_shutdown_tx, http_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    tokio::spawn(async move {
+        axum::serve(
+            http_listener,
+            app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .with_graceful_shutdown(async {
+            http_shutdown_rx.await.ok();
+        })
+        .await
+        .unwrap();
+    });
+
+    // SynapRPC listener on the same state.
+    let rpc_handle = spawn_synap_rpc_listener(
+        state,
+        "127.0.0.1:0".parse().unwrap(),
+        std::time::Duration::ZERO,
+        1024,
+    )
+    .await
+    .expect("rpc listener binds");
+    let rpc_config = synap_sdk::SynapConfig::new(format!("synap://{}", rpc_handle.local_addr()));
+
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+    // RPC watcher via the SDK.
+    let sdk = synap_sdk::SynapClient::new(rpc_config).expect("client builds");
+    let (mut rpc_events, rpc_stop) = sdk.kv().watch("iso:1");
+
+    // WebSocket watcher.
+    let ws_url = format!("ws://{}/kv/ws?keys=iso:1", http_addr);
+    let (ws_stream, _) = connect_async(&ws_url).await.expect("ws connects");
+    let (mut ws_write, mut ws_read) = ws_stream.split();
+    ws_read.next().await; // welcome frame
+
+    // Wait until both subscriptions have registered on the shared router.
+    tokio::time::sleep(tokio::time::Duration::from_millis(150)).await;
+
+    // One mutation through the HTTP SET handler.
+    let http = reqwest::Client::new();
+    http.post(format!("http://{}/kv/set", http_addr))
+        .json(&json!({ "key": "iso:1", "value": "shared" }))
+        .send()
+        .await
+        .unwrap();
+
+    // RPC side: the SDK decodes a typed WatchEvent.
+    let rpc_event = tokio::time::timeout(std::time::Duration::from_secs(2), rpc_events.next())
+        .await
+        .expect("an rpc event arrives")
+        .expect("the rpc stream stays open");
+
+    // WebSocket side: decode the same fields off the JSON frame.
+    let ws_msg = next_watch_message(&mut ws_read).await;
+    let ws_payload = &ws_msg["payload"];
+
+    assert_eq!(
+        rpc_event.key,
+        ws_payload["key"].as_str().unwrap(),
+        "key must match"
+    );
+    assert_eq!(
+        rpc_event.event,
+        ws_payload["event"].as_str().unwrap(),
+        "event must match"
+    );
+    assert_eq!(
+        rpc_event.version,
+        ws_payload["version"].as_u64().unwrap(),
+        "version must match"
+    );
+    assert_eq!(
+        rpc_event.value.as_deref(),
+        ws_payload["value"].as_str(),
+        "value must match across transports",
+    );
+    assert_eq!(rpc_event.event, "set");
+    assert_eq!(rpc_event.value.as_deref(), Some("shared"));
+
+    rpc_stop.unsubscribe();
+    let _ = ws_write.close().await;
+    let _ = http_shutdown_tx.send(());
 }

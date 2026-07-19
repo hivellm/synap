@@ -143,6 +143,10 @@ name = "pubsub_bench"
 harness = false
 
 [[bench]]
+name = "kv_watch_bench"
+harness = false
+
+[[bench]]
 name = "stream_bench"
 harness = false
 
