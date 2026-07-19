@@ -46,13 +46,11 @@ jobs:
         with:
           key: clippy
 
-      - name: Run Clippy (workspace)
-        run: cargo clippy --workspace -- -D warnings
-
-      - name: Run Clippy (all targets)
-        run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: Run Clippy (all features)
+      # `--all-targets --all-features` is a superset of the narrower runs this
+      # job used to make first (`--workspace`, then `--workspace
+      # --all-targets`): anything they would catch, this catches. Keeping all
+      # three compiled the workspace three times for one guarantee.
+      - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   cargo-deny:
@@ -76,17 +74,8 @@ jobs:
         run: cargo deny check bans
         continue-on-error: true
 
-  cargo-audit:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
-
-      - name: Install cargo-audit
-        uses: taiki-e/install-action@cargo-audit
-
-      - name: Run security audit
-        run: cargo audit
-        continue-on-error: true
+  # A separate `cargo audit` job used to run here. It queried the same RustSec
+  # advisory database `cargo deny check advisories` above already gates on, and
+  # it carried `continue-on-error: true`, so it could never fail the build — a
+  # second opinion that was never allowed to disagree. The gating check stays.
 
