@@ -213,7 +213,7 @@ hub:
 #   SYNAP_HUB_CACHE_TTL_SECS=60
 #   SYNAP_HUB_USAGE_REPORT_INTERVAL_SECS=300
 
-# Value-carrying KV watch (docs/kv-watch.md)
+# Value-carrying KV watch (docs/features/kv-watch.md)
 # Always on — this only tunes the envelope. Values above the cap are delivered
 # as notify-only (truncated: true) so a watcher re-GETs on demand.
 watch:

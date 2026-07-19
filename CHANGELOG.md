@@ -25,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   watcher count or handing back mangled bytes.
 
   When nobody is watching a key the cost is a single router lookup: no envelope,
-  no serialization, no version counter. Documented in `docs/kv-watch.md`.
+  no serialization, no version counter. Documented in `docs/features/kv-watch.md`.
 - `PubSubRouter::has_subscriber` — an allocation-free existence check, for
   callers that want to skip building a payload nobody will read.
 - **KV watch server endpoints.** `KV.WATCH <pattern> [mode]` / `KV.UNWATCH` on
@@ -66,10 +66,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **KV watch fan-out benchmark and cross-transport interop test.**
   `benches/kv_watch_bench.rs` measures `notify` fan-out as watcher count grows
   (linear at ~1µs/watcher; ~115ns idle; a stalled watcher does not slow the
-  rest), documented in `docs/kv-watch.md`. A cross-transport test asserts the
+  rest), documented in `docs/features/kv-watch.md`. A cross-transport test asserts the
   SynapRPC push bridge and the `/kv/ws` WebSocket deliver byte-identical
   envelopes for one mutation, pinning the server-side contract the six SDK
   decoders target.
+
+### Changed
+
+- **Dependency bumps.** `bcrypt` 0.16 → 0.19 and `tokio-tungstenite` 0.29 → 0.30
+  (server, Rust SDK); `typescript-eslint`, `@typescript-eslint/parser` and
+  `@typescript-eslint/eslint-plugin` 8.63.0 → 8.64.0 in the TypeScript SDK.
+  No call-site changes: the `bcrypt::hash`/`verify` and `connect_async`/`Message`
+  surfaces we use are unchanged across those releases.
 
 ### Fixed
 
@@ -934,7 +942,7 @@ fixed for the 1.0 release.
 - **HUB_INTEGRATION.md**: Complete 698-line technical specification with architecture diagrams ([docs/specs/HUB_INTEGRATION.md](docs/specs/HUB_INTEGRATION.md))
 - **QUOTA_MANAGEMENT.md**: Detailed 698-line quota system specification ([docs/specs/QUOTA_MANAGEMENT.md](docs/specs/QUOTA_MANAGEMENT.md))
 - **ACCESS_KEYS.md**: Comprehensive 775-line access key authentication guide ([docs/specs/ACCESS_KEYS.md](docs/specs/ACCESS_KEYS.md))
-- **AUTHENTICATION.md**: Updated with Hub integration section ([docs/AUTHENTICATION.md](docs/AUTHENTICATION.md))
+- **AUTHENTICATION.md**: Updated with Hub integration section ([docs/features/AUTHENTICATION.md](docs/features/AUTHENTICATION.md))
 - **HUB_CONFIGURATION.md**: Step-by-step user configuration guide ([docs/guides/HUB_CONFIGURATION.md](docs/guides/HUB_CONFIGURATION.md))
 
 - **Server-Side Enforcement**: All quota/permission checks on server (never trust client)
@@ -1163,7 +1171,7 @@ fixed for the 1.0 release.
 - ### Added
 
 - **Migration Guide**: Created comprehensive guide (`docs/guides/MIGRATION_AUTH.md`) for migrating from non-auth to auth-enabled deployments
-- **Security Best Practices**: Expanded security section in `docs/AUTHENTICATION.md` with 8 detailed categories:
+- **Security Best Practices**: Expanded security section in `docs/features/AUTHENTICATION.md` with 8 detailed categories:
 - Production Deployment guidelines
 - API Key Management best practices
 - Password Security recommendations
@@ -2993,8 +3001,8 @@ Implementação **completa de persistência** em todos os subsistemas usando est
 - [docs/benchmarks/BENCHMARK_RESULTS_EXTENDED.md](docs/benchmarks/BENCHMARK_RESULTS_EXTENDED.md) - All benchmarks
 - [docs/benchmarks/PERSISTENCE_BENCHMARKS.md](docs/benchmarks/PERSISTENCE_BENCHMARKS.md) - Realistic comparisons
 - [docs/COMPETITIVE_ANALYSIS.md](docs/COMPETITIVE_ANALYSIS.md) - Honest vs Redis/Kafka/RabbitMQ
-- [docs/IMPLEMENTATION_COMPLETE.md](docs/IMPLEMENTATION_COMPLETE.md) - Implementation summary
-- [docs/TESTING.md](docs/TESTING.md) - Testing strategy
+- [docs/project/IMPLEMENTATION_COMPLETE.md](docs/project/IMPLEMENTATION_COMPLETE.md) - Implementation summary
+- [docs/development/TESTING.md](docs/development/TESTING.md) - Testing strategy
 
 #### 📡 Pub/Sub System NEW
 - **Topic-Based Messaging**: Redis/MQTT-style publish/subscribe
@@ -3178,12 +3186,12 @@ Implementação **completa de persistência** em todos os subsistemas usando est
 
 ### Documentation
 
-- `docs/AUTHENTICATION.md` - Complete authentication guide
+- `docs/features/AUTHENTICATION.md` - Complete authentication guide
 - `docs/QUEUE_CONCURRENCY_TESTS.md` - Concurrency test documentation
 - `docs/BENCHMARK_RESULTS.md` - Performance benchmarks
 - `docs/CLI_GUIDE.md` - CLI usage guide
 - `docs/CONFIGURATION.md` - Configuration reference
-- `docs/TESTING.md` - Testing strategy
+- `docs/development/TESTING.md` - Testing strategy
 - `docs/PHASE1_SUMMARY.md` - Phase 1 implementation summary
 
 ## [0.1.0-alpha] - 2025-10-21

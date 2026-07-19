@@ -1,7 +1,7 @@
 # Thunder interop matrix — recorded run
 
 Cross-SDK verification of the Thunder-based SynapRPC transport, run as the gate
-for 1.2.0. How to re-run it: [`scripts/interop/README.md`](../scripts/interop/README.md).
+for 1.2.0. How to re-run it: [`scripts/interop/README.md`](../../scripts/interop/README.md).
 
 Run twice against the same code: once with a locally built
 `target/release/synap-server`, and once against the **release Docker image**

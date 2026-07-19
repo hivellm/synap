@@ -4,7 +4,7 @@ using System.Text.Json.Serialization;
 namespace Synap.SDK.Types;
 
 /// <summary>
-/// One KV watch envelope (<c>docs/kv-watch.md</c> in the server repository).
+/// One KV watch envelope (<c>docs/features/kv-watch.md</c> in the server repository).
 /// </summary>
 /// <remarks>
 /// <see cref="Value"/> is the <b>post-mutation</b> value and is <c>null</c> for

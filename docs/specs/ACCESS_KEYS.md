@@ -770,6 +770,6 @@ export HIVEHUB_ACCESS_KEY="$(aws secretsmanager get-secret-value \
 
 - [HUB_INTEGRATION.md](./HUB_INTEGRATION.md) - Complete Hub integration specification
 - [QUOTA_MANAGEMENT.md](./QUOTA_MANAGEMENT.md) - Quota management specification
-- [AUTHENTICATION.md](../AUTHENTICATION.md) - General authentication documentation
+- [AUTHENTICATION.md](../features/AUTHENTICATION.md) - General authentication documentation
 - Phase 2 tasks: `rulebook/tasks/hub-integration/tasks.md` (Tasks 2.1-2.7)
 - Implementation: `synap-server/src/hub/hub_auth.rs`

@@ -68,4 +68,4 @@ launch from a subprocess with "Access denied".
 ## Results
 
 The recorded run, and what each red or unrun cell means, is in
-[`docs/thunder-interop-matrix.md`](../../docs/thunder-interop-matrix.md).
+[`docs/thunder-interop-matrix.md`](../../docs/protocol/thunder-interop-matrix.md).

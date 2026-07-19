@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.92%2B)-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-1800%2B-brightgreen.svg)](docs/TESTING.md)
+[![Tests](https://img.shields.io/badge/tests-1800%2B-brightgreen.svg)](docs/development/TESTING.md)
 [![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](CHANGELOG.md)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
@@ -69,7 +69,7 @@ Synap provides multiple core capabilities in a single, cohesive system:
 - **🐌 SLOWLOG** - Slow query logging with configurable threshold (default 10ms)
 - **💾 MEMORY USAGE** - Per-key memory tracking across all data types
 - **👥 CLIENT LIST** - Active connection tracking and management
-- **📊 Prometheus Metrics** - process-scoped CPU/memory plus broker-level gauges (per-stream length, consumer-group lag, queue depth) at `GET /metrics` — see [Observability](docs/observability.md)
+- **📊 Prometheus Metrics** - process-scoped CPU/memory plus broker-level gauges (per-stream length, consumer-group lag, queue depth) at `GET /metrics` — see [Observability](docs/operations/observability.md)
 
 ### 👨‍💻 Developer Experience
 - **🤖 AI Integration**: MCP support for Cursor, Claude Desktop, and AI assistants
@@ -404,7 +404,7 @@ curl -H "Authorization: Bearer sk_XXXXX..." http://localhost:15500/kv/get/user:1
 curl "http://localhost:15500/kv/get/user:1?api_key=sk_XXXXX..."
 ```
 
-See [Authentication Guide](docs/AUTHENTICATION.md) for complete details.
+See [Authentication Guide](docs/features/AUTHENTICATION.md) for complete details.
 
 ### 🔄 Replication Setup
 
@@ -574,16 +574,16 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 ### 🔧 Core Documentation
 - **[Architecture](docs/ARCHITECTURE.md)** - System architecture and components
 - **[Configuration](docs/specs/CONFIGURATION.md)** - Complete configuration reference
-- **[CLI Guide](docs/CLI_GUIDE.md)** - Synap CLI usage and commands
-- **[Transports](docs/transports.md)** - SynapRPC / RESP3 / HTTP command-parity matrix
-- **[Transactions](docs/transactions.md)** - MULTI/EXEC durability, replication, and isolation
-- **[Replication](docs/replication.md)** - Setup, sync semantics, and monitoring
-- **[Memory Accounting](docs/memory-accounting.md)** - `maxmemory` across all datatypes
-- **[Observability](docs/observability.md)** - Prometheus metrics reference
+- **[CLI Guide](docs/guides/CLI_GUIDE.md)** - Synap CLI usage and commands
+- **[Transports](docs/protocol/transports.md)** - SynapRPC / RESP3 / HTTP command-parity matrix
+- **[Transactions](docs/features/transactions.md)** - MULTI/EXEC durability, replication, and isolation
+- **[Replication](docs/features/REPLICATION.md)** - Setup, sync semantics, and monitoring
+- **[Memory Accounting](docs/internals/memory-accounting.md)** - `maxmemory` across all datatypes
+- **[Observability](docs/operations/observability.md)** - Prometheus metrics reference
 
 ### 🔒 Security & Authentication
-- **[Authentication](docs/AUTHENTICATION.md)** - Complete auth guide (users, roles, API keys, ACL)
-- **[Network Limits](docs/network-limits.md)** - Connection caps, idle timeouts, parser bounds
+- **[Authentication](docs/features/AUTHENTICATION.md)** - Complete auth guide (users, roles, API keys, ACL)
+- **[Network Limits](docs/operations/network-limits.md)** - Connection caps, idle timeouts, parser bounds
 
 ### 🌐 API & Protocols
 - **[REST API](docs/api/REST_API.md)** - Complete REST API documentation
@@ -596,7 +596,7 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 - **[Redis vs Synap](docs/benchmarks/redis-vs-synap.md)** - Live `redis-benchmark` head-to-head
 - **[Benchmarks](docs/benchmarks/README.md)** - All benchmark suites and results
 - **[Queue Concurrency](docs/benchmarks/QUEUE_CONCURRENCY_TESTS.md)** - Zero-duplicate guarantees
-- **[Testing Strategy](docs/TESTING.md)** - Test coverage and approach
+- **[Testing Strategy](docs/development/TESTING.md)** - Test coverage and approach
 
 ### 🔧 Development & Planning
 - **[Development Guide](docs/specs/DEVELOPMENT.md)** - Setup and contribution guide

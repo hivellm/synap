@@ -804,7 +804,7 @@ pub(super) async fn run(
             ]))
         }
 
-        // ── KV watch (value-carrying, docs/kv-watch.md) ───────────────────────
+        // ── KV watch (value-carrying, docs/features/kv-watch.md) ───────────────────────
         // Named KV.WATCH because plain WATCH is the transaction command below.
         "KV.WATCH" => {
             // KV.WATCH pattern [mode]  — mode is `value` (default) or `notify`

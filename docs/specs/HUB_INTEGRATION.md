@@ -689,7 +689,7 @@ To revert to standalone mode:
 
 - [QUOTA_MANAGEMENT.md](./QUOTA_MANAGEMENT.md) - Detailed quota specification
 - [ACCESS_KEYS.md](./ACCESS_KEYS.md) - Access key format and security
-- [../AUTHENTICATION.md](../AUTHENTICATION.md) - Complete authentication guide
+- [../AUTHENTICATION.md](../features/AUTHENTICATION.md) - Complete authentication guide
 
 ---
 

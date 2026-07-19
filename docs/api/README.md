@@ -177,7 +177,7 @@ When adding new endpoints:
 
 - **[REST API Guide](REST_API.md)** - Detailed API usage guide
 - **[StreamableHTTP Protocol](../protocol/STREAMABLE_HTTP.md)** - Alternative protocol
-- **[Authentication Guide](../AUTHENTICATION.md)** - Security and auth details
+- **[Authentication Guide](../features/AUTHENTICATION.md)** - Security and auth details
 - **[Examples](../examples/)** - Code examples and use cases
 
 ## 🔗 Resources

@@ -3,7 +3,7 @@
 //! Rides the same infrastructure as [`crate::pubsub_reactive`]: the `synap://`
 //! transport opens a dedicated push connection driven by `KV.WATCH`, and
 //! `http://` / `https://` URLs fall back to the `/kv/ws` WebSocket endpoint.
-//! See `docs/kv-watch.md` in the server repository for the envelope semantics.
+//! See `docs/features/kv-watch.md` in the server repository for the envelope semantics.
 
 use crate::reactive::{MessageStream, SubscriptionHandle};
 use futures::{Stream, StreamExt};

@@ -45,13 +45,13 @@ pub struct ServerConfig {
     #[serde(default)]
     pub cluster: crate::cluster::ClusterConfig,
 
-    /// Value-carrying KV watch (`docs/kv-watch.md`). Always on; this only tunes it.
+    /// Value-carrying KV watch (`docs/features/kv-watch.md`). Always on; this only tunes it.
     #[serde(default)]
     pub watch: WatchConfig,
 }
 
 /// KV watch tuning (phase22). The watch channel family itself has no enable
-/// flag — see `docs/kv-watch.md` for why.
+/// flag — see `docs/features/kv-watch.md` for why.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WatchConfig {
     /// Cap on the value inlined in a watch envelope, in bytes. Larger values

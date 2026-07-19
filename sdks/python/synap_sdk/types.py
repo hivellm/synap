@@ -46,7 +46,7 @@ class StreamEvent:
 
 @dataclass
 class WatchEvent:
-    """One KV watch envelope (``docs/kv-watch.md`` in the server repository).
+    """One KV watch envelope (``docs/features/kv-watch.md`` in the server repository).
 
     ``value`` is the **post-mutation** value and is ``None`` for terminal
     events (``del``, ``expired``, ``evicted``), TTL-only events (``expire``,

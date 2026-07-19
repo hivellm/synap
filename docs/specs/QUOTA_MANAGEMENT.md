@@ -693,6 +693,6 @@ cp -r /var/lib/synap.backup /var/lib/synap
 
 - [HUB_INTEGRATION.md](./HUB_INTEGRATION.md) - Complete Hub integration specification
 - [ACCESS_KEYS.md](./ACCESS_KEYS.md) - Access key authentication specification
-- [AUTHENTICATION.md](../AUTHENTICATION.md) - General authentication documentation
+- [AUTHENTICATION.md](../features/AUTHENTICATION.md) - General authentication documentation
 - Phase 4 tasks: `rulebook/tasks/hub-integration/tasks.md` (Tasks 4.1-4.7)
 - Implementation: `synap-server/src/hub/quota.rs`

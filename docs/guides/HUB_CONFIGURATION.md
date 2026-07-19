@@ -561,7 +561,7 @@ If you're migrating from standalone mode:
 - **[HUB_INTEGRATION.md](../specs/HUB_INTEGRATION.md)** - Technical specification
 - **[QUOTA_MANAGEMENT.md](../specs/QUOTA_MANAGEMENT.md)** - Quota system details
 - **[ACCESS_KEYS.md](../specs/ACCESS_KEYS.md)** - Access key authentication
-- **[AUTHENTICATION.md](../AUTHENTICATION.md)** - Authentication overview
+- **[AUTHENTICATION.md](../features/AUTHENTICATION.md)** - Authentication overview
 
 ### Get Help
 

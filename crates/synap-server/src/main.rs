@@ -283,7 +283,7 @@ async fn main() -> Result<()> {
         }
     };
 
-    // Value-carrying KV watch (docs/kv-watch.md) — always on, unlike keyspace
+    // Value-carrying KV watch (docs/features/kv-watch.md) — always on, unlike keyspace
     // notifications: a watch that silently does nothing at the default
     // configuration would be worse than none. Idle cost is one router lookup
     // per mutation.
