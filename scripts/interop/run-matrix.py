@@ -146,7 +146,7 @@ def discover_cells() -> list[Cell]:
             command=["php", str(CLIENTS / "php" / "interop.php")],
             cwd=CLIENTS / "php",
             requires="php",
-            note="hand-written transport, no Thunder package",
+            note="hivellm/thunder via the SDK",
         ),
         Cell(
             name="legacy",

@@ -11,15 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 The SynapRPC binary transport now runs on [Thunder](https://github.com/hivellm/thunder),
 the HiveLLM family's shared protocol, on both ends of the wire: the server
-listener and the Rust, TypeScript, Python and C# SDKs. Wire v1 is frozen and
+listener and all six SDKs. Wire v1 is frozen and
 unchanged — a pre-1.2.0 client keeps working against a 1.2.0 server, verified by
 the `legacy` cell of the interop matrix rather than asserted.
 
-The **Go SDK** is on Thunder too, and now lives in its own repository —
-[`hivellm/synap-sdk-go`](https://github.com/hivellm/synap-sdk-go), consumed here
-as a submodule, released as v1.1.1. The **PHP SDK** likewise moved to
-[`hivellm/synap-sdk-php`](https://github.com/hivellm/synap-sdk-php); it keeps a
-hand-written transport, because Thunder has no PHP package, and interoperates.
+The **Go** and **PHP** SDKs are on Thunder too, and each now lives in its own
+repository — [`hivellm/synap-sdk-go`](https://github.com/hivellm/synap-sdk-go)
+(v1.2.0) and [`hivellm/synap-sdk-php`](https://github.com/hivellm/synap-sdk-php)
+(v1.2.1) — consumed here as submodules. All six SDKs run the same protocol
+implementation as the server, so no hand-written binary transport is left.
 
 Every cell of the interop matrix is green — rust, typescript, python, csharp,
 go, php, and a replay of the pre-Thunder wire. Full results:

@@ -17,7 +17,7 @@ Server: `thunder-rpc 0.2.0`, authentication required.
 | `typescript` | ✅ | ✅ | ✅ | ✅ | `@hivehub/thunder` |
 | `python` | ✅ | ✅ | ✅ | ✅ | `hivellm-thunder` |
 | `csharp` | ✅ | ✅ | ✅ | ✅ | `HiveLLM.Thunder` |
-| `php` | ✅ | ✅ | ✅ | ✅ | hand-written (no Thunder package) |
+| `php` | ✅ | ✅ | ✅ | ✅ | `hivellm/thunder` |
 | `go` | ✅ | ✅ | ✅ | ✅ | `thunder-go` |
 | `legacy` | ✅ | ✅ | ✅ | ✅ | pre-Thunder wire replay |
 

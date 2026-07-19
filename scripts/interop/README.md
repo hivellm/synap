@@ -4,8 +4,8 @@ One server build, every SDK, the same four steps.
 
 Each SDK has its own test suite, and each one passes. What none of them can
 prove is the thing that actually matters to a user: that a Thunder-based Synap
-server and every Synap client still agree on the wire — including the one SDK
-with no Thunder package (PHP) and any pre-Thunder client still deployed.
+server and every Synap client still agree on the wire — including any
+pre-Thunder client still deployed.
 
 That is this matrix. It is the release gate for 1.2.0.
 

@@ -100,9 +100,9 @@ Go, PHP, C#) select the transport via URL scheme — no separate builder options
 > — the HiveLLM family's shared binary RPC — on both ends: the server listener
 > and the Rust, TypeScript, Python and C# SDKs run the same protocol
 > implementation, so the two halves of a connection cannot drift. Wire v1 is
-> frozen; a pre-1.2.0 client still interoperates. The PHP SDK keeps a
-> hand-written transport, because Thunder has no PHP package — it is verified
-> against the same server by the interop matrix, see
+> frozen; a pre-1.2.0 client still interoperates. Every SDK — Rust,
+> TypeScript, Python, C#, Go and PHP — runs the same protocol implementation,
+> verified against one server build by the interop matrix, see
 > `docs/thunder-interop-matrix.md`.
 >
 > ```ts
