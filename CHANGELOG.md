@@ -131,7 +131,24 @@ toolchain. Full results: `docs/thunder-interop-matrix.md`.
 
 ### Fixed
 
-Everything in this block was found by the cross-SDK interop matrix
+- **The Docker image builds again.** The `Dockerfile` still copied
+  `crates/synap-protocol/`, which was dissolved into the server and the SDK
+  earlier in this release, so every image build failed at that `COPY` — the
+  release would have shipped without a working container. Nothing caught it
+  because no CI job builds the image.
+- **An authenticated deployment no longer reports itself unhealthy.** `/health`
+  and `/metrics` are declared "always public" at their route definitions, but
+  the auth middleware is a layer over the whole router, so under `require_auth`
+  they answered `401` like any other path. The container's own HEALTHCHECK
+  sends an unauthenticated `GET /health`, so the container stayed `unhealthy`
+  forever and an orchestrator would restart a server that was serving
+  perfectly. A liveness probe cannot require credentials — the RPC port already
+  answers `PING` before authentication for the same reason.
+
+Both of the above were found by running the release image with authentication
+required, which nothing in CI does.
+
+The rest of this block was found by the cross-SDK interop matrix
 (`scripts/interop/`, results in `docs/thunder-interop-matrix.md`). None of it
 was introduced by the Thunder swap — the matrix is the first thing that ran
 every SDK against one authenticated server and compared the results.

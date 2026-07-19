@@ -3,7 +3,13 @@
 Cross-SDK verification of the Thunder-based SynapRPC transport, run as the gate
 for 1.1.0. How to re-run it: [`scripts/interop/README.md`](../scripts/interop/README.md).
 
-Server: `target/release/synap-server` on `thunder-rpc 0.2.0`, auth required.
+Run twice against the same code: once with a locally built
+`target/release/synap-server`, and once against the **release Docker image**
+(`synap:interop`, 18.5 MB, reporting `healthy`) with its ports published. Both
+runs produced the table below — the container is not a separate result, it is
+the same result reached through a published port.
+
+Server: `thunder-rpc 0.2.0`, authentication required.
 
 | SDK | authenticate | SET/GET binary | SUBSCRIBE/PUBLISH | error round-trip | Transport |
 |---|---|---|---|---|---|
@@ -39,6 +45,24 @@ Thunder swap — the matrix is simply the first thing that looked.
 
 The C# SDK had the identical `AUTH` and reserved-sentinel defects; both were
 fixed when it moved onto Thunder, before this matrix ran.
+
+### Found by running the image, not the matrix
+
+Two defects only a container run could surface, both release blockers:
+
+- **The image did not build.** The `Dockerfile` still copied
+  `crates/synap-protocol/`, dissolved earlier in this release, so every build
+  failed at that `COPY`. No CI job builds the image, so nothing caught it.
+- **An authenticated deployment reported itself `unhealthy`.** `/health` and
+  `/metrics` are declared "always public" at their route definitions, but the
+  auth middleware is a layer over the whole router, so under `require_auth`
+  they answered `401`. The container's HEALTHCHECK probes `/health`
+  unauthenticated, so the container stayed `unhealthy` forever and an
+  orchestrator would restart a server that was serving perfectly.
+
+Both are fixed, with regression tests in `auth_edge_cases_tests.rs`. The
+standing lesson matches the matrix's: a CI job should build and run the image,
+for the same reason the matrix exists.
 
 ### Open
 

@@ -1,0 +1,60 @@
+# Server configuration for running the interop matrix against a container.
+#
+# Identical to server-config.yml except every listener binds 0.0.0.0: inside a
+# container, 127.0.0.1 is reachable only from the container itself, so a
+# published port would connect to nothing.
+#
+# Ports stay on the defaults here — the container has its own network namespace,
+# so there is nothing to collide with, and `docker run -p` maps them outward.
+
+server:
+  host: "0.0.0.0"
+  port: 15500
+  websocket_enabled: true
+
+synap_rpc:
+  enabled: true
+  host: "0.0.0.0"
+  port: 15501
+
+resp3:
+  enabled: true
+  host: "0.0.0.0"
+  port: 6379
+
+auth:
+  enabled: true
+  require_auth: true
+  root:
+    username: "root"
+    password: "interop-secret"
+    enabled: true
+
+kv_store:
+  max_memory_mb: 256
+  eviction_policy: "allkeys-lru"
+  ttl_cleanup_interval_ms: 100
+
+queue:
+  enabled: true
+  max_depth: 10000
+  ack_deadline_secs: 30
+  default_max_retries: 3
+  default_priority: 5
+
+logging:
+  level: "info"
+  format: "json"
+
+protocols:
+  streamable_http:
+    enabled: true
+    path: "/api/v1/command"
+  rest:
+    enabled: true
+    prefix: "/kv"
+
+rate_limit:
+  enabled: false
+  requests_per_second: 100000
+  burst_size: 100000

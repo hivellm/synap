@@ -95,3 +95,53 @@ jobs:
         with:
           name: interop-results
           path: interop-results.json
+
+  container:
+    name: The release image builds, runs, and answers
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    # The image shipped broken for an entire release cycle — the Dockerfile
+    # still copied a crate that had been dissolved — because nothing in CI
+    # built it. And once it built, an authenticated deployment reported itself
+    # unhealthy, because /health sat behind the auth middleware. Both are the
+    # same class of bug: only running the container finds them.
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the image
+        run: docker build -t synap:ci .
+
+      - name: Run it with authentication required
+        run: |
+          docker run -d --name synap-ci \
+            -p 15500:15500 -p 15501:15501 \
+            -v "$PWD/scripts/interop/server-config.docker.yml:/app/config.yml:ro" \
+            synap:ci
+
+      - name: Wait for the container to report healthy
+        run: |
+          for _ in $(seq 1 60); do
+            status=$(docker inspect synap-ci --format '{{.State.Health.Status}}')
+            [ "$status" = "healthy" ] && exit 0
+            [ "$status" = "unhealthy" ] && break
+            sleep 5
+          done
+          echo "container never became healthy (last status: ${status:-unknown})"
+          docker logs synap-ci
+          exit 1
+
+      - name: An unauthenticated probe must still answer
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:15500/health)
+          [ "$code" = "200" ] || { echo "GET /health returned $code, expected 200"; exit 1; }
+
+      - name: A data path must still demand credentials
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:15500/kv/stats)
+          [ "$code" = "200" ] && { echo "GET /kv/stats answered without credentials"; exit 1; }
+          exit 0
+
+      - name: Dump the logs on failure
+        if: failure()
+        run: docker logs synap-ci

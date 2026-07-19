@@ -262,7 +262,7 @@ def parse_steps(stdout: str) -> dict[str, tuple[str, str]]:
     return steps
 
 
-def run_cell(cell: Cell, timeout: float) -> Result:
+def run_cell(cell: Cell, timeout: float, target: tuple[str, int]) -> Result:
     # `SYNAP_INTEROP_<CELL>` overrides the launcher for one cell, e.g.
     # `SYNAP_INTEROP_PHP=C:\php\php.exe`. Needed when the name on PATH is not
     # something that can actually be spawned: a winget-installed PHP resolves
@@ -293,7 +293,8 @@ def run_cell(cell: Cell, timeout: float) -> Result:
                 output="\n".join(transcript),
             )
 
-    argv = [*cell.command, "127.0.0.1", str(RPC_PORT), USER, PASSWORD]
+    host, port = target
+    argv = [*cell.command, host, str(port), USER, PASSWORD]
     try:
         done = subprocess.run(
             argv, cwd=cell.cwd, env=env, capture_output=True, text=True, timeout=timeout
@@ -335,6 +336,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("only", nargs="*", help="run only these cells")
     parser.add_argument("--list", action="store_true", help="list cells and exit")
+    parser.add_argument(
+        "--server",
+        metavar="HOST:PORT",
+        help="measure an already-running server instead of starting one — "
+        "a container, a staging box, anything reachable. The server must be "
+        "configured like server-config.yml: auth required, same credentials.",
+    )
     parser.add_argument("--timeout", type=float, default=300.0)
     parser.add_argument("--json", type=Path, help="also write raw results here")
     args = parser.parse_args()
@@ -354,22 +362,32 @@ def main() -> int:
     by_name = {c.name: c for c in cells}
     results: list[Result] = []
 
-    with tempfile.TemporaryDirectory(
-        prefix="synap-interop-", ignore_cleanup_errors=True
-    ) as tmp:
-        with Server(Path(tmp)):
-            for cell in cells:
-                print(f"--- {cell.name} ---", flush=True)
-                result = run_cell(cell, args.timeout)
-                results.append(result)
-                if result.skipped_reason:
-                    print(f"    not run: {result.skipped_reason}", flush=True)
-                else:
-                    for step in STEPS:
-                        status, detail = result.steps.get(step, ("MISS", "not reported"))
-                        print(f"    {step:<10} {status} {detail}", flush=True)
-                if not result.green and result.output:
-                    print(result.output, flush=True)
+    def run_all(target: tuple[str, int]) -> None:
+        for cell in cells:
+            print(f"--- {cell.name} ---", flush=True)
+            result = run_cell(cell, args.timeout, target)
+            results.append(result)
+            if result.skipped_reason:
+                print(f"    not run: {result.skipped_reason}", flush=True)
+            else:
+                for step in STEPS:
+                    status, detail = result.steps.get(step, ("MISS", "not reported"))
+                    print(f"    {step:<10} {status} {detail}", flush=True)
+            if not result.green and result.output:
+                print(result.output, flush=True)
+
+    if args.server:
+        host, _, port = args.server.rpartition(":")
+        if not host or not port.isdigit():
+            raise SystemExit(f"--server wants HOST:PORT, got {args.server!r}")
+        print(f"measuring the server already running at {host}:{port}", flush=True)
+        run_all((host, int(port)))
+    else:
+        with tempfile.TemporaryDirectory(
+            prefix="synap-interop-", ignore_cleanup_errors=True
+        ) as tmp:
+            with Server(Path(tmp)):
+                run_all(("127.0.0.1", RPC_PORT))
 
     print()
     print(render(results, by_name))

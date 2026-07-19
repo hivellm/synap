@@ -15,6 +15,15 @@ use tower_http::{
 use tracing::debug;
 
 /// Create the Axum router with all endpoints
+/// Paths that must answer without credentials.
+///
+/// A liveness probe that requires authentication is not a liveness probe: the
+/// container HEALTHCHECK, Kubernetes, and any load balancer all probe
+/// unauthenticated. `/metrics` is the same contract — a scraper is not a user.
+fn is_public_path(path: &str) -> bool {
+    matches!(path, "/health" | "/metrics")
+}
+
 pub fn create_router(
     state: AppState,
     rate_limit_config: crate::config::RateLimitConfig,
@@ -453,6 +462,25 @@ pub fn create_router(
                 let auth = auth_clone.clone();
                 async move {
                     let client_ip = AuthMiddleware::get_client_ip(&req);
+
+                    // `/health` and `/metrics` are declared "always public" at
+                    // their route definitions, but this middleware is a layer
+                    // over the whole router, so the declaration was never
+                    // enforced: under `require_auth` they answered 401 like
+                    // anything else.
+                    //
+                    // That made the container's own HEALTHCHECK fail — it sends
+                    // an unauthenticated GET /health — so every authenticated
+                    // deployment reported `unhealthy` and an orchestrator would
+                    // restart a server that was serving perfectly. A liveness
+                    // probe cannot require credentials; the RPC port already
+                    // answers PING before authentication for the same reason.
+                    if is_public_path(req.uri().path()) {
+                        req.extensions_mut()
+                            .insert(crate::auth::AuthContext::anonymous(client_ip));
+                        return Ok(next.run(req).await);
+                    }
+
                     debug!("Processing authentication for IP: {}", client_ip);
 
                     // Try API Key authentication first (from header or query param)
