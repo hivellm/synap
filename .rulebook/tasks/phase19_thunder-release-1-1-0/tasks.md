@@ -16,9 +16,17 @@
 ## 3. Release
 
 - [ ] 3.1 Bump the workspace and every SDK manifest to 1.1.0
-- [ ] 3.2 Write the `CHANGELOG.md` 1.1.0 section with the `Bytes` canonicalization, the `synap-protocol` deprecation and a migration note
+- [ ] 3.2 Write the `CHANGELOG.md` 1.1.0 section with the `Bytes` canonicalization and a migration
+      note. The `synap-protocol` part is already written: phase13 put the type-by-type migration
+      table in `CHANGELOG.md` precisely because there is no published artifact to carry it —
+      fold it into the 1.1.0 section rather than restating it
 - [ ] 3.3 Update `README.md` and `docs/` to describe the RPC transport as Thunder-based
-- [ ] 3.4 Publish the terminal `synap-protocol` shim prepared in phase13
+- [x] 3.4 ~~Publish the terminal `synap-protocol` shim prepared in phase13~~ — **void, nothing to
+      do.** `phase13_thunder-protocol-crate-dissolution` (archived 2026-07-19, after this task was
+      written) decided the opposite: *"Delete `crates/synap-protocol` outright — no deprecation
+      shim (owner's call)"*. The crate is gone from the workspace and no shim was ever prepared,
+      so this step has no artifact to publish. It also matches the current direction across the
+      family: no `-protocol` crate gets published to crates.io
 - [ ] 3.5 Run the full quality gate: `cargo clippy -- -D warnings`, `cargo test`, and every SDK's test suite
 - [ ] 3.6 Tag `v1.1.0` and verify the release artifacts build
 

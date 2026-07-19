@@ -39,6 +39,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The Python SDK's RPC transport is Thunder's client** (`hivellm-thunder`,
   imported as `thunder_rpc`). The public API is unchanged; `msgpack` moves from
   a runtime dependency to a dev dependency for the same reason.
+- **The C# SDK's RPC transport is Thunder's client** (`HiveLLM.Thunder`). The
+  public API is unchanged; the SDK's hand-written MessagePack encoder is gone
+  from the shipped package (it now lives in the test project, where it still
+  decodes frames independently of Thunder).
 
 ### Added
 
@@ -84,27 +88,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- **The TypeScript and Python SDKs no longer allocate from an untrusted length
-  prefix.** Their RPC transports read a 4-byte frame header and allocated
+- **The TypeScript, Python and C# SDKs no longer allocate from an untrusted
+  length prefix.** Their RPC transports read a 4-byte frame header and allocated
   whatever it claimed, so a hostile or compromised peer could drive unbounded
   allocation from a tiny message. Thunder validates the prefix against the
   512 MiB cap before allocating anything. (Thunder's inventory found this
-  pattern in 9 of the family's 15 hand-ported SDK transports.)
+  pattern in 9 of the family's 15 hand-ported SDK transports.) The Go SDK
+  already had a cap; see below for its own correction.
 
 ### Not in this release
 
-- **The C# and Go SDKs keep their hand-written transports.** Both swaps are
-  blocked on Thunder packaging, not on anything in Synap: `HiveLLM.Thunder`
-  0.2.0 was never pushed to NuGet
-  ([thunder#8](https://github.com/hivellm/thunder/issues/8)), and the Go module
-  path `github.com/hivellm/thunder-go` does not resolve
-  ([thunder#9](https://github.com/hivellm/thunder/issues/9)). Both SDKs were
-  verified against a Thunder-based server and interoperate correctly; the Go one
-  needed the `Bytes` fix below to do so. They move to Thunder once the packages
-  ship.
+- **The Go SDK keeps its hand-written transport.** The swap is blocked on
+  Thunder packaging, not on anything in Synap: the module path
+  `github.com/hivellm/thunder-go` does not resolve
+  ([thunder#9](https://github.com/hivellm/thunder/issues/9)). It was verified
+  against a Thunder-based server and interoperates correctly — it needed the
+  `Bytes` fix below to do so. It moves to Thunder once the module ships.
 
 ### Fixed
 
+- **Pub/sub over RPC works from the C# SDK.** Its `SUBSCRIBE` was sent with
+  `id = 0xFFFFFFFF` — the reserved server-push sentinel. A Thunder server
+  refuses a request carrying that id, so the subscription would have failed
+  outright against a 1.1.0 server. Thunder allocates a normal request id and
+  routes push frames by the sentinel, which is what it is for.
 - **The Go SDK decodes the server's new `Bytes` encoding.** It understood only
   the legacy array-of-integers form, so against a 1.1.0 server every binary
   value would have come back as a raw `[]byte` instead of a `string`. It now
