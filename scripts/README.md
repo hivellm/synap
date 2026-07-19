@@ -1,6 +1,17 @@
-# Build Scripts
+# Synap Scripts
 
-Automated build scripts for creating platform-specific installers and packages.
+Everything under `scripts/` is grouped by what it is *for*, one directory per
+theme. Paths in the sections below are relative to the repository root.
+
+| Directory | What lives there |
+|---|---|
+| [`build/`](build/) | Platform installers and packages (MSI, DEB, Homebrew), plus `sweep-target` for bounding the Cargo `target/` directory. |
+| [`docker/`](docker/) | Image build, publish (multi-arch, SBOM, provenance), deploy, and their smoke tests. |
+| [`bench/`](bench/) | Performance suites and the Redis head-to-head, including the benchmark Dockerfile and its config. |
+| [`test/`](test/) | Ad-hoc server exercises — MCP, KV values, persistence, streaming, endpoint probes. |
+| [`interop/`](interop/README.md) | The cross-SDK interop matrix: one server build measured against every SDK. |
+| [`release/`](release/) | Release-workflow checks and CHANGELOG formatting. |
+| [`dev/`](dev/) | Local development helpers, such as populating a dashboard with sample data. |
 
 ## Available Scripts
 
@@ -17,10 +28,10 @@ Build Windows MSI installer using WiX Toolset.
 **Usage**:
 ```powershell
 # Build with default version
-.\scripts\build-windows.ps1
+.\scripts\build\build-windows.ps1
 
 # Build with specific version
-.\scripts\build-windows.ps1 -Version "1.0.0"
+.\scripts\build\build-windows.ps1 -Version "1.0.0"
 ```
 
 **Output**: `target/wix/synap-{version}-x86_64.msi`
@@ -40,13 +51,13 @@ Build Debian/Ubuntu DEB package.
 **Usage**:
 ```bash
 # Build with default version
-./scripts/build-linux.sh
+./scripts/build/build-linux.sh
 
 # Build with specific version
-./scripts/build-linux.sh 1.0.0
+./scripts/build/build-linux.sh 1.0.0
 
 # Build and test installation
-./scripts/build-linux.sh 1.0.0 --test
+./scripts/build/build-linux.sh 1.0.0 --test
 ```
 
 **Output**: `target/debian/synap_{version}_amd64.deb`
@@ -65,13 +76,13 @@ Build macOS tarball and Homebrew formula.
 **Usage**:
 ```bash
 # Build with default version
-./scripts/build-macos.sh
+./scripts/build/build-macos.sh
 
 # Build with specific version
-./scripts/build-macos.sh 1.0.0
+./scripts/build/build-macos.sh 1.0.0
 
 # Build and test Homebrew installation
-./scripts/build-macos.sh 1.0.0 --test
+./scripts/build/build-macos.sh 1.0.0 --test
 ```
 
 **Output**: 
@@ -87,10 +98,10 @@ Build packages for all platforms (detects current OS).
 **Usage**:
 ```bash
 # Build for current platform
-./scripts/build-all.sh
+./scripts/build/build-all.sh
 
 # Build with specific version
-./scripts/build-all.sh 1.0.0
+./scripts/build/build-all.sh 1.0.0
 ```
 
 ---
@@ -160,13 +171,13 @@ These scripts are used in GitHub Actions workflow:
 ```yaml
 # .github/workflows/release.yml
 - name: Build Windows MSI
-  run: pwsh scripts/build-windows.ps1 ${{ github.ref_name }}
+  run: pwsh scripts/build/build-windows.ps1 ${{ github.ref_name }}
 
 - name: Build Linux DEB
-  run: ./scripts/build-linux.sh ${{ github.ref_name }}
+  run: ./scripts/build/build-linux.sh ${{ github.ref_name }}
 
 - name: Build macOS Package
-  run: ./scripts/build-macos.sh ${{ github.ref_name }}
+  run: ./scripts/build/build-macos.sh ${{ github.ref_name }}
 ```
 
 ---
@@ -231,7 +242,7 @@ cargo install cargo-deb
 ### macOS: Permission Denied
 ```bash
 # Make script executable
-chmod +x scripts/build-macos.sh
+chmod +x scripts/build/build-macos.sh
 ```
 
 ### All Platforms: Rust Not Found
@@ -266,19 +277,19 @@ Build Docker images locally for testing.
 **Usage**:
 ```powershell
 # PowerShell
-.\scripts\docker-build.ps1 [version]
+.\scripts\docker\docker-build.ps1 [version]
 
 # Bash
-./scripts/docker-build.sh [version]
+./scripts/docker/docker-build.sh [version]
 ```
 
 **Examples**:
 ```powershell
 # Build latest
-.\scripts\docker-build.ps1
+.\scripts\docker\docker-build.ps1
 
 # Build specific version
-.\scripts\docker-build.ps1 0.8.1
+.\scripts\docker\docker-build.ps1 0.8.1
 ```
 
 **Output**: Local Docker image tagged as `hivehub/synap:{version}` and `hivehub/synap:latest`
@@ -296,25 +307,25 @@ Build and publish multi-arch Docker images to DockerHub.
 **Usage**:
 ```powershell
 # PowerShell
-.\scripts\docker-publish.ps1 [version] [--no-build] [--no-push]
+.\scripts\docker\docker-publish.ps1 [version] [--no-build] [--no-push]
 
 # Bash
-./scripts/docker-publish.sh [version] [--no-build] [--no-push]
+./scripts/docker/docker-publish.sh [version] [--no-build] [--no-push]
 ```
 
 **Examples**:
 ```powershell
 # Build and push latest
-.\scripts\docker-publish.ps1
+.\scripts\docker\docker-publish.ps1
 
 # Build and push specific version
-.\scripts\docker-publish.ps1 0.8.1
+.\scripts\docker\docker-publish.ps1 0.8.1
 
 # Only push (skip build)
-.\scripts\docker-publish.ps1 0.8.1 --no-build
+.\scripts\docker\docker-publish.ps1 0.8.1 --no-build
 
 # Only build (skip push)
-.\scripts\docker-publish.ps1 0.8.1 --no-push
+.\scripts\docker\docker-publish.ps1 0.8.1 --no-push
 ```
 
 **Features**:
@@ -334,10 +345,10 @@ Manage Synap replication cluster using Docker Compose.
 **Usage**:
 ```powershell
 # PowerShell
-.\scripts\docker-deploy.ps1 [command]
+.\scripts\docker\docker-deploy.ps1 [command]
 
 # Bash
-./scripts/docker-deploy.sh [command]
+./scripts/docker/docker-deploy.sh [command]
 ```
 
 **Commands**:
@@ -351,9 +362,9 @@ Manage Synap replication cluster using Docker Compose.
 
 **Examples**:
 ```powershell
-.\scripts\docker-deploy.ps1 start
-.\scripts\docker-deploy.ps1 logs
-.\scripts\docker-deploy.ps1 health
+.\scripts\docker\docker-deploy.ps1 start
+.\scripts\docker\docker-deploy.ps1 logs
+.\scripts\docker\docker-deploy.ps1 health
 ```
 
 ---
@@ -369,13 +380,13 @@ Popula o servidor Synap com dados reais para visualizar no dashboard GUI.
 **Uso**:
 ```powershell
 # Com servidor padrão (localhost:8080)
-.\scripts\populate-synap-dashboard.ps1
+.\scripts\dev\populate-synap-dashboard.ps1
 
 # Com servidor customizado
-.\scripts\populate-synap-dashboard.ps1 -Url "http://localhost" -Port 8080
+.\scripts\dev\populate-synap-dashboard.ps1 -Url "http://localhost" -Port 8080
 
 # Com API key
-.\scripts\populate-synap-dashboard.ps1 -Url "http://localhost" -Port 8080 -ApiKey "your-api-key"
+.\scripts\dev\populate-synap-dashboard.ps1 -Url "http://localhost" -Port 8080 -ApiKey "your-api-key"
 ```
 
 **O que o script faz**:

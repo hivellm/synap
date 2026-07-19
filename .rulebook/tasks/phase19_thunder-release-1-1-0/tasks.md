@@ -1,17 +1,26 @@
 ## 1. Interop matrix
 
-- [ ] 1.1 Add `scripts/thunder-interop/` driving one Thunder-based server build against every SDK
-- [ ] 1.2 Cover per SDK: authenticate → SET/GET with a binary value → SUBSCRIBE/PUBLISH → error round-trip
-- [ ] 1.3 Run the matrix for rust, typescript, python, csharp, go
-- [ ] 1.4 Run the matrix for php and java (hand-written transports, no Thunder package)
-- [ ] 1.5 Run the legacy cell: a pre-Thunder SDK build against the new server, proving int-array `Bytes` tolerance
-- [ ] 1.6 Record the full matrix result in `docs/`
+- [x] 1.1 Add `scripts/interop/` driving one Thunder-based server build against every SDK
+- [x] 1.2 Cover per SDK: authenticate → SET/GET with a binary value → SUBSCRIBE/PUBLISH → error round-trip
+- [x] 1.3 Run the matrix for rust, typescript, python, csharp, go
+- [x] 1.4 Run the matrix for php (green after three fixes). Java has no toolchain on
+      this machine — Maven is absent from the winget source and the JDK 17 install was
+      cancelled at the UAC prompt — so its cell is recorded as unverified in
+      `docs/thunder-interop-matrix.md` rather than presented as a result
+- [x] 1.5 Run the legacy cell: a pre-Thunder SDK build against the new server, proving int-array `Bytes` tolerance
+- [x] 1.6 Record the full matrix result in `docs/thunder-interop-matrix.md`
 
 ## 2. Failures
 
-- [ ] 2.1 For each red cell caused by Thunder, file an issue on `hivellm/thunder` with the failing frame bytes and the SDK/language
-- [ ] 2.2 For each red cell caused by Synap, fix it in this repo and re-run the affected cell
-- [ ] 2.3 Confirm every cell is green before continuing to section 3
+- [x] 2.1 No red cell was caused by Thunder — every defect the matrix surfaced was
+      Synap's own and predates the swap, so no new upstream issue was filed
+- [x] 2.2 Fixed and re-ran: rust (JSON round-trip asymmetry), typescript (lossy UTF-8
+      `Bytes` decode), go (missing `AUTH`; non-UTF-8 `str`), php (missing `AUTH`;
+      reserved push id on `SUBSCRIBE`; non-UTF-8 `str`)
+- [ ] 2.3 Confirm every cell is green before continuing to section 3 — **blocked**:
+      `go`/kv_binary is red because `sendRPC` JSON-marshals the payload and Go's
+      `encoding/json` destroys non-UTF-8 before framing. The fix is the `sendRPC`
+      rewrite phase20 performs; `java` is unverified for lack of a toolchain
 
 ## 3. Release
 

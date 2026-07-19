@@ -150,3 +150,49 @@ async fn sdk_surfaces_unauthorized_without_credentials() {
         "NOAUTH should surface as the typed auth error, got: {err:?}"
     );
 }
+
+/// The binary transport JSON-encodes a structured value into a string on the
+/// way out (`to_wire` has no array or object arm) and the server stores those
+/// bytes verbatim. Nothing re-parsed them on the way back, so a value the SDK
+/// itself had written could not be read back into its own type.
+///
+/// Found by the cross-SDK interop matrix (`scripts/interop/`): the Rust cell
+/// was the only one that could not complete a binary round-trip.
+#[tokio::test]
+async fn sdk_reads_back_a_structured_value_it_wrote() {
+    let (_handle, config) = start_open().await;
+    let client = SynapClient::new(config).expect("client builds");
+    let kv = client.kv();
+
+    let written = vec![0xDEu8, 0xAD, 0xBE, 0xEF];
+    kv.set("round-trip:bytes", written.clone(), None)
+        .await
+        .expect("set succeeds");
+
+    let read: Option<Vec<u8>> = kv.get("round-trip:bytes").await.expect("get succeeds");
+
+    assert_eq!(read.as_ref(), Some(&written));
+}
+
+/// The re-parse must not change what a plain string decodes to. A string that
+/// happens to be valid JSON (`"123"`, `"null"`, `"[1,2]"`) still has to come
+/// back as that string, because the direct decode succeeds first and the
+/// fallback is never reached.
+#[tokio::test]
+async fn sdk_does_not_reinterpret_a_string_that_looks_like_json() {
+    let (_handle, config) = start_open().await;
+    let client = SynapClient::new(config).expect("client builds");
+    let kv = client.kv();
+
+    for value in ["123", "null", "[1,2]", "{\"a\":1}", "true"] {
+        kv.set("round-trip:str", value, None)
+            .await
+            .expect("set succeeds");
+        let read: Option<String> = kv.get("round-trip:str").await.expect("get succeeds");
+        assert_eq!(
+            read.as_deref(),
+            Some(value),
+            "a string value must survive as that string"
+        );
+    }
+}

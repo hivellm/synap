@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A cross-SDK interop matrix** (`scripts/interop/`) — one server build
+  measured against every SDK plus a pre-Thunder client, each completing
+  authenticate → `SET`/`GET` with a binary value → `SUBSCRIBE`/`PUBLISH` → an
+  error round-trip. Each SDK's own suite passes in isolation; this is the only
+  thing that checks they still agree with each other and with the server.
+  Results and the open cells are recorded in `docs/thunder-interop-matrix.md`.
 - `synap_rpc_connections_refused_total` — accepts refused at the
   `network.max_connections` ceiling, so an engaging limit is visible rather than
   silent.
@@ -107,6 +113,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+Everything in this block was found by the cross-SDK interop matrix
+(`scripts/interop/`, results in `docs/thunder-interop-matrix.md`). None of it
+was introduced by the Thunder swap — the matrix is the first thing that ran
+every SDK against one authenticated server and compared the results.
+
+- **The Go and PHP SDKs can reach an authenticated server over `synap://`.**
+  Neither RPC transport ever sent `AUTH`, so against a `require_auth`
+  deployment on 15501 every single command came back `NOAUTH` — the transport
+  was unusable, not degraded. Both now send the credentials the HTTP transport
+  already carried in its `Authorization` header, on every connect including
+  reconnects, so a replaced socket is not silently downgraded to anonymous.
+- **Pub/sub over RPC works from the PHP SDK.** Its `SUBSCRIBE` was sent with
+  `id = 0xFFFFFFFF` — the reserved server-push sentinel — which the server
+  refuses outright (`ERR request id u32::MAX is reserved for server push
+  frames`). It now uses an ordinary request id; the sentinel identifies frames
+  coming *from* the server and was never an address a client could send to.
+- **Binary values survive the round trip in the TypeScript, Go and PHP SDKs.**
+  TypeScript decoded `Bytes` as UTF-8 unconditionally, so every invalid
+  sequence became U+FFFD and `deadbeef` came back as `adfdfd` — corrupted and
+  unrecoverable. Go and PHP packed non-UTF-8 strings as MessagePack `str`,
+  which the server decoded lossily or rejected outright. Bytes that are not
+  valid UTF-8 now travel as `bin` and decode back as raw bytes.
+- **The Rust SDK reads back a structured value it wrote.** `set(k, vec![…])`
+  followed by `get::<Vec<u8>>(k)` failed: the transport JSON-encodes a
+  structured value into a string on the way out and nothing re-parsed it on the
+  way back. The re-parse is attempted only after the direct decode has already
+  failed, so a value that genuinely is a string — including one that looks like
+  JSON, such as `"123"` or `"[1,2]"` — still decodes as that string.
 - **Pub/sub over RPC works from the C# SDK.** Its `SUBSCRIBE` was sent with
   `id = 0xFFFFFFFF` — the reserved server-push sentinel. A Thunder server
   refuses a request carrying that id, so the subscription would have failed

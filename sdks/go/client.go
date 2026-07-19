@@ -134,7 +134,8 @@ func NewClient(cfg *Config) *SynapClient {
 	}
 	switch cfg.transport {
 	case TransportSynapRPC:
-		c.rpc = newSynapRpcTransport(cfg.host, cfg.port, cfg.timeout)
+		c.rpc = newSynapRpcTransport(cfg.host, cfg.port, cfg.timeout).
+			withCredentials(cfg.authToken, cfg.username, cfg.password)
 		c.endpoint = fmt.Sprintf("http://%s:15500/api/v1/command", cfg.host)
 	case TransportRESP3:
 		c.resp3 = newResp3Transport(cfg.host, cfg.port, cfg.timeout)

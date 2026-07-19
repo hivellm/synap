@@ -129,6 +129,22 @@ describe('toWireValue / fromWireValue (via SynapRpcTransport loopback)', () => {
     expect(result).toBe('hello');
   });
 
+  it('Buffer (non-UTF-8 bytes) survives the round trip as a Buffer', async () => {
+    // Decoding Bytes as UTF-8 unconditionally replaced every invalid sequence
+    // with U+FFFD, so a binary value came back corrupted and unrecoverable:
+    // deadbeef read back as adfdfd. Found by the cross-SDK interop matrix
+    // (scripts/interop/), where TypeScript was the only red binary cell.
+    const { server: s, port } = await makeEchoServer();
+    server = s;
+    transport = new SynapRpcTransport('127.0.0.1', port, 5000);
+
+    const binary = Buffer.from([0xde, 0xad, 0xbe, 0xef]);
+    const result = await transport.execute('GET', [binary]);
+
+    expect(Buffer.isBuffer(result)).toBe(true);
+    expect((result as Buffer).equals(binary)).toBe(true);
+  });
+
   it('undefined → treated as null (Null) on wire', async () => {
     const { server: s, port } = await makeEchoServer();
     server = s;

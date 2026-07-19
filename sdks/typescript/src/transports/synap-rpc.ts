@@ -73,10 +73,16 @@ export function toWireValue(v: unknown): WireValue {
 /**
  * Decode a Thunder {@link Value} back to a plain JS value.
  *
- * `Bytes` decode as UTF-8, since Synap's SDK surface is string-oriented;
+ * `Bytes` decode as UTF-8 when they are valid UTF-8 -- Synap's SDK surface is
+ * string-oriented -- and stay a `Buffer` when they are not. Decoding
+ * unconditionally replaced every invalid sequence with U+FFFD, so a binary
+ * value came back corrupted and unrecoverable: `deadbeef` read back as
+ * `adfdfd`.
+ *
  * `Int` narrows to `number` when it fits safely and stays a `bigint` when it
  * does not, so a value outside ±2^53 is never silently corrupted.
  */
+const UTF8_STRICT = new TextDecoder('utf-8', { fatal: true });
 export function fromWireValue(wire: unknown): unknown {
   const value = wire as Value | undefined;
   if (value === null || value === undefined) return null;
@@ -95,7 +101,11 @@ export function fromWireValue(wire: unknown): unknown {
         ? Number(value.value)
         : value.value;
     case 'bytes':
-      return Buffer.from(value.value).toString('utf8');
+      try {
+        return UTF8_STRICT.decode(value.value);
+      } catch {
+        return Buffer.from(value.value);
+      }
     case 'array':
       return value.value.map(fromWireValue);
     case 'map': {

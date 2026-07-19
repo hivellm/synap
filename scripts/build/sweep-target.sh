@@ -8,10 +8,10 @@
 # breaking incrementality — the hot set (recently touched artifacts) stays.
 #
 # Usage:
-#   scripts/sweep-target.sh [DAYS]     # remove artifacts unused for DAYS (default 14)
-#   scripts/sweep-target.sh --clean    # full `cargo clean` (reclaim everything)
-#   scripts/sweep-target.sh --dry-run  # show what would be removed, delete nothing
-#   SWEEP_DAYS=30 scripts/sweep-target.sh
+#   scripts/build/sweep-target.sh [DAYS]     # remove artifacts unused for DAYS (default 14)
+#   scripts/build/sweep-target.sh --clean    # full `cargo clean` (reclaim everything)
+#   scripts/build/sweep-target.sh --dry-run  # show what would be removed, delete nothing
+#   SWEEP_DAYS=30 scripts/build/sweep-target.sh
 #
 # See docs/rust-target-hygiene.md for the full rationale.
 set -euo pipefail

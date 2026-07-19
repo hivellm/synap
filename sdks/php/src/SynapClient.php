@@ -59,6 +59,11 @@ class SynapClient
                 $config->getRpcHost(),
                 $config->getRpcPort(),
                 $config->getTimeout(),
+                // The same credentials the HTTP transport puts in an
+                // Authorization header now open the RPC connection too.
+                $config->getAuthToken(),
+                $config->getUsername(),
+                $config->getPassword(),
             );
         } elseif ($config->getTransport() === TransportMode::RESP3) {
             $this->native = new Resp3Transport(

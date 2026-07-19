@@ -80,9 +80,26 @@ impl KVStore {
             return Ok(None);
         }
 
-        // Parse the value
-        let value: V = serde_json::from_value(response)?;
-        Ok(Some(value))
+        // Parse the value.
+        //
+        // On the binary transport a structured value is JSON-encoded into a
+        // string on the way out (`transport::mapping::to_wire` has no array or
+        // object arm), and the server stores exactly those bytes. Nothing on
+        // the way back re-parses them, so `set(k, vec![1, 2, 3])` followed by
+        // `get::<Vec<u8>>(k)` used to fail on a value the SDK itself wrote.
+        //
+        // Re-parsing is attempted only after the direct decode has already
+        // failed, so a value that genuinely is a string still decodes as one:
+        // `get::<String>` succeeds on the first branch and never reaches here.
+        match serde_json::from_value::<V>(response.clone()) {
+            Ok(value) => Ok(Some(value)),
+            Err(direct) => match response.as_str() {
+                Some(text) => serde_json::from_str::<V>(text)
+                    .map(Some)
+                    .map_err(|_| direct.into()),
+                None => Err(direct.into()),
+            },
+        }
     }
 
     /// Delete a key

@@ -5,7 +5,7 @@ Guards the release-artifact contract (Nexus/Vectorizer pattern):
 triggers, both binaries, all five targets, sha256 checksums, native
 arm64 runner, no cross-compile leftovers.
 
-Usage: python scripts/test-release-workflow.py
+Usage: python scripts/release/test-release-workflow.py
 """
 
 import sys
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-WORKFLOW = Path(__file__).resolve().parent.parent / ".github/workflows/release.yml"
+WORKFLOW = Path(__file__).resolve().parents[2] / ".github/workflows/release.yml"
 
 EXPECTED_TARGETS = {
     "x86_64-unknown-linux-gnu",

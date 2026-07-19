@@ -29,15 +29,34 @@ use Synap\SDK\Exception\SynapException;
  */
 class SynapRpcTransport
 {
+    /**
+     * The reserved id that marks a frame as server push.
+     *
+     * It identifies frames coming *from* the server. A client must never send
+     * it as a request id -- the server refuses such a frame outright.
+     */
+    private const PUSH_ID = 0xFFFF_FFFF;
+
     /** @var resource|null */
     private mixed $socket = null;
 
     private int $nextId = 1;
 
+    /**
+     * @param string      $host        SynapRPC host.
+     * @param int         $port        SynapRPC port.
+     * @param int         $timeoutSecs Connect and per-call timeout.
+     * @param string|null $authToken   API key / token, sent as `AUTH <token>`.
+     * @param string|null $username    Username, sent with $password as `AUTH <user> <pass>`.
+     * @param string|null $password    Password paired with $username.
+     */
     public function __construct(
         private readonly string $host,
         private readonly int $port,
         private readonly int $timeoutSecs,
+        private readonly ?string $authToken = null,
+        private readonly ?string $username = null,
+        private readonly ?string $password = null,
     ) {}
 
     /**
@@ -62,7 +81,71 @@ class SynapRpcTransport
         stream_set_timeout($sock, $this->timeoutSecs);
         $this->socket = $sock;
 
+        $this->authenticate($sock);
+
         return $sock;
+    }
+
+    /**
+     * Send AUTH on a freshly opened socket.
+     *
+     * This transport never authenticated, so it could not reach a
+     * `require_auth` deployment on 15501 at all — every command came back
+     * NOAUTH. `AUTH <password>` authenticates the default user and
+     * `AUTH <user> <pass>` names one, matching the server's handshake. With no
+     * credentials configured the connection stays anonymous, which is what an
+     * open deployment expects.
+     *
+     * @param resource $sock
+     * @throws SynapException when the credentials are rejected
+     */
+    private function authenticate(mixed $sock): void
+    {
+        try {
+            $this->authenticateOn($sock);
+        } catch (SynapException $e) {
+            // Do not leave an unauthenticated socket behind for the retry path
+            // to reuse: it would fail every command with NOAUTH instead.
+            fclose($sock);
+            $this->socket = null;
+            throw $e;
+        }
+    }
+
+    /**
+     * Write an AUTH frame on the given socket and consume its acknowledgement.
+     *
+     * Framing is done here rather than through {@see doExecute} so the
+     * dedicated push socket, which is not `$this->socket`, can authenticate
+     * with the same code.
+     *
+     * @param resource $sock
+     * @throws SynapException when the credentials are rejected
+     */
+    private function authenticateOn(mixed $sock): void
+    {
+        if ($this->username !== null && $this->username !== '' && $this->password !== null) {
+            $args = [$this->username, $this->password];
+        } elseif ($this->authToken !== null && $this->authToken !== '') {
+            $args = [$this->authToken];
+        } else {
+            return;
+        }
+
+        $wireArgs = array_map(__NAMESPACE__ . '\\toWireValue', $args);
+        $body  = MessagePack::pack([0, 'AUTH', $wireArgs]);
+        $frame = pack('V', strlen($body)) . $body;
+
+        if (fwrite($sock, $frame) === false) {
+            throw SynapException::networkError('SynapRPC AUTH write failed');
+        }
+
+        /** @var array{1: int} $unpacked */
+        $unpacked = unpack('V', $this->readExactFrom($sock, 4));
+        $ack = MessagePack::unpack($this->readExactFrom($sock, $unpacked[1]));
+        if (isset($ack[1]['Err'])) {
+            throw SynapException::serverError((string) $ack[1]['Err']);
+        }
     }
 
     /**
@@ -157,10 +240,20 @@ class SynapRpcTransport
         }
         stream_set_timeout($pushSock, $this->timeoutSecs);
 
-        // Send SUBSCRIBE frame: [id=U32_MAX, "SUBSCRIBE", [topic, ...]]
-        $PUSH_ID = 0xFFFF_FFFF;
+        // A push connection authenticates like any other: SUBSCRIBE is a
+        // privileged command, so credentials have to open this socket too.
+        $this->authenticateOn($pushSock);
+
+        // Send SUBSCRIBE frame: [id, "SUBSCRIBE", [topic, ...]]
+        //
+        // The id is an ordinary request id. This used to send 0xFFFFFFFF — the
+        // reserved push sentinel — as the *request* id, which the server
+        // refuses outright ("request id u32::MAX is reserved for server push
+        // frames"), so pub/sub over SynapRPC could not work at all. The
+        // sentinel identifies frames coming *from* the server; it is not an
+        // address a client may send to.
         $wireTopics = array_map(__NAMESPACE__ . '\\toWireValue', $topics);
-        $body  = MessagePack::pack([$PUSH_ID, 'SUBSCRIBE', $wireTopics]);
+        $body  = MessagePack::pack([1, 'SUBSCRIBE', $wireTopics]);
         $frame = pack('V', strlen($body)) . $body;
 
         if (fwrite($pushSock, $frame) === false) {
@@ -199,7 +292,7 @@ class SynapRpcTransport
                 $decoded   = MessagePack::unpack($pushBody);
                 [$frameId, $resultEnv] = $decoded;
 
-                if ((int) $frameId !== $PUSH_ID) {
+                if ((int) $frameId !== self::PUSH_ID) {
                     continue; // Skip non-push frames
                 }
 

@@ -4,7 +4,7 @@
 # then stops Redis. Synap must already be running on port 15500.
 #
 # Usage:
-#   ./scripts/bench-redis-comparison.sh [--no-synap]
+#   ./scripts/bench/bench-redis-comparison.sh [--no-synap]
 #
 # Options:
 #   --no-synap   Skip Synap health check (Redis-only run)

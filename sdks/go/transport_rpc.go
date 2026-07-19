@@ -3,6 +3,7 @@ package synap
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/vmihailenco/msgpack/v5"
 )
@@ -37,6 +39,15 @@ func toSynapWireMap(v interface{}) interface{} {
 	}
 	switch val := v.(type) {
 	case string:
+		// A Go string is an arbitrary byte sequence, not necessarily UTF-8,
+		// and the SDK's KV surface is typed `string` -- so this is the only
+		// way a caller can hand over binary. Sending it as MessagePack `str`
+		// made the server decode it lossily: every invalid sequence came back
+		// as U+FFFD, so `deadbeef` read back as `deadefbfbdefbfbd`. Bytes that
+		// are not valid UTF-8 travel as `bin`, which round-trips exactly.
+		if !utf8.ValidString(val) {
+			return map[string]interface{}{"Bytes": []byte(val)}
+		}
 		return map[string]interface{}{"Str": val}
 	case bool:
 		return map[string]interface{}{"Bool": val}
@@ -146,6 +157,14 @@ type SynapRpcTransport struct {
 	port    int
 	timeout time.Duration
 
+	// Handshake credentials. This transport never sent AUTH, so it could not
+	// reach a require_auth deployment on 15501 at all: every command came back
+	// NOAUTH. The credentials the HTTP transport puts in an Authorization
+	// header now open the connection here too.
+	authToken string
+	username  string
+	password  string
+
 	mu     sync.Mutex
 	conn   net.Conn
 	nextID uint32
@@ -155,6 +174,16 @@ func newSynapRpcTransport(host string, port int, timeout time.Duration) *SynapRp
 	return &SynapRpcTransport{host: host, port: port, timeout: timeout}
 }
 
+// withCredentials attaches handshake credentials, sent as AUTH on every
+// connect -- including the reconnects Execute performs, so an authenticated
+// session is not silently downgraded when the socket is replaced.
+func (t *SynapRpcTransport) withCredentials(token, username, password string) *SynapRpcTransport {
+	t.authToken = token
+	t.username = username
+	t.password = password
+	return t
+}
+
 func (t *SynapRpcTransport) doConnect() error {
 	addr := net.JoinHostPort(t.host, fmt.Sprintf("%d", t.port))
 	conn, err := net.DialTimeout("tcp", addr, t.timeout)
@@ -162,8 +191,44 @@ func (t *SynapRpcTransport) doConnect() error {
 		return fmt.Errorf("SynapRPC connect %s: %w", addr, err)
 	}
 	t.conn = conn
+
+	if err := t.authenticate(); err != nil {
+		conn.Close()
+		t.conn = nil
+		return err
+	}
 	return nil
 }
+
+// authenticate sends AUTH on a freshly dialled connection.
+//
+// `AUTH <password>` authenticates the default user and `AUTH <user> <pass>`
+// names one, matching the server's handshake. With no credentials configured
+// the connection stays anonymous, which is what an open deployment expects.
+func (t *SynapRpcTransport) authenticate() error {
+	var args []interface{}
+	switch {
+	case t.username != "" && t.password != "":
+		args = []interface{}{t.username, t.password}
+	case t.authToken != "":
+		args = []interface{}{t.authToken}
+	default:
+		return nil
+	}
+
+	if _, err := t.exchange(context.Background(), "AUTH", args); err != nil {
+		return fmt.Errorf("SynapRPC authenticate: %w", err)
+	}
+	return nil
+}
+
+// connError marks a failure that killed the connection, so Execute knows a
+// reconnect is worth attempting. A server-side `Err` reply is not one of
+// these: the connection is fine and the command genuinely failed.
+type connError struct{ err error }
+
+func (e *connError) Error() string { return e.err.Error() }
+func (e *connError) Unwrap() error { return e.err }
 
 // Execute sends a command and waits for the response. Thread-safe via mutex.
 // Auto-reconnects once on failure.
@@ -172,11 +237,7 @@ func (t *SynapRpcTransport) Execute(ctx context.Context, cmd string, args []inte
 	defer t.mu.Unlock()
 
 	for attempt := 0; attempt < 2; attempt++ {
-		if t.conn == nil || attempt == 1 {
-			if t.conn != nil {
-				t.conn.Close()
-			}
-			t.conn = nil
+		if t.conn == nil {
 			if err := t.doConnect(); err != nil {
 				if attempt == 0 {
 					continue
@@ -185,91 +246,99 @@ func (t *SynapRpcTransport) Execute(ctx context.Context, cmd string, args []inte
 			}
 		}
 
-		id := atomic.AddUint32(&t.nextID, 1)
-
-		wireArgs := make([]interface{}, len(args))
-		for i, a := range args {
-			wireArgs[i] = toSynapWireMap(a)
-		}
-		reqMap := map[string]interface{}{
-			"id":      id,
-			"command": strings.ToUpper(cmd),
-			"args":    wireArgs,
-		}
-		body, err := msgpack.Marshal(reqMap)
-		if err != nil {
-			return nil, fmt.Errorf("SynapRPC marshal: %w", err)
+		result, err := t.exchange(ctx, cmd, args)
+		if err == nil {
+			return result, nil
 		}
 
-		deadline := time.Now().Add(t.timeout)
-		if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
-			deadline = dl
+		var dead *connError
+		if !errors.As(err, &dead) {
+			return nil, err
 		}
-		_ = t.conn.SetDeadline(deadline)
 
-		// Write length-prefixed frame
-		frame := make([]byte, 4+len(body))
-		binary.LittleEndian.PutUint32(frame[:4], uint32(len(body)))
-		copy(frame[4:], body)
-		if _, err := t.conn.Write(frame); err != nil {
+		// The socket is gone: drop it so the next attempt dials -- and
+		// re-authenticates -- from scratch.
+		if t.conn != nil {
 			t.conn.Close()
 			t.conn = nil
-			if attempt == 0 {
-				continue
-			}
-			return nil, fmt.Errorf("SynapRPC write: %w", err)
 		}
-
-		// Read response: 4-byte LE length header + body
-		header := make([]byte, 4)
-		if _, err := io.ReadFull(t.conn, header); err != nil {
-			t.conn.Close()
-			t.conn = nil
-			if attempt == 0 {
-				continue
-			}
-			return nil, fmt.Errorf("SynapRPC read header: %w", err)
+		if attempt == 1 {
+			return nil, err
 		}
-		respLen := binary.LittleEndian.Uint32(header)
-		if respLen > maxFrameBytes {
-			t.conn.Close()
-			t.conn = nil
-			return nil, fmt.Errorf("SynapRPC frame too large: %d", respLen)
-		}
-		respBody := make([]byte, respLen)
-		if _, err := io.ReadFull(t.conn, respBody); err != nil {
-			t.conn.Close()
-			t.conn = nil
-			if attempt == 0 {
-				continue
-			}
-			return nil, fmt.Errorf("SynapRPC read body: %w", err)
-		}
-
-		// Decode: response is array [id, {"Ok": value} | {"Err": string}]
-		var raw interface{}
-		if err := msgpack.Unmarshal(respBody, &raw); err != nil {
-			return nil, fmt.Errorf("SynapRPC unmarshal: %w", err)
-		}
-
-		arr, ok := raw.([]interface{})
-		if !ok || len(arr) != 2 {
-			return nil, fmt.Errorf("SynapRPC: unexpected response format: %T", raw)
-		}
-
-		resultMap, ok := arr[1].(map[string]interface{})
-		if !ok {
-			return nil, fmt.Errorf("SynapRPC: result is not a map: %T", arr[1])
-		}
-		if okVal, has := resultMap["Ok"]; has {
-			return unwrapSynapValue(okVal), nil
-		}
-		if errVal, has := resultMap["Err"]; has {
-			return nil, newServerError(fmt.Sprintf("%v", errVal))
-		}
-		return nil, fmt.Errorf("SynapRPC: result has neither Ok nor Err")
 	}
 	return nil, fmt.Errorf("SynapRPC: exhausted reconnect attempts")
+}
+
+// exchange performs exactly one request/response round trip on the live
+// connection. Split out of Execute so the AUTH handshake can use the same
+// framing without re-entering Execute's mutex or its reconnect loop.
+func (t *SynapRpcTransport) exchange(ctx context.Context, cmd string, args []interface{}) (interface{}, error) {
+	id := atomic.AddUint32(&t.nextID, 1)
+
+	wireArgs := make([]interface{}, len(args))
+	for i, a := range args {
+		wireArgs[i] = toSynapWireMap(a)
+	}
+	reqMap := map[string]interface{}{
+		"id":      id,
+		"command": strings.ToUpper(cmd),
+		"args":    wireArgs,
+	}
+	body, err := msgpack.Marshal(reqMap)
+	if err != nil {
+		return nil, fmt.Errorf("SynapRPC marshal: %w", err)
+	}
+
+	deadline := time.Now().Add(t.timeout)
+	if dl, ok := ctx.Deadline(); ok && dl.Before(deadline) {
+		deadline = dl
+	}
+	_ = t.conn.SetDeadline(deadline)
+
+	// Write length-prefixed frame
+	frame := make([]byte, 4+len(body))
+	binary.LittleEndian.PutUint32(frame[:4], uint32(len(body)))
+	copy(frame[4:], body)
+	if _, err := t.conn.Write(frame); err != nil {
+		return nil, &connError{fmt.Errorf("SynapRPC write: %w", err)}
+	}
+
+	// Read response: 4-byte LE length header + body
+	header := make([]byte, 4)
+	if _, err := io.ReadFull(t.conn, header); err != nil {
+		return nil, &connError{fmt.Errorf("SynapRPC read header: %w", err)}
+	}
+	respLen := binary.LittleEndian.Uint32(header)
+	if respLen > maxFrameBytes {
+		return nil, &connError{fmt.Errorf("SynapRPC frame too large: %d", respLen)}
+	}
+	respBody := make([]byte, respLen)
+	if _, err := io.ReadFull(t.conn, respBody); err != nil {
+		return nil, &connError{fmt.Errorf("SynapRPC read body: %w", err)}
+	}
+
+	// Decode: response is array [id, {"Ok": value} | {"Err": string}]
+	var raw interface{}
+	if err := msgpack.Unmarshal(respBody, &raw); err != nil {
+		return nil, fmt.Errorf("SynapRPC unmarshal: %w", err)
+	}
+
+	arr, ok := raw.([]interface{})
+	if !ok || len(arr) != 2 {
+		return nil, fmt.Errorf("SynapRPC: unexpected response format: %T", raw)
+	}
+
+	resultMap, ok := arr[1].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("SynapRPC: result is not a map: %T", arr[1])
+	}
+	if okVal, has := resultMap["Ok"]; has {
+		return unwrapSynapValue(okVal), nil
+	}
+	if errVal, has := resultMap["Err"]; has {
+		return nil, newServerError(fmt.Sprintf("%v", errVal))
+	}
+	return nil, fmt.Errorf("SynapRPC: result has neither Ok nor Err")
 }
 
 // Close tears down the underlying TCP connection.

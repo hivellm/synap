@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Smoke tests for scripts/docker-publish.{sh,ps1}
+# Smoke tests for scripts/docker/docker-publish.{sh,ps1}
 # ============================================================================
 #
 # Validates the publish scripts without pushing anything:
@@ -8,13 +8,13 @@
 #   2. multi-arch + attestation + cache flags are present in both variants
 #   3. dry run (--no-build --no-push) exits 0
 #
-# Usage: ./scripts/test-docker-publish.sh
+# Usage: ./scripts/docker/test-docker-publish.sh
 # ============================================================================
 
 set -e
 set -u
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/../.."
 
 FAILURES=0
 
@@ -22,7 +22,7 @@ pass() { echo "  ok: $1"; }
 fail() { echo "  FAIL: $1"; FAILURES=$((FAILURES + 1)); }
 
 echo "[1/4] bash syntax"
-if bash -n scripts/docker-publish.sh; then
+if bash -n scripts/docker/docker-publish.sh; then
     pass "docker-publish.sh parses"
 else
     fail "docker-publish.sh has syntax errors"
@@ -31,7 +31,7 @@ fi
 echo "[2/4] PowerShell syntax"
 if command -v pwsh > /dev/null 2>&1; then
     if pwsh -NoProfile -Command \
-        '$e = $null; [System.Management.Automation.Language.Parser]::ParseFile("scripts/docker-publish.ps1", [ref]$null, [ref]$e) | Out-Null; exit $e.Count' \
+        '$e = $null; [System.Management.Automation.Language.Parser]::ParseFile("scripts/docker/docker-publish.ps1", [ref]$null, [ref]$e) | Out-Null; exit $e.Count' \
         > /dev/null 2>&1; then
         pass "docker-publish.ps1 parses"
     else
@@ -42,7 +42,7 @@ else
 fi
 
 echo "[3/4] required buildx flags present in both variants"
-for script in scripts/docker-publish.sh scripts/docker-publish.ps1; do
+for script in scripts/docker/docker-publish.sh scripts/docker/docker-publish.ps1; do
     for flag in \
         "--platform linux/amd64,linux/arm64" \
         "--sbom=true" \
@@ -59,7 +59,7 @@ done
 
 echo "[4/4] dry run (--no-build --no-push) exits 0"
 if command -v docker > /dev/null 2>&1 && docker info > /dev/null 2>&1; then
-    if bash scripts/docker-publish.sh test-dry-run --no-build --no-push > /dev/null 2>&1; then
+    if bash scripts/docker/docker-publish.sh test-dry-run --no-build --no-push > /dev/null 2>&1; then
         pass "dry run exited 0"
     else
         fail "dry run exited non-zero"

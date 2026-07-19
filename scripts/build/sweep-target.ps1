@@ -20,10 +20,10 @@
   Show what would be removed without deleting anything.
 
 .EXAMPLE
-  scripts/sweep-target.ps1              # sweep artifacts unused for 14 days
-  scripts/sweep-target.ps1 -Days 30
-  scripts/sweep-target.ps1 -Clean
-  scripts/sweep-target.ps1 -DryRun
+  scripts/build/sweep-target.ps1              # sweep artifacts unused for 14 days
+  scripts/build/sweep-target.ps1 -Days 30
+  scripts/build/sweep-target.ps1 -Clean
+  scripts/build/sweep-target.ps1 -DryRun
 #>
 [CmdletBinding()]
 param(

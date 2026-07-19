@@ -49,6 +49,15 @@ function toWireValue(mixed $v): mixed
         return ['Float' => $v];
     }
     if (is_string($v)) {
+        // A PHP string is an arbitrary byte sequence, not necessarily UTF-8,
+        // and the SDK's surface is string-typed -- so this is the only way a
+        // caller can hand over binary. Packing it as MessagePack `str` made
+        // the server reject the frame outright and close the connection.
+        // Bytes that are not valid UTF-8 travel as `bin`, which round-trips
+        // exactly.
+        if (!mb_check_encoding($v, 'UTF-8')) {
+            return ['Bytes' => $v];
+        }
         return ['Str' => $v];
     }
     // Fallback: stringify any other scalar

@@ -45,6 +45,12 @@
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
       <_Parameter1>Synap.SDK.Tests</_Parameter1>
     </AssemblyAttribute>
+    <!-- The cross-SDK interop matrix (scripts/interop/) drives the transport
+         directly, the same layer the Python and TypeScript cells use, so the
+         matrix measures the wire rather than the JSON module surface above it. -->
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>Synap.SDK.Interop</_Parameter1>
+    </AssemblyAttribute>
   </ItemGroup>
 </Project>
 
