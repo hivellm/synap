@@ -17,10 +17,19 @@
 - [x] 3.2 `transport_rpc_test.go` rewritten against the new internals, including `TestConcurrentCommandsShareOneConnection` (32 concurrent calls, each response matched to its own request, 32 distinct ids seen server-side)
 - [x] 3.3 `go vet ./...` clean and `go test ./...` green; interop matrix re-run with `auth`, `pubsub` and `error` green
 
-## 4. Carried forward
+## 4. Carried forward — resolved
 
-- [ ] 4.1 Binary values still do not survive a full round trip: responses are handed
-      to the module methods as JSON, and `encoding/json` replaces invalid UTF-8 with
-      U+FFFD on the way back. The outbound path and the transport are byte-exact; the
-      remaining loss is that internal plumbing, across 56 decode sites in eight
-      modules. Out of scope for a transport swap — needs its own task
+- [x] 4.1 Binary values now survive a full round trip. This was written as a
+      carry-forward: responses reached the module methods as JSON, and
+      `encoding/json` replaces invalid UTF-8 with U+FFFD, so `deadbeef` came back
+      as `deadefbfbdefbfbd` — the outbound path and the transport were byte-exact,
+      but that internal plumbing was not. Fixed in the SDK by `d9a0950` (released
+      in Go SDK 1.1.1), which added the `response` seam in `response.go`: replies
+      on `synap://` travel to the caller as typed Go values and never pass through
+      JSON, so the fix is one seam rather than the 56 decode sites this item
+      feared. HTTP and RESP3, which genuinely speak JSON, are unchanged.
+      Verified end to end by the SDK's interop client, which round-trips
+      `0xDEADBEEF` through SET/GET and asserts byte equality. No follow-up task is
+      needed. Residual, documented in `response.go`: `Raw()` still re-encodes on
+      the RPC path and carries the same UTF-8 caveat — no module method uses it,
+      and its doc comment steers callers to `Decode`
