@@ -1,0 +1,15 @@
+{
+  "id": "2026-07-19T07-59-22-rxjs-teardown-must-live-in-the-observable-constructor-not-subject-takeuntil",
+  "title": "rxjs teardown must live in the Observable constructor, not Subject+takeUntil",
+  "content": "The TS SDK's pubsub.subscribe builds streams as Subject + takeUntil(stopSignal) + share(), where only a separate manager.unsubscribe() fires the stop signal — a plain subscription.unsubscribe() never unwinds the server-side registration or closes the push connection. For kv.watch this would leak a dedicated TCP connection per abandoned watch. Correct shape: new Observable(subscriber => { async setup; return teardownFn }) — teardown runs on unsubscribe, can issue KV.UNWATCH + close, and must handle the torn-down-mid-handshake race (cancel flag checked after the async setup resolves). Applies to any SDK surface that owns a connection per subscription.",
+  "source": "manual",
+  "relatedTask": "phase23_kv-watch-sdk-rust-ts",
+  "tags": [
+    "typescript",
+    "rxjs",
+    "kv-watch",
+    "sdk",
+    "phase23"
+  ],
+  "createdAt": "2026-07-19T07:59:22.804Z"
+}
