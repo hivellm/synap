@@ -1555,3 +1555,140 @@ async fn test_stream_reactive_read_after_publish() {
         other => panic!("unexpected SREAD result: {other:?}"),
     }
 }
+
+// ── KV watch (phase22) ───────────────────────────────────────────────────────
+
+/// A state whose KV store publishes watch events through a shared router, the
+/// way `main.rs` wires it.
+fn make_state_with_watch() -> (AppState, Arc<crate::core::PubSubRouter>) {
+    let router = Arc::new(crate::core::PubSubRouter::new());
+    let notifier = Arc::new(crate::core::KeyWatchNotifier::new(router.clone(), 0));
+    let mut state = make_state();
+    state.kv_store =
+        Arc::new(KVStore::new(KVConfig::default()).with_watch_notifier(Some(notifier)));
+    state.pubsub_router = Some(router.clone());
+    (state, router)
+}
+
+/// Dispatch KV.WATCH, register a delivery channel for the subscription, and
+/// return the receiver (what the push bridge would drain).
+async fn watch_via_rpc(
+    state: &AppState,
+    router: &crate::core::PubSubRouter,
+    pattern: &str,
+) -> (
+    String,
+    tokio::sync::mpsc::Receiver<crate::core::pubsub::Message>,
+) {
+    let resp = dispatch(state, req(1, "KV.WATCH", vec![str_arg(pattern)])).await;
+    let value = resp.result.expect("KV.WATCH succeeds");
+    let subscriber_id = value
+        .map_get("subscriber_id")
+        .and_then(SynapValue::as_str)
+        .expect("response carries subscriber_id")
+        .to_owned();
+    let (tx, rx) = tokio::sync::mpsc::channel(64);
+    router.register_connection(subscriber_id.clone(), tx);
+    (subscriber_id, rx)
+}
+
+#[tokio::test]
+async fn kv_watch_returns_channel_and_mode() {
+    let (state, _router) = make_state_with_watch();
+
+    let resp = dispatch(&state, req(1, "KV.WATCH", vec![str_arg("user:1")])).await;
+    let value = resp.result.expect("KV.WATCH succeeds");
+    assert_eq!(
+        value.map_get("channel").and_then(SynapValue::as_str),
+        Some("__watch@0__:user:1")
+    );
+    assert_eq!(
+        value.map_get("mode").and_then(SynapValue::as_str),
+        Some("value"),
+        "value is the default mode"
+    );
+
+    let resp = dispatch(
+        &state,
+        req(2, "KV.WATCH", vec![str_arg("user:2"), str_arg("notify")]),
+    )
+    .await;
+    let value = resp.result.expect("notify mode is accepted");
+    assert_eq!(
+        value.map_get("mode").and_then(SynapValue::as_str),
+        Some("notify")
+    );
+
+    let resp = dispatch(
+        &state,
+        req(3, "KV.WATCH", vec![str_arg("user:3"), str_arg("bogus")]),
+    )
+    .await;
+    assert!(resp.result.is_err(), "an unknown mode must be rejected");
+}
+
+#[tokio::test]
+async fn kv_watch_delivers_the_set_value() {
+    let (state, router) = make_state_with_watch();
+    let (_id, mut rx) = watch_via_rpc(&state, &router, "user:1").await;
+
+    state
+        .kv_store
+        .set("user:1", b"alice".to_vec(), None)
+        .await
+        .expect("set succeeds");
+
+    let msg = rx.try_recv().expect("the watcher receives the set event");
+    assert_eq!(msg.topic, "__watch@0__:user:1");
+    assert_eq!(msg.payload["event"], "set");
+    assert_eq!(msg.payload["value"], "alice");
+}
+
+#[tokio::test]
+async fn kv_watch_wildcard_covers_the_prefix() {
+    let (state, router) = make_state_with_watch();
+    let (_id, mut rx) = watch_via_rpc(&state, &router, "user:*").await;
+
+    state
+        .kv_store
+        .set("user:42", b"v".to_vec(), None)
+        .await
+        .expect("set succeeds");
+    state
+        .kv_store
+        .set("order:1", b"v".to_vec(), None)
+        .await
+        .expect("set succeeds");
+
+    let msg = rx.try_recv().expect("user:42 matches user:*");
+    assert_eq!(msg.payload["key"], "user:42");
+    assert!(
+        rx.try_recv().is_err(),
+        "order:1 must not match the user:* watch"
+    );
+}
+
+#[tokio::test]
+async fn kv_unwatch_stops_delivery() {
+    let (state, router) = make_state_with_watch();
+    let (id, mut rx) = watch_via_rpc(&state, &router, "k").await;
+
+    let resp = dispatch(&state, req(2, "KV.UNWATCH", vec![str_arg(&id)])).await;
+    assert!(resp.result.is_ok(), "KV.UNWATCH succeeds");
+
+    state
+        .kv_store
+        .set("k", b"v".to_vec(), None)
+        .await
+        .expect("set succeeds");
+
+    assert!(rx.try_recv().is_err(), "an unwatched key delivers nothing");
+}
+
+#[tokio::test]
+async fn kv_watch_without_pubsub_router_is_rejected() {
+    let state = make_state(); // pubsub_router: None
+
+    let resp = dispatch(&state, req(1, "KV.WATCH", vec![str_arg("k")])).await;
+    assert!(resp.result.is_err());
+}

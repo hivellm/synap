@@ -10,3 +10,6 @@
 - [x] 2.1 `docs/kv-watch.md` — why it is not keyspace notifications, the envelope, the best-effort/version semantics, the two notify-only degradations, the idle cost, and how to attach it
 - [x] 2.2 20 tests: 12 unit in `watch.rs` (channel name, idle no-op, counter-map bound, versioning, cap boundary, non-UTF-8, envelope field omission) and 8 integration in `store_tests.rs` driving real mutations through a subscribed router
 - [x] 2.3 423 passed, 0 failed across synap-core
+- [x] 2.4 Update or create documentation covering the implementation (docs/kv-watch.md, CHANGELOG)
+- [x] 2.5 Write tests covering the new behavior (20 + 6 regression tests in 98f7fde)
+- [x] 2.6 Run tests and confirm they pass (435 green in synap-core, server suite green)

@@ -3,9 +3,9 @@
 Watch lets a client observe a key and receive **the new value** when it changes,
 instead of learning only that something happened and having to `GET` again.
 
-This document covers the core notifier that landed in `synap-core`. The client
-surfaces that ride on it — the SynapRPC command, the WebSocket endpoint and
-`kv.watch()` in the SDKs — are separate phases.
+This document covers the core notifier (`synap-core`) and the server surfaces
+that ride on it: the `KV.WATCH` SynapRPC command and the `/kv/ws` WebSocket
+endpoint. `kv.watch()` in the SDKs is a separate phase.
 
 ## Why it is not keyspace notifications
 
@@ -99,7 +99,48 @@ the store, and entries are dropped when a key is deleted.
 `APPEND` and `SETRANGE` need the merged bytes to ship the resulting value, and
 that copy happens only when a notifier is attached.
 
-## Wiring it up
+## Watching over SynapRPC
+
+```
+KV.WATCH <pattern> [mode]      → { subscriber_id, channel, mode }
+KV.UNWATCH <subscriber_id> [pattern ...]
+```
+
+Named `KV.WATCH` because plain `WATCH` is the transaction command (optimistic
+locking), whose `WATCH client_id key` shape would be indistinguishable.
+
+`mode` is `value` (default) or `notify`. A `notify` subscription receives the
+envelope without `value`/`truncated` — the strip happens server-side, per
+subscription, so a client that only wants change signals does not pay value
+bandwidth. Envelopes arrive as ordinary push frames on the same connection,
+exactly like `SUBSCRIBE` — same bridge, same slow-consumer policy.
+
+Wildcards glob within the key: `KV.WATCH user:*` sees every `user:`-prefixed
+key. (`*` in a pub/sub topic still matches one `.`-segment; a `*` embedded in a
+segment globs inside it, which is what `:`-style keys need.)
+
+`KV.UNWATCH` with no patterns drops every subscription of that subscriber.
+
+## Watching over WebSocket
+
+```
+GET /kv/ws?keys=user:1,session:*
+```
+
+Each key (wildcards allowed) becomes its `__watch@0__:<key>` channel and the
+connection speaks the ordinary pub/sub socket protocol: one `connected` welcome
+frame, then `{"type": "message", "topic": ..., "payload": <envelope>}` frames.
+Slow consumers are disconnected by the same bounded-channel policy.
+
+## Configuration
+
+```yaml
+watch:
+  max_inline_value_bytes: 65536   # SYNAP_WATCH_MAX_INLINE_VALUE_BYTES
+```
+
+There is no enable flag — watch is always on, and an unwatched deployment pays
+one router lookup per mutation. Embedders wire the notifier themselves:
 
 ```rust
 use std::sync::Arc;
@@ -113,6 +154,3 @@ let store = KVStore::new(KVConfig::default())
 
 Override the inline cap with `KeyWatchNotifier::with_inline_cap`. A store with
 no notifier attached behaves exactly as before, at no cost.
-
-Subscribing is ordinary pub/sub — `__watch@0__:user:1` for one key, and the
-router's wildcard matching covers patterns.

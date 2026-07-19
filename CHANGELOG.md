@@ -28,6 +28,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no serialization, no version counter. Documented in `docs/kv-watch.md`.
 - `PubSubRouter::has_subscriber` — an allocation-free existence check, for
   callers that want to skip building a payload nobody will read.
+- **KV watch server endpoints.** `KV.WATCH <pattern> [mode]` / `KV.UNWATCH` on
+  SynapRPC ride the existing SUBSCRIBE push bridge (named `KV.WATCH` because
+  plain `WATCH` is the transaction command). `mode: notify` strips the inline
+  value server-side, per subscription. The `/kv/ws?keys=` WebSocket endpoint —
+  a 501 stub since its introduction — now streams watch envelopes as JSON
+  frames with the existing slow-consumer semantics. The server always attaches
+  the notifier; `watch.max_inline_value_bytes` in `config.yml`
+  (`SYNAP_WATCH_MAX_INLINE_VALUE_BYTES`) tunes the inline cap.
+- **In-segment pub/sub globs.** A `*` embedded in a topic segment (`user:*`,
+  `sensor-*-temp`) now globs within that level; previously `*` only matched a
+  whole `.`-segment, which made wildcard watch impossible for Redis-style `:`
+  keys. Purely additive: such patterns previously matched nothing useful (only
+  a topic containing a literal `*`).
 
 ### Fixed
 

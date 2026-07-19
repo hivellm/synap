@@ -804,6 +804,58 @@ pub(super) async fn run(
             ]))
         }
 
+        // ── KV watch (value-carrying, docs/kv-watch.md) ───────────────────────
+        // Named KV.WATCH because plain WATCH is the transaction command below.
+        "KV.WATCH" => {
+            // KV.WATCH pattern [mode]  — mode is `value` (default) or `notify`
+            let pattern = arg_str(args, 0)?;
+            let mode = match args.get(1).and_then(|v| v.as_str()) {
+                None | Some("value") => "value",
+                Some("notify") => "notify",
+                Some(other) => {
+                    return Err(format!("ERR unknown watch mode '{other}' (value|notify)"));
+                }
+            };
+            let ps = state
+                .pubsub_router
+                .as_deref()
+                .ok_or_else(|| "ERR pubsub subsystem not enabled".to_string())?;
+            let channel = format!("__watch@0__:{pattern}");
+            ps.subscribe(vec![channel.clone()])
+                .map(|r| {
+                    SynapValue::Map(vec![
+                        (
+                            SynapValue::Str("subscriber_id".into()),
+                            SynapValue::Str(r.subscriber_id),
+                        ),
+                        (SynapValue::Str("channel".into()), SynapValue::Str(channel)),
+                        (SynapValue::Str("mode".into()), SynapValue::Str(mode.into())),
+                    ])
+                })
+                .map_err(|e| e.to_string())
+        }
+        "KV.UNWATCH" => {
+            // KV.UNWATCH subscriber_id [pattern ...]  (no patterns = stop all)
+            let subscriber_id = arg_str(args, 0)?;
+            let channels: Vec<String> = args[1..]
+                .iter()
+                .filter_map(|v| v.as_str())
+                .map(|p| format!("__watch@0__:{p}"))
+                .collect();
+            let channels_opt = if channels.is_empty() {
+                None
+            } else {
+                Some(channels)
+            };
+            let ps = state
+                .pubsub_router
+                .as_deref()
+                .ok_or_else(|| "ERR pubsub subsystem not enabled".to_string())?;
+            ps.unsubscribe(&subscriber_id, channels_opt)
+                .map(|n| SynapValue::Int(n as i64))
+                .map_err(|e| e.to_string())
+        }
+
         // ── Transactions ──────────────────────────────────────────────────────
         "MULTI" => {
             // MULTI client_id

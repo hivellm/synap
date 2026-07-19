@@ -131,6 +131,12 @@ async fn main() -> Result<()> {
         config.auth.default_key_ttl = ttl;
     }
 
+    if let Ok(cap) = std::env::var("SYNAP_WATCH_MAX_INLINE_VALUE_BYTES")
+        && let Ok(bytes) = cap.parse::<usize>()
+    {
+        config.watch.max_inline_value_bytes = bytes;
+    }
+
     // Override HiveHub config from environment variables (Docker/Cloud support)
     // Task 9.7: Add environment variable support for HiveHub service API key
 
@@ -277,6 +283,18 @@ async fn main() -> Result<()> {
         }
     };
 
+    // Value-carrying KV watch (docs/kv-watch.md) — always on, unlike keyspace
+    // notifications: a watch that silently does nothing at the default
+    // configuration would be worse than none. Idle cost is one router lookup
+    // per mutation.
+    let watch_notifier = Some(Arc::new(
+        synap_server::core::KeyWatchNotifier::with_inline_cap(
+            pubsub_router_inner.clone(),
+            0,
+            config.watch.max_inline_value_bytes,
+        ),
+    ));
+
     #[allow(clippy::type_complexity)]
     let (
         kv_store,
@@ -303,7 +321,8 @@ async fn main() -> Result<()> {
                     Arc::new(
                         kv.with_global_memory(global_mem.clone())
                             .with_cluster(cluster_topology.clone(), cluster_migration.clone())
-                            .with_keyspace_notifier(keyspace_notifier.clone()),
+                            .with_keyspace_notifier(keyspace_notifier.clone())
+                            .with_watch_notifier(watch_notifier.clone()),
                     ),
                     hs.map(|s| {
                         Arc::new(
@@ -339,7 +358,8 @@ async fn main() -> Result<()> {
                     Arc::new(
                         KVStore::new(kv_config.clone())
                             .with_cluster(cluster_topology.clone(), cluster_migration.clone())
-                            .with_keyspace_notifier(keyspace_notifier.clone()),
+                            .with_keyspace_notifier(keyspace_notifier.clone())
+                            .with_watch_notifier(watch_notifier.clone()),
                     ),
                     Some(Arc::new(
                         HashStore::new().with_keyspace_notifier(keyspace_notifier.clone()),
@@ -369,7 +389,8 @@ async fn main() -> Result<()> {
                 KVStore::new(kv_config.clone())
                     .with_global_memory(global_mem.clone())
                     .with_cluster(cluster_topology.clone(), cluster_migration.clone())
-                    .with_keyspace_notifier(keyspace_notifier.clone()),
+                    .with_keyspace_notifier(keyspace_notifier.clone())
+                    .with_watch_notifier(watch_notifier.clone()),
             ),
             Some(Arc::new(
                 HashStore::new()

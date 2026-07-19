@@ -44,6 +44,32 @@ pub struct ServerConfig {
     /// Cluster mode (disabled by default) — topology + slot migration (issue #232)
     #[serde(default)]
     pub cluster: crate::cluster::ClusterConfig,
+
+    /// Value-carrying KV watch (`docs/kv-watch.md`). Always on; this only tunes it.
+    #[serde(default)]
+    pub watch: WatchConfig,
+}
+
+/// KV watch tuning (phase22). The watch channel family itself has no enable
+/// flag — see `docs/kv-watch.md` for why.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatchConfig {
+    /// Cap on the value inlined in a watch envelope, in bytes. Larger values
+    /// are delivered as notify-only with `truncated: true`.
+    #[serde(default = "default_watch_max_inline_value_bytes")]
+    pub max_inline_value_bytes: usize,
+}
+
+fn default_watch_max_inline_value_bytes() -> usize {
+    crate::core::DEFAULT_INLINE_VALUE_CAP
+}
+
+impl Default for WatchConfig {
+    fn default() -> Self {
+        Self {
+            max_inline_value_bytes: default_watch_max_inline_value_bytes(),
+        }
+    }
 }
 
 /// Configurable network resource limits for the binary listeners (phase6i).
@@ -380,6 +406,7 @@ impl Default for ServerConfig {
             synap_rpc: SynapRpcConfig::default(),
             network: NetworkConfig::default(),
             cluster: crate::cluster::ClusterConfig::default(),
+            watch: WatchConfig::default(),
         }
     }
 }

@@ -70,6 +70,10 @@ pub enum SegmentMatcher {
     Exact(String), // Literal string
     SingleLevel,   // * wildcard (matches exactly one level)
     MultiLevel,    // # wildcard (matches zero or more levels)
+    /// A `*` embedded in a segment (`user:*`, `sensor-*-temp`) globs within
+    /// that one level. Needed by KV watch, whose `__watch@0__:<key>` channels
+    /// use Redis-style `:` keys that never split on `.`.
+    Glob(Vec<String>), // pattern pieces around each `*`
 }
 
 /// Pub/Sub statistics
@@ -394,6 +398,9 @@ impl PubSubRouter {
             .map(|seg| match seg {
                 "*" => SegmentMatcher::SingleLevel,
                 "#" => SegmentMatcher::MultiLevel,
+                s if s.contains('*') => {
+                    SegmentMatcher::Glob(s.split('*').map(str::to_string).collect())
+                }
                 s => SegmentMatcher::Exact(s.to_string()),
             })
             .collect();
@@ -527,6 +534,14 @@ impl WildcardMatcher {
                     }
                     seg_idx += 1;
                 }
+                SegmentMatcher::Glob(pieces) => {
+                    if seg_idx >= topic_segments.len()
+                        || !glob_segment_matches(pieces, topic_segments[seg_idx])
+                    {
+                        return false;
+                    }
+                    seg_idx += 1;
+                }
                 SegmentMatcher::MultiLevel => {
                     // # matches everything remaining
                     // Must be the last segment (validated during compilation)
@@ -539,6 +554,27 @@ impl WildcardMatcher {
         // All pattern segments matched and all topic segments consumed
         seg_idx == topic_segments.len()
     }
+}
+
+/// Match one topic segment against glob pieces (the text around each `*`).
+///
+/// The first piece anchors at the start, the last at the end, and the middle
+/// pieces must appear in order between them — standard `*` glob semantics,
+/// scoped to a single segment.
+fn glob_segment_matches(pieces: &[String], segment: &str) -> bool {
+    debug_assert!(pieces.len() >= 2, "a glob has at least one `*`");
+    let (first, rest) = pieces.split_first().expect("glob pieces are non-empty");
+    let Some(mut remaining) = segment.strip_prefix(first.as_str()) else {
+        return false;
+    };
+    let (last, middle) = rest.split_last().expect("glob has a piece after `*`");
+    for piece in middle {
+        let Some(found) = remaining.find(piece.as_str()) else {
+            return false;
+        };
+        remaining = &remaining[found + piece.len()..];
+    }
+    remaining.ends_with(last.as_str())
 }
 
 /// Topic information
@@ -723,5 +759,59 @@ mod tests {
         assert!(matcher.matches(&["events", "user", "login"]));
         assert!(matcher.matches(&["events", "user", "login", "success"]));
         assert!(!matcher.matches(&["events", "admin"]));
+    }
+
+    #[test]
+    fn an_embedded_star_globs_within_one_segment() {
+        // Redis-style `:` keys never split on `.`, so `user:*` must glob inside
+        // the single segment — this is what makes wildcard KV watch work.
+        let matcher = PubSubRouter::compile_pattern("__watch@0__:user:*").expect("compiles");
+
+        assert!(matcher.matches(&["__watch@0__:user:1"]));
+        assert!(matcher.matches(&["__watch@0__:user:alice"]));
+        assert!(!matcher.matches(&["__watch@0__:session:1"]));
+        assert!(
+            !matcher.matches(&["__watch@0__:user"]),
+            "prefix must match fully"
+        );
+    }
+
+    #[test]
+    fn glob_pieces_anchor_prefix_and_suffix() {
+        let matcher = PubSubRouter::compile_pattern("sensor-*-temp").expect("compiles");
+
+        assert!(matcher.matches(&["sensor-kitchen-temp"]));
+        assert!(matcher.matches(&["sensor--temp"]), "`*` may match empty");
+        assert!(!matcher.matches(&["sensor-kitchen-humidity"]));
+        assert!(!matcher.matches(&["asensor-kitchen-temp"]));
+    }
+
+    #[test]
+    fn glob_composes_with_dot_segments() {
+        let matcher = PubSubRouter::compile_pattern("orders.user:*.created").expect("compiles");
+
+        assert!(matcher.matches(&["orders", "user:42", "created"]));
+        assert!(!matcher.matches(&["orders", "user:42", "deleted"]));
+        assert!(!matcher.matches(&["orders", "user:42"]));
+    }
+
+    #[tokio::test]
+    async fn a_glob_subscription_receives_matching_publishes() {
+        let router = PubSubRouter::new();
+        let sub = router
+            .subscribe(vec!["__watch@0__:user:*".to_string()])
+            .expect("subscribe succeeds");
+        let (tx, mut rx) = mpsc::channel::<Message>(8);
+        router.register_connection(sub.subscriber_id, tx);
+
+        assert!(router.has_subscriber("__watch@0__:user:1"));
+        assert!(!router.has_subscriber("__watch@0__:order:1"));
+
+        router
+            .publish("__watch@0__:user:1", serde_json::json!({"v": 1}), None)
+            .expect("publish succeeds");
+
+        let msg = rx.try_recv().expect("the glob subscriber gets the message");
+        assert_eq!(msg.topic, "__watch@0__:user:1");
     }
 }

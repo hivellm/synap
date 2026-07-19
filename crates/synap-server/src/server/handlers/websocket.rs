@@ -4,20 +4,38 @@ use super::*;
 // Pub/Sub WebSocket Handler
 // ============================================================================
 
+/// WebSocket WATCH endpoint: `GET /kv/ws?keys=user:1,session:*`.
+///
+/// Each key (wildcards allowed) maps to its `__watch@0__:<key>` channel and
+/// the connection rides the ordinary pub/sub socket loop, so value-carrying
+/// watch envelopes arrive as JSON frames with the existing slow-consumer
+/// semantics.
 pub async fn kv_websocket(
-    State(_state): State<AppState>,
-    _ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    ws: WebSocketUpgrade,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
 ) -> AxumResponse {
+    let pubsub_router = match state.pubsub_router.as_ref() {
+        Some(router) => router.clone(),
+        None => {
+            return (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "Pub/Sub system disabled",
+            )
+                .into_response();
+        }
+    };
+
     // Parse keys from query params
     let keys_str = params.get("keys").cloned().unwrap_or_default();
-    let keys: Vec<String> = keys_str
+    let channels: Vec<String> = keys_str
         .split(',')
         .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
+        .map(|key| format!("__watch@0__:{key}"))
         .collect();
 
-    if keys.is_empty() {
+    if channels.is_empty() {
         return (
             axum::http::StatusCode::BAD_REQUEST,
             "At least one key required in query param: ?keys=key1,key2",
@@ -25,15 +43,20 @@ pub async fn kv_websocket(
             .into_response();
     }
 
-    info!("KV WebSocket WATCH connection for keys: {:?}", keys);
+    info!("KV WebSocket WATCH connection for channels: {:?}", channels);
 
-    // Note: Full implementation would require KVStore to support change notifications
-    // For now, return not implemented
-    (
-        axum::http::StatusCode::NOT_IMPLEMENTED,
-        "KV WebSocket WATCH not yet implemented - use polling for now",
-    )
-        .into_response()
+    let client_list_manager = state.client_list_manager.clone();
+    let client_addr = addr.to_string();
+
+    ws.on_upgrade(move |socket| {
+        handle_pubsub_socket(
+            socket,
+            pubsub_router,
+            channels,
+            client_list_manager,
+            client_addr,
+        )
+    })
 }
 
 // ============================================================================

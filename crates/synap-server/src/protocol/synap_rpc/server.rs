@@ -119,9 +119,9 @@ impl Dispatch for SynapDispatch {
             run_command(&self.state, command, args).await
         };
 
-        // After SUBSCRIBE succeeds, bridge the connection's push channel to the
-        // pubsub router so publish() reaches this client.
-        if command.eq_ignore_ascii_case("SUBSCRIBE")
+        // After SUBSCRIBE / KV.WATCH succeeds, bridge the connection's push
+        // channel to the pubsub router so publish() reaches this client.
+        if (command.eq_ignore_ascii_case("SUBSCRIBE") || command.eq_ignore_ascii_case("KV.WATCH"))
             && let Ok(ref value) = result
         {
             self.bridge_subscription(session, value);
@@ -171,6 +171,10 @@ impl SynapDispatch {
             return;
         };
 
+        // KV.WATCH in `notify` mode asked for envelopes without the inline
+        // value; the strip happens here, per subscription, before the push.
+        let notify_only = response.map_get("mode").and_then(SynapValue::as_str) == Some("notify");
+
         let (tx, mut rx) = tokio::sync::mpsc::channel::<PubSubMessage>(
             crate::core::pubsub::SUBSCRIBER_CHANNEL_CAPACITY,
         );
@@ -178,7 +182,10 @@ impl SynapDispatch {
 
         let push = push.clone();
         tokio::spawn(async move {
-            while let Some(msg) = rx.recv().await {
+            while let Some(mut msg) = rx.recv().await {
+                if notify_only {
+                    strip_watch_value(&mut msg.payload);
+                }
                 let frame = SynapValue::Map(vec![
                     (SynapValue::Str("topic".into()), SynapValue::Str(msg.topic)),
                     (
@@ -196,6 +203,16 @@ impl SynapDispatch {
                 }
             }
         });
+    }
+}
+
+/// Reduce a watch envelope to notify-only: drop the inline value, and the
+/// `truncated` flag with it — a client that never asked for values has no cap
+/// to be told about.
+fn strip_watch_value(payload: &mut serde_json::Value) {
+    if let Some(map) = payload.as_object_mut() {
+        map.remove("value");
+        map.remove("truncated");
     }
 }
 
@@ -233,4 +250,28 @@ pub async fn spawn_synap_rpc_listener(
     tracing::info!("SynapRPC server listening on {}", handle.local_addr());
 
     Ok(Arc::new(handle))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::strip_watch_value;
+
+    #[test]
+    fn notify_mode_strips_value_and_truncated() {
+        let mut payload = serde_json::json!({
+            "key": "user:1",
+            "event": "set",
+            "version": 3,
+            "value": "alice",
+            "truncated": false,
+        });
+
+        strip_watch_value(&mut payload);
+
+        assert_eq!(
+            payload,
+            serde_json::json!({ "key": "user:1", "event": "set", "version": 3 }),
+            "a notify-mode watcher gets the envelope without the value"
+        );
+    }
 }
