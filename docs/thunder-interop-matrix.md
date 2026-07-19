@@ -19,7 +19,6 @@ Server: `thunder-rpc 0.2.0`, authentication required.
 | `csharp` | ✅ | ✅ | ✅ | ✅ | `HiveLLM.Thunder` |
 | `php` | ✅ | ✅ | ✅ | ✅ | hand-written (no Thunder package) |
 | `go` | ✅ | ✅ | ✅ | ✅ | `thunder-go` |
-| `java` | — | — | — | — | hand-written; **not run**, no toolchain |
 | `legacy` | ✅ | ✅ | ✅ | ✅ | pre-Thunder wire replay |
 
 The `php` row was run directly rather than through the driver: a
@@ -80,14 +79,7 @@ reach their fields by name, and replies reach the module methods as typed values
 instead of being re-encoded. HTTP and RESP3, which genuinely speak JSON, are
 untouched. Shipped in the Go SDK's v1.1.1.
 
-### Open
-
-**`java` — not run.** The Java cell needs Maven and JDK 17; this machine has
-neither (JDK 11 only, and Maven is absent from the winget source). Reading the
-transport shows it has no `AUTH` path either, so it is expected to fail the
-`auth` column the same way Go and PHP did — but that is a code reading, not a
-measurement, and it is recorded as unverified rather than presented as a result.
-Fixing it without being able to run it would be worse than leaving it.
+Every cell is green. There is nothing open.
 
 ## Compatibility
 

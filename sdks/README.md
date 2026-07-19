@@ -11,8 +11,7 @@ All 7 SDKs support **three transports** with auto-detection from URL scheme. **S
 | [Rust](rust/) | Rust | `synap-sdk` (crates.io) | 1.0.0 |
 | [TypeScript](typescript/) | TS/JS | `@hivehub/synap` (npm) | 1.0.0 |
 | [Python](python/) | Python 3.11+ | `synap-sdk` (PyPI) | 1.0.0 |
-| [Go](go/) | Go 1.22+ | `github.com/hivellm/synap/sdks/go` | 1.0.0 |
-| [Java](java/) | Java 17+ | `com.hivellm:synap-sdk` (Maven) | 1.0.0 |
+| [Go](go/) | Go 1.25+ | `github.com/hivellm/synap-sdk-go` | 1.1.1 |
 | [PHP](php/) | PHP 8.1+ | `hivellm/synap-sdk` (Packagist) | 1.0.0 |
 | [C#](csharp/) | .NET 8+ | `Synap.SDK` (NuGet) | 1.0.0 |
 
@@ -26,25 +25,25 @@ The transport is auto-detected from the URL scheme:
 | **RESP3** | `resp3://host:6379` | | Redis-compatible wire protocol — use with Redis tooling |
 | **HTTP/REST** | `http://host:15500` | fallback | JSON over HTTP — maximum compatibility |
 
-All 7 SDKs support all 3 transports:
+All 6 SDKs support all 3 transports:
 
-| | Rust | TS | Python | Go | Java | PHP | C# |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| SynapRPC | x | x | x | x | x | x | x |
-| RESP3 | x | x | x | x | x | x | x |
-| HTTP | x | x | x | x | x | x | x |
+| | Rust | TS | Python | Go | PHP | C# |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| SynapRPC | x | x | x | x | x | x |
+| RESP3 | x | x | x | x | x | x |
+| HTTP | x | x | x | x | x | x |
 
 ## Module Coverage
 
-| Module | Rust | TS | Python | Go | Java | PHP | C# |
-|--------|:----:|:--:|:------:|:--:|:----:|:---:|:--:|
-| **KV Store** | x | x | x | x | x | x | x |
-| **Queue** | x | x | x | x | x | x | x |
-| **Stream** | x | x | x | x | x | x | x |
-| **Pub/Sub** | x | x | x | x | x | x | x |
-| **Hash** | x | x | x | x | x | x | x |
-| **List** | x | x | x | x | x | x | x |
-| **Set** | x | x | x | x | x | x | x |
+| Module | Rust | TS | Python | Go | PHP | C# |
+|--------|:----:|:--:|:------:|:--:|:---:|:--:|
+| **KV Store** | x | x | x | x | x | x |
+| **Queue** | x | x | x | x | x | x |
+| **Stream** | x | x | x | x | x | x |
+| **Pub/Sub** | x | x | x | x | x | x |
+| **Hash** | x | x | x | x | x | x |
+| **List** | x | x | x | x | x | x |
+| **Set** | x | x | x | x | x | x |
 | **Sorted Set** | x | x | - | - | - | - | - |
 | **Bitmap** | x | x | x | - | - | x | x |
 | **Geospatial** | x | x | x | - | - | x | x |
@@ -64,7 +63,6 @@ Totals from the 1.0.0 release audit (suites run against the published
 | TypeScript | 467 | SET/GET/DEL verified | HTTP + RPC + RESP3 |
 | Python | 177 | SET/GET/DEL verified | HTTP + RPC + RESP3 |
 | PHP | 182 | SET/GET/DEL verified | HTTP + RPC + RESP3 |
-| Java | 36 | - (needs JDK 17) | code verified |
 | C# | 96 | - | build verified |
 
 ## Quick Start
@@ -99,14 +97,6 @@ async with SynapClient(SynapConfig("synap://localhost:15501")) as client:
     val = await client.kv.get("key")
 ```
 
-### Java
-```java
-try (var client = new SynapClient(SynapConfig.builder("synap://localhost:15501").build())) {
-    client.kv().set("key", "value");
-    String val = client.kv().get("key");
-}
-```
-
 ### PHP
 ```php
 $client = new SynapClient('synap://localhost:15501');
@@ -137,7 +127,6 @@ synap://localhost:15501          # + .withBasicAuth("user", "pass")
 | Go | `.WithAuth("token")` | `.WithBasicAuth("user", "pass")` |
 | TS | `{ authToken: "token" }` | `{ username, password }` |
 | Python | `SynapConfig(auth_token="token")` | `SynapConfig(username="u", password="p")` |
-| Java | `.authToken("token")` | `.basicAuth("user", "pass")` |
 | PHP | `new SynapConfig(authToken: "token")` | `new SynapConfig(username: "u", password: "p")` |
 | C# | `new SynapClient(url, authToken: "token")` | `new SynapClient(url, user: "u", pass: "p")` |
 

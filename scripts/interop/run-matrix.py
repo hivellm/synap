@@ -4,7 +4,7 @@
 One server build, every SDK, the same four steps. The point is not to test each
 SDK again -- each has its own suite -- but to prove the thing no single-language
 suite can: that a Thunder-based Synap server and every Synap client still agree
-on the wire, including the two SDKs with no Thunder package (PHP, Java) and a
+on the wire, including the one SDK with no Thunder package (PHP) and a
 pre-Thunder client still in the wild.
 
 Every client is a standalone program under ``clients/`` that speaks the same
@@ -139,22 +139,13 @@ def discover_cells() -> list[Cell]:
             command=["go", "run", "./cmd/interop"],
             cwd=REPO / "sdks" / "go",
             requires="go",
-            note="hand-written transport at wire parity (thunder#9)",
+            note="thunder-go",
         ),
         Cell(
             name="php",
             command=["php", str(CLIENTS / "php" / "interop.php")],
             cwd=CLIENTS / "php",
             requires="php",
-            note="hand-written transport, no Thunder package",
-        ),
-        Cell(
-            name="java",
-            command=["java", "-cp", "target/classes:target/dependency/*",
-                     "-Dinterop.main=1", "InteropMain"],
-            cwd=CLIENTS / "java",
-            setup=[["mvn", "-q", "-B", "package", "dependency:copy-dependencies"]],
-            requires="mvn",
             note="hand-written transport, no Thunder package",
         ),
         Cell(

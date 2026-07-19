@@ -75,13 +75,13 @@ Synap provides multiple core capabilities in a single, cohesive system:
 - **🤖 AI Integration**: MCP support for Cursor, Claude Desktop, and AI assistants
 - **🌊 StreamableHTTP Protocol**: Simple HTTP-based streaming protocol
 - **🔌 WebSocket Support**: Persistent connections for real-time updates
-- **📚 Multi-language SDKs**: TypeScript, Python, Rust (with reactive PubSub), PHP, and C# clients with full authentication support
+- **📚 Multi-language SDKs**: TypeScript, Python, Rust (with reactive PubSub), Go, PHP, and C# clients with full authentication support
 - **📖 Rich Examples**: Chat, event broadcasting, task queues, authentication examples, and more
 
 ### 🔗 Protocol Support
 
 Synap supports **three wire transports**. All SDKs (Rust, TypeScript, Python,
-PHP, C#) select the transport via URL scheme — no separate builder options required.
+Go, PHP, C#) select the transport via URL scheme — no separate builder options required.
 
 | URL scheme    | Port    | Framing                       | When to use                                             |
 |---------------|---------|-------------------------------|---------------------------------------------------------|
@@ -100,9 +100,10 @@ PHP, C#) select the transport via URL scheme — no separate builder options req
 > — the HiveLLM family's shared binary RPC — on both ends: the server listener
 > and the Rust, TypeScript, Python and C# SDKs run the same protocol
 > implementation, so the two halves of a connection cannot drift. Wire v1 is
-> frozen; a pre-1.1.0 client still interoperates. The Go and Java SDKs keep
-> hand-written transports for now, and the Go one cannot carry a **binary**
-> value over `synap://` — see `docs/thunder-interop-matrix.md`.
+> frozen; a pre-1.1.0 client still interoperates. The PHP SDK keeps a
+> hand-written transport, because Thunder has no PHP package — it is verified
+> against the same server by the interop matrix, see
+> `docs/thunder-interop-matrix.md`.
 >
 > ```ts
 > // TypeScript

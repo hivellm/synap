@@ -21,14 +21,22 @@ as a submodule, released as v1.1.1. The **PHP SDK** likewise moved to
 [`hivellm/synap-sdk-php`](https://github.com/hivellm/synap-sdk-php); it keeps a
 hand-written transport, because Thunder has no PHP package, and interoperates.
 
-**Not verified:** the Java SDK's cell needs Maven and JDK 17, neither available
-on the machine this ran on, so it is recorded as unverified rather than
-presented as a result. Full results: `docs/thunder-interop-matrix.md`.
+Every cell of the interop matrix is green — rust, typescript, python, csharp,
+go, php, and a replay of the pre-Thunder wire. Full results:
+`docs/thunder-interop-matrix.md`.
+
+### Removed
+
+- **The Java SDK is gone.** It was never published to Maven Central, so nothing
+  downstream depended on it, and it was the one SDK the interop matrix could not
+  verify — it had no `AUTH` path on the RPC transport and no Thunder package to
+  move to. Removing it is better than shipping an SDK no one measures. The
+  matrix, the CI job, and the SDK tables no longer mention it.
 
 ### Changed
 
 - **SynapRPC now runs on [Thunder](https://github.com/hivellm/thunder)
-  (`thunder-rpc` 0.2.0).** The binary RPC listener's accept loop, writer task,
+  (`thunder-rpc` 0.2.1).** The binary RPC listener's accept loop, writer task,
   frame codec, session state machine and graceful drain come from the family's
   shared protocol crate; Synap keeps its command catalog, its authentication
   store and its ACL. The wire format is unchanged — wire v1 is frozen — and the

@@ -3,10 +3,9 @@
 - [x] 1.1 Add `scripts/interop/` driving one Thunder-based server build against every SDK
 - [x] 1.2 Cover per SDK: authenticate → SET/GET with a binary value → SUBSCRIBE/PUBLISH → error round-trip
 - [x] 1.3 Run the matrix for rust, typescript, python, csharp, go
-- [x] 1.4 Run the matrix for php (green after three fixes). Java has no toolchain on
-      this machine — Maven is absent from the winget source and the JDK 17 install was
-      cancelled at the UAC prompt — so its cell is recorded as unverified in
-      `docs/thunder-interop-matrix.md` rather than presented as a result
+- [x] 1.4 Run the matrix for php — green after three fixes (missing `AUTH`, `SUBSCRIBE`
+      on the reserved push id, and non-UTF-8 strings packed as `str`). Java support was
+      dropped entirely on 2026-07-19 (owner's call), so there is no Java cell
 - [x] 1.5 Run the legacy cell: a pre-Thunder SDK build against the new server, proving int-array `Bytes` tolerance
 - [x] 1.6 Record the full matrix result in `docs/thunder-interop-matrix.md`
 
@@ -17,13 +16,10 @@
 - [x] 2.2 Fixed and re-ran: rust (JSON round-trip asymmetry), typescript (lossy UTF-8
       `Bytes` decode), go (missing `AUTH`; non-UTF-8 `str`), php (missing `AUTH`;
       reserved push id on `SUBSCRIBE`; non-UTF-8 `str`)
-- [x] 2.3 Every Thunder-based cell is green — rust, typescript, python, csharp, plus
-      the legacy compatibility cell. Owner's call (2026-07-19): Go and Java are out of
-      scope for 1.1.0, the release criterion is Thunder working. `go`/kv_binary stays
-      red (`sendRPC` JSON-marshals the payload and Go's `encoding/json` destroys
-      non-UTF-8 before framing — fixed by the `sendRPC` rewrite in phase20) and `java`
-      stays unverified; both are documented in `docs/thunder-interop-matrix.md` and
-      called out in the 1.1.0 CHANGELOG section
+- [x] 2.3 Every cell is green: rust, typescript, python, csharp, go, php, and the
+      legacy compatibility cell. Go's binary cell closed when phase20 put it on Thunder
+      and removed the JSON round trip in both directions (Go SDK v1.1.1). Java support
+      was dropped entirely (owner's call, 2026-07-19)
 
 ## 3. Release
 

@@ -9,7 +9,7 @@ build before 1.1.0 is tagged.
 
 #### Scenario: Every SDK passes
 Given a Thunder-based Synap server build
-When the interop matrix runs for rust, typescript, python, csharp, go, php and java
+When the interop matrix runs for rust, typescript, python, csharp, go and php
 Then every cell passes
 
 #### Scenario: A cell fails

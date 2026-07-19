@@ -86,9 +86,6 @@ jobs:
         run: composer install --no-interaction --no-progress
 
       - name: Run the matrix
-        # java is excluded deliberately: its transport has no Thunder package
-        # and no AUTH path, so it is tracked as unverified in
-        # docs/thunder-interop-matrix.md rather than gating every push.
         run: |
           python scripts/interop/run-matrix.py \
             rust typescript python csharp php legacy \
