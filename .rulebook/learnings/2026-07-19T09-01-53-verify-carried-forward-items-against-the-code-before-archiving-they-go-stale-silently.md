@@ -1,0 +1,6 @@
+# Verify carried-forward items against the code before archiving — they go stale silently
+**Source**: manual
+**Date**: 2026-07-19
+**Related Task**: phase20_thunder-go-sdk-swap
+**Tags**: rulebook, task-hygiene, deferred-items, go-sdk, phase20
+phase20's only open item was a "Carried forward" note saying Go SDK binary values could not survive a round trip, declared out of scope and needing its own task. It had already been fixed by d9a0950 (Go SDK 1.1.1) — the response seam in response.go — which landed ~1h before the checklist was last written, so the item was born stale. Nobody noticed because deferred items are the ones nobody re-reads. Two consequences: (a) the deferred-items protocol would have forced creating a pointless follow-up task, (b) the item's own estimate was wrong — it predicted 56 decode sites across eight modules, while the real fix was a single seam every module already routed through. Before archiving any task with a carry-forward, re-verify the claim against current code (grep the symptom, check the SDK CHANGELOG, look for a test asserting the opposite) instead of trusting the note. Here the giveaway was response_test.go asserting binary IS byte-exact — the direct contradiction of the open item.

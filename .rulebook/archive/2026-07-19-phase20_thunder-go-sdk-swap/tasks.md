@@ -16,6 +16,9 @@
 - [x] 3.1 README and CHANGELOG rewritten for the Thunder transport, including the module-path break, the Go 1.25 floor and the remaining binary-value limitation
 - [x] 3.2 `transport_rpc_test.go` rewritten against the new internals, including `TestConcurrentCommandsShareOneConnection` (32 concurrent calls, each response matched to its own request, 32 distinct ids seen server-side)
 - [x] 3.3 `go vet ./...` clean and `go test ./...` green; interop matrix re-run with `auth`, `pubsub` and `error` green
+- [x] 3.4 Update or create documentation covering the implementation — satisfied by 3.1 (SDK README + CHANGELOG rewritten for the Thunder transport)
+- [x] 3.5 Write tests covering the new behavior — satisfied by 3.2 (`transport_rpc_test.go` rewritten, incl. the concurrent-pipelining test) plus `response_test.go` covering the binary seam from 4.1
+- [x] 3.6 Run tests and confirm they pass — re-verified at archive time: `go vet ./...` clean, `go test -count=1 ./...` green
 
 ## 4. Carried forward — resolved
 
