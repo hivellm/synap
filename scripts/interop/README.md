@@ -7,7 +7,7 @@ prove is the thing that actually matters to a user: that a Thunder-based Synap
 server and every Synap client still agree on the wire — including the one SDK
 with no Thunder package (PHP) and any pre-Thunder client still deployed.
 
-That is this matrix. It is the release gate for 1.1.0.
+That is this matrix. It is the release gate for 1.2.0.
 
 ## Running it
 

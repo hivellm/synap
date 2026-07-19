@@ -4,7 +4,7 @@ All notable changes to the Synap TypeScript SDK will be documented in this file.
 
 ## [Unreleased]
 
-## [1.1.0] - 2026-07-19
+## [1.2.0] - 2026-07-19
 
 ### Changed
 - **The `synap://` transport now runs on [Thunder](https://github.com/hivellm/thunder)**

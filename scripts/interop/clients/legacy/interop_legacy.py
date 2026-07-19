@@ -13,7 +13,7 @@ moved on and no pre-Thunder build is left to check out:
   * there is no frame cap and no handshake beyond ``AUTH``.
 
 A green cell here means an old client in the wild keeps working against a
-1.1.0 server. A red one means the release breaks deployed software.
+1.2.0 server. A red one means the release breaks deployed software.
 """
 
 from __future__ import annotations
@@ -87,7 +87,7 @@ def wire_str(s: str) -> dict:
 
 
 def wire_bytes_legacy(b: bytes) -> dict:
-    """`Bytes` as an array of integers -- the pre-1.1.0 encoding."""
+    """`Bytes` as an array of integers -- the pre-1.2.0 encoding."""
     return {"Bytes": list(b)}
 
 

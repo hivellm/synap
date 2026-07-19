@@ -8,12 +8,12 @@ All 7 SDKs support **three transports** with auto-detection from URL scheme. **S
 
 | SDK | Language | Package | Version |
 |-----|----------|---------|:-------:|
-| [Rust](rust/) | Rust | `synap-sdk` (crates.io) | 1.1.0 |
-| [TypeScript](typescript/) | TS/JS | `@hivehub/synap` (npm) | 1.1.0 |
-| [Python](python/) | Python 3.11+ | `synap-sdk` (PyPI) | 1.1.0 |
-| [Go](go/) | Go 1.25+ | `github.com/hivellm/synap-sdk-go` | 1.1.1 |
-| [PHP](php/) | PHP 8.1+ | `hivellm/synap-sdk` (Packagist) | 1.1.0 |
-| [C#](csharp/) | .NET 8+ | `Synap.SDK` (NuGet) | 1.1.0 |
+| [Rust](rust/) | Rust | `synap-sdk` (crates.io) | 1.2.0 |
+| [TypeScript](typescript/) | TS/JS | `@hivehub/synap` (npm) | 1.2.0 |
+| [Python](python/) | Python 3.11+ | `synap-sdk` (PyPI) | 1.2.0 |
+| [Go](go/) | Go 1.25+ | `github.com/hivellm/synap-sdk-go` | 1.2.0 |
+| [PHP](php/) | PHP 8.1+ | `hivellm/synap-sdk` (Packagist) | 1.2.0 |
+| [C#](csharp/) | .NET 8+ | `Synap.SDK` (NuGet) | 1.2.0 |
 
 ## Transport Support
 

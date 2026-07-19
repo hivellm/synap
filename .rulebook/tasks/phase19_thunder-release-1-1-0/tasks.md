@@ -23,11 +23,11 @@
 
 ## 3. Release
 
-- [x] 3.1 Bump the workspace and every SDK manifest to 1.1.0
-- [x] 3.2 Write the `CHANGELOG.md` 1.1.0 section with the `Bytes` canonicalization and a migration
+- [x] 3.1 Bump the workspace and every SDK manifest to 1.2.0
+- [x] 3.2 Write the `CHANGELOG.md` 1.2.0 section with the `Bytes` canonicalization and a migration
       note. The `synap-protocol` part is already written: phase13 put the type-by-type migration
       table in `CHANGELOG.md` precisely because there is no published artifact to carry it —
-      fold it into the 1.1.0 section rather than restating it
+      fold it into the 1.2.0 section rather than restating it
 - [x] 3.3 Update `README.md` and `docs/` to describe the RPC transport as Thunder-based
 - [x] 3.4 ~~Publish the terminal `synap-protocol` shim prepared in phase13~~ — **void, nothing to
       do.** `phase13_thunder-protocol-crate-dissolution` (archived 2026-07-19, after this task was
@@ -36,7 +36,7 @@
       so this step has no artifact to publish. It also matches the current direction across the
       family: no `-protocol` crate gets published to crates.io
 - [x] 3.5 Run the full quality gate: clippy clean, 89 Rust test binaries green, TypeScript 370, Python 181, C# 102, Go green. The s2s/integration suites in TypeScript, Python and PHP need a live server on the default ports and did not run here; Python's 95% coverage gate fails at 68.98% as a direct consequence of those skips, not of this change
-- [ ] 3.6 Tag `v1.1.0` and verify the release artifacts build
+- [ ] 3.6 Tag `v1.2.0` and verify the release artifacts build
 
 ## 4. Tail (docs + tests — check or waive with tailWaiver)
 

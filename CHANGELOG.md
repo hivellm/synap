@@ -7,12 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.0] - 2026-07-19
+## [1.2.0] - 2026-07-19
 
 The SynapRPC binary transport now runs on [Thunder](https://github.com/hivellm/thunder),
 the HiveLLM family's shared protocol, on both ends of the wire: the server
 listener and the Rust, TypeScript, Python and C# SDKs. Wire v1 is frozen and
-unchanged — a pre-1.1.0 client keeps working against a 1.1.0 server, verified by
+unchanged — a pre-1.2.0 client keeps working against a 1.2.0 server, verified by
 the `legacy` cell of the interop matrix rather than asserted.
 
 The **Go SDK** is on Thunder too, and now lives in its own repository —
@@ -187,10 +187,10 @@ every SDK against one authenticated server and compared the results.
 - **Pub/sub over RPC works from the C# SDK.** Its `SUBSCRIBE` was sent with
   `id = 0xFFFFFFFF` — the reserved server-push sentinel. A Thunder server
   refuses a request carrying that id, so the subscription would have failed
-  outright against a 1.1.0 server. Thunder allocates a normal request id and
+  outright against a 1.2.0 server. Thunder allocates a normal request id and
   routes push frames by the sentinel, which is what it is for.
 - **The Go SDK decodes the server's new `Bytes` encoding.** It understood only
-  the legacy array-of-integers form, so against a 1.1.0 server every binary
+  the legacy array-of-integers form, so against a 1.2.0 server every binary
   value would have come back as a raw `[]byte` instead of a `string`. It now
   accepts both forms, so it interoperates with servers on either side of the
   change. Its frame cap also moves from 64 MiB to 512 MiB to match the server's,
@@ -3235,8 +3235,8 @@ These limitations will be addressed in future phases.
 - Documentation
 - Security
 
-[Unreleased]: https://github.com/hivellm/synap/compare/v1.1.0...HEAD
-[1.1.0]: https://github.com/hivellm/synap/compare/v1.0.0...v1.1.0
+[Unreleased]: https://github.com/hivellm/synap/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/hivellm/synap/compare/v1.0.0...v1.2.0
 [1.0.0]: https://github.com/hivellm/synap/compare/v0.8.1...v1.0.0
 [0.8.1]: https://github.com/hivellm/synap/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/hivellm/synap/compare/v0.7.0-rc2...v0.8.0

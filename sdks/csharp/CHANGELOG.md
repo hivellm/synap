@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.0] - 2026-07-19
+## [1.2.0] - 2026-07-19
 
 ### Changed
 - **The `synap://` transport now runs on [Thunder](https://github.com/hivellm/thunder)**
@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **Pub/sub over RPC works.** `SUBSCRIBE` was sent with `id = 0xFFFFFFFF`, the
   reserved server-push sentinel, which a Thunder server refuses outright — the
-  subscription would have failed against any 1.1.0 server. The sentinel
+  subscription would have failed against any 1.2.0 server. The sentinel
   identifies frames coming *from* the server; it was never an address a client
   could send to.
 - The frame cap is validated against the length prefix **before** allocating.

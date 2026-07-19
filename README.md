@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.92%2B)-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/tests-1800%2B-brightgreen.svg)](docs/TESTING.md)
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](CHANGELOG.md)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
 
@@ -96,11 +96,11 @@ Go, PHP, C#) select the transport via URL scheme — no separate builder options
 > All commands — KV, queues, streams, pub/sub, transactions, scripts,
 > geospatial, HyperLogLog — are fully supported on every transport.
 >
-> Since 1.1.0 the `synap://` wire is **[Thunder](https://github.com/hivellm/thunder)**
+> Since 1.2.0 the `synap://` wire is **[Thunder](https://github.com/hivellm/thunder)**
 > — the HiveLLM family's shared binary RPC — on both ends: the server listener
 > and the Rust, TypeScript, Python and C# SDKs run the same protocol
 > implementation, so the two halves of a connection cannot drift. Wire v1 is
-> frozen; a pre-1.1.0 client still interoperates. The PHP SDK keeps a
+> frozen; a pre-1.2.0 client still interoperates. The PHP SDK keeps a
 > hand-written transport, because Thunder has no PHP package — it is verified
 > against the same server by the interop matrix, see
 > `docs/thunder-interop-matrix.md`.
@@ -275,10 +275,10 @@ docker run -d \
 **Multi-Architecture Build**:
 ```bash
 # Build and push multi-arch images (AMD64 + ARM64)
-./scripts/docker/docker-publish.sh 1.1.0
+./scripts/docker/docker-publish.sh 1.2.0
 
 # Or using PowerShell
-.\scripts\docker\docker-publish.ps1 1.1.0
+.\scripts\docker\docker-publish.ps1 1.2.0
 ```
 
 **Docker Compose**:
@@ -296,7 +296,7 @@ docker-compose up -d
 
 **Available Images**:
 - `hivehub/synap:latest` - Latest stable release
-- `hivehub/synap:<version>` - Specific version (e.g. `hivehub/synap:1.1.0`)
+- `hivehub/synap:<version>` - Specific version (e.g. `hivehub/synap:1.2.0`)
 - Supports `linux/amd64` and `linux/arm64` architectures
 
 📖 **For detailed Docker documentation, see [DOCKER_README.md](DOCKER_README.md)**

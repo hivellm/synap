@@ -12,7 +12,7 @@ server and every Synap SDK — including the one with no Thunder package (PHP)
 and any pre-Thunder client still in the wild — still talk to each other correctly.
 
 That cross-language verification is Thunder's Gate G2/G3, and it is the gate for
-tagging 1.1.0. A release only happens if it is green in every cell; a red cell
+tagging 1.2.0. A release only happens if it is green in every cell; a red cell
 becomes an issue on `hivellm/thunder` (if the fault is Thunder's) or a fix in this
 repo (if it is Synap's), and the release waits.
 
@@ -27,8 +27,8 @@ repo (if it is Synap's), and the release waits.
 - PHP has no Thunder package. It keeps its hand-written transport;
   this task only proves they still interoperate, and files the packaging gap
   upstream if the family intends to cover them.
-- Version bump to 1.1.0 across the workspace and every SDK manifest.
-- `CHANGELOG.md` gets the 1.1.0 section, including the `Bytes` canonicalization and
+- Version bump to 1.2.0 across the workspace and every SDK manifest.
+- `CHANGELOG.md` gets the 1.2.0 section, including the `Bytes` canonicalization and
   the `synap-protocol` deprecation, with a migration note.
 - The terminal `synap-protocol` shim prepared in phase13 is published.
 - Release tag and artifacts.
@@ -40,3 +40,8 @@ repo (if it is Synap's), and the release waits.
   `synap-protocol` (deprecated shim).
 - User benefit: a verified, single-protocol release across seven SDKs, with the
   interop matrix as evidence rather than assertion.
+
+> **On the task id.** This task is still called `phase19_thunder-release-1-1-0`.
+> The release it drives was renumbered to 1.2.0 before it was ever tagged; the
+> directory name is left alone because a rulebook task id is its identity, and
+> renaming it would orphan the references to it in the CHANGELOG and in phase20.

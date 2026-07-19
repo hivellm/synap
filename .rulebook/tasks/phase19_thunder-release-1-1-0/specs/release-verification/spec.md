@@ -1,11 +1,11 @@
-# Spec: 1.1.0 release verification
+# Spec: 1.2.0 release verification
 
 ## ADDED Requirements
 
 ### Requirement: Cross-SDK interop matrix
 Every Synap SDK SHALL complete authenticate, a binary-value SET/GET round-trip, a
 SUBSCRIBE/PUBLISH delivery and an error round-trip against one Thunder-based server
-build before 1.1.0 is tagged.
+build before 1.2.0 is tagged.
 
 #### Scenario: Every SDK passes
 Given a Thunder-based Synap server build
@@ -26,7 +26,7 @@ When it runs SET/GET of a binary value against the new server
 Then the value round-trips correctly
 
 ### Requirement: Release gate
-The 1.1.0 tag SHALL NOT be created while any interop cell, lint check or test suite
+The 1.2.0 tag SHALL NOT be created while any interop cell, lint check or test suite
 is failing.
 
 #### Scenario: Tag preconditions
@@ -35,9 +35,9 @@ When the tag is created
 Then `cargo clippy -- -D warnings` passes, `cargo test` passes, every SDK suite passes, and the interop matrix is fully green
 
 ### Requirement: Version consistency
-The workspace and every SDK manifest SHALL declare version 1.1.0.
+The workspace and every SDK manifest SHALL declare version 1.2.0.
 
 #### Scenario: Manifests agree
 Given the release commit
 When every manifest is inspected
-Then each declares 1.1.0
+Then each declares 1.2.0
