@@ -18,7 +18,7 @@ Server: `thunder-rpc 0.2.0`, authentication required.
 | `python` | ✅ | ✅ | ✅ | ✅ | `hivellm-thunder` |
 | `csharp` | ✅ | ✅ | ✅ | ✅ | `HiveLLM.Thunder` |
 | `php` | ✅ | ✅ | ✅ | ✅ | hand-written (no Thunder package) |
-| `go` | ✅ | ❌ | ✅ | ✅ | hand-written (thunder#9) |
+| `go` | ✅ | ✅ | ✅ | ✅ | `thunder-go` |
 | `java` | — | — | — | — | hand-written; **not run**, no toolchain |
 | `legacy` | ✅ | ✅ | ✅ | ✅ | pre-Thunder wire replay |
 
@@ -64,23 +64,23 @@ Both are fixed, with regression tests in `auth_edge_cases_tests.rs`. The
 standing lesson matches the matrix's: a CI job should build and run the image,
 for the same reason the matrix exists.
 
-### Open
+### Closed since
 
-**`go` / SET-GET binary — red.** The Go SDK cannot carry a binary value over
-`synap://`. The cause is not the wire: `sendRPC` marshals the payload to JSON to
-extract its fields, and Go's `encoding/json` replaces invalid UTF-8 with U+FFFD.
-The value is destroyed client-side, before framing:
+**`go` / SET-GET binary — now green.** The Go SDK moved onto Thunder
+(`phase20`), and with it the JSON round trip that sat in the middle of a binary
+transport was removed in both directions. `encoding/json` replaces invalid UTF-8
+with U+FFFD, so the value was destroyed inside the client, before framing:
 
 ```
 in=deadbeef  json={"value":"ޭ��"}  out=deadefbfbdefbfbd
 ```
 
-A JSON round-trip in the middle of a binary transport is the real defect, and
-fixing it means the module methods must build wire arguments directly rather
-than going through `encoding/json`. That is the rewrite `phase20` performs when
-Go moves onto Thunder, so it is tracked there rather than patched twice.
+Command payloads are now read by reflection instead of being marshalled just to
+reach their fields by name, and replies reach the module methods as typed values
+instead of being re-encoded. HTTP and RESP3, which genuinely speak JSON, are
+untouched. Shipped in the Go SDK's v1.1.1.
 
-The two Go fixes above are independent of it and stand on their own.
+### Open
 
 **`java` — not run.** The Java cell needs Maven and JDK 17; this machine has
 neither (JDK 11 only, and Maven is absent from the winget source). Reading the

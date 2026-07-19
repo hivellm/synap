@@ -15,15 +15,15 @@ listener and the Rust, TypeScript, Python and C# SDKs. Wire v1 is frozen and
 unchanged — a pre-1.1.0 client keeps working against a 1.1.0 server, verified by
 the `legacy` cell of the interop matrix rather than asserted.
 
-**Not on Thunder in this release:** the Go and Java SDKs keep their hand-written
-transports, because Thunder has no package for them yet
-([thunder#9](https://github.com/hivellm/thunder/issues/9)). Both received wire
-and authentication fixes here and interoperate, with one documented limitation:
-**the Go SDK cannot carry a binary value over `synap://`** — `sendRPC` marshals
-the payload through `encoding/json`, which replaces invalid UTF-8 with U+FFFD
-before the value is framed. Use a UTF-8 value, or the HTTP transport, until Go
-moves onto Thunder. The Java cell of the matrix is unverified for lack of a
-toolchain. Full results: `docs/thunder-interop-matrix.md`.
+The **Go SDK** is on Thunder too, and now lives in its own repository —
+[`hivellm/synap-sdk-go`](https://github.com/hivellm/synap-sdk-go), consumed here
+as a submodule, released as v1.1.1. The **PHP SDK** likewise moved to
+[`hivellm/synap-sdk-php`](https://github.com/hivellm/synap-sdk-php); it keeps a
+hand-written transport, because Thunder has no PHP package, and interoperates.
+
+**Not verified:** the Java SDK's cell needs Maven and JDK 17, neither available
+on the machine this ran on, so it is recorded as unverified rather than
+presented as a result. Full results: `docs/thunder-interop-matrix.md`.
 
 ### Changed
 
