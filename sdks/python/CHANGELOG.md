@@ -106,6 +106,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-19
+
+### Changed
+- **The `synap://` transport now runs on [Thunder](https://github.com/hivellm/thunder)**
+  (`hivellm-thunder` 0.2.1), the family's shared binary RPC client — the same
+  protocol implementation the Synap server runs, so the two ends of the wire
+  cannot drift.
+
+### Added
+- Credentials travel in the RPC handshake. The previous transport never sent
+  `AUTH`, so it could not reach a `require_auth` server on 15501 at all.
+- The push hook is registered before `SUBSCRIBE` is sent, so a message published
+  between the server's acknowledgement and the reader starting cannot be lost.
+
 ## [1.0.0] - 2026-07-11
 
 ### Fixed

@@ -2,8 +2,8 @@ apiVersion: v2
 name: synap
 description: High-Performance In-Memory Key-Value Store & Message Broker
 type: application
-version: 0.4.0
-appVersion: "1.0.0"
+version: 0.5.0
+appVersion: "1.1.0"
 keywords:
   - database
   - key-value

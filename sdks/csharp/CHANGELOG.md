@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-07-19
+
+### Changed
+- **The `synap://` transport now runs on [Thunder](https://github.com/hivellm/thunder)**
+  (`HiveLLM.Thunder` 0.2.1), the family's shared binary RPC client — the same
+  protocol implementation the Synap server runs, so the two ends of the wire
+  cannot drift. Concurrent commands genuinely multiplex over one connection.
+
+### Added
+- Credentials travel in the RPC handshake. The previous transport never sent
+  `AUTH`, so it could not reach a `require_auth` server on 15501 at all.
+
+### Fixed
+- **Pub/sub over RPC works.** `SUBSCRIBE` was sent with `id = 0xFFFFFFFF`, the
+  reserved server-push sentinel, which a Thunder server refuses outright — the
+  subscription would have failed against any 1.1.0 server. The sentinel
+  identifies frames coming *from* the server; it was never an address a client
+  could send to.
+- The frame cap is validated against the length prefix **before** allocating.
+  The previous transport ran `new byte[msgLen]` with whatever a four-byte prefix
+  claimed.
+
 ## [1.0.0] - 2026-07-11
 
 ### Changed
