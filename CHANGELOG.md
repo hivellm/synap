@@ -5,6 +5,29 @@ All notable changes to Synap will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-07-20
+
+A maintenance release. There are no public API or wire changes — every SDK is
+functionally identical to 1.2.0, and a 1.2.0 client and a 1.2.1 server
+interoperate unchanged. It exists to bring the SDKs onto the automated,
+credential-less publishing pipeline and to carry routine dependency bumps.
+
+### Added
+
+- Automated SDK publishing on release (`.github/workflows/sdk-publish.yml`).
+  When a GitHub Release is published, `synap-sdk` (crates.io), `@hivehub/synap`
+  (npm), `synap_sdk` (PyPI) and `HiveLLM.Synap.SDK` (NuGet) are published
+  automatically, each authenticating via Trusted Publishing (OIDC) — no
+  long-lived registry credential is stored in the repository. `sdks/go` and
+  `sdks/php` are submodules of their own repositories and continue to publish by
+  tag there.
+
+### Changed
+
+- Bumped CI actions: `actions/setup-node` 4→7, `actions/setup-python` 5→7,
+  `actions/setup-dotnet` 4→6.
+- Bumped `compact_str` 0.9→0.10.
+
 ## [1.2.0] - 2026-07-19
 
 Watching a key is now a first-class operation. `KV.WATCH` streams the resulting
