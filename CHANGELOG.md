@@ -5,12 +5,13 @@ All notable changes to Synap will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.2.1] - 2026-07-20
+## [1.2.3] - 2026-07-20
 
 A maintenance release. There are no public API or wire changes — every SDK is
-functionally identical to 1.2.0, and a 1.2.0 client and a 1.2.1 server
+functionally identical to 1.2.0, and a 1.2.0 client and a 1.2.3 server
 interoperate unchanged. It exists to bring the SDKs onto the automated,
-credential-less publishing pipeline and to carry routine dependency bumps.
+credential-less publishing pipeline, to realign every SDK on one version, and
+to carry routine dependency bumps.
 
 ### Added
 
@@ -24,6 +25,10 @@ credential-less publishing pipeline and to carry routine dependency bumps.
 
 ### Changed
 
+- Normalized every SDK to 1.2.3. The Go (`hivellm/synap-sdk-go`) and PHP
+  (`hivellm/synap-sdk-php`) SDKs had drifted onto their own version numbers
+  (Go at 1.2.0, PHP at 1.2.1); all six now share 1.2.3. There is no 1.2.1 or
+  1.2.2 release — those numbers are skipped to reach a single shared version.
 - Bumped CI actions: `actions/setup-node` 4→7, `actions/setup-python` 5→7,
   `actions/setup-dotnet` 4→6.
 - Bumped `compact_str` 0.9→0.10.
