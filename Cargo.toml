@@ -38,7 +38,7 @@ bcrypt = "0.19"
 chrono = { version = "0.4", features = ["serde"] }
 base64 = "0.22"
 rand = "0.10"
-compact_str = { version = "0.9", features = ["serde"] }
+compact_str = { version = "0.10", features = ["serde"] }
 
 [profile.dev]
 # Keep file:line in panics/backtraces but drop full variable debuginfo — the
