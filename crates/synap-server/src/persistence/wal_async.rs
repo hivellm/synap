@@ -80,18 +80,12 @@ impl AsyncWAL {
     }
 
     /// Scan WAL file to find the last valid offset
-    #[allow(clippy::while_let_loop)]
     async fn scan_for_last_offset(path: &PathBuf) -> Result<u64> {
         let mut file = File::open(path).await?;
         let mut max_offset = 0u64;
 
-        loop {
-            // Try to read entry size
-            let size = match file.read_u64().await {
-                Ok(s) => s,
-                Err(_) => break, // EOF
-            };
-
+        // Read until EOF (read_u64 errors at end of file)
+        while let Ok(size) = file.read_u64().await {
             // Read checksum
             let _checksum = match file.read_u32().await {
                 Ok(c) => c,
@@ -339,20 +333,14 @@ impl AsyncWAL {
     }
 
     /// Replay WAL entries from a specific offset
-    #[allow(clippy::while_let_loop)]
     pub async fn replay(&self, path: &PathBuf, from_offset: u64) -> Result<Vec<WALEntry>> {
         let mut file = File::open(path).await?;
         let mut entries = Vec::new();
 
         debug!("Replaying WAL from offset {}", from_offset);
 
-        loop {
-            // Read entry size
-            let size = match file.read_u64().await {
-                Ok(s) => s,
-                Err(_) => break, // EOF
-            };
-
+        // Read until EOF (read_u64 errors at end of file)
+        while let Ok(size) = file.read_u64().await {
             // Read checksum
             let checksum_expected = match file.read_u32().await {
                 Ok(c) => c,

@@ -17,7 +17,7 @@ pub use extractor::{
     require_resource_permission,
 };
 pub use mcp_context::{clear_auth_context, get_auth_context, set_auth_context, with_auth_context};
-pub use middleware::AuthMiddleware;
+pub use middleware::{AuthMiddleware, AuthRejection};
 pub use password_validation::{PasswordRequirements, validate_password, validate_password_strict};
 pub use permission_checker::*;
 pub use permissions::{Action, Permission, Role, command_requires_admin};

@@ -16,6 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ReplicaNode::new`), and `StreamSocketParams` (stream WebSocket handler).
   Call sites now use named-field construction, eliminating argument-order bugs
   the compiler could not catch.
+- Internal: the remaining structural clippy suppressions in live code were
+  fixed rather than silenced — `authenticate_api_key`/`authenticate_basic` now
+  return a real `AuthRejection` error enum instead of `Err(())` (still always
+  mapped to HTTP 401; the variant is logged, never sent to the client), the six
+  WAL scan/replay loops use idiomatic `while let Ok(..)` reads, and the RESP3
+  `GEORADIUS`/`GEOSEARCH` argument parsing moved into shared helpers
+  (`parse_geo_option_tail`/`parse_geosearch_args`). Only the experimental
+  cluster layer (ADR 004) keeps its two `#[allow]`s.
 - Every SDK version normalized to 1.3.0 alongside the server (workspace crates,
   `@hivehub/synap`, `synap_sdk`, `HiveLLM.Synap.SDK`; the Go and PHP submodules
   follow by tag in their own repositories).

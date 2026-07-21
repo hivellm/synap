@@ -977,8 +977,49 @@ pub(super) async fn cmd_geohash(state: &AppState, args: &[Resp3Value]) -> Resp3V
     }
 }
 
+/// Parsed `[WITHDIST] [WITHCOORD] [COUNT n] [ASC|DESC]` tail shared by the
+/// GEORADIUS-family commands.
+#[derive(Default)]
+struct GeoOptionTail {
+    with_dist: bool,
+    with_coord: bool,
+    count: Option<usize>,
+    sort: Option<String>,
+}
+
+/// Parse the GEORADIUS-family option tail starting at argument index `i`.
+/// Unknown tokens are skipped (matching prior behavior).
+fn parse_geo_option_tail(args: &[Resp3Value], mut i: usize) -> GeoOptionTail {
+    let mut tail = GeoOptionTail::default();
+    while i < args.len() {
+        match args[i].as_str().map(|s| s.to_ascii_uppercase()).as_deref() {
+            Some("WITHDIST") => {
+                tail.with_dist = true;
+                i += 1;
+            }
+            Some("WITHCOORD") => {
+                tail.with_coord = true;
+                i += 1;
+            }
+            Some("COUNT") => {
+                tail.count = arg_u64(args, i + 1).map(|n| n as usize);
+                i += 2;
+            }
+            Some("ASC") => {
+                tail.sort = Some("ASC".into());
+                i += 1;
+            }
+            Some("DESC") => {
+                tail.sort = Some("DESC".into());
+                i += 1;
+            }
+            _ => i += 1,
+        }
+    }
+    tail
+}
+
 /// `GEORADIUS key longitude latitude radius unit [WITHCOORD] [WITHDIST] [COUNT n] [ASC|DESC]`
-#[allow(clippy::too_many_lines)]
 pub(super) async fn cmd_georadius(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
     if args.len() < 6 {
         return err_wrong_args("GEORADIUS");
@@ -1005,36 +1046,7 @@ pub(super) async fn cmd_georadius(state: &AppState, args: &[Resp3Value]) -> Resp
         .and_then(|a| a.as_str())
         .and_then(|s| s.parse().ok())
         .unwrap_or(DistanceUnit::Meters);
-    let mut with_dist = false;
-    let mut with_coord = false;
-    let mut count: Option<usize> = None;
-    let mut sort: Option<String> = None;
-    let mut i = 6;
-    while i < args.len() {
-        match args[i].as_str().map(|s| s.to_ascii_uppercase()).as_deref() {
-            Some("WITHDIST") => {
-                with_dist = true;
-                i += 1;
-            }
-            Some("WITHCOORD") => {
-                with_coord = true;
-                i += 1;
-            }
-            Some("COUNT") => {
-                count = arg_u64(args, i + 1).map(|n| n as usize);
-                i += 2;
-            }
-            Some("ASC") => {
-                sort = Some("ASC".into());
-                i += 1;
-            }
-            Some("DESC") => {
-                sort = Some("DESC".into());
-                i += 1;
-            }
-            _ => i += 1,
-        }
-    }
+    let tail = parse_geo_option_tail(args, 6);
     // Internal API uses (lat, lon) — convert from Redis (lon, lat)
     match state.geospatial_store.georadius(
         &key,
@@ -1043,10 +1055,10 @@ pub(super) async fn cmd_georadius(state: &AppState, args: &[Resp3Value]) -> Resp
         radius,
         unit,
         GeoQueryOptions {
-            with_dist,
-            with_coord,
-            count,
-            sort: sort.as_deref(),
+            with_dist: tail.with_dist,
+            with_coord: tail.with_coord,
+            count: tail.count,
+            sort: tail.sort.as_deref(),
         },
     ) {
         Ok(results) => geo_results_to_resp3(results),
@@ -1076,46 +1088,17 @@ pub(super) async fn cmd_georadiusbymember(state: &AppState, args: &[Resp3Value])
         .and_then(|a| a.as_str())
         .and_then(|s| s.parse().ok())
         .unwrap_or(DistanceUnit::Meters);
-    let mut with_dist = false;
-    let mut with_coord = false;
-    let mut count: Option<usize> = None;
-    let mut sort: Option<String> = None;
-    let mut i = 5;
-    while i < args.len() {
-        match args[i].as_str().map(|s| s.to_ascii_uppercase()).as_deref() {
-            Some("WITHDIST") => {
-                with_dist = true;
-                i += 1;
-            }
-            Some("WITHCOORD") => {
-                with_coord = true;
-                i += 1;
-            }
-            Some("COUNT") => {
-                count = arg_u64(args, i + 1).map(|n| n as usize);
-                i += 2;
-            }
-            Some("ASC") => {
-                sort = Some("ASC".into());
-                i += 1;
-            }
-            Some("DESC") => {
-                sort = Some("DESC".into());
-                i += 1;
-            }
-            _ => i += 1,
-        }
-    }
+    let tail = parse_geo_option_tail(args, 5);
     match state.geospatial_store.georadiusbymember(
         &key,
         &member,
         radius,
         unit,
         GeoQueryOptions {
-            with_dist,
-            with_coord,
-            count,
-            sort: sort.as_deref(),
+            with_dist: tail.with_dist,
+            with_coord: tail.with_coord,
+            count: tail.count,
+            sort: tail.sort.as_deref(),
         },
     ) {
         Ok(results) => geo_results_to_resp3(results),
@@ -1123,35 +1106,32 @@ pub(super) async fn cmd_georadiusbymember(state: &AppState, args: &[Resp3Value])
     }
 }
 
-/// `GEOSEARCH key FROMMEMBER member|FROMLONLAT lon lat BYRADIUS r unit|BYBOX w h unit …`
-#[allow(clippy::too_many_lines)]
-pub(super) async fn cmd_geosearch(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
-    if args.len() < 6 {
-        return err_wrong_args("GEOSEARCH");
-    }
-    let key = match arg_str(args, 1) {
-        Some(k) => k,
-        None => return Resp3Value::Error("ERR key must be a string".into()),
-    };
-    let mut from_member: Option<Vec<u8>> = None;
-    let mut from_lonlat: Option<(f64, f64)> = None;
-    let mut by_radius: Option<(f64, DistanceUnit)> = None;
-    let mut by_box: Option<(f64, f64, DistanceUnit)> = None;
-    let mut with_dist = false;
-    let mut with_coord = false;
-    let mut count: Option<usize> = None;
-    let mut sort: Option<String> = None;
+/// Parsed GEOSEARCH arguments: origin (FROMMEMBER/FROMLONLAT), shape
+/// (BYRADIUS/BYBOX), and the shared option tail.
+#[derive(Default)]
+struct GeoSearchArgs {
+    from_member: Option<Vec<u8>>,
+    from_lonlat: Option<(f64, f64)>,
+    by_radius: Option<(f64, DistanceUnit)>,
+    by_box: Option<(f64, f64, DistanceUnit)>,
+    tail: GeoOptionTail,
+}
+
+/// Parse GEOSEARCH arguments starting after the key (index 2). Unknown tokens
+/// are skipped (matching prior behavior).
+fn parse_geosearch_args(args: &[Resp3Value]) -> GeoSearchArgs {
+    let mut parsed = GeoSearchArgs::default();
     let mut i = 2;
     while i < args.len() {
         match args[i].as_str().map(|s| s.to_ascii_uppercase()).as_deref() {
             Some("FROMMEMBER") => {
-                from_member = arg_bytes(args, i + 1);
+                parsed.from_member = arg_bytes(args, i + 1);
                 i += 2;
             }
             Some("FROMLONLAT") => {
                 let lon = arg_f64(args, i + 1).unwrap_or(0.0);
                 let lat = arg_f64(args, i + 2).unwrap_or(0.0);
-                from_lonlat = Some((lon, lat));
+                parsed.from_lonlat = Some((lon, lat));
                 i += 3;
             }
             Some("BYRADIUS") => {
@@ -1161,7 +1141,7 @@ pub(super) async fn cmd_geosearch(state: &AppState, args: &[Resp3Value]) -> Resp
                     .and_then(|a| a.as_str())
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(DistanceUnit::Meters);
-                by_radius = Some((r, u));
+                parsed.by_radius = Some((r, u));
                 i += 3;
             }
             Some("BYBOX") => {
@@ -1172,45 +1152,58 @@ pub(super) async fn cmd_geosearch(state: &AppState, args: &[Resp3Value]) -> Resp
                     .and_then(|a| a.as_str())
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(DistanceUnit::Meters);
-                by_box = Some((w, h, u));
+                parsed.by_box = Some((w, h, u));
                 i += 4;
             }
             Some("WITHDIST") => {
-                with_dist = true;
+                parsed.tail.with_dist = true;
                 i += 1;
             }
             Some("WITHCOORD") => {
-                with_coord = true;
+                parsed.tail.with_coord = true;
                 i += 1;
             }
             Some("COUNT") => {
-                count = arg_u64(args, i + 1).map(|n| n as usize);
+                parsed.tail.count = arg_u64(args, i + 1).map(|n| n as usize);
                 i += 2;
             }
             Some("ASC") => {
-                sort = Some("ASC".into());
+                parsed.tail.sort = Some("ASC".into());
                 i += 1;
             }
             Some("DESC") => {
-                sort = Some("DESC".into());
+                parsed.tail.sort = Some("DESC".into());
                 i += 1;
             }
             _ => i += 1,
         }
     }
+    parsed
+}
+
+/// `GEOSEARCH key FROMMEMBER member|FROMLONLAT lon lat BYRADIUS r unit|BYBOX w h unit …`
+pub(super) async fn cmd_geosearch(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    if args.len() < 6 {
+        return err_wrong_args("GEOSEARCH");
+    }
+    let key = match arg_str(args, 1) {
+        Some(k) => k,
+        None => return Resp3Value::Error("ERR key must be a string".into()),
+    };
+    let parsed = parse_geosearch_args(args);
     match state.geospatial_store.geosearch(
         &key,
         GeoSearchParams {
-            from_member: from_member.as_deref(),
-            from_lonlat,
-            by_radius,
-            by_box,
+            from_member: parsed.from_member.as_deref(),
+            from_lonlat: parsed.from_lonlat,
+            by_radius: parsed.by_radius,
+            by_box: parsed.by_box,
             with_hash: false,
             options: GeoQueryOptions {
-                with_dist,
-                with_coord,
-                count,
-                sort: sort.as_deref(),
+                with_dist: parsed.tail.with_dist,
+                with_coord: parsed.tail.with_coord,
+                count: parsed.tail.count,
+                sort: parsed.tail.sort.as_deref(),
             },
         },
     ) {

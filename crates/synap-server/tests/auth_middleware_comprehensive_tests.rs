@@ -201,6 +201,50 @@ fn test_basic_auth_invalid_utf8() {
 }
 
 #[test]
+fn test_auth_rejection_reports_specific_variant() {
+    use synap_server::auth::AuthRejection;
+
+    let user_manager = UserManager::new();
+    user_manager
+        .create_user("testuser", "testpass123", false)
+        .unwrap();
+    let api_key_manager = ApiKeyManager::new();
+    let auth = AuthMiddleware::new(user_manager, api_key_manager, false);
+    let client_ip = IpAddr::from([127, 0, 0, 1]);
+
+    // Nonexistent API key → UnknownApiKey
+    let req = create_request_with_headers(vec![(
+        "Authorization".to_string(),
+        "Bearer sk_does_not_exist".to_string(),
+    )]);
+    assert!(matches!(
+        AuthMiddleware::authenticate_api_key(&auth, &req, client_ip),
+        Err(AuthRejection::UnknownApiKey)
+    ));
+
+    // Invalid base64 in Basic Auth → MalformedHeader
+    let req = create_request_with_headers(vec![(
+        "Authorization".to_string(),
+        "Basic invalid!base64@".to_string(),
+    )]);
+    assert!(matches!(
+        AuthMiddleware::authenticate_basic(&auth, &req, client_ip),
+        Err(AuthRejection::MalformedHeader)
+    ));
+
+    // Wrong password for an existing user → InvalidCredentials
+    let encoded = general_purpose::STANDARD.encode("testuser:wrongpass");
+    let req = create_request_with_headers(vec![(
+        "Authorization".to_string(),
+        format!("Basic {}", encoded),
+    )]);
+    assert!(matches!(
+        AuthMiddleware::authenticate_basic(&auth, &req, client_ip),
+        Err(AuthRejection::InvalidCredentials)
+    ));
+}
+
+#[test]
 fn test_basic_auth_empty_username() {
     let user_manager = UserManager::new();
     let api_key_manager = ApiKeyManager::new();

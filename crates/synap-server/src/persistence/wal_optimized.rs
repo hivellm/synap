@@ -313,7 +313,6 @@ impl OptimizedWAL {
             .as_secs()
     }
 
-    #[allow(clippy::while_let_loop)]
     async fn scan_for_last_offset(path: &PathBuf) -> Result<u64> {
         if tokio::fs::metadata(path).await.is_err() {
             return Ok(0);
@@ -322,12 +321,8 @@ impl OptimizedWAL {
         let mut file = File::open(path).await?;
         let mut max_offset = 0u64;
 
-        loop {
-            let size = match file.read_u64().await {
-                Ok(s) => s,
-                Err(_) => break,
-            };
-
+        // Read until EOF (read_u64 errors at end of file)
+        while let Ok(size) = file.read_u64().await {
             let _checksum = match file.read_u32().await {
                 Ok(c) => c,
                 Err(_) => break,
@@ -349,17 +344,12 @@ impl OptimizedWAL {
     }
 
     /// Read all entries from WAL (for recovery)
-    #[allow(clippy::while_let_loop)]
     pub async fn read_all(&self, path: &PathBuf) -> Result<Vec<WALEntry>> {
         let mut file = File::open(path).await?;
         let mut entries = Vec::new();
 
-        loop {
-            let size = match file.read_u64().await {
-                Ok(s) => s,
-                Err(_) => break,
-            };
-
+        // Read until EOF (read_u64 errors at end of file)
+        while let Ok(size) = file.read_u64().await {
             let expected_checksum = match file.read_u32().await {
                 Ok(c) => c,
                 Err(_) => break,

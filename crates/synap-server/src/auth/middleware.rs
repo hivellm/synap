@@ -9,6 +9,22 @@ use base64::{Engine as _, engine::general_purpose};
 use std::net::{IpAddr, SocketAddr};
 use tracing::debug;
 
+/// Why an authentication attempt was rejected.
+///
+/// Every variant maps to HTTP 401; the distinction exists for logs and tests,
+/// never for the response body (which would leak probe feedback to attackers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum AuthRejection {
+    #[error("API key not found")]
+    UnknownApiKey,
+    #[error("API key rejected (expired, disabled, or IP not allowed)")]
+    InvalidApiKey,
+    #[error("malformed Authorization header")]
+    MalformedHeader,
+    #[error("invalid username or password")]
+    InvalidCredentials,
+}
+
 /// Authentication middleware
 #[derive(Clone)]
 pub struct AuthMiddleware {
@@ -56,9 +72,9 @@ impl AuthMiddleware {
                 req.extensions_mut().insert(auth_context);
                 return Ok(next.run(req).await);
             }
-            Err(_) => {
+            Err(rejection) => {
                 // API key provided but invalid - return 401
-                debug!("Invalid API key provided");
+                debug!("API key rejected: {rejection}");
                 return Err(StatusCode::UNAUTHORIZED);
             }
             Ok(None) => {
@@ -72,9 +88,9 @@ impl AuthMiddleware {
                 req.extensions_mut().insert(auth_context);
                 return Ok(next.run(req).await);
             }
-            Err(_) => {
+            Err(rejection) => {
                 // Basic Auth credentials provided but invalid - return 401
-                debug!("Invalid Basic Auth credentials");
+                debug!("Basic Auth rejected: {rejection}");
                 return Err(StatusCode::UNAUTHORIZED);
             }
             Ok(None) => {
@@ -96,13 +112,12 @@ impl AuthMiddleware {
 
     /// Authenticate via API key
     /// Returns Ok(Some(AuthContext)) on success, Ok(None) if no API key provided,
-    /// Err(()) if API key provided but invalid
-    #[allow(clippy::result_unit_err)]
+    /// Err(AuthRejection) if API key provided but invalid
     pub fn authenticate_api_key(
         auth: &AuthMiddleware,
         req: &Request,
         client_ip: IpAddr,
-    ) -> Result<Option<AuthContext>, ()> {
+    ) -> Result<Option<AuthContext>, AuthRejection> {
         // Check for API key in header
         let api_key = if let Some(auth_header) = req.headers().get(header::AUTHORIZATION) {
             if let Ok(auth_str) = auth_header.to_str() {
@@ -136,7 +151,7 @@ impl AuthMiddleware {
             if !auth.api_key_manager.key_exists(&key) {
                 // Key provided but not found - return error (401 Unauthorized)
                 // This ensures that invalid/non-existent keys return 401, not fallback to Basic Auth
-                return Err(());
+                return Err(AuthRejection::UnknownApiKey);
             }
 
             // Key exists, verify it
@@ -154,7 +169,7 @@ impl AuthMiddleware {
                 }
                 Err(_) => {
                     // Key exists but is invalid (expired, disabled, IP not allowed) - return error
-                    return Err(());
+                    return Err(AuthRejection::InvalidApiKey);
                 }
             }
         }
@@ -164,13 +179,12 @@ impl AuthMiddleware {
 
     /// Authenticate via Basic Auth
     /// Returns Ok(Some(AuthContext)) on success, Ok(None) if no Basic Auth header,
-    /// Err(()) if Basic Auth header present but invalid
-    #[allow(clippy::result_unit_err)]
+    /// Err(AuthRejection) if Basic Auth header present but invalid
     pub fn authenticate_basic(
         auth: &AuthMiddleware,
         req: &Request,
         client_ip: IpAddr,
-    ) -> Result<Option<AuthContext>, ()> {
+    ) -> Result<Option<AuthContext>, AuthRejection> {
         let auth_header = match req.headers().get(header::AUTHORIZATION) {
             Some(h) => h,
             None => return Ok(None), // No auth header
@@ -178,7 +192,7 @@ impl AuthMiddleware {
 
         let auth_str = match auth_header.to_str() {
             Ok(s) => s,
-            Err(_) => return Err(()), // Invalid header
+            Err(_) => return Err(AuthRejection::MalformedHeader), // Invalid header
         };
 
         let credentials = match auth_str.strip_prefix("Basic ") {
@@ -189,18 +203,18 @@ impl AuthMiddleware {
         // Decode base64
         let decoded = match general_purpose::STANDARD.decode(credentials) {
             Ok(d) => d,
-            Err(_) => return Err(()), // Invalid base64
+            Err(_) => return Err(AuthRejection::MalformedHeader), // Invalid base64
         };
 
         let credentials_str = match String::from_utf8(decoded) {
             Ok(s) => s,
-            Err(_) => return Err(()), // Invalid UTF-8
+            Err(_) => return Err(AuthRejection::MalformedHeader), // Invalid UTF-8
         };
 
         // Split username:password
         let (username, password) = match credentials_str.split_once(':') {
             Some(pair) => pair,
-            None => return Err(()), // Invalid format
+            None => return Err(AuthRejection::MalformedHeader), // Invalid format
         };
 
         // Authenticate
@@ -219,7 +233,7 @@ impl AuthMiddleware {
         }
 
         // Credentials provided but invalid
-        Err(())
+        Err(AuthRejection::InvalidCredentials)
     }
 }
 
