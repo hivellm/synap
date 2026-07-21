@@ -57,6 +57,9 @@ pub enum SynapError {
     #[error("Index out of range")]
     IndexOutOfRange,
 
+    #[error("Stream offset {requested} out of range; earliest retained offset is {earliest}")]
+    StreamOffsetOutOfRange { requested: u64, earliest: u64 },
+
     #[error("Key expired")]
     KeyExpired,
 
@@ -118,6 +121,7 @@ impl SynapError {
             Self::QueueFull(_) => StatusCode::INSUFFICIENT_STORAGE,
             Self::IoError(_) => StatusCode::INTERNAL_SERVER_ERROR,
             Self::IndexOutOfRange => StatusCode::BAD_REQUEST,
+            Self::StreamOffsetOutOfRange { .. } => StatusCode::BAD_REQUEST,
             Self::KeyExpired => StatusCode::GONE,
             Self::Timeout => StatusCode::REQUEST_TIMEOUT,
             Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
@@ -241,6 +245,19 @@ mod tests {
         assert_eq!(
             SynapError::Forbidden("test".to_string()).status_code(),
             StatusCode::FORBIDDEN
+        );
+    }
+
+    #[test]
+    fn test_stream_offset_out_of_range() {
+        let err = SynapError::StreamOffsetOutOfRange {
+            requested: 100,
+            earliest: 500,
+        };
+        assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            err.to_string(),
+            "Stream offset 100 out of range; earliest retained offset is 500"
         );
     }
 }

@@ -1,3 +1,4 @@
+use super::error::SynapError;
 use parking_lot::RwLock;
 /// Event Stream module for Kafka-style room-based broadcasting
 ///
@@ -212,8 +213,28 @@ impl Room {
         self.next_offset - 1
     }
 
-    /// Consume events starting from an offset
-    fn consume(&mut self, subscriber_id: &str, from_offset: u64, limit: usize) -> Vec<StreamEvent> {
+    /// Consume events starting from an offset.
+    ///
+    /// Returns [`SynapError::StreamOffsetOutOfRange`] when `from_offset` addresses
+    /// data that retention has already evicted (`from_offset < min_offset` after at
+    /// least one eviction), so a lagging consumer learns it fell off the retention
+    /// window instead of silently receiving a later batch (audit M-012, residual).
+    fn consume(
+        &mut self,
+        subscriber_id: &str,
+        from_offset: u64,
+        limit: usize,
+    ) -> Result<Vec<StreamEvent>, SynapError> {
+        // A request below the earliest retained offset means the wanted events were
+        // evicted. `min_offset > 0` distinguishes real eviction from a fresh room,
+        // whose `min_offset == 0` has never dropped anything.
+        if self.min_offset > 0 && from_offset < self.min_offset {
+            return Err(SynapError::StreamOffsetOutOfRange {
+                requested: from_offset,
+                earliest: self.min_offset,
+            });
+        }
+
         // Offsets are contiguous in the ring buffer (buffer[i].offset == min_offset + i),
         // so seek straight to the first requested index instead of scanning the whole
         // buffer (audit M-016: O(limit) rather than O(buffer)).
@@ -244,7 +265,7 @@ impl Room {
         self.stats.subscriber_count = self.subscribers.len();
         self.stats.total_consumed += events.len() as u64;
 
-        events
+        Ok(events)
     }
 
     /// Get room statistics
@@ -401,7 +422,13 @@ impl StreamManager {
             .get_mut(room)
             .ok_or_else(|| format!("Room '{}' not found", room))?;
 
-        Ok(room_obj.consume(subscriber_id, from_offset, limit))
+        // Flatten the typed out-of-range error to a string at the store boundary so
+        // the existing REST/RESP3/SynapRPC callers keep their `Result<_, String>`
+        // signature; the handler still surfaces it as HTTP 400 with the earliest
+        // retained offset in the message.
+        room_obj
+            .consume(subscriber_id, from_offset, limit)
+            .map_err(|e| e.to_string())
     }
 
     /// Get room statistics
@@ -674,12 +701,47 @@ mod tests {
     }
 
     #[test]
+    fn test_consume_evicted_offset_is_out_of_range() {
+        // Plain ring buffer, capacity 2: publishing offsets 0..4 evicts 0..2,
+        // leaving offsets 3 and 4 with min_offset == 3.
+        let mut room = small_room();
+        for i in 0..5u8 {
+            room.publish(StreamEvent::new("r".to_string(), "e".to_string(), vec![i]));
+        }
+        assert_eq!(room.min_offset, 3);
+
+        // Consuming from an evicted offset returns an explicit out-of-range error
+        // carrying the earliest retained offset, not a silently later batch.
+        let err = room.consume("s", 0, 10).unwrap_err();
+        assert!(matches!(
+            err,
+            SynapError::StreamOffsetOutOfRange {
+                requested: 0,
+                earliest: 3
+            }
+        ));
+
+        // Consuming from the earliest retained offset still works.
+        let got = room.consume("s", 3, 10).unwrap();
+        assert_eq!(got.len(), 2);
+    }
+
+    #[test]
+    fn test_consume_fresh_room_from_zero_is_ok() {
+        // A room that has never evicted (min_offset == 0) never errors at offset 0.
+        let mut room = room_with(100, 100);
+        room.publish(StreamEvent::new("r".to_string(), "e".to_string(), vec![0]));
+        let got = room.consume("s", 0, 10).unwrap();
+        assert_eq!(got.len(), 1);
+    }
+
+    #[test]
     fn test_stream_counts_unread_eviction_for_lagging_subscriber() {
         let mut room = small_room();
 
         // Publish e0, then a subscriber reads only up to offset 0 (last_offset=1).
         room.publish(StreamEvent::new("r".to_string(), "e".to_string(), vec![0]));
-        let got = room.consume("s", 0, 1);
+        let got = room.consume("s", 0, 1).unwrap();
         assert_eq!(got.len(), 1);
 
         // Publish e1..e4 without the subscriber catching up. Evictions of events
@@ -702,7 +764,7 @@ mod tests {
 
         // Publish e0, subscriber reads only up to offset 0 (committed = 1).
         room.publish(StreamEvent::new("r".to_string(), "e".to_string(), vec![0]));
-        assert_eq!(room.consume("s", 0, 1).len(), 1);
+        assert_eq!(room.consume("s", 0, 1).unwrap().len(), 1);
 
         // Publish e1..e6 without the subscriber catching up.
         for i in 1..=6u8 {

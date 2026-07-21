@@ -5,6 +5,25 @@ All notable changes to Synap will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Every SDK version normalized to 1.3.0 alongside the server (workspace crates,
+  `@hivehub/synap`, `synap_sdk`, `HiveLLM.Synap.SDK`; the Go and PHP submodules
+  follow by tag in their own repositories).
+
+### Fixed
+
+- **Streams: consuming from an evicted offset no longer silently skips data.**
+  Previously a consumer requesting a `from_offset` below a room's earliest
+  retained offset (after retention evicted the older events) received a later
+  batch with no indication that events were skipped, then advanced its cursor
+  as if nothing was lost. The stream `consume` path now returns an explicit
+  error — `StreamOffsetOutOfRange { requested, earliest }`, surfaced as HTTP 400
+  carrying the earliest retained offset — so a lagging consumer can re-seek
+  deliberately instead of losing committed events (audit M-012, residual).
+
 ## [1.2.3] - 2026-07-20
 
 A maintenance release. There are no public API or wire changes — every SDK is
