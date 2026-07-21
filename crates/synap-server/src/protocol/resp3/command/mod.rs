@@ -148,6 +148,7 @@ pub async fn dispatch(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
         "PUBSUB" => advanced::cmd_pubsub(state, args).await,
 
         // ── Transactions (3.4) ───────────────────────────────────────────────────
+        "TXQUEUE" => advanced::cmd_txqueue(state, args).await,
         "MULTI" => advanced::cmd_multi(state, args).await,
         "EXEC" => advanced::cmd_exec(state, args).await,
         "DISCARD" => advanced::cmd_discard(state, args).await,

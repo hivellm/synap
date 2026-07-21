@@ -138,6 +138,11 @@ export interface CommandOptions {
 export interface SetOptions {
   /** Time-to-live in seconds */
   ttl?: number;
+  /**
+   * Transaction client id. When set (after `transaction.multi`), the write is
+   * queued into that open transaction instead of executing immediately.
+   */
+  clientId?: string;
 }
 
 /**

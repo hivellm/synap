@@ -195,6 +195,37 @@ public sealed class TransportTests
     }
 
     [Fact]
+    public void MapCommand_WriteWithClientId_WrapsIntoTxQueue()
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["key"] = "foo",
+            ["value"] = "bar",
+            ["client_id"] = "tx1",
+        };
+        var result = CommandMapper.MapCommand("kv.set", payload);
+        Assert.True(result.HasValue);
+        Assert.Equal("TXQUEUE", result!.Value.Command);
+        Assert.Equal("tx1", result.Value.Args[0]);
+        Assert.Equal("SET", result.Value.Args[1]);
+        Assert.Equal("foo", result.Value.Args[2]);
+    }
+
+    [Fact]
+    public void MapCommand_UnqueueableWithClientId_ReturnsNull()
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["key"] = "z",
+            ["member"] = "m",
+            ["score"] = 1.0,
+            ["client_id"] = "tx1",
+        };
+        var result = CommandMapper.MapCommand("sorted_set.add", payload);
+        Assert.False(result.HasValue);
+    }
+
+    [Fact]
     public void MapCommand_KvDelete_ReturnsDelCommand()
     {
         var payload = new Dictionary<string, object?> { ["key"] = "foo" };

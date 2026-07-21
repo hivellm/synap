@@ -12,10 +12,47 @@ internal static class CommandMapper
     /// Maps a Synap operation + payload to a native command + args.
     /// Returns null for operations that must fall back to HTTP.
     /// </summary>
+    /// <summary>
+    /// Raw commands the server can queue inside a MULTI via TXQUEUE (ADR 005)
+    /// — exactly the server's TransactionCommand enum.
+    /// </summary>
+    private static readonly HashSet<string> TxQueueable = new(StringComparer.Ordinal)
+    {
+        "SET", "DEL",
+        "INCR", "DECR", "INCRBY", "DECRBY",
+        "HSET", "HDEL", "HINCRBY",
+        "LPUSH", "RPUSH", "LPOP", "RPOP",
+        "SADD", "SREM",
+    };
+
     internal static (string Command, object?[] Args)? MapCommand(
         string operation,
         Dictionary<string, object?> payload)
     {
+        // Transactional writes (payload carries a client_id) travel as
+        // TXQUEUE <client_id> <CMD> <args...> so the server queues them into
+        // the open MULTI instead of executing immediately (ADR 005). Commands
+        // the server cannot queue return null (-> UnsupportedCommandException),
+        // never a silent execution outside the transaction.
+        if (payload.TryGetValue("client_id", out var txClientId)
+            && txClientId is not null
+            && !string.IsNullOrEmpty(txClientId.ToString())
+            && !operation.StartsWith("transaction.", StringComparison.Ordinal))
+        {
+            var stripped = new Dictionary<string, object?>(payload);
+            stripped.Remove("client_id");
+            var inner = MapCommand(operation, stripped);
+            if (inner is not { } m || !TxQueueable.Contains(m.Command))
+            {
+                return null;
+            }
+
+            return ("TXQUEUE", new object?[] { txClientId.ToString() }
+                .Concat(new object?[] { m.Command })
+                .Concat(m.Args)
+                .ToArray());
+        }
+
         var key = payload.TryGetValue("key", out var k) ? k?.ToString() ?? string.Empty : string.Empty;
 
         return operation switch

@@ -245,6 +245,10 @@ class SynapClient:
                 raw_cmd, args = mapped
                 try:
                     raw_result = await self._native.execute(raw_cmd, args)
+                    if raw_cmd == "TXQUEUE":
+                        # Server replied QUEUED — mirror the HTTP envelope for
+                        # a write queued into an open MULTI (errors raise).
+                        return {"success": True, "queued": True}
                     return map_response(command, raw_result)
                 except Exception as exc:
                     raise SynapException.network_error(

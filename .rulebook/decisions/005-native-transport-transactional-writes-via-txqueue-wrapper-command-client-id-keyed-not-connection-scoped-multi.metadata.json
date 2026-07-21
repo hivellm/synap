@@ -1,0 +1,11 @@
+{
+  "id": 5,
+  "slug": "native-transport-transactional-writes-via-txqueue-wrapper-command-client-id-keyed-not-connection-scoped-multi",
+  "title": "Native-transport transactional writes via TXQUEUE wrapper command (client_id-keyed), not connection-scoped MULTI",
+  "status": "proposed",
+  "date": "2026-07-21",
+  "relatedTasks": [
+    "phase7_native-transport-transactions"
+  ],
+  "supersededBy": null
+}

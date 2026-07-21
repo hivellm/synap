@@ -22,6 +22,18 @@ export interface MappedCommand {
 }
 
 /**
+ * Raw commands the server can queue inside a MULTI via `TXQUEUE` (ADR 005) —
+ * exactly the server's TransactionCommand enum.
+ */
+const TXQUEUEABLE = new Set([
+  'SET', 'DEL',
+  'INCR', 'DECR', 'INCRBY', 'DECRBY',
+  'HSET', 'HDEL', 'HINCRBY',
+  'LPUSH', 'RPUSH', 'LPOP', 'RPOP',
+  'SADD', 'SREM',
+]);
+
+/**
  * Map a dotted SDK command + JSON payload to a native wire command.
  *
  * @returns `MappedCommand` on success, or `null` if the command has no native mapping.
@@ -30,6 +42,19 @@ export function mapCommand(
   cmd: string,
   payload: Record<string, unknown>,
 ): MappedCommand | null {
+  // Transactional writes (payload carries a client_id) travel as
+  // `TXQUEUE <client_id> <CMD> <args...>` so the server queues them into the
+  // open MULTI instead of executing immediately (ADR 005). Commands the server
+  // cannot queue return null (-> UnsupportedCommandError), never a silent
+  // execution outside the transaction.
+  const clientId = payload['client_id'];
+  if (clientId != null && clientId !== '' && !cmd.startsWith('transaction.')) {
+    const rest: Record<string, unknown> = { ...payload };
+    delete rest['client_id'];
+    const inner = mapCommand(cmd, rest);
+    if (inner === null || !TXQUEUEABLE.has(inner.rawCmd)) return null;
+    return { rawCmd: 'TXQUEUE', args: [String(clientId), inner.rawCmd, ...inner.args] };
+  }
   /** Coerce `payload[key]` to a string (empty string if absent). */
   const s = (key: string): string => String(payload[key] ?? '');
   /** Coerce `payload[key]` to a string number with `def` as fallback. */
@@ -618,7 +643,12 @@ export function mapResponse(cmd: string, raw: unknown): unknown {
     case 'transaction.discard':
     case 'transaction.watch':
     case 'transaction.unwatch': return raw ?? { success: true };
-    case 'transaction.exec':    return raw;
+    case 'transaction.exec':
+      // Mirror the HTTP envelope: a result list means the transaction
+      // committed; null means it aborted (watched key changed).
+      if (Array.isArray(raw)) return { success: true, results: raw };
+      if (raw === null || raw === undefined) return { aborted: true };
+      return raw;
 
     // ── Scripts ───────────────────────────────────────────────────────────────
     case 'script.eval':

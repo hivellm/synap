@@ -587,6 +587,163 @@ pub(super) async fn cmd_pubsub(state: &AppState, args: &[Resp3Value]) -> Resp3Va
 
 // ── Transaction commands (3.4) ────────────────────────────────────────────────
 
+/// `TXQUEUE <client_id> <CMD> <args...>` — queue a write into the client's
+/// open transaction (ADR 005). The inner command set is exactly the
+/// [`TransactionCommand`](crate::core::transaction::TransactionCommand) enum;
+/// anything else is an explicit error, never a silent immediate execution.
+pub(super) async fn cmd_txqueue(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    if args.len() < 3 {
+        return err_wrong_args("TXQUEUE");
+    }
+    let client_id = match arg_str(args, 1) {
+        Some(id) => id,
+        None => return Resp3Value::Error("ERR client_id must be a string".into()),
+    };
+    let inner = match arg_str(args, 2) {
+        Some(c) => c.to_ascii_uppercase(),
+        None => return Resp3Value::Error("ERR inner command must be a string".into()),
+    };
+
+    use crate::core::transaction::TransactionCommand as Tx;
+    // Inner args start at index 3.
+    let key = |i: usize| arg_str(args, i);
+    let bytes = |i: usize| arg_bytes(args, i);
+    let int = |i: usize| arg_i64(args, i);
+    let strings_from = |i: usize| -> Vec<String> { (i..args.len()).filter_map(key).collect() };
+    let bytes_from = |i: usize| -> Vec<Vec<u8>> { (i..args.len()).filter_map(bytes).collect() };
+
+    let command = match inner.as_str() {
+        "SET" => {
+            let (Some(k), Some(v)) = (key(3), bytes(4)) else {
+                return err_wrong_args("TXQUEUE SET");
+            };
+            // Optional trailing: EX <seconds>
+            let ttl = match args.get(5).and_then(|a| a.as_str()) {
+                Some(opt) if opt.eq_ignore_ascii_case("EX") => match int(6) {
+                    Some(t) if t >= 0 => Some(t as u64),
+                    _ => return Resp3Value::Error("ERR invalid EX ttl".into()),
+                },
+                Some(_) => {
+                    return Resp3Value::Error("ERR syntax — TXQUEUE SET key value [EX ttl]".into());
+                }
+                None => None,
+            };
+            Tx::KVSet {
+                key: k,
+                value: v,
+                ttl,
+            }
+        }
+        "DEL" => {
+            let keys = strings_from(3);
+            if keys.is_empty() {
+                return err_wrong_args("TXQUEUE DEL");
+            }
+            Tx::KVDel { keys }
+        }
+        "INCR" | "DECR" | "INCRBY" | "DECRBY" => {
+            let Some(k) = key(3) else {
+                return err_wrong_args("TXQUEUE INCR");
+            };
+            let magnitude = match inner.as_str() {
+                "INCR" | "DECR" => 1,
+                _ => match int(4) {
+                    Some(d) => d,
+                    None => return Resp3Value::Error("ERR delta must be an integer".into()),
+                },
+            };
+            let delta = if inner.starts_with("DECR") {
+                -magnitude
+            } else {
+                magnitude
+            };
+            Tx::KVIncr { key: k, delta }
+        }
+        "HSET" => {
+            let (Some(k), Some(f), Some(v)) = (key(3), key(4), bytes(5)) else {
+                return err_wrong_args("TXQUEUE HSET");
+            };
+            Tx::HashSet {
+                key: k,
+                field: f,
+                value: v,
+            }
+        }
+        "HDEL" => {
+            let Some(k) = key(3) else {
+                return err_wrong_args("TXQUEUE HDEL");
+            };
+            let fields = strings_from(4);
+            if fields.is_empty() {
+                return err_wrong_args("TXQUEUE HDEL");
+            }
+            Tx::HashDel { key: k, fields }
+        }
+        "HINCRBY" => {
+            let (Some(k), Some(f), Some(d)) = (key(3), key(4), int(5)) else {
+                return err_wrong_args("TXQUEUE HINCRBY");
+            };
+            Tx::HashIncrBy {
+                key: k,
+                field: f,
+                delta: d,
+            }
+        }
+        "LPUSH" | "RPUSH" => {
+            let Some(k) = key(3) else {
+                return err_wrong_args("TXQUEUE LPUSH");
+            };
+            let values = bytes_from(4);
+            if values.is_empty() {
+                return err_wrong_args("TXQUEUE LPUSH");
+            }
+            if inner == "LPUSH" {
+                Tx::ListLPush { key: k, values }
+            } else {
+                Tx::ListRPush { key: k, values }
+            }
+        }
+        "LPOP" | "RPOP" => {
+            let Some(k) = key(3) else {
+                return err_wrong_args("TXQUEUE LPOP");
+            };
+            if inner == "LPOP" {
+                Tx::ListLPop { key: k }
+            } else {
+                Tx::ListRPop { key: k }
+            }
+        }
+        "SADD" | "SREM" => {
+            let Some(k) = key(3) else {
+                return err_wrong_args("TXQUEUE SADD");
+            };
+            let members = bytes_from(4);
+            if members.is_empty() {
+                return err_wrong_args("TXQUEUE SADD");
+            }
+            if inner == "SADD" {
+                Tx::SetAdd { key: k, members }
+            } else {
+                Tx::SetRem { key: k, members }
+            }
+        }
+        other => {
+            return Resp3Value::Error(format!("ERR '{other}' cannot be queued in a transaction"));
+        }
+    };
+
+    match state
+        .transaction_manager
+        .queue_command_if_transaction(&client_id, command)
+    {
+        Ok(true) => Resp3Value::SimpleString("QUEUED".into()),
+        Ok(false) => Resp3Value::Error(format!(
+            "ERR no transaction in progress for client '{client_id}' — call MULTI first"
+        )),
+        Err(e) => Resp3Value::Error(format!("ERR {e}")),
+    }
+}
+
 /// `MULTI <client_id>`
 pub(super) async fn cmd_multi(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
     if args.len() < 2 {

@@ -685,6 +685,68 @@ async fn test_multi_exec_empty_transaction() {
 }
 
 #[tokio::test]
+async fn test_txqueue_set_then_exec_applies_write() {
+    let state = make_state();
+    let cid = "txq_client_1";
+    assert_eq!(
+        dispatch(&state, &args(&["MULTI", cid])).await,
+        Resp3Value::SimpleString("OK".into())
+    );
+    assert_eq!(
+        dispatch(&state, &args(&["TXQUEUE", cid, "SET", "txq:k", "txq-v"])).await,
+        Resp3Value::SimpleString("QUEUED".into())
+    );
+    // Not visible before EXEC.
+    assert_eq!(
+        dispatch(&state, &args(&["GET", "txq:k"])).await,
+        Resp3Value::Null
+    );
+    let exec = dispatch(&state, &args(&["EXEC", cid])).await;
+    assert!(matches!(exec, Resp3Value::Array(_)), "got {exec:?}");
+    let got = dispatch(&state, &args(&["GET", "txq:k"])).await;
+    assert_eq!(got.as_bytes(), Some(b"txq-v".as_slice()));
+}
+
+#[tokio::test]
+async fn test_txqueue_discard_drops_write() {
+    let state = make_state();
+    let cid = "txq_client_2";
+    dispatch(&state, &args(&["MULTI", cid])).await;
+    assert_eq!(
+        dispatch(&state, &args(&["TXQUEUE", cid, "HSET", "txq:h", "f", "v"])).await,
+        Resp3Value::SimpleString("QUEUED".into())
+    );
+    assert_eq!(
+        dispatch(&state, &args(&["DISCARD", cid])).await,
+        Resp3Value::SimpleString("OK".into())
+    );
+    assert_eq!(
+        dispatch(&state, &args(&["HGET", "txq:h", "f"])).await,
+        Resp3Value::Null
+    );
+}
+
+#[tokio::test]
+async fn test_txqueue_without_multi_and_unqueueable_command_error() {
+    let state = make_state();
+    // No open transaction → explicit error, and nothing is written.
+    let no_tx = dispatch(
+        &state,
+        &args(&["TXQUEUE", "no_tx_cid", "SET", "txq:k2", "v"]),
+    )
+    .await;
+    assert!(matches!(no_tx, Resp3Value::Error(_)), "got {no_tx:?}");
+    assert_eq!(
+        dispatch(&state, &args(&["GET", "txq:k2"])).await,
+        Resp3Value::Null
+    );
+    // Unqueueable inner command → explicit error.
+    dispatch(&state, &args(&["MULTI", "txq_client_3"])).await;
+    let bad = dispatch(&state, &args(&["TXQUEUE", "txq_client_3", "GEOADD", "x"])).await;
+    assert!(matches!(bad, Resp3Value::Error(_)), "got {bad:?}");
+}
+
+#[tokio::test]
 async fn test_discard_without_multi_returns_error() {
     let state = make_state();
     let result = dispatch(&state, &args(&["DISCARD", "no_tx_client_xyz"])).await;

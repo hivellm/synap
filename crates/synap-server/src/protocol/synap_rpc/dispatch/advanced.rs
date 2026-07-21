@@ -865,6 +865,129 @@ pub(super) async fn run(
         }
 
         // ── Transactions ──────────────────────────────────────────────────────
+        "TXQUEUE" => {
+            // TXQUEUE client_id CMD args...
+            // Queue a write into the client's open transaction (ADR 005). The
+            // inner command set mirrors the TransactionCommand enum; anything
+            // else is an explicit error, never a silent immediate execution.
+            use crate::core::transaction::TransactionCommand as Tx;
+            let client_id = arg_str(args, 0)?;
+            let inner = arg_str(args, 1)?.to_ascii_uppercase();
+            let strings_from = |i: usize| -> Vec<String> {
+                (i..args.len())
+                    .filter_map(|j| arg_str(args, j).ok())
+                    .collect()
+            };
+            let bytes_from = |i: usize| -> Vec<Vec<u8>> {
+                (i..args.len())
+                    .filter_map(|j| arg_bytes(args, j).ok())
+                    .collect()
+            };
+
+            let command = match inner.as_str() {
+                "SET" => {
+                    let key = arg_str(args, 2)?;
+                    let value = arg_bytes(args, 3)?;
+                    // Optional trailing: EX <seconds>
+                    let ttl = match args.get(4).and_then(|v| v.as_str()) {
+                        Some(opt) if opt.eq_ignore_ascii_case("EX") => {
+                            let t = arg_int(args, 5)?;
+                            if t < 0 {
+                                return Err("ERR invalid EX ttl".into());
+                            }
+                            Some(t as u64)
+                        }
+                        Some(_) => return Err("ERR syntax — TXQUEUE SET key value [EX ttl]".into()),
+                        None => None,
+                    };
+                    Tx::KVSet { key, value, ttl }
+                }
+                "DEL" => {
+                    let keys = strings_from(2);
+                    if keys.is_empty() {
+                        return Err("ERR TXQUEUE DEL requires at least one key".into());
+                    }
+                    Tx::KVDel { keys }
+                }
+                "INCR" | "DECR" | "INCRBY" | "DECRBY" => {
+                    let key = arg_str(args, 2)?;
+                    let magnitude = match inner.as_str() {
+                        "INCR" | "DECR" => 1,
+                        _ => arg_int(args, 3)?,
+                    };
+                    let delta = if inner.starts_with("DECR") {
+                        -magnitude
+                    } else {
+                        magnitude
+                    };
+                    Tx::KVIncr { key, delta }
+                }
+                "HSET" => Tx::HashSet {
+                    key: arg_str(args, 2)?,
+                    field: arg_str(args, 3)?,
+                    value: arg_bytes(args, 4)?,
+                },
+                "HDEL" => {
+                    let key = arg_str(args, 2)?;
+                    let fields = strings_from(3);
+                    if fields.is_empty() {
+                        return Err("ERR TXQUEUE HDEL requires at least one field".into());
+                    }
+                    Tx::HashDel { key, fields }
+                }
+                "HINCRBY" => Tx::HashIncrBy {
+                    key: arg_str(args, 2)?,
+                    field: arg_str(args, 3)?,
+                    delta: arg_int(args, 4)?,
+                },
+                "LPUSH" | "RPUSH" => {
+                    let key = arg_str(args, 2)?;
+                    let values = bytes_from(3);
+                    if values.is_empty() {
+                        return Err("ERR TXQUEUE LPUSH requires at least one value".into());
+                    }
+                    if inner == "LPUSH" {
+                        Tx::ListLPush { key, values }
+                    } else {
+                        Tx::ListRPush { key, values }
+                    }
+                }
+                "LPOP" | "RPOP" => {
+                    let key = arg_str(args, 2)?;
+                    if inner == "LPOP" {
+                        Tx::ListLPop { key }
+                    } else {
+                        Tx::ListRPop { key }
+                    }
+                }
+                "SADD" | "SREM" => {
+                    let key = arg_str(args, 2)?;
+                    let members = bytes_from(3);
+                    if members.is_empty() {
+                        return Err("ERR TXQUEUE SADD requires at least one member".into());
+                    }
+                    if inner == "SADD" {
+                        Tx::SetAdd { key, members }
+                    } else {
+                        Tx::SetRem { key, members }
+                    }
+                }
+                other => {
+                    return Err(format!("ERR '{other}' cannot be queued in a transaction"));
+                }
+            };
+
+            match state
+                .transaction_manager
+                .queue_command_if_transaction(&client_id, command)
+            {
+                Ok(true) => Ok(SynapValue::Str("QUEUED".into())),
+                Ok(false) => Err(format!(
+                    "ERR no transaction in progress for client '{client_id}' — call MULTI first"
+                )),
+                Err(e) => Err(e.to_string()),
+            }
+        }
         "MULTI" => {
             // MULTI client_id
             let client_id = arg_str(args, 0)?;

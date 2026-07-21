@@ -841,6 +841,84 @@ async fn test_multi_exec_discard() {
 }
 
 #[tokio::test]
+async fn test_txqueue_set_exec_and_discard() {
+    let state = make_state();
+    let cid = "txq_rpc_1";
+
+    // MULTI → TXQUEUE SET → key invisible → EXEC → key visible
+    let resp = dispatch(&state, req(1, "MULTI", vec![str_arg(cid)])).await;
+    assert_eq!(resp.result, Ok(SynapValue::Str("OK".into())));
+    let resp = dispatch(
+        &state,
+        req(
+            2,
+            "TXQUEUE",
+            vec![
+                str_arg(cid),
+                str_arg("SET"),
+                str_arg("txq:rk"),
+                bytes_arg(b"rv"),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(resp.result, Ok(SynapValue::Str("QUEUED".into())));
+    let resp = dispatch(&state, req(3, "GET", vec![str_arg("txq:rk")])).await;
+    assert_eq!(resp.result, Ok(SynapValue::Null));
+    let resp = dispatch(&state, req(4, "EXEC", vec![str_arg(cid)])).await;
+    assert!(
+        matches!(resp.result, Ok(SynapValue::Array(_))),
+        "got {:?}",
+        resp.result
+    );
+    let resp = dispatch(&state, req(5, "GET", vec![str_arg("txq:rk")])).await;
+    assert!(
+        matches!(&resp.result, Ok(SynapValue::Bytes(b)) if b.as_ref() == b"rv"),
+        "got {:?}",
+        resp.result
+    );
+
+    // DISCARD path: queued write never lands.
+    let cid2 = "txq_rpc_2";
+    dispatch(&state, req(6, "MULTI", vec![str_arg(cid2)])).await;
+    let resp = dispatch(
+        &state,
+        req(
+            7,
+            "TXQUEUE",
+            vec![
+                str_arg(cid2),
+                str_arg("SET"),
+                str_arg("txq:rk2"),
+                bytes_arg(b"x"),
+            ],
+        ),
+    )
+    .await;
+    assert_eq!(resp.result, Ok(SynapValue::Str("QUEUED".into())));
+    dispatch(&state, req(8, "DISCARD", vec![str_arg(cid2)])).await;
+    let resp = dispatch(&state, req(9, "GET", vec![str_arg("txq:rk2")])).await;
+    assert_eq!(resp.result, Ok(SynapValue::Null));
+
+    // No open transaction → explicit error.
+    let resp = dispatch(
+        &state,
+        req(
+            10,
+            "TXQUEUE",
+            vec![
+                str_arg("txq_rpc_none"),
+                str_arg("SET"),
+                str_arg("k"),
+                bytes_arg(b"v"),
+            ],
+        ),
+    )
+    .await;
+    assert!(resp.result.is_err(), "got {:?}", resp.result);
+}
+
+#[tokio::test]
 async fn test_watch_unwatch() {
     let state = make_state();
     let client = "tx_client_2";

@@ -216,6 +216,17 @@ public sealed class SynapClient : IDisposable
                 try
                 {
                     var raw = await _transport.ExecuteAsync(cmd, args, cancellationToken).ConfigureAwait(false);
+                    if (cmd == "TXQUEUE")
+                    {
+                        // A write queued into an open MULTI replies QUEUED —
+                        // mirror the HTTP envelope (ADR 005).
+                        return DictToJsonDocument(new Dictionary<string, object?>
+                        {
+                            ["success"] = true,
+                            ["queued"] = true,
+                        });
+                    }
+
                     var responseDict = CommandMapper.MapResponse(operation, raw);
                     return DictToJsonDocument(responseDict);
                 }
@@ -254,6 +265,8 @@ public sealed class SynapClient : IDisposable
         Dictionary<string, object?>? payload = null,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(command);
+
         var pl = payload ?? new Dictionary<string, object?>();
 
         if (_transport is not null)
@@ -266,6 +279,17 @@ public sealed class SynapClient : IDisposable
                 try
                 {
                     var raw = await _transport.ExecuteAsync(cmd, args, cancellationToken).ConfigureAwait(false);
+                    if (cmd == "TXQUEUE")
+                    {
+                        // A write queued into an open MULTI replies QUEUED —
+                        // mirror the HTTP envelope (ADR 005).
+                        return DictToJsonDocument(new Dictionary<string, object?>
+                        {
+                            ["success"] = true,
+                            ["queued"] = true,
+                        });
+                    }
+
                     return DictToJsonDocument(CommandMapper.MapResponse(command, raw));
                 }
                 catch (SynapException) { throw; }

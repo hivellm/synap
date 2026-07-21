@@ -52,9 +52,13 @@ export class KVStore {
    */
   async set(key: string, value: JSONValue, options?: SetOptions): Promise<boolean> {
     const payload: Record<string, any> = { key, value };
-    
+
     if (options?.ttl) {
       payload.ttl = options.ttl;
+    }
+    if (options?.clientId) {
+      // Queue into the open transaction (ADR 005) instead of executing now.
+      payload.client_id = options.clientId;
     }
 
     const result = await this.client.sendCommand<{ success: boolean }>('kv.set', payload);
@@ -89,8 +93,12 @@ export class KVStore {
   /**
    * Delete a key
    */
-  async del(key: string): Promise<boolean> {
-    const result = await this.client.sendCommand<{ deleted: boolean }>('kv.del', { key });
+  async del(key: string, options?: { clientId?: string }): Promise<boolean> {
+    const payload: Record<string, any> = { key };
+    if (options?.clientId) {
+      payload.client_id = options.clientId;
+    }
+    const result = await this.client.sendCommand<{ deleted: boolean }>('kv.del', payload);
     return result.deleted;
   }
 

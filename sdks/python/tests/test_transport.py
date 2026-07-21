@@ -146,6 +146,23 @@ class TestMapCommand:
         result = _map_command("kv.del", {"key": "foo"})
         assert result == ("DEL", ["foo"])
 
+    def test_write_with_client_id_wraps_into_txqueue(self) -> None:
+        result = _map_command(
+            "kv.set", {"key": "foo", "value": "bar", "client_id": "tx1"}
+        )
+        assert result == ("TXQUEUE", ["tx1", "SET", "foo", "bar"])
+
+    def test_unqueueable_with_client_id_returns_none(self) -> None:
+        result = _map_command(
+            "sorted_set.add",
+            {"key": "z", "member": "m", "score": 1.0, "client_id": "tx1"},
+        )
+        assert result is None
+
+    def test_transaction_commands_not_wrapped(self) -> None:
+        result = _map_command("transaction.exec", {"client_id": "tx1"})
+        assert result == ("EXEC", ["tx1"])
+
     def test_kv_exists(self) -> None:
         result = _map_command("kv.exists", {"key": "foo"})
         assert result == ("EXISTS", ["foo"])

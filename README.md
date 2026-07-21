@@ -95,11 +95,10 @@ Go, PHP, C#) select the transport via URL scheme — no separate builder options
 > persistent multiplexed TCP connection, avoids HTTP framing overhead, and
 > preserves integer/float/bool/bytes types on the wire (no stringification).
 > All data commands — KV, hashes, lists, sets, sorted sets, queues, streams,
-> pub/sub, scripts, geospatial, HyperLogLog — are supported on every
-> transport (streams landed on RESP3 in 1.3.0). The one exception is
-> queuing writes inside a `MULTI` transaction, which is HTTP-only today:
-> native transports refuse such writes explicitly rather than executing
-> them outside the transaction.
+> pub/sub, transactions, scripts, geospatial, HyperLogLog — are supported on
+> every transport (streams and transactional write-queuing landed on the
+> native wires in 1.3.0; queued writes travel as `TXQUEUE`, see
+> [Transports](docs/protocol/transports.md)).
 >
 > Since 1.2.0 the `synap://` wire is **[Thunder](https://github.com/hivellm/thunder)**
 > — the HiveLLM family's shared binary RPC — on both ends: the server listener

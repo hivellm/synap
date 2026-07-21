@@ -205,6 +205,11 @@ export class SynapClient {
                   mapped.rawCmd,
                   mapped.args,
                 );
+          // A write queued into an open MULTI replies QUEUED — mirror the
+          // HTTP envelope instead of the per-command response shape (ADR 005).
+          if (mapped.rawCmd === 'TXQUEUE') {
+            return { success: true, queued: true } as T;
+          }
           const result = mapResponse(command, raw) as T;
           if (this.debug) {
             console.log('[Synap] Native response:', result);

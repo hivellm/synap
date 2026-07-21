@@ -210,6 +210,27 @@ describe('mapCommand', () => {
       expect(result).toEqual({ rawCmd: 'DEL', args: ['foo'] });
     });
 
+    it('write with client_id wraps into TXQUEUE (ADR 005)', () => {
+      const result = mapCommand('kv.set', { key: 'foo', value: 'bar', client_id: 'tx1' });
+      expect(result).toEqual({ rawCmd: 'TXQUEUE', args: ['tx1', 'SET', 'foo', 'bar'] });
+    });
+
+    it('unqueueable command with client_id returns null (no silent bypass)', () => {
+      // sortedset.zadd maps natively (ZADD) but ZADD is not TXQUEUE-able.
+      const result = mapCommand('sortedset.zadd', {
+        key: 'z',
+        member: 'm',
+        score: 1,
+        client_id: 'tx1',
+      });
+      expect(result).toBeNull();
+    });
+
+    it('transaction.* commands are never wrapped in TXQUEUE', () => {
+      const result = mapCommand('transaction.exec', { client_id: 'tx1' });
+      expect(result).toEqual({ rawCmd: 'EXEC', args: ['tx1'] });
+    });
+
     it('"kv.exists" with {key: "foo"} → {rawCmd: "EXISTS", args: ["foo"]}', () => {
       const result = mapCommand('kv.exists', { key: 'foo' });
       expect(result).toEqual({ rawCmd: 'EXISTS', args: ['foo'] });

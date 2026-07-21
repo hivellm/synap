@@ -287,14 +287,19 @@ Legend: ✅ implemented · ❌ not yet · N/A not applicable
 | transaction.discard | ✅ | ✅ DISCARD | ✅ DISCARD |
 | transaction.watch | ✅ | ✅ WATCH | ✅ WATCH |
 | transaction.unwatch | ✅ | ✅ UNWATCH | ✅ UNWATCH |
+| queued write (`client_id` in payload) | ✅ | ✅ TXQUEUE (1.3.0) | ✅ TXQUEUE (1.3.0) |
 
-> **Note:** RPC transaction commands carry `client_id` as the first argument.
+> **Note:** transaction commands carry `client_id` as the first argument on the
+> native wires. Transactions are keyed by `client_id` on every transport, so a
+> transaction may even span transports (MULTI over HTTP, queue over RPC).
 >
-> **Limitation:** queuing *writes* inside a `MULTI` is HTTP-only today — the raw
-> native write commands carry no `client_id`, so a write sent over `synap://` or
-> `resp3://` between MULTI and EXEC cannot join the transaction. The Python SDK
-> refuses such writes with `UnsupportedCommandError`; native queuing is tracked
-> as follow-up work (phase7_native-transport-transactions).
+> **Queued writes (ADR 005):** on native transports, a write whose payload
+> carries a `client_id` travels as `TXQUEUE <client_id> <CMD> <args...>` and is
+> queued into the open MULTI; the server replies `QUEUED`. The queueable inner
+> commands are exactly `SET`, `DEL`, `INCR[BY]`, `DECR[BY]`, `HSET`, `HDEL`,
+> `HINCRBY`, `LPUSH`, `RPUSH`, `LPOP`, `RPOP`, `SADD`, `SREM`. Anything else
+> with a `client_id` is refused with `UnsupportedCommandError` — never executed
+> silently outside the transaction.
 
 ### Scripting
 

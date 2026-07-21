@@ -221,16 +221,27 @@ class TestTransactionParity:
 
     @pytest.mark.asyncio
     async def test_multi_exec_rpc(self) -> None:
-        # Transactional writes cannot be queued over native transports (the raw
-        # wire commands carry no client_id); the SDK refuses them explicitly
-        # instead of executing the write outside the transaction.
+        # Queued writes travel as TXQUEUE over native transports (ADR 005).
         async with _rpc_client() as client:
-            client_id = f"txn-{_uid()}"
-            key = f"tx:test:{_uid()}"
+            await _txn_roundtrip(client)
+
+    @pytest.mark.asyncio
+    async def test_multi_exec_resp3(self) -> None:
+        async with _resp3_client() as client:
+            await _txn_roundtrip(client)
+
+    @pytest.mark.asyncio
+    async def test_unqueueable_write_is_refused_rpc(self) -> None:
+        # Commands outside the server's queueable set must be refused, never
+        # silently executed outside the transaction.
+        async with _rpc_client() as client:
+            client_id = f"txn-refuse-{_uid()}"
             await client.transaction.multi(client_id=client_id)
             with pytest.raises(UnsupportedCommandError):
                 await client.send_command(
-                    "kv.set", {"key": key, "value": "x", "client_id": client_id}
+                    "sorted_set.add",
+                    {"key": f"tx:z:{_uid()}", "member": "m", "score": 1.0,
+                     "client_id": client_id},
                 )
             await client.transaction.discard(client_id=client_id)
 
@@ -241,21 +252,13 @@ class TestTransactionParity:
 
     @pytest.mark.asyncio
     async def test_multi_discard_rpc(self) -> None:
-        # Same contract as test_multi_exec_rpc: queued writes are refused on
-        # native transports, so there is nothing to discard.
         async with _rpc_client() as client:
-            client_id = f"txn-discard-{_uid()}"
-            key = f"tx:discard:{_uid()}"
-            await client.transaction.multi(client_id=client_id)
-            with pytest.raises(UnsupportedCommandError):
-                await client.send_command(
-                    "kv.set",
-                    {"key": key, "value": "should-not-exist", "client_id": client_id},
-                )
-            result = await client.transaction.discard(client_id=client_id)
-            assert result.get("success") is True
-            value = await client.kv.get(key)
-            assert value is None
+            await _txn_discard(client)
+
+    @pytest.mark.asyncio
+    async def test_multi_discard_resp3(self) -> None:
+        async with _resp3_client() as client:
+            await _txn_discard(client)
 
 
 async def _txn_roundtrip(client: SynapClient) -> None:

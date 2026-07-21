@@ -46,14 +46,35 @@ def map_command_optional(cmd: str, payload: dict[str, Any]) -> tuple[str, list[A
     return _map_command_inner(cmd, payload)
 
 
+# Raw commands the server can queue inside a MULTI via TXQUEUE (ADR 005) —
+# exactly the server's TransactionCommand enum.
+_TXQUEUEABLE = frozenset(
+    {
+        "SET", "DEL",
+        "INCR", "DECR", "INCRBY", "DECRBY",
+        "HSET", "HDEL", "HINCRBY",
+        "LPUSH", "RPUSH", "LPOP", "RPOP",
+        "SADD", "SREM",
+    }
+)
+
+
 def _map_command_inner(cmd: str, payload: dict[str, Any]) -> tuple[str, list[Any]] | None:  # noqa: C901, PLR0912
     """Internal implementation — returns None for unmapped commands."""
-    # Transactional writes (payload carries a client_id) cannot travel natively:
-    # the raw wire commands have no client_id slot, so the write would execute
-    # immediately instead of being queued into the MULTI — silent corruption.
-    # Refuse the mapping so the client raises UnsupportedCommandError instead.
-    if payload.get("client_id") and not cmd.startswith("transaction."):
-        return None
+    # Transactional writes (payload carries a client_id) travel as
+    # `TXQUEUE <client_id> <CMD> <args...>` so the server queues them into the
+    # open MULTI instead of executing immediately (ADR 005). Commands the
+    # server cannot queue are refused (-> UnsupportedCommandError), never
+    # silently executed outside the transaction.
+    if (client_id := payload.get("client_id")) and not cmd.startswith("transaction."):
+        stripped = {k: v for k, v in payload.items() if k != "client_id"}
+        inner = _map_command_inner(cmd, stripped)
+        if inner is None:
+            return None
+        raw_cmd, args = inner
+        if raw_cmd not in _TXQUEUEABLE:
+            return None
+        return "TXQUEUE", [client_id, raw_cmd, *args]
 
     key = payload.get("key", "")
     value = payload.get("value", "")
@@ -697,11 +718,15 @@ def map_response(cmd: str, raw: Any) -> dict[str, Any]:  # noqa: ANN401
                 return raw
             return {"success": raw == "OK" or raw is True, "message": str(raw or "")}
         case "transaction.exec":
+            # Mirror the HTTP envelope: a result list means the transaction
+            # committed; Null means it aborted (watched key changed).
             if isinstance(raw, dict):
                 return raw
             if isinstance(raw, list):
-                return {"results": raw}
-            return {"results": []}
+                return {"success": True, "results": raw}
+            if raw is None:
+                return {"aborted": True}
+            return {"success": True, "results": []}
 
         # ── Scripts ───────────────────────────────────────────────────────────
         case "script.eval" | "script.evalsha":

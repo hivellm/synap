@@ -12,12 +12,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 A correctness release driven by end-to-end validation: every SDK was exercised
 against a live release server on all three transports (HTTP, SynapRPC, RESP3)
 — something the mocked/skipped SDK suites had never done — and every
-compatibility hole that surfaced was fixed. RESP3 gains the event-stream
-command family and `HINCRBY`/`HINCRBYFLOAT` land on both native protocols.
-Thunder is aligned at 0.2.2 on every end of the wire.
+compatibility hole that surfaced was fixed. Transactions now work on every
+transport (queued writes travel as the new `TXQUEUE` command), RESP3 gains the
+event-stream command family, and `HINCRBY`/`HINCRBYFLOAT` land on both native
+protocols. Thunder is aligned at 0.2.2 on every end of the wire.
 
 ### Added
 
+- **Transactional writes on the native transports** (ADR 005): a new
+  `TXQUEUE <client_id> <CMD> <args...>` command on both SynapRPC and RESP3
+  queues a write into the client's open `MULTI` (reply: `QUEUED`). The
+  queueable set is `SET`/`DEL`/`INCR[BY]`/`DECR[BY]`/`HSET`/`HDEL`/`HINCRBY`/
+  `LPUSH`/`RPUSH`/`LPOP`/`RPOP`/`SADD`/`SREM`. All three SDK command maps
+  wrap writes carrying a `client_id` in `TXQUEUE` automatically, and refuse
+  (`UnsupportedCommandError`) commands the server cannot queue — writes are
+  never silently executed outside a transaction again. Transactions are
+  `client_id`-keyed on every wire, so MULTI/queue/EXEC even work across
+  transports. Verified by parity S2S suites on HTTP, SynapRPC and RESP3.
 - Server native protocols: `HINCRBY`/`HINCRBYFLOAT` on both RESP3 and
   SynapRPC (every SDK maps `hash.incrby` to them), and the full event-stream
   family (`SCREATE`/`SGETORCREATE`/`SPUBLISH`/`SREAD`/`SDELETE`/`SLIST`/
@@ -71,10 +82,11 @@ Thunder is aligned at 0.2.2 on every end of the wire.
     object instead of the byte-list wire shape, consume neither decoded
     payloads nor understood the flat native reply; `hash.incrby` on native
     transports silently incremented by 1 (payload key mismatch).
-  - Python SDK now **refuses** transactional writes over native transports
-    with `UnsupportedCommandError` instead of silently executing them
-    outside the `MULTI` (the raw wire commands carry no `client_id`);
-    native transaction queuing is tracked as follow-up work.
+  - Transactional writes over native transports silently bypassed the
+    `MULTI` (the raw wire commands carried no `client_id`), and the
+    TypeScript SDK dropped `clientId` from `kv.set`/`kv.del` even over
+    HTTP. Fixed by the `TXQUEUE` mechanism above; unqueueable commands
+    are refused explicitly.
 - **Streams: consuming from an evicted offset no longer silently skips data.**
   Previously a consumer requesting a `from_offset` below a room's earliest
   retained offset (after retention evicted the older events) received a later
