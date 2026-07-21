@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Thunder (binary RPC wire layer) aligned at **0.2.2** across every wire
+  consumer: server + Rust SDK (`thunder-rpc`, workspace-pinned), TypeScript SDK
+  (`@hivehub/thunder`), and C# SDK (`HiveLLM.Thunder`). This also removes the
+  declared-floor drift in `sdks/rust` (0.2.0 → 0.2.2). Wire stays v1-frozen —
+  verified by the SDK RPC interop test suites.
+- TypeScript SDK dev tooling: `typescript-eslint`/`@typescript-eslint/*`
+  8.64.0 → 8.65.0, `prettier` → 3.9.6 (closes Dependabot #247, #248, #249,
+  #250, #251).
+
 - Internal (no public API/wire change): the 10 live-code
   `#[allow(clippy::too_many_arguments)]` suppressions were removed by
   introducing parameter structs — `GeoQueryOptions`/`GeoSearchParams`

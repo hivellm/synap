@@ -13,7 +13,7 @@ categories = ["database", "network-programming", "asynchronous"]
 [dependencies]
 # Shared binary RPC — the same crate the Synap server runs on, so the two ends
 # of the wire cannot drift. Client-only: the SDK never serves.
-thunder-rpc = { version = "0.2.0", default-features = false, features = ["client"] }
+thunder-rpc = { version = "0.2.2", default-features = false, features = ["client"] }
 tokio = { version = "1.48", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 reqwest = { version = "0.13", features = ["json", "stream"] }

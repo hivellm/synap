@@ -18,7 +18,7 @@ repository = "https://github.com/hivellm/synap"
 # HiveLLM shared binary RPC (wire v1, frozen). The registry name is
 # `thunder-rpc`; the lib name is `thunder`, so call sites say `use thunder::`.
 # Server and SDK pin the same version so they cannot drift apart.
-thunder-rpc = { version = "0.2.1", default-features = false }
+thunder-rpc = { version = "0.2.2", default-features = false }
 tokio = { version = "1.48", features = ["full"] }
 axum = "0.8"
 radix_trie = "0.2"
