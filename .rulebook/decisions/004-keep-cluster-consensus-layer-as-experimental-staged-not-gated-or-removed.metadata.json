@@ -1,0 +1,9 @@
+{
+  "id": 4,
+  "slug": "keep-cluster-consensus-layer-as-experimental-staged-not-gated-or-removed",
+  "title": "Keep the cluster consensus layer as experimental/staged — not gated or removed",
+  "status": "accepted",
+  "date": "2026-07-21",
+  "relatedTasks": ["phase3_cluster-scaffolding-triage"],
+  "supersededBy": null
+}

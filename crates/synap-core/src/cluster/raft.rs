@@ -2,6 +2,15 @@
 //!
 //! Implements a simplified Raft consensus for cluster coordination.
 //! Used for leader election and cluster state coordination.
+//!
+//! # Status: experimental / not yet wired
+//!
+//! The running server never constructs a `RaftNode` — no non-test call path
+//! does. This layer is exercised only by
+//! `crates/synap-server/tests/cluster_integration_tests.rs` and is staged
+//! consensus work (archived phase10/phase11). The `#[allow(dead_code)]` markers
+//! in this module are justified staging artifacts, not debt; see
+//! `.rulebook/decisions/004-keep-cluster-consensus-layer-as-experimental-staged-not-gated-or-removed.md`.
 
 use super::types::ClusterResult;
 use parking_lot::RwLock;

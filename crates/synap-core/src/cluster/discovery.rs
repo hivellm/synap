@@ -6,6 +6,16 @@
 //! - Gossip protocol for topology propagation
 //! - Ping/Pong health checks
 //! - Automatic topology updates
+//!
+//! # Status: experimental / not yet wired
+//!
+//! The running server never constructs a `ClusterDiscovery` — no non-test call
+//! path does (the `discovery::` re-export used elsewhere is `umicp::discovery`,
+//! an unrelated module). This layer is exercised only by
+//! `crates/synap-server/tests/cluster_integration_tests.rs` and is staged
+//! consensus work (archived phase10/phase11). The `#[allow(dead_code)]` markers
+//! in this module are justified staging artifacts, not debt; see
+//! `.rulebook/decisions/004-keep-cluster-consensus-layer-as-experimental-staged-not-gated-or-removed.md`.
 
 use super::topology::ClusterTopology;
 use super::types::{ClusterCommand, ClusterError, ClusterNode, ClusterResult};
