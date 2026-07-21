@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Internal (no public API/wire change): the 10 live-code
+  `#[allow(clippy::too_many_arguments)]` suppressions were removed by
+  introducing parameter structs — `GeoQueryOptions`/`GeoSearchParams`
+  (geospatial queries), `StoreRefs`/`StoreArcs` (persistence apply/snapshot and
+  `ReplicaNode::new`), and `StreamSocketParams` (stream WebSocket handler).
+  Call sites now use named-field construction, eliminating argument-order bugs
+  the compiler could not catch.
 - Every SDK version normalized to 1.3.0 alongside the server (workspace crates,
   `@hivehub/synap`, `synap_sdk`, `HiveLLM.Synap.SDK`; the Go and PHP submodules
   follow by tag in their own repositories).

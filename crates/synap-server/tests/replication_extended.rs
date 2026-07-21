@@ -107,7 +107,7 @@ async fn test_replica_stats() {
     config.auto_reconnect = false;
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let replica = ReplicaNode::new(config, kv, None, None, None, None, None, None)
+    let replica = ReplicaNode::new(config, synap_server::persistence::StoreArcs::kv_only(kv))
         .await
         .unwrap();
 
@@ -127,7 +127,7 @@ async fn test_replica_lag_calculation() {
     config.auto_reconnect = false;
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let replica = ReplicaNode::new(config, kv, None, None, None, None, None, None)
+    let replica = ReplicaNode::new(config, synap_server::persistence::StoreArcs::kv_only(kv))
         .await
         .unwrap();
 

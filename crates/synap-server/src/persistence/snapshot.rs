@@ -1,8 +1,5 @@
 use super::types::{PersistenceError, Result, Snapshot, SnapshotConfig, StreamEvent};
-use crate::core::kv_store::KVStore;
-use crate::core::queue::{QueueManager, QueueMessage};
-use crate::core::stream::StreamManager;
-use crate::core::{HashStore, ListStore, SetStore, SortedSetStore};
+use crate::core::queue::QueueMessage;
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
@@ -29,18 +26,20 @@ impl SnapshotManager {
     }
 
     /// Create a snapshot using streaming serialization (O(1) memory usage)
-    #[allow(clippy::too_many_arguments)]
     pub async fn create_snapshot(
         &self,
-        kv_store: &KVStore,
-        hash_store: Option<&HashStore>,
-        list_store: Option<&ListStore>,
-        set_store: Option<&SetStore>,
-        sorted_set_store: Option<&SortedSetStore>,
-        queue_manager: Option<&QueueManager>,
-        stream_manager: Option<&StreamManager>,
+        stores: super::apply::StoreRefs<'_>,
         wal_offset: u64,
     ) -> Result<PathBuf> {
+        let super::apply::StoreRefs {
+            kv_store,
+            hash_store,
+            list_store,
+            set_store,
+            sorted_set_store,
+            queue_manager,
+            stream_manager,
+        } = stores;
         // Create directory if it doesn't exist
         tokio::fs::create_dir_all(&self.config.directory).await?;
 

@@ -255,15 +255,15 @@ pub async fn trigger_snapshot(
 
     if let Some(ref persistence) = state.persistence {
         persistence
-            .maybe_snapshot(
-                &state.kv_store,
-                Some(state.hash_store.as_ref()),
-                Some(state.list_store.as_ref()),
-                Some(state.set_store.as_ref()),
-                Some(state.sorted_set_store.as_ref()),
-                state.queue_manager.as_deref(),
-                state.stream_manager.as_deref(),
-            )
+            .maybe_snapshot(crate::persistence::StoreRefs {
+                kv_store: &state.kv_store,
+                hash_store: Some(state.hash_store.as_ref()),
+                list_store: Some(state.list_store.as_ref()),
+                set_store: Some(state.set_store.as_ref()),
+                sorted_set_store: Some(state.sorted_set_store.as_ref()),
+                queue_manager: state.queue_manager.as_deref(),
+                stream_manager: state.stream_manager.as_deref(),
+            })
             .await
             .map_err(|e| SynapError::InternalError(format!("Snapshot failed: {}", e)))?;
 

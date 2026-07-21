@@ -1,5 +1,5 @@
 use super::{AppState, Resp3Value, arg_bytes, arg_f64, arg_i64, arg_str, arg_u64, err_wrong_args};
-use crate::core::geospatial::DistanceUnit;
+use crate::core::geospatial::{DistanceUnit, GeoQueryOptions, GeoSearchParams};
 use crate::scripting::ScriptExecContext;
 
 // ── Queue commands (3.1) ──────────────────────────────────────────────────────
@@ -1042,10 +1042,12 @@ pub(super) async fn cmd_georadius(state: &AppState, args: &[Resp3Value]) -> Resp
         lon,
         radius,
         unit,
-        with_dist,
-        with_coord,
-        count,
-        sort.as_deref(),
+        GeoQueryOptions {
+            with_dist,
+            with_coord,
+            count,
+            sort: sort.as_deref(),
+        },
     ) {
         Ok(results) => geo_results_to_resp3(results),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
@@ -1109,10 +1111,12 @@ pub(super) async fn cmd_georadiusbymember(state: &AppState, args: &[Resp3Value])
         &member,
         radius,
         unit,
-        with_dist,
-        with_coord,
-        count,
-        sort.as_deref(),
+        GeoQueryOptions {
+            with_dist,
+            with_coord,
+            count,
+            sort: sort.as_deref(),
+        },
     ) {
         Ok(results) => geo_results_to_resp3(results),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
@@ -1196,15 +1200,19 @@ pub(super) async fn cmd_geosearch(state: &AppState, args: &[Resp3Value]) -> Resp
     }
     match state.geospatial_store.geosearch(
         &key,
-        from_member.as_deref(),
-        from_lonlat,
-        by_radius,
-        by_box,
-        with_dist,
-        with_coord,
-        false,
-        count,
-        sort.as_deref(),
+        GeoSearchParams {
+            from_member: from_member.as_deref(),
+            from_lonlat,
+            by_radius,
+            by_box,
+            with_hash: false,
+            options: GeoQueryOptions {
+                with_dist,
+                with_coord,
+                count,
+                sort: sort.as_deref(),
+            },
+        },
     ) {
         Ok(results) => geo_results_to_resp3(results),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),

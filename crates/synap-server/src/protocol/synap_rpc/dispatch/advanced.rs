@@ -201,10 +201,12 @@ pub(super) async fn run(
                     lon,
                     radius,
                     unit,
-                    with_dist,
-                    with_coord,
-                    count,
-                    sort.as_deref(),
+                    crate::core::GeoQueryOptions {
+                        with_dist,
+                        with_coord,
+                        count,
+                        sort: sort.as_deref(),
+                    },
                 )
                 .map(geo_results_to_value)
                 .map_err(|e| e.to_string())
@@ -253,10 +255,12 @@ pub(super) async fn run(
                     &member,
                     radius,
                     unit,
-                    with_dist,
-                    with_coord,
-                    count,
-                    sort.as_deref(),
+                    crate::core::GeoQueryOptions {
+                        with_dist,
+                        with_coord,
+                        count,
+                        sort: sort.as_deref(),
+                    },
                 )
                 .map(geo_results_to_value)
                 .map_err(|e| e.to_string())
@@ -338,15 +342,19 @@ pub(super) async fn run(
                 .geospatial_store
                 .geosearch(
                     &key,
-                    from_member.as_deref(),
-                    from_lonlat,
-                    by_radius,
-                    by_box,
-                    with_dist,
-                    with_coord,
-                    false, // with_hash not yet supported in the store
-                    count,
-                    sort.as_deref(),
+                    crate::core::GeoSearchParams {
+                        from_member: from_member.as_deref(),
+                        from_lonlat,
+                        by_radius,
+                        by_box,
+                        with_hash: false, // with_hash not yet supported in the store
+                        options: crate::core::GeoQueryOptions {
+                            with_dist,
+                            with_coord,
+                            count,
+                            sort: sort.as_deref(),
+                        },
+                    },
                 )
                 .map(geo_results_to_value)
                 .map_err(|e| e.to_string())

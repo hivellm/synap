@@ -63,9 +63,12 @@ async fn create_replica(
     config.reconnect_delay_ms = 100; // Fast reconnect for testing
 
     let kv = Arc::new(KVStore::new(KVConfig::default()));
-    let replica = ReplicaNode::new(config, Arc::clone(&kv), None, None, None, None, None, None)
-        .await
-        .unwrap();
+    let replica = ReplicaNode::new(
+        config,
+        synap_server::persistence::StoreArcs::kv_only(Arc::clone(&kv)),
+    )
+    .await
+    .unwrap();
 
     // Give replica a moment to start connecting
     sleep(Duration::from_millis(50)).await;

@@ -267,29 +267,41 @@ pub async fn stream_websocket(
     ws.on_upgrade(move |socket| {
         handle_stream_socket(
             socket,
-            stream_manager,
-            room_name,
-            subscriber_id,
-            from_offset,
-            client_list_manager,
-            client_id,
-            client_addr,
+            StreamSocketParams {
+                stream_manager,
+                room_name,
+                subscriber_id,
+                from_offset,
+                client_list_manager,
+                client_id,
+                client_addr,
+            },
         )
     })
 }
 
+/// Everything a stream WebSocket session needs besides the socket itself.
+pub(super) struct StreamSocketParams {
+    pub stream_manager: Arc<crate::core::StreamManager>,
+    pub room_name: String,
+    pub subscriber_id: String,
+    pub from_offset: u64,
+    pub client_list_manager: Arc<crate::monitoring::ClientListManager>,
+    pub client_id: String,
+    pub client_addr: String,
+}
+
 /// Handle Event Stream WebSocket connection
-#[allow(clippy::too_many_arguments)]
-pub(super) async fn handle_stream_socket(
-    socket: WebSocket,
-    stream_manager: Arc<crate::core::StreamManager>,
-    room_name: String,
-    subscriber_id: String,
-    mut current_offset: u64,
-    client_list_manager: Arc<crate::monitoring::ClientListManager>,
-    client_id: String,
-    client_addr: String,
-) {
+pub(super) async fn handle_stream_socket(socket: WebSocket, params: StreamSocketParams) {
+    let StreamSocketParams {
+        stream_manager,
+        room_name,
+        subscriber_id,
+        from_offset: mut current_offset,
+        client_list_manager,
+        client_id,
+        client_addr,
+    } = params;
     let connected_at = std::time::SystemTime::now();
     let client_info =
         crate::monitoring::ClientInfo::new(client_id.clone(), client_addr, connected_at);

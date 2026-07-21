@@ -76,13 +76,15 @@ async fn create_replica(master_addr: SocketAddr) -> ReplicaStores {
     let zset = Arc::new(SortedSetStore::new());
     let replica = ReplicaNode::new(
         config,
-        kv,
-        Some(stream),
-        Some(hash.clone()),
-        Some(list.clone()),
-        Some(set.clone()),
-        Some(zset.clone()),
-        None,
+        synap_server::persistence::StoreArcs {
+            kv_store: kv,
+            hash_store: Some(hash.clone()),
+            list_store: Some(list.clone()),
+            set_store: Some(set.clone()),
+            sorted_set_store: Some(zset.clone()),
+            queue_manager: None,
+            stream_manager: Some(stream),
+        },
     )
     .await
     .unwrap();

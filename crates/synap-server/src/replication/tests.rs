@@ -69,13 +69,7 @@ async fn test_replica_initialization() {
     let replica_kv = Arc::new(KVStore::new(KVConfig::default()));
     let replica = ReplicaNode::new(
         replica_config,
-        replica_kv,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
+        crate::persistence::StoreArcs::kv_only(replica_kv),
     )
     .await
     .unwrap();

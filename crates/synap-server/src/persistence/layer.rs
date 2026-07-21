@@ -1,8 +1,7 @@
+use super::apply::{StoreArcs, StoreRefs};
 use super::types::{FsyncMode, Operation, PersistenceConfig};
 use super::{AsyncWAL, SnapshotManager};
-use crate::core::{
-    HashStore, KVStore, ListStore, QueueManager, SetStore, SortedSetStore, StreamManager,
-};
+use crate::core::sorted_set::ZAddOptions;
 use parking_lot::RwLock;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -378,17 +377,7 @@ impl PersistenceLayer {
     }
 
     /// Create a snapshot if conditions are met
-    #[allow(clippy::too_many_arguments)]
-    pub async fn maybe_snapshot(
-        &self,
-        kv_store: &KVStore,
-        hash_store: Option<&HashStore>,
-        list_store: Option<&ListStore>,
-        set_store: Option<&SetStore>,
-        sorted_set_store: Option<&SortedSetStore>,
-        queue_manager: Option<&QueueManager>,
-        stream_manager: Option<&StreamManager>,
-    ) -> super::types::Result<()> {
+    pub async fn maybe_snapshot(&self, stores: StoreRefs<'_>) -> super::types::Result<()> {
         if !self.config.enabled || !self.config.snapshot.enabled {
             return Ok(());
         }
@@ -410,16 +399,7 @@ impl PersistenceLayer {
             let wal_offset = self.wal.as_ref().map(|w| w.current_offset()).unwrap_or(0);
 
             self.snapshot_mgr
-                .create_snapshot(
-                    kv_store,
-                    hash_store,
-                    list_store,
-                    set_store,
-                    sorted_set_store,
-                    queue_manager,
-                    stream_manager,
-                    wal_offset,
-                )
+                .create_snapshot(stores, wal_offset)
                 .await?;
 
             // Reset counters
@@ -431,35 +411,14 @@ impl PersistenceLayer {
     }
 
     /// Start background snapshot task
-    #[allow(clippy::too_many_arguments)]
-    pub fn start_snapshot_task(
-        self: Arc<Self>,
-        kv_store: Arc<KVStore>,
-        hash_store: Option<Arc<HashStore>>,
-        list_store: Option<Arc<ListStore>>,
-        set_store: Option<Arc<SetStore>>,
-        sorted_set_store: Option<Arc<SortedSetStore>>,
-        queue_manager: Option<Arc<QueueManager>>,
-        stream_manager: Option<Arc<StreamManager>>,
-    ) -> tokio::task::JoinHandle<()> {
+    pub fn start_snapshot_task(self: Arc<Self>, stores: StoreArcs) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(Duration::from_secs(60)); // Check every minute
 
             loop {
                 interval.tick().await;
 
-                if let Err(e) = self
-                    .maybe_snapshot(
-                        &kv_store,
-                        hash_store.as_deref(),
-                        list_store.as_deref(),
-                        set_store.as_deref(),
-                        sorted_set_store.as_deref(),
-                        queue_manager.as_deref(),
-                        stream_manager.as_deref(),
-                    )
-                    .await
-                {
+                if let Err(e) = self.maybe_snapshot(stores.as_refs()).await {
                     tracing::error!("Snapshot failed: {}", e);
                 }
             }
@@ -529,26 +488,24 @@ impl PersistenceLayer {
             .await
     }
 
-    /// Log a Sorted Set ADD operation (ZADD)
-    #[allow(clippy::too_many_arguments)]
+    /// Log a Sorted Set ADD operation (ZADD). Only the conditional flags
+    /// (`nx`/`xx`/`gt`/`lt`) are persisted; `ch`/`incr` shape the reply, not
+    /// the stored state.
     pub async fn log_zadd(
         &self,
         key: String,
         member: Vec<u8>,
         score: f64,
-        nx: bool,
-        xx: bool,
-        gt: bool,
-        lt: bool,
+        opts: &ZAddOptions,
     ) -> super::types::Result<()> {
         self.record(Operation::ZAdd {
             key,
             member,
             score,
-            nx,
-            xx,
-            gt,
-            lt,
+            nx: opts.nx,
+            xx: opts.xx,
+            gt: opts.gt,
+            lt: opts.lt,
         })
         .await
     }
@@ -794,7 +751,7 @@ mod tests {
             .await
             .unwrap();
         layer
-            .log_zadd("z".into(), b"m".to_vec(), 1.0, false, false, false, false)
+            .log_zadd("z".into(), b"m".to_vec(), 1.0, &ZAddOptions::default())
             .await
             .unwrap();
         layer

@@ -418,7 +418,7 @@ mod replication_info_tests {
             ..Default::default()
         };
         let kv = Arc::new(KVStore::new(KVConfig::default()));
-        let replica = ReplicaNode::new(config, kv, None, None, None, None, None, None)
+        let replica = ReplicaNode::new(config, crate::persistence::StoreArcs::kv_only(kv))
             .await
             .unwrap();
 

@@ -31,7 +31,9 @@ pub use consumer_group::{
     ConsumerGroupStats, ConsumerMember, GroupState,
 };
 pub use error::SynapError;
-pub use geospatial::{Coordinate, DistanceUnit, GeospatialStats, GeospatialStore};
+pub use geospatial::{
+    Coordinate, DistanceUnit, GeoQueryOptions, GeoSearchParams, GeospatialStats, GeospatialStore,
+};
 pub use glob::glob_match;
 pub use hash::{HashStats, HashStore, HashValue};
 pub use hyperloglog::{HyperLogLogStats, HyperLogLogStore, HyperLogLogValue};

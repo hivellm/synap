@@ -608,15 +608,17 @@ async fn main() -> Result<()> {
     // Now that every store exists, start the background snapshot task so that
     // hash/list/set/sorted-set state is captured alongside KV/queue/stream.
     if let Some(ref layer) = persistence {
-        layer.clone().start_snapshot_task(
-            kv_store.clone(),
-            Some(hash_store.clone()),
-            Some(list_store.clone()),
-            Some(set_store.clone()),
-            Some(sorted_set_store.clone()),
-            queue_manager.clone(),
-            stream_manager.clone(),
-        );
+        layer
+            .clone()
+            .start_snapshot_task(synap_server::persistence::StoreArcs {
+                kv_store: kv_store.clone(),
+                hash_store: Some(hash_store.clone()),
+                list_store: Some(list_store.clone()),
+                set_store: Some(set_store.clone()),
+                sorted_set_store: Some(sorted_set_store.clone()),
+                queue_manager: queue_manager.clone(),
+                stream_manager: stream_manager.clone(),
+            });
     }
 
     // Start the replication replica node now that every datatype store exists,
@@ -628,13 +630,15 @@ async fn main() -> Result<()> {
     {
         match synap_server::replication::ReplicaNode::new(
             config.replication.clone(),
-            kv_store.clone(),
-            stream_manager.clone(),
-            Some(hash_store.clone()),
-            Some(list_store.clone()),
-            Some(set_store.clone()),
-            Some(sorted_set_store.clone()),
-            queue_manager.clone(),
+            synap_server::persistence::StoreArcs {
+                kv_store: kv_store.clone(),
+                hash_store: Some(hash_store.clone()),
+                list_store: Some(list_store.clone()),
+                set_store: Some(set_store.clone()),
+                sorted_set_store: Some(sorted_set_store.clone()),
+                queue_manager: queue_manager.clone(),
+                stream_manager: stream_manager.clone(),
+            },
         )
         .await
         {

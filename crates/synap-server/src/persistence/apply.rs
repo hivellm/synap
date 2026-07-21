@@ -18,23 +18,94 @@ use crate::core::{
 };
 use crate::persistence::types::Operation;
 
-/// Apply a single [`Operation`] to the provided stores.
+/// Borrowed bundle of every store a persistence routine can touch.
 ///
 /// `kv_store` is always present; the collection/broker stores are optional (a
-/// datatype that is disabled is simply skipped). Errors from KV and hash writes
-/// propagate; list/set/sorted-set/queue/stream applies are best-effort
-/// (idempotent replays), matching WAL recovery semantics.
-#[allow(clippy::too_many_arguments)]
-pub async fn apply_operation(
-    op: Operation,
-    kv_store: &KVStore,
-    hash_store: Option<&HashStore>,
-    list_store: Option<&ListStore>,
-    set_store: Option<&SetStore>,
-    sorted_set_store: Option<&SortedSetStore>,
-    queue_manager: Option<&QueueManager>,
-    stream_manager: Option<&StreamManager>,
-) -> Result<(), SynapError> {
+/// datatype that is disabled is simply skipped). Shared by the operation
+/// applier ([`apply_operation`]) and the snapshot path so the two never
+/// disagree on which stores exist.
+#[derive(Clone, Copy)]
+pub struct StoreRefs<'a> {
+    pub kv_store: &'a KVStore,
+    pub hash_store: Option<&'a HashStore>,
+    pub list_store: Option<&'a ListStore>,
+    pub set_store: Option<&'a SetStore>,
+    pub sorted_set_store: Option<&'a SortedSetStore>,
+    pub queue_manager: Option<&'a QueueManager>,
+    pub stream_manager: Option<&'a StreamManager>,
+}
+
+impl<'a> StoreRefs<'a> {
+    /// A bundle with only the KV store (collection/broker stores absent).
+    pub fn kv_only(kv_store: &'a KVStore) -> Self {
+        Self {
+            kv_store,
+            hash_store: None,
+            list_store: None,
+            set_store: None,
+            sorted_set_store: None,
+            queue_manager: None,
+            stream_manager: None,
+        }
+    }
+}
+
+/// Owned (`Arc`) counterpart of [`StoreRefs`] for consumers that must hold the
+/// stores across `'static` boundaries (background snapshot task, replica node).
+#[derive(Clone)]
+pub struct StoreArcs {
+    pub kv_store: std::sync::Arc<KVStore>,
+    pub hash_store: Option<std::sync::Arc<HashStore>>,
+    pub list_store: Option<std::sync::Arc<ListStore>>,
+    pub set_store: Option<std::sync::Arc<SetStore>>,
+    pub sorted_set_store: Option<std::sync::Arc<SortedSetStore>>,
+    pub queue_manager: Option<std::sync::Arc<QueueManager>>,
+    pub stream_manager: Option<std::sync::Arc<StreamManager>>,
+}
+
+impl StoreArcs {
+    /// A bundle with only the KV store (collection/broker stores absent).
+    pub fn kv_only(kv_store: std::sync::Arc<KVStore>) -> Self {
+        Self {
+            kv_store,
+            hash_store: None,
+            list_store: None,
+            set_store: None,
+            sorted_set_store: None,
+            queue_manager: None,
+            stream_manager: None,
+        }
+    }
+
+    /// Borrow the bundle as a [`StoreRefs`] for the snapshot/apply APIs.
+    pub fn as_refs(&self) -> StoreRefs<'_> {
+        StoreRefs {
+            kv_store: &self.kv_store,
+            hash_store: self.hash_store.as_deref(),
+            list_store: self.list_store.as_deref(),
+            set_store: self.set_store.as_deref(),
+            sorted_set_store: self.sorted_set_store.as_deref(),
+            queue_manager: self.queue_manager.as_deref(),
+            stream_manager: self.stream_manager.as_deref(),
+        }
+    }
+}
+
+/// Apply a single [`Operation`] to the provided stores.
+///
+/// Errors from KV and hash writes propagate; list/set/sorted-set/queue/stream
+/// applies are best-effort (idempotent replays), matching WAL recovery
+/// semantics.
+pub async fn apply_operation(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapError> {
+    let StoreRefs {
+        kv_store,
+        hash_store,
+        list_store,
+        set_store,
+        sorted_set_store,
+        queue_manager,
+        stream_manager,
+    } = stores;
     match op {
         // ── KV ──────────────────────────────────────────────────────────────
         Operation::KVSet { key, value, ttl } => {
@@ -339,13 +410,15 @@ mod tests {
     async fn apply(s: &Stores, op: Operation) {
         apply_operation(
             op,
-            &s.kv,
-            Some(&s.hash),
-            Some(&s.list),
-            Some(&s.set),
-            Some(&s.zset),
-            Some(&s.queue),
-            Some(&s.stream),
+            StoreRefs {
+                kv_store: &s.kv,
+                hash_store: Some(&s.hash),
+                list_store: Some(&s.list),
+                set_store: Some(&s.set),
+                sorted_set_store: Some(&s.zset),
+                queue_manager: Some(&s.queue),
+                stream_manager: Some(&s.stream),
+            },
         )
         .await
         .unwrap();
@@ -722,13 +795,15 @@ mod tests {
                 event_type: "e".into(),
                 payload: b"data".to_vec(),
             },
-            &s.kv,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            StoreRefs {
+                kv_store: &s.kv,
+                hash_store: None,
+                list_store: None,
+                set_store: None,
+                sorted_set_store: None,
+                queue_manager: None,
+                stream_manager: None,
+            },
         )
         .await
         .unwrap();

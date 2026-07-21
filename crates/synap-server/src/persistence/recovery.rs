@@ -140,13 +140,15 @@ pub async fn recover(
     for entry in entries {
         crate::persistence::apply::apply_operation(
             entry.operation,
-            &kv_store,
-            hash_store.as_ref(),
-            list_store.as_ref(),
-            set_store.as_ref(),
-            sorted_set_store.as_ref(),
-            queue_manager.as_ref(),
-            None, // WAL recovery skips streams (StreamPersistence owns them)
+            crate::persistence::apply::StoreRefs {
+                kv_store: &kv_store,
+                hash_store: hash_store.as_ref(),
+                list_store: list_store.as_ref(),
+                set_store: set_store.as_ref(),
+                sorted_set_store: sorted_set_store.as_ref(),
+                queue_manager: queue_manager.as_ref(),
+                stream_manager: None, // WAL recovery skips streams (StreamPersistence owns them)
+            },
         )
         .await?;
         replayed += 1;

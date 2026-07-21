@@ -186,10 +186,12 @@ pub async fn geospatial_georadius(
         center_lon,
         radius,
         unit,
-        with_dist,
-        with_coord,
-        count,
-        sort.as_deref(),
+        crate::core::GeoQueryOptions {
+            with_dist,
+            with_coord,
+            count,
+            sort: sort.as_deref(),
+        },
     )?;
 
     let response_results: Vec<GeospatialRadiusResult> = results
@@ -247,10 +249,12 @@ pub async fn geospatial_georadiusbymember(
         member.as_bytes(),
         radius,
         unit,
-        with_dist,
-        with_coord,
-        count,
-        sort.as_deref(),
+        crate::core::GeoQueryOptions {
+            with_dist,
+            with_coord,
+            count,
+            sort: sort.as_deref(),
+        },
     )?;
 
     let response_results: Vec<GeospatialRadiusResult> = results
@@ -348,15 +352,19 @@ pub async fn geospatial_geosearch(
 
     let results = state.geospatial_store.geosearch(
         &key,
-        from_member,
-        from_lonlat,
-        by_radius,
-        by_box,
-        req.with_dist.unwrap_or(false),
-        req.with_coord.unwrap_or(false),
-        req.with_hash.unwrap_or(false),
-        req.count,
-        req.sort.as_deref(),
+        crate::core::GeoSearchParams {
+            from_member,
+            from_lonlat,
+            by_radius,
+            by_box,
+            with_hash: req.with_hash.unwrap_or(false),
+            options: crate::core::GeoQueryOptions {
+                with_dist: req.with_dist.unwrap_or(false),
+                with_coord: req.with_coord.unwrap_or(false),
+                count: req.count,
+                sort: req.sort.as_deref(),
+            },
+        },
     )?;
 
     let response_results: Vec<GeospatialRadiusResult> = results
@@ -551,10 +559,12 @@ pub(super) async fn handle_geospatial_georadius_cmd(
         center_lon,
         radius,
         unit,
-        with_dist,
-        with_coord,
-        count,
-        sort.as_deref(),
+        crate::core::GeoQueryOptions {
+            with_dist,
+            with_coord,
+            count,
+            sort: sort.as_deref(),
+        },
     )?;
 
     let json_results: Vec<serde_json::Value> = results
@@ -634,10 +644,12 @@ pub(super) async fn handle_geospatial_georadiusbymember_cmd(
         member.as_bytes(),
         radius,
         unit,
-        with_dist,
-        with_coord,
-        count,
-        sort.as_deref(),
+        crate::core::GeoQueryOptions {
+            with_dist,
+            with_coord,
+            count,
+            sort: sort.as_deref(),
+        },
     )?;
 
     let json_results: Vec<serde_json::Value> = results
@@ -820,15 +832,19 @@ pub(super) async fn handle_geospatial_geosearch_cmd(
 
     let results = state.geospatial_store.geosearch(
         key,
-        from_member,
-        from_lonlat,
-        by_radius,
-        by_box,
-        with_dist,
-        with_coord,
-        with_hash,
-        count,
-        sort.as_deref(),
+        crate::core::GeoSearchParams {
+            from_member,
+            from_lonlat,
+            by_radius,
+            by_box,
+            with_hash,
+            options: crate::core::GeoQueryOptions {
+                with_dist,
+                with_coord,
+                count,
+                sort: sort.as_deref(),
+            },
+        },
     )?;
 
     let json_results: Vec<serde_json::Value> = results

@@ -52,16 +52,9 @@ pub struct ReplicaNode {
 
 impl ReplicaNode {
     /// Create a new replica node
-    #[allow(clippy::too_many_arguments)]
     pub async fn new(
         config: ReplicationConfig,
-        kv_store: Arc<KVStore>,
-        stream_manager: Option<Arc<StreamManager>>,
-        hash_store: Option<Arc<HashStore>>,
-        list_store: Option<Arc<ListStore>>,
-        set_store: Option<Arc<SetStore>>,
-        sorted_set_store: Option<Arc<SortedSetStore>>,
-        queue_manager: Option<Arc<QueueManager>>,
+        stores: crate::persistence::StoreArcs,
     ) -> ReplicationResult<Arc<Self>> {
         if !config.is_replica() {
             return Err(ReplicationError::NotReplica);
@@ -69,18 +62,18 @@ impl ReplicaNode {
 
         info!(
             "Initializing replica node with stream support: {}",
-            stream_manager.is_some()
+            stores.stream_manager.is_some()
         );
 
         let replica = Arc::new(Self {
             config,
-            kv_store,
-            stream_manager,
-            hash_store,
-            list_store,
-            set_store,
-            sorted_set_store,
-            queue_manager,
+            kv_store: stores.kv_store,
+            stream_manager: stores.stream_manager,
+            hash_store: stores.hash_store,
+            list_store: stores.list_store,
+            set_store: stores.set_store,
+            sorted_set_store: stores.sorted_set_store,
+            queue_manager: stores.queue_manager,
             current_offset: Arc::new(AtomicU64::new(0)),
             master_offset: Arc::new(AtomicU64::new(0)),
             last_heartbeat: Arc::new(AtomicU64::new(0)),
@@ -319,13 +312,15 @@ impl ReplicaNode {
         // phase6j). Streams are applied on the replica (Some(stream_manager)).
         if let Err(e) = crate::persistence::apply::apply_operation(
             op.operation.clone(),
-            &self.kv_store,
-            self.hash_store.as_deref(),
-            self.list_store.as_deref(),
-            self.set_store.as_deref(),
-            self.sorted_set_store.as_deref(),
-            self.queue_manager.as_deref(),
-            self.stream_manager.as_deref(),
+            crate::persistence::apply::StoreRefs {
+                kv_store: &self.kv_store,
+                hash_store: self.hash_store.as_deref(),
+                list_store: self.list_store.as_deref(),
+                set_store: self.set_store.as_deref(),
+                sorted_set_store: self.sorted_set_store.as_deref(),
+                queue_manager: self.queue_manager.as_deref(),
+                stream_manager: self.stream_manager.as_deref(),
+            },
         )
         .await
         {
@@ -420,7 +415,7 @@ mod tests {
         config.auto_reconnect = false; // Don't actually connect in test
 
         let kv = Arc::new(KVStore::new(KVConfig::default()));
-        let replica = ReplicaNode::new(config, kv, None, None, None, None, None, None).await;
+        let replica = ReplicaNode::new(config, crate::persistence::StoreArcs::kv_only(kv)).await;
 
         assert!(replica.is_ok());
     }
@@ -434,7 +429,7 @@ mod tests {
         config.auto_reconnect = false;
 
         let kv = Arc::new(KVStore::new(KVConfig::default()));
-        let replica = ReplicaNode::new(config, kv.clone(), None, None, None, None, None, None)
+        let replica = ReplicaNode::new(config, crate::persistence::StoreArcs::kv_only(kv.clone()))
             .await
             .unwrap();
 

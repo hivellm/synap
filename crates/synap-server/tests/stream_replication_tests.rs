@@ -72,13 +72,10 @@ async fn create_stream_replica(
 
     let replica = ReplicaNode::new(
         config,
-        Arc::clone(&kv),
-        Some(Arc::clone(&stream_mgr)),
-        None,
-        None,
-        None,
-        None,
-        None,
+        synap_server::persistence::StoreArcs {
+            stream_manager: Some(Arc::clone(&stream_mgr)),
+            ..synap_server::persistence::StoreArcs::kv_only(Arc::clone(&kv))
+        },
     )
     .await
     .unwrap();

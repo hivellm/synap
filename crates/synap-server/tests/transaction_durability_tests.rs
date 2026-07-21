@@ -193,13 +193,15 @@ async fn committed_transaction_reaches_replica() {
     let r_zset = Arc::new(SortedSetStore::new());
     let _replica = ReplicaNode::new(
         replica_cfg,
-        Arc::clone(&r_kv),
-        Some(Arc::clone(&r_stream)),
-        Some(Arc::clone(&r_hash)),
-        Some(Arc::clone(&r_list)),
-        Some(Arc::clone(&r_set)),
-        Some(Arc::clone(&r_zset)),
-        None,
+        synap_server::persistence::StoreArcs {
+            kv_store: Arc::clone(&r_kv),
+            hash_store: Some(Arc::clone(&r_hash)),
+            list_store: Some(Arc::clone(&r_list)),
+            set_store: Some(Arc::clone(&r_set)),
+            sorted_set_store: Some(Arc::clone(&r_zset)),
+            queue_manager: None,
+            stream_manager: Some(Arc::clone(&r_stream)),
+        },
     )
     .await
     .unwrap();

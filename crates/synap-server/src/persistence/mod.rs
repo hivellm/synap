@@ -16,6 +16,7 @@ pub mod wal;
 pub mod wal_async;
 pub mod wal_optimized;
 
+pub use apply::{StoreArcs, StoreRefs};
 pub use layer::PersistenceLayer;
 pub use queue_persistence::QueuePersistence;
 pub use recovery::recover;

@@ -149,6 +149,29 @@ fn haversine_distance(coord1: Coordinate, coord2: Coordinate, unit: DistanceUnit
 /// Result type for georadius queries
 pub type GeospatialRadiusResult = (Vec<u8>, Option<f64>, Option<Coordinate>);
 
+/// Result-shaping options shared by the GEORADIUS-family queries
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GeoQueryOptions<'a> {
+    pub with_dist: bool,
+    pub with_coord: bool,
+    pub count: Option<usize>,
+    /// "ASC" / "DESC" (case-insensitive); anything else disables sorting
+    pub sort: Option<&'a str>,
+}
+
+/// Origin and shape of a GEOSEARCH query (FROMMEMBER/FROMLONLAT + BYRADIUS/BYBOX)
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GeoSearchParams<'a> {
+    pub from_member: Option<&'a [u8]>,
+    /// (lon, lat) — Redis argument order
+    pub from_lonlat: Option<(f64, f64)>,
+    pub by_radius: Option<(f64, DistanceUnit)>,
+    pub by_box: Option<(f64, f64, DistanceUnit)>,
+    /// Accepted for Redis parity; hashes are not included in results yet
+    pub with_hash: bool,
+    pub options: GeoQueryOptions<'a>,
+}
+
 /// Geospatial statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeospatialStats {
@@ -326,7 +349,6 @@ impl GeospatialStore {
 
     /// GEORADIUS - Query members within radius of given coordinate
     /// Returns vector of (member, distance) pairs sorted by distance
-    #[allow(clippy::too_many_arguments)]
     pub fn georadius(
         &self,
         key: &str,
@@ -334,11 +356,14 @@ impl GeospatialStore {
         center_lon: f64,
         radius: f64,
         unit: DistanceUnit,
-        with_dist: bool,
-        with_coord: bool,
-        count: Option<usize>,
-        sort: Option<&str>,
+        options: GeoQueryOptions,
     ) -> Result<Vec<GeospatialRadiusResult>> {
+        let GeoQueryOptions {
+            with_dist,
+            with_coord,
+            count,
+            sort,
+        } = options;
         let center = Coordinate::new(center_lat, center_lon)?;
         let radius_meters = match unit {
             DistanceUnit::Meters => radius,
@@ -421,17 +446,13 @@ impl GeospatialStore {
 
     /// GEORADIUSBYMEMBER - Query members within radius of given member
     /// Returns vector of (member, distance) pairs sorted by distance
-    #[allow(clippy::too_many_arguments)]
     pub fn georadiusbymember(
         &self,
         key: &str,
         member: &[u8],
         radius: f64,
         unit: DistanceUnit,
-        with_dist: bool,
-        with_coord: bool,
-        count: Option<usize>,
-        sort: Option<&str>,
+        options: GeoQueryOptions,
     ) -> Result<Vec<GeospatialRadiusResult>> {
         // Get center coordinate from member
         let center_coord = self.get_coordinate(key, member)?;
@@ -446,27 +467,30 @@ impl GeospatialStore {
         };
 
         // Delegate to georadius
-        self.georadius(
-            key, center.lat, center.lon, radius, unit, with_dist, with_coord, count, sort,
-        )
+        self.georadius(key, center.lat, center.lon, radius, unit, options)
     }
 
     /// GEOSEARCH - Advanced geospatial search with FROMMEMBER/FROMLONLAT and BYRADIUS/BYBOX
     /// Supports both radius-based and bounding box queries
-    #[allow(clippy::too_many_arguments)]
     pub fn geosearch(
         &self,
         key: &str,
-        from_member: Option<&[u8]>,
-        from_lonlat: Option<(f64, f64)>,
-        by_radius: Option<(f64, DistanceUnit)>,
-        by_box: Option<(f64, f64, DistanceUnit)>,
-        with_dist: bool,
-        with_coord: bool,
-        _with_hash: bool,
-        count: Option<usize>,
-        sort: Option<&str>,
+        params: GeoSearchParams,
     ) -> Result<Vec<GeospatialRadiusResult>> {
+        let GeoSearchParams {
+            from_member,
+            from_lonlat,
+            by_radius,
+            by_box,
+            with_hash: _,
+            options:
+                GeoQueryOptions {
+                    with_dist,
+                    with_coord,
+                    count,
+                    sort,
+                },
+        } = params;
         // Determine center coordinate
         let center = if let Some(member) = from_member {
             let coord = self.get_coordinate(key, member)?;
@@ -840,10 +864,7 @@ mod tests {
                 -122.4194,
                 50.0,
                 DistanceUnit::Kilometers,
-                false,
-                false,
-                None,
-                None,
+                GeoQueryOptions::default(),
             )
             .unwrap();
         assert_eq!(results.len(), 2); // SF and Near SF
@@ -864,10 +885,10 @@ mod tests {
                 -122.4194,
                 10.0,
                 DistanceUnit::Kilometers,
-                true,
-                false,
-                None,
-                None,
+                GeoQueryOptions {
+                    with_dist: true,
+                    ..Default::default()
+                },
             )
             .unwrap();
         assert_eq!(results.len(), 1);
@@ -890,10 +911,10 @@ mod tests {
                 -122.4194,
                 10.0,
                 DistanceUnit::Kilometers,
-                false,
-                true,
-                None,
-                None,
+                GeoQueryOptions {
+                    with_coord: true,
+                    ..Default::default()
+                },
             )
             .unwrap();
         assert_eq!(results.len(), 1);
@@ -919,10 +940,10 @@ mod tests {
                 -122.4194,
                 10.0,
                 DistanceUnit::Kilometers,
-                false,
-                false,
-                Some(2),
-                None,
+                GeoQueryOptions {
+                    count: Some(2),
+                    ..Default::default()
+                },
             )
             .unwrap();
         assert_eq!(results.len(), 2);
@@ -945,10 +966,7 @@ mod tests {
                 b"San Francisco",
                 50.0,
                 DistanceUnit::Kilometers,
-                false,
-                false,
-                None,
-                None,
+                GeoQueryOptions::default(),
             )
             .unwrap();
         assert_eq!(results.len(), 2);
@@ -969,15 +987,11 @@ mod tests {
         let results = store
             .geosearch(
                 "cities",
-                Some(b"San Francisco"),
-                None,
-                Some((50.0, DistanceUnit::Kilometers)),
-                None,
-                false,
-                false,
-                false,
-                None,
-                None,
+                GeoSearchParams {
+                    from_member: Some(b"San Francisco"),
+                    by_radius: Some((50.0, DistanceUnit::Kilometers)),
+                    ..Default::default()
+                },
             )
             .unwrap();
         assert_eq!(results.len(), 2); // SF and Near SF
@@ -997,15 +1011,11 @@ mod tests {
         let results = store
             .geosearch(
                 "cities",
-                None,
-                Some((-122.4194, 37.7749)),
-                Some((50.0, DistanceUnit::Kilometers)),
-                None,
-                false,
-                false,
-                false,
-                None,
-                None,
+                GeoSearchParams {
+                    from_lonlat: Some((-122.4194, 37.7749)),
+                    by_radius: Some((50.0, DistanceUnit::Kilometers)),
+                    ..Default::default()
+                },
             )
             .unwrap();
         assert_eq!(results.len(), 2);
@@ -1027,15 +1037,11 @@ mod tests {
         let results = store
             .geosearch(
                 "cities",
-                Some(b"San Francisco"),
-                None,
-                None,
-                Some((100000.0, 100000.0, DistanceUnit::Meters)),
-                false,
-                false,
-                false,
-                None,
-                None,
+                GeoSearchParams {
+                    from_member: Some(b"San Francisco"),
+                    by_box: Some((100000.0, 100000.0, DistanceUnit::Meters)),
+                    ..Default::default()
+                },
             )
             .unwrap();
         assert!(results.len() >= 2); // Should include SF and Near SF
@@ -1046,15 +1052,10 @@ mod tests {
         let store = create_store();
         let result = store.geosearch(
             "cities",
-            None,
-            None,
-            Some((50.0, DistanceUnit::Kilometers)),
-            None,
-            false,
-            false,
-            false,
-            None,
-            None,
+            GeoSearchParams {
+                by_radius: Some((50.0, DistanceUnit::Kilometers)),
+                ..Default::default()
+            },
         );
         assert!(result.is_err());
     }
@@ -1064,15 +1065,10 @@ mod tests {
         let store = create_store();
         let result = store.geosearch(
             "cities",
-            Some(b"San Francisco"),
-            None,
-            None,
-            None,
-            false,
-            false,
-            false,
-            None,
-            None,
+            GeoSearchParams {
+                from_member: Some(b"San Francisco"),
+                ..Default::default()
+            },
         );
         assert!(result.is_err());
     }

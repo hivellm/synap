@@ -123,8 +123,11 @@ impl FailoverManager {
         };
 
         // Create new replica node
-        let replica =
-            ReplicaNode::new(replica_config, kv_store, None, None, None, None, None, None).await?;
+        let replica = ReplicaNode::new(
+            replica_config,
+            crate::persistence::StoreArcs::kv_only(kv_store),
+        )
+        .await?;
 
         info!("Master successfully demoted to replica");
 
@@ -157,13 +160,7 @@ mod tests {
         let kv = Arc::new(KVStore::new(KVConfig::default()));
         let replica = ReplicaNode::new(
             replica_config,
-            Arc::clone(&kv),
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
+            crate::persistence::StoreArcs::kv_only(Arc::clone(&kv)),
         )
         .await
         .unwrap();

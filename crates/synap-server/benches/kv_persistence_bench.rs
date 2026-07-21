@@ -319,7 +319,9 @@ fn bench_snapshot_creation(c: &mut Criterion) {
                 b.iter(|| {
                     rt.block_on(async {
                         persistence
-                            .maybe_snapshot(black_box(&*kv), None, None, None, None, None, None)
+                            .maybe_snapshot(synap_server::persistence::StoreRefs::kv_only(
+                                black_box(&*kv),
+                            ))
                             .await
                             .ok();
                     })

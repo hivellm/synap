@@ -172,7 +172,7 @@ async fn test_snapshot_create_and_load() {
 
     // Create snapshot
     let snapshot_path = snapshot_mgr
-        .create_snapshot(&kv_store, None, None, None, None, None, None, 42)
+        .create_snapshot(apply::StoreRefs::kv_only(&kv_store), 42)
         .await
         .unwrap();
 
@@ -215,7 +215,7 @@ async fn test_snapshot_rejects_corrupted_checksum() {
         .unwrap();
 
     let path = snapshot_mgr
-        .create_snapshot(&kv_store, None, None, None, None, None, None, 7)
+        .create_snapshot(apply::StoreRefs::kv_only(&kv_store), 7)
         .await
         .unwrap();
 
@@ -277,13 +277,15 @@ async fn test_snapshot_roundtrip_all_datatypes() {
     // Snapshot every datatype, then reload from disk.
     snapshot_mgr
         .create_snapshot(
-            &kv_store,
-            Some(&hash_store),
-            Some(&list_store),
-            Some(&set_store),
-            Some(&sorted_set_store),
-            None,
-            None,
+            apply::StoreRefs {
+                kv_store: &kv_store,
+                hash_store: Some(&hash_store),
+                list_store: Some(&list_store),
+                set_store: Some(&set_store),
+                sorted_set_store: Some(&sorted_set_store),
+                queue_manager: None,
+                stream_manager: None,
+            },
             99,
         )
         .await
@@ -389,7 +391,7 @@ async fn test_snapshot_cleanup_old() {
             .unwrap();
 
         snapshot_mgr
-            .create_snapshot(&kv_store, None, None, None, None, None, None, i)
+            .create_snapshot(apply::StoreRefs::kv_only(&kv_store), i)
             .await
             .unwrap();
 
