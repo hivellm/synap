@@ -1,0 +1,6 @@
+# npm ERESOLVE on grouped typescript-eslint bumps: stale node_modules anchors the resolver
+**Source**: manual
+**Date**: 2026-07-21
+**Related Task**: phase5_v1.3-dependency-updates
+**Tags**: npm, eresolve, typescript-eslint, dependabot, lockfile
+Bumping typescript-eslint + @typescript-eslint/eslint-plugin + @typescript-eslint/parser together in package.json made every npm command (install, update, install --package-lock-only) fail with ERESOLVE, even though the 8.65.0 trio is mutually consistent. Root cause: npm arborist seeds resolution from the physical node_modules tree, so the installed typescript-eslint@8.64.0 (which pins plugin 8.64.0 exactly) kept conflicting with the root's ^8.65.0 — removing the lockfile alone did NOT help. Fix: move node_modules aside (mv, not rm), run `npm install --package-lock-only` to regenerate the lockfile purely from manifests, then `npm install` to rebuild the tree; verify with `npm ls`. Never reach for --force/--legacy-peer-deps for this class of failure — the peers are actually consistent.
