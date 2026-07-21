@@ -26,6 +26,9 @@ use tracing::trace;
 
 const SHARD_COUNT: usize = 64;
 
+/// One page of an `HSCAN`: the next cursor and the `(field, value)` pairs in it.
+type HScanPage = (u64, Vec<(String, Vec<u8>)>);
+
 /// Hash value stored in a single key
 /// Contains multiple field-value pairs
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -442,14 +445,13 @@ impl HashStore {
     /// the next cursor (0 when the scan is complete) and the matched field/value
     /// pairs within the scanned window. `pattern` is an optional glob over field
     /// names; `count` bounds the window size (min 1).
-    #[allow(clippy::type_complexity)]
     pub fn hscan(
         &self,
         key: &str,
         cursor: u64,
         pattern: Option<&str>,
         count: usize,
-    ) -> Result<(u64, Vec<(String, Vec<u8>)>)> {
+    ) -> Result<HScanPage> {
         let mut fields: Vec<(String, Vec<u8>)> = self.hgetall(key)?.into_iter().collect();
         fields.sort_by(|a, b| a.0.cmp(&b.0));
         let total = fields.len();

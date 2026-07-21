@@ -721,15 +721,15 @@ mod tests {
         );
     }
 
-    #[allow(clippy::type_complexity)]
-    fn full_manager() -> (
+    type FullManager = (
         Arc<KVStore>,
         Arc<HashStore>,
         Arc<ListStore>,
         Arc<SetStore>,
         Arc<SortedSetStore>,
         KeyManager,
-    ) {
+    );
+    fn full_manager() -> FullManager {
         let kv = Arc::new(KVStore::new(KVConfig::default()));
         let hash = Arc::new(HashStore::new());
         let list = Arc::new(ListStore::new());

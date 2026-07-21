@@ -16,6 +16,10 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::debug;
 
+/// The per-command JSON results and the durable writes produced by a committed
+/// `EXEC`; `None` when the transaction aborted (a `WATCH`ed key changed).
+type ExecOutcome = Option<(Vec<serde_json::Value>, Vec<CommittedWrite>)>;
+
 /// Command to be executed in a transaction
 #[derive(Debug, Clone)]
 pub enum TransactionCommand {
@@ -381,11 +385,7 @@ impl TransactionManager {
     /// Returns `Ok(Some((results, writes)))` on success — `writes` is the list of
     /// durable effects the caller must persist and replicate (audit M-010) — or
     /// `Ok(None)` if watched keys changed (the transaction is aborted).
-    #[allow(clippy::type_complexity)]
-    pub async fn exec(
-        &self,
-        client_id: &str,
-    ) -> Result<Option<(Vec<serde_json::Value>, Vec<CommittedWrite>)>> {
+    pub async fn exec(&self, client_id: &str) -> Result<ExecOutcome> {
         debug!("EXEC client_id={}", client_id);
 
         // Remove transaction from map first (atomic)

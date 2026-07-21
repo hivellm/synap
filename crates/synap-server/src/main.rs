@@ -295,7 +295,15 @@ async fn main() -> Result<()> {
         ),
     ));
 
-    #[allow(clippy::type_complexity)]
+    type RecoveredStores = (
+        Arc<KVStore>,
+        Option<Arc<HashStore>>,
+        Option<Arc<ListStore>>,
+        Option<Arc<SetStore>>,
+        Option<Arc<SortedSetStore>>,
+        Option<Arc<QueueManager>>,
+        u64,
+    );
     let (
         kv_store,
         hash_store_recovered,
@@ -304,15 +312,7 @@ async fn main() -> Result<()> {
         _sorted_set_store_recovered,
         queue_manager,
         _wal_offset,
-    ): (
-        Arc<KVStore>,
-        Option<Arc<HashStore>>,
-        Option<Arc<ListStore>>,
-        Option<Arc<SetStore>>,
-        Option<Arc<SortedSetStore>>,
-        Option<Arc<QueueManager>>,
-        u64,
-    ) = if config.persistence.enabled {
+    ): RecoveredStores = if config.persistence.enabled {
         info!("Persistence enabled, attempting recovery...");
         match recover(&config.persistence, kv_config.clone(), queue_config.clone()).await {
             Ok((kv, hs, ls, ss, zs, qm, offset)) => {
