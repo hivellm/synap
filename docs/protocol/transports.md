@@ -185,9 +185,9 @@ Legend: ✅ implemented · ❌ not yet · N/A not applicable
 | HSET/HGET/HDEL | ✅ | ✅ | ✅ |
 | HGETALL/HLEN/HEXISTS | ✅ | ✅ | ✅ |
 | HMSET/HMGET | ✅ | ✅ | ✅ |
-| HKEYS | ✅ | ✅ HKEYS | ❌ |
-| HVALS | ✅ | ✅ HVALS | ❌ |
-| HINCRBY/HINCRBYFLOAT | ✅ | ❌ | ❌ |
+| HKEYS | ✅ | ✅ HKEYS | ✅ |
+| HVALS | ✅ | ✅ HVALS | ✅ |
+| HINCRBY/HINCRBYFLOAT | ✅ | ✅ | ✅ (1.3.0) |
 | HSETNX | ✅ | ❌ | ❌ |
 
 ### List
@@ -232,48 +232,49 @@ Legend: ✅ implemented · ❌ not yet · N/A not applicable
 
 | Command | HTTP | SynapRPC | RESP3 |
 |---------|------|----------|-------|
-| GEOADD | ✅ | ✅ GEOADD | ❌ |
-| GEOPOS | ✅ | ✅ GEOPOS | ❌ |
-| GEODIST | ✅ | ✅ GEODIST | ❌ |
-| GEOHASH | ✅ | ✅ GEOHASH | ❌ |
-| GEORADIUS | ✅ | ✅ GEORADIUS | ❌ |
-| GEORADIUSBYMEMBER | ✅ | ✅ GEORADIUSBYMEMBER | ❌ |
-| GEOSEARCH | ✅ | ✅ GEOSEARCH | ❌ |
+| GEOADD | ✅ | ✅ GEOADD | ✅ GEOADD |
+| GEOPOS | ✅ | ✅ GEOPOS | ✅ GEOPOS |
+| GEODIST | ✅ | ✅ GEODIST | ✅ GEODIST |
+| GEOHASH | ✅ | ✅ GEOHASH | ✅ GEOHASH |
+| GEORADIUS | ✅ | ✅ GEORADIUS | ✅ GEORADIUS |
+| GEORADIUSBYMEMBER | ✅ | ✅ GEORADIUSBYMEMBER | ✅ GEORADIUSBYMEMBER |
+| GEOSEARCH | ✅ | ✅ GEOSEARCH | ✅ GEOSEARCH |
 | GEO.STATS | ✅ | ✅ GEOSTATS | ❌ |
 
 ### Queue
 
 | Command | HTTP | SynapRPC | RESP3 |
 |---------|------|----------|-------|
-| queue.create | ✅ | ✅ QCREATE | ❌ |
-| queue.delete | ✅ | ✅ QDELETE | ❌ |
-| queue.list | ✅ | ✅ QLIST | ❌ |
-| queue.publish | ✅ | ✅ QPUBLISH | ❌ |
-| queue.consume | ✅ | ✅ QCONSUME | ❌ |
-| queue.ack | ✅ | ✅ QACK | ❌ |
-| queue.nack | ✅ | ✅ QNACK | ❌ |
-| queue.stats | ✅ | ✅ QSTATS | ❌ |
-| queue.purge | ✅ | ✅ QPURGE | ❌ |
+| queue.create | ✅ | ✅ QCREATE | ✅ QCREATE |
+| queue.delete | ✅ | ✅ QDELETE | ✅ QDELETE |
+| queue.list | ✅ | ✅ QLIST | ✅ QLIST |
+| queue.publish | ✅ | ✅ QPUBLISH | ✅ QPUBLISH |
+| queue.consume | ✅ | ✅ QCONSUME | ✅ QCONSUME |
+| queue.ack | ✅ | ✅ QACK | ✅ QACK |
+| queue.nack | ✅ | ✅ QNACK | ✅ QNACK |
+| queue.stats | ✅ | ✅ QSTATS | ✅ QSTATS |
+| queue.purge | ✅ | ✅ QPURGE | ✅ QPURGE |
 
 ### Stream
 
 | Command | HTTP | SynapRPC | RESP3 |
 |---------|------|----------|-------|
-| stream.create_room | ✅ | ✅ SCREATE | ❌ |
-| stream.publish | ✅ | ✅ SPUBLISH | ❌ |
-| stream.read | ✅ | ✅ SREAD | ❌ |
-| stream.delete_room | ✅ | ✅ SDELETE | ❌ |
-| stream.list_rooms | ✅ | ✅ SLIST | ❌ |
-| stream.stats | ✅ | ✅ SSTATS | ❌ |
+| stream.create_room | ✅ | ✅ SCREATE | ✅ SCREATE (1.3.0) |
+| stream.get_or_create_room | ✅ | ✅ SGETORCREATE | ✅ SGETORCREATE (1.3.0) |
+| stream.publish | ✅ | ✅ SPUBLISH | ✅ SPUBLISH (1.3.0) |
+| stream.read | ✅ | ✅ SREAD | ✅ SREAD (1.3.0) |
+| stream.delete_room | ✅ | ✅ SDELETE | ✅ SDELETE (1.3.0) |
+| stream.list_rooms | ✅ | ✅ SLIST | ✅ SLIST (1.3.0) |
+| stream.stats | ✅ | ✅ SSTATS | ✅ SSTATS (1.3.0) |
 | stream.replay | ✅ | ❌ | ❌ |
 
 ### Pub/Sub
 
 | Command | HTTP | SynapRPC | RESP3 |
 |---------|------|----------|-------|
-| pubsub.publish | ✅ | ✅ PUBLISH | ❌ |
-| pubsub.subscribe | ✅ (WS) | ✅ SUBSCRIBE + push | ❌ |
-| pubsub.unsubscribe | ✅ | ✅ UNSUBSCRIBE | ❌ |
+| pubsub.publish | ✅ | ✅ PUBLISH | ✅ PUBLISH |
+| pubsub.subscribe | ✅ (WS) | ✅ SUBSCRIBE + push | ✅ SUBSCRIBE |
+| pubsub.unsubscribe | ✅ | ✅ UNSUBSCRIBE | ✅ UNSUBSCRIBE |
 | pubsub.topics | ✅ | ✅ TOPICS | ❌ |
 | pubsub.stats | ✅ | ✅ PSSTATS | ❌ |
 
@@ -281,22 +282,28 @@ Legend: ✅ implemented · ❌ not yet · N/A not applicable
 
 | Command | HTTP | SynapRPC | RESP3 |
 |---------|------|----------|-------|
-| transaction.multi | ✅ | ✅ MULTI | ❌ |
-| transaction.exec | ✅ | ✅ EXEC | ❌ |
-| transaction.discard | ✅ | ✅ DISCARD | ❌ |
-| transaction.watch | ✅ | ✅ WATCH | ❌ |
-| transaction.unwatch | ✅ | ✅ UNWATCH | ❌ |
+| transaction.multi | ✅ | ✅ MULTI | ✅ MULTI |
+| transaction.exec | ✅ | ✅ EXEC | ✅ EXEC |
+| transaction.discard | ✅ | ✅ DISCARD | ✅ DISCARD |
+| transaction.watch | ✅ | ✅ WATCH | ✅ WATCH |
+| transaction.unwatch | ✅ | ✅ UNWATCH | ✅ UNWATCH |
 
 > **Note:** RPC transaction commands carry `client_id` as the first argument.
+>
+> **Limitation:** queuing *writes* inside a `MULTI` is HTTP-only today — the raw
+> native write commands carry no `client_id`, so a write sent over `synap://` or
+> `resp3://` between MULTI and EXEC cannot join the transaction. The Python SDK
+> refuses such writes with `UnsupportedCommandError`; native queuing is tracked
+> as follow-up work (phase7_native-transport-transactions).
 
 ### Scripting
 
 | Command | HTTP | SynapRPC | RESP3 |
 |---------|------|----------|-------|
-| script.eval | ✅ | ✅ EVAL | ❌ |
-| script.evalsha | ✅ | ✅ EVALSHA | ❌ |
-| script.load | ✅ | ✅ SCRIPT.LOAD | ❌ |
-| script.exists | ✅ | ✅ SCRIPT.EXISTS | ❌ |
+| script.eval | ✅ | ✅ EVAL | ✅ EVAL |
+| script.evalsha | ✅ | ✅ EVALSHA | ✅ EVALSHA |
+| script.load | ✅ | ✅ SCRIPT.LOAD | ✅ SCRIPT LOAD |
+| script.exists | ✅ | ✅ SCRIPT.EXISTS | ✅ SCRIPT EXISTS |
 | script.flush | ✅ | ✅ SCRIPT.FLUSH | ❌ |
 | script.kill | ✅ | ✅ SCRIPT.KILL | ❌ |
 

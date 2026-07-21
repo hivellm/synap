@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-07-21
+
+A correctness release driven by end-to-end validation: every SDK was exercised
+against a live release server on all three transports (HTTP, SynapRPC, RESP3)
+— something the mocked/skipped SDK suites had never done — and every
+compatibility hole that surfaced was fixed. RESP3 gains the event-stream
+command family and `HINCRBY`/`HINCRBYFLOAT` land on both native protocols.
+Thunder is aligned at 0.2.2 on every end of the wire.
+
+### Added
+
+- Server native protocols: `HINCRBY`/`HINCRBYFLOAT` on both RESP3 and
+  SynapRPC (every SDK maps `hash.incrby` to them), and the full event-stream
+  family (`SCREATE`/`SGETORCREATE`/`SPUBLISH`/`SREAD`/`SDELETE`/`SLIST`/
+  `SSTATS`) on RESP3 — previously SynapRPC-only, so RESP3 clients (including
+  the TS/Python SDKs on `resp3://`) could not reach streams at all.
+
 ### Changed
 
 - Thunder (binary RPC wire layer) aligned at **0.2.2** across every wire
@@ -17,7 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TypeScript SDK dev tooling: `typescript-eslint`/`@typescript-eslint/*`
   8.64.0 → 8.65.0, `prettier` → 3.9.6 (closes Dependabot #247, #248, #249,
   #250, #251).
-
 - Internal (no public API/wire change): the 10 live-code
   `#[allow(clippy::too_many_arguments)]` suppressions were removed by
   introducing parameter structs — `GeoQueryOptions`/`GeoSearchParams`
@@ -36,14 +52,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Every SDK version normalized to 1.3.0 alongside the server (workspace crates,
   `@hivehub/synap`, `synap_sdk`, `HiveLLM.Synap.SDK`; the Go and PHP submodules
   follow by tag in their own repositories).
-
-### Added
-
-- Server native protocols: `HINCRBY`/`HINCRBYFLOAT` on both RESP3 and
-  SynapRPC (every SDK maps `hash.incrby` to them), and the full event-stream
-  family (`SCREATE`/`SGETORCREATE`/`SPUBLISH`/`SREAD`/`SDELETE`/`SLIST`/
-  `SSTATS`) on RESP3 — previously SynapRPC-only, so RESP3 clients (including
-  the TS/Python SDKs on `resp3://`) could not reach streams at all.
 
 ### Fixed
 

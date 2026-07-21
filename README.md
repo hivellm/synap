@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.92%2B)-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/tests-1800%2B-brightgreen.svg)](docs/development/TESTING.md)
-[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](CHANGELOG.md)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
 
@@ -94,8 +94,12 @@ Go, PHP, C#) select the transport via URL scheme — no separate builder options
 > SynapRPC is the preferred transport for production workloads: it keeps a
 > persistent multiplexed TCP connection, avoids HTTP framing overhead, and
 > preserves integer/float/bool/bytes types on the wire (no stringification).
-> All commands — KV, queues, streams, pub/sub, transactions, scripts,
-> geospatial, HyperLogLog — are fully supported on every transport.
+> All data commands — KV, hashes, lists, sets, sorted sets, queues, streams,
+> pub/sub, scripts, geospatial, HyperLogLog — are supported on every
+> transport (streams landed on RESP3 in 1.3.0). The one exception is
+> queuing writes inside a `MULTI` transaction, which is HTTP-only today:
+> native transports refuse such writes explicitly rather than executing
+> them outside the transaction.
 >
 > Since 1.2.0 the `synap://` wire is **[Thunder](https://github.com/hivellm/thunder)**
 > — the HiveLLM family's shared binary RPC — on both ends: the server listener
@@ -276,10 +280,10 @@ docker run -d \
 **Multi-Architecture Build**:
 ```bash
 # Build and push multi-arch images (AMD64 + ARM64)
-./scripts/docker/docker-publish.sh 1.2.0
+./scripts/docker/docker-publish.sh 1.3.0
 
 # Or using PowerShell
-.\scripts\docker\docker-publish.ps1 1.2.0
+.\scripts\docker\docker-publish.ps1 1.3.0
 ```
 
 **Docker Compose**:
@@ -297,7 +301,7 @@ docker-compose up -d
 
 **Available Images**:
 - `hivehub/synap:latest` - Latest stable release
-- `hivehub/synap:<version>` - Specific version (e.g. `hivehub/synap:1.2.0`)
+- `hivehub/synap:<version>` - Specific version (e.g. `hivehub/synap:1.3.0`)
 - Supports `linux/amd64` and `linux/arm64` architectures
 
 📖 **For detailed Docker documentation, see [DOCKER_README.md](DOCKER_README.md)**
