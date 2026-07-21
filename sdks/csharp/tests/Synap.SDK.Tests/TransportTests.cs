@@ -198,7 +198,7 @@ public sealed class TransportTests
     public void MapCommand_KvDelete_ReturnsDelCommand()
     {
         var payload = new Dictionary<string, object?> { ["key"] = "foo" };
-        var result = CommandMapper.MapCommand("kv.delete", payload);
+        var result = CommandMapper.MapCommand("kv.del", payload);
         Assert.True(result.HasValue);
         Assert.Equal("DEL", result!.Value.Command);
         Assert.Equal(new object?[] { "foo" }, result.Value.Args);
@@ -308,8 +308,8 @@ public sealed class TransportTests
     [Fact]
     public void MapResponse_KvDelete_ReturnsSuccess()
     {
-        // kv.delete falls to the default case → {"success": true}
-        var result = CommandMapper.MapResponse("kv.delete", 1L);
+        // kv.del falls to the default case → {"success": true}
+        var result = CommandMapper.MapResponse("kv.del", 1L);
         Assert.Equal(true, result["success"]);
     }
 

@@ -51,6 +51,26 @@ pub(super) async fn run(
                 .map(|n| SynapValue::Int(n as i64))
                 .map_err(|e| e.to_string())
         }
+        "HINCRBY" => {
+            let key = arg_str(args, 0)?;
+            let field = arg_str(args, 1)?;
+            let increment = arg_int(args, 2)?;
+            state
+                .hash_store
+                .hincrby(&key, &field, increment)
+                .map(SynapValue::Int)
+                .map_err(|e| e.to_string())
+        }
+        "HINCRBYFLOAT" => {
+            let key = arg_str(args, 0)?;
+            let field = arg_str(args, 1)?;
+            let increment = arg_float(args, 2)?;
+            state
+                .hash_store
+                .hincrbyfloat(&key, &field, increment)
+                .map(SynapValue::Float)
+                .map_err(|e| e.to_string())
+        }
         "HGETALL" => {
             let key = arg_str(args, 0)?;
             state

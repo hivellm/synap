@@ -69,6 +69,51 @@ pub(super) async fn cmd_hdel(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
     }
 }
 
+pub(super) async fn cmd_hincrby(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    if args.len() != 4 {
+        return err_wrong_args("HINCRBY");
+    }
+    let key = match arg_str(args, 1) {
+        Some(k) => k,
+        None => return err_wrong_args("HINCRBY"),
+    };
+    let field = match arg_str(args, 2) {
+        Some(f) => f,
+        None => return err_wrong_args("HINCRBY"),
+    };
+    let increment = match arg_i64(args, 3) {
+        Some(i) => i,
+        None => return Resp3Value::Error("ERR value is not an integer or out of range".into()),
+    };
+    match state.hash_store.hincrby(&key, &field, increment) {
+        Ok(v) => Resp3Value::Integer(v),
+        Err(e) => Resp3Value::Error(format!("ERR {e}")),
+    }
+}
+
+pub(super) async fn cmd_hincrbyfloat(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    if args.len() != 4 {
+        return err_wrong_args("HINCRBYFLOAT");
+    }
+    let key = match arg_str(args, 1) {
+        Some(k) => k,
+        None => return err_wrong_args("HINCRBYFLOAT"),
+    };
+    let field = match arg_str(args, 2) {
+        Some(f) => f,
+        None => return err_wrong_args("HINCRBYFLOAT"),
+    };
+    let increment = match arg_f64(args, 3) {
+        Some(i) => i,
+        None => return Resp3Value::Error("ERR value is not a valid float".into()),
+    };
+    match state.hash_store.hincrbyfloat(&key, &field, increment) {
+        // Redis replies with the new value as a bulk string
+        Ok(v) => Resp3Value::BulkString(v.to_string().into_bytes()),
+        Err(e) => Resp3Value::Error(format!("ERR {e}")),
+    }
+}
+
 pub(super) async fn cmd_hgetall(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
     if args.len() < 2 {
         return err_wrong_args("HGETALL");

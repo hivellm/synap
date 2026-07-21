@@ -1050,3 +1050,44 @@ async fn test_hash_large_value_size() {
     let retrieved: String = get_resp.json().await.unwrap();
     assert_eq!(retrieved.len(), 1024 * 1024);
 }
+
+/// The SDKs (TS/Python/C#) send a singular `field` for `hash.del`; the REST
+/// route uses a `fields` array. The command endpoint must accept both.
+#[tokio::test]
+async fn test_hash_del_command_accepts_field_and_fields() {
+    let base_url = spawn_test_server().await;
+    let client = Client::new();
+
+    for (i, payload) in [
+        json!({"key": "del:compat", "field": "f1"}),
+        json!({"key": "del:compat", "fields": ["f2"]}),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        for f in ["f1", "f2"] {
+            client
+                .post(format!("{}/hash/del:compat/set", base_url))
+                .json(&json!({"field": f, "value": "v"}))
+                .send()
+                .await
+                .unwrap();
+        }
+
+        let resp = client
+            .post(format!("{}/api/v1/command", base_url))
+            .json(&json!({
+                "command": "hash.del",
+                "request_id": format!("del-compat-{i}"),
+                "payload": payload
+            }))
+            .send()
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), 200);
+        let body: serde_json::Value = resp.json().await.unwrap();
+        assert_eq!(body["success"], true, "payload variant {i} failed: {body}");
+        assert_eq!(body["payload"]["deleted"], 1, "variant {i}: {body}");
+    }
+}

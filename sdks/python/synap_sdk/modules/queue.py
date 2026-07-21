@@ -2,12 +2,53 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 from synap_sdk.types import QueueMessage
 
 if TYPE_CHECKING:
     from synap_sdk.client import SynapClient
+
+
+def _encode_payload(message: Any) -> list[int]:
+    """Encode a message to the byte array the wire expects.
+
+    The server (and the TS SDK) exchange queue payloads as a JSON array of
+    bytes; strings are UTF-8, anything else is JSON-encoded first.
+    """
+    if isinstance(message, bytes | bytearray):
+        return list(message)
+    if isinstance(message, str):
+        return list(message.encode("utf-8"))
+    return list(json.dumps(message).encode("utf-8"))
+
+
+def _decode_payload(payload: Any) -> Any:
+    """Decode a wire payload back to what was published.
+
+    Payloads arrive as a byte list (HTTP/SynapRPC) or a string (RESP3 bulk
+    strings decode to text). Tries JSON first, then a UTF-8 string, falling
+    back to the raw form.
+    """
+    if isinstance(payload, str):
+        try:
+            return json.loads(payload)
+        except json.JSONDecodeError:
+            return payload
+    if not isinstance(payload, list):
+        return payload
+    try:
+        raw = bytes(payload)
+    except (TypeError, ValueError):
+        return payload
+    try:
+        return json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return raw
 
 
 class QueueManager:
@@ -72,7 +113,7 @@ class QueueManager:
         Returns:
             The message ID
         """
-        data: dict[str, Any] = {"queue": queue, "payload": message}
+        data: dict[str, Any] = {"queue": queue, "payload": _encode_payload(message)}
         if priority is not None:
             data["priority"] = priority
         if max_retries is not None:
@@ -106,9 +147,9 @@ class QueueManager:
 
         return QueueMessage(
             id=str(msg_data.get("id", "")),
-            payload=msg_data.get("payload"),
+            payload=_decode_payload(msg_data.get("payload")),
             priority=int(msg_data.get("priority", 0)),
-            retries=int(msg_data.get("retries", 0)),
+            retries=int(msg_data.get("retry_count", msg_data.get("retries", 0))),
             max_retries=int(msg_data.get("max_retries", 3)),
             timestamp=int(msg_data.get("timestamp", 0)),
         )

@@ -620,14 +620,24 @@ pub(super) async fn handle_hash_del_cmd(
         .and_then(|v| v.as_str())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
 
-    let fields: Vec<String> = request
-        .payload
-        .get("fields")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| SynapError::InvalidRequest("Missing 'fields' array".to_string()))?
-        .iter()
-        .filter_map(|v| v.as_str().map(|s| s.to_string()))
-        .collect();
+    // Every SDK (TS/Python/C#) sends a singular "field" for hash.del; "fields"
+    // is the batch form the REST route uses. Accept both.
+    let fields: Vec<String> = match request.payload.get("fields").and_then(|v| v.as_array()) {
+        Some(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect(),
+        None => {
+            let field = request
+                .payload
+                .get("field")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| {
+                    SynapError::InvalidRequest("Missing 'fields' array or 'field'".to_string())
+                })?;
+            vec![field.to_string()]
+        }
+    };
 
     // Check if there's an active transaction for this client_id
     let client_id = request

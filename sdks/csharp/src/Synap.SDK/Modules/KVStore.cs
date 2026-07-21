@@ -82,7 +82,7 @@ public sealed class KVStore
     /// <param name="cancellationToken">Cancellation token.</param>
     public async Task DeleteAsync(string key, CancellationToken cancellationToken = default)
     {
-        using var response = await _client.ExecuteAsync("kv.delete", key, null, cancellationToken).ConfigureAwait(false);
+        using var response = await _client.ExecuteAsync("kv.del", key, null, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

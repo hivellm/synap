@@ -291,7 +291,7 @@ class TestBitmapS2S:
             await client.bitmap.bitcount(key)
 
             stats = await client.bitmap.stats()
-            assert stats['setbit_count'] >= 1
-            assert stats['getbit_count'] >= 1
-            assert stats['bitcount_count'] >= 1
+            assert stats.setbit_count >= 1
+            assert stats.getbit_count >= 1
+            assert stats.bitcount_count >= 1
 

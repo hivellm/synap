@@ -22,7 +22,7 @@ internal static class CommandMapper
         {
             // ---- KV ----
             "kv.get" => ("GET", [key]),
-            "kv.delete" => ("DEL", [key]),
+            "kv.del" => ("DEL", [key]),
             "kv.exists" => ("EXISTS", [key]),
             "kv.ttl" => ("TTL", [key]),
             "kv.persist" => ("PERSIST", [key]),
@@ -50,7 +50,7 @@ internal static class CommandMapper
                 ? ("HGET", new object?[] { key, hf })
                 : null,
             "hash.getall" => ("HGETALL", [key]),
-            "hash.delete" => payload.TryGetValue("field", out var hdf)
+            "hash.del" => payload.TryGetValue("field", out var hdf)
                 ? ("HDEL", new object?[] { key, hdf })
                 : null,
             "hash.exists" => payload.TryGetValue("field", out var hef)
@@ -58,8 +58,8 @@ internal static class CommandMapper
                 : null,
             "hash.len" => ("HLEN", [key]),
             "hash.keys" => ("HKEYS", [key]),
-            "hash.values" => ("HVALS", [key]),
-            "hash.incr" => payload.TryGetValue("field", out var hif) && payload.TryGetValue("delta", out var hid)
+            "hash.vals" => ("HVALS", [key]),
+            "hash.incrby" => payload.TryGetValue("field", out var hif) && payload.TryGetValue("increment", out var hid)
                 ? ("HINCRBY", new object?[] { key, hif, hid })
                 : null,
 
@@ -208,12 +208,13 @@ internal static class CommandMapper
             "kv.type" => new Dictionary<string, object?> { ["type"] = raw },
 
             "hash.get" => new Dictionary<string, object?> { ["value"] = raw },
+            "hash.del" => new Dictionary<string, object?> { ["deleted"] = raw },
             "hash.exists" => new Dictionary<string, object?> { ["exists"] = raw is long hl && hl > 0 },
             "hash.len" => new Dictionary<string, object?> { ["length"] = raw },
             "hash.keys" => new Dictionary<string, object?> { ["keys"] = RawToList(raw) },
-            "hash.values" => new Dictionary<string, object?> { ["values"] = RawToList(raw) },
+            "hash.vals" => new Dictionary<string, object?> { ["values"] = RawToList(raw) },
             "hash.getall" => new Dictionary<string, object?> { ["fields"] = FlatArrayToDict(raw) },
-            "hash.incr" => new Dictionary<string, object?> { ["value"] = raw },
+            "hash.incrby" => new Dictionary<string, object?> { ["value"] = raw },
 
             "list.pop_left" or "list.pop_right" or "list.index" =>
                 new Dictionary<string, object?> { ["value"] = raw },
@@ -431,23 +432,26 @@ internal static class CommandMapper
         return ("GEORADIUS", [key, lon, lat, radius, unit]);
     }
 
+    /// <summary>
+    /// Normalizes a raw transport list — RESP3 yields <c>object?[]</c>, the
+    /// SynapRPC wire decoder yields <c>List&lt;object?&gt;</c> — to an array.
+    /// </summary>
+    private static object?[] AsRawArray(object? raw) => raw switch
+    {
+        object?[] arr => arr,
+        List<object?> list => list.ToArray(),
+        _ => Array.Empty<object?>(),
+    };
+
     private static List<object?> RawToList(object? raw)
     {
-        if (raw is object?[] arr)
-        {
-            return new List<object?>(arr);
-        }
-
-        return new List<object?>();
+        return new List<object?>(AsRawArray(raw));
     }
 
     private static Dictionary<string, object?> FlatArrayToDict(object? raw)
     {
         var result = new Dictionary<string, object?>();
-        if (raw is not object?[] arr)
-        {
-            return result;
-        }
+        var arr = AsRawArray(raw);
 
         for (var i = 0; i + 1 < arr.Length; i += 2)
         {
@@ -463,7 +467,8 @@ internal static class CommandMapper
 
     private static List<object?> ZRangeToList(object? raw)
     {
-        if (raw is not object?[] arr)
+        var arr = AsRawArray(raw);
+        if (arr.Length == 0)
         {
             return new List<object?>();
         }

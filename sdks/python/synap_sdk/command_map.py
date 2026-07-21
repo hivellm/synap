@@ -48,6 +48,13 @@ def map_command_optional(cmd: str, payload: dict[str, Any]) -> tuple[str, list[A
 
 def _map_command_inner(cmd: str, payload: dict[str, Any]) -> tuple[str, list[Any]] | None:  # noqa: C901, PLR0912
     """Internal implementation — returns None for unmapped commands."""
+    # Transactional writes (payload carries a client_id) cannot travel natively:
+    # the raw wire commands have no client_id slot, so the write would execute
+    # immediately instead of being queued into the MULTI — silent corruption.
+    # Refuse the mapping so the client raises UnsupportedCommandError instead.
+    if payload.get("client_id") and not cmd.startswith("transaction."):
+        return None
+
     key = payload.get("key", "")
     value = payload.get("value", "")
     field = payload.get("field", "")
@@ -135,9 +142,9 @@ def _map_command_inner(cmd: str, payload: dict[str, Any]) -> tuple[str, list[Any
                 args.extend([k, v])
             return "HMSET", args
         case "hash.incrby":
-            return "HINCRBY", [key, field, payload.get("amount", 1)]
+            return "HINCRBY", [key, field, payload.get("increment", 1)]
         case "hash.incrbyfloat":
-            return "HINCRBYFLOAT", [key, field, payload.get("amount", 1.0)]
+            return "HINCRBYFLOAT", [key, field, payload.get("increment", 1.0)]
         case "hash.setnx":
             return "HSETNX", [key, field, value]
 
@@ -285,7 +292,14 @@ def _map_command_inner(cmd: str, payload: dict[str, Any]) -> tuple[str, list[Any
             return "QPURGE", [payload.get("queue", "")]
         case "queue.publish":
             pl = payload.get("payload", "")
-            payload_arg = pl if isinstance(pl, (bytes, bytearray)) else str(pl)
+            if isinstance(pl, list):
+                # Modules encode payloads as a byte list (the HTTP wire shape);
+                # the native wire wants actual bytes.
+                payload_arg: Any = bytes(pl)
+            elif isinstance(pl, (bytes, bytearray)):
+                payload_arg = pl
+            else:
+                payload_arg = str(pl)
             return "QPUBLISH", [
                 payload.get("queue", ""),
                 payload_arg,
@@ -610,7 +624,28 @@ def map_response(cmd: str, raw: Any) -> dict[str, Any]:  # noqa: ANN401
                 return raw
             return {"message_id": str(raw or "")}
         case "queue.consume":
-            return raw if isinstance(raw, dict) else {}
+            # Native QCONSUME returns the message flat — a map on SynapRPC, an
+            # [id, payload, priority, retry_count] array on RESP3, Null when
+            # empty. The module reads the HTTP shape {"message": {...} | None}.
+            if isinstance(raw, dict):
+                msg = dict(raw)
+                pl = msg.get("payload")
+                if isinstance(pl, (bytes, bytearray)):
+                    msg["payload"] = list(pl)
+                return {"message": msg}
+            if isinstance(raw, (list, tuple)) and len(raw) >= 4:
+                pl = raw[1]
+                if isinstance(pl, (bytes, bytearray)):
+                    pl = list(pl)
+                return {
+                    "message": {
+                        "id": raw[0],
+                        "payload": pl,
+                        "priority": raw[2],
+                        "retry_count": raw[3],
+                    }
+                }
+            return {"message": None}
         case "queue.ack" | "queue.nack":
             return {"success": bool(raw)}
         case "queue.stats":

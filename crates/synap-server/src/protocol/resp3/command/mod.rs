@@ -70,6 +70,8 @@ pub async fn dispatch(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
         "HSET" => collections::cmd_hset(state, args).await,
         "HGET" => collections::cmd_hget(state, args).await,
         "HDEL" => collections::cmd_hdel(state, args).await,
+        "HINCRBY" => collections::cmd_hincrby(state, args).await,
+        "HINCRBYFLOAT" => collections::cmd_hincrbyfloat(state, args).await,
         "HGETALL" => collections::cmd_hgetall(state, args).await,
         "HMSET" => collections::cmd_hmset(state, args).await,
         "HMGET" => collections::cmd_hmget(state, args).await,
@@ -118,6 +120,15 @@ pub async fn dispatch(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
         "QACK" => advanced::cmd_qack(state, args).await,
         "QNACK" => advanced::cmd_qnack(state, args).await,
         "QSTATS" => advanced::cmd_qstats(state, args).await,
+
+        // Event streams (mirrors the SynapRPC stream family)
+        "SCREATE" => advanced::cmd_screate(state, args).await,
+        "SGETORCREATE" => advanced::cmd_sgetorcreate(state, args).await,
+        "SPUBLISH" => advanced::cmd_spublish(state, args).await,
+        "SREAD" => advanced::cmd_sread(state, args).await,
+        "SDELETE" => advanced::cmd_sdelete(state, args).await,
+        "SLIST" => advanced::cmd_slist(state, args).await,
+        "SSTATS" => advanced::cmd_sstats(state, args).await,
         "QPURGE" => advanced::cmd_qpurge(state, args).await,
 
         // ── Stream — Redis X* names (3.2) ─────────────────────────────────────────

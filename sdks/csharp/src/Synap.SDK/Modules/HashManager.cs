@@ -106,7 +106,7 @@ public sealed class HashManager
     /// </summary>
     public async Task<List<string>> ValuesAsync(string key, CancellationToken cancellationToken = default)
     {
-        using var response = await _client.ExecuteAsync("hash.values", key, null, cancellationToken).ConfigureAwait(false);
+        using var response = await _client.ExecuteAsync("hash.vals", key, null, cancellationToken).ConfigureAwait(false);
 
         if (response.RootElement.TryGetProperty("values", out var values))
         {

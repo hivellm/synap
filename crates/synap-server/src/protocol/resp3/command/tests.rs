@@ -447,6 +447,28 @@ async fn test_hvals_returns_all_values() {
 }
 
 #[tokio::test]
+async fn test_hincrby_increments_and_returns_integer() {
+    let state = make_state();
+    let r1 = dispatch(&state, &args(&["HINCRBY", "hincr_h", "n", "5"])).await;
+    assert!(matches!(r1, Resp3Value::Integer(5)), "got {r1:?}");
+    let r2 = dispatch(&state, &args(&["HINCRBY", "hincr_h", "n", "-2"])).await;
+    assert!(matches!(r2, Resp3Value::Integer(3)), "got {r2:?}");
+}
+
+#[tokio::test]
+async fn test_hincrbyfloat_returns_bulk_string_value() {
+    let state = make_state();
+    let r = dispatch(&state, &args(&["HINCRBYFLOAT", "hincrf_h", "n", "1.5"])).await;
+    match r {
+        Resp3Value::BulkString(v) => {
+            let s = String::from_utf8(v).unwrap();
+            assert!((s.parse::<f64>().unwrap() - 1.5).abs() < 1e-9, "got {s}");
+        }
+        other => panic!("Expected BulkString from HINCRBYFLOAT, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn test_hscan_returns_cursor_and_pairs() {
     let state = make_state();
     dispatch(&state, &args(&["HSET", "hscan_h", "f1", "v1", "f2", "v2"])).await;

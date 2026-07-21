@@ -338,6 +338,23 @@ public sealed class SynapClient : IDisposable
 
                     throw SynapException.ServerError(errorMessage);
                 }
+
+                // The command endpoint wraps results in an envelope
+                // {success, request_id, payload, error}. Modules read the flat
+                // result document (same shape the native transports produce),
+                // so unwrap the payload here. Scalar payloads (e.g. kv.get
+                // returns the bare value) are exposed as {"value": <scalar>}.
+                if (result.RootElement.TryGetProperty("payload", out var payloadElement)
+                    && payloadElement.ValueKind is not JsonValueKind.Null
+                        and not JsonValueKind.Undefined)
+                {
+                    using (result)
+                    {
+                        return payloadElement.ValueKind is JsonValueKind.Object or JsonValueKind.Array
+                            ? JsonDocument.Parse(payloadElement.GetRawText())
+                            : JsonDocument.Parse($"{{\"value\":{payloadElement.GetRawText()}}}");
+                    }
+                }
             }
 
             return result;

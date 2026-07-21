@@ -49,9 +49,14 @@ async def test_publish_returns_message_id(
     message_id = await queue_manager.publish("test-queue", {"data": "test"}, priority=9)
 
     assert message_id == "msg-123"
+    # The payload travels as a JSON-encoded byte list (the wire shape).
     mock_client.send_command.assert_called_once_with(
         "queue.publish",
-        {"queue": "test-queue", "payload": {"data": "test"}, "priority": 9},
+        {
+            "queue": "test-queue",
+            "payload": list(b'{"data": "test"}'),
+            "priority": 9,
+        },
     )
 
 

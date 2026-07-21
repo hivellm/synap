@@ -152,6 +152,36 @@ async fn test_hset_returns_count() {
 }
 
 #[tokio::test]
+async fn test_hincrby_increments() {
+    let state = make_state();
+    let resp = dispatch(
+        &state,
+        req(
+            1,
+            "HINCRBY",
+            vec![str_arg("rpc_hincr"), str_arg("n"), SynapValue::Int(7)],
+        ),
+    )
+    .await;
+    assert_eq!(resp.result, Ok(SynapValue::Int(7)));
+}
+
+#[tokio::test]
+async fn test_hincrbyfloat_increments() {
+    let state = make_state();
+    let resp = dispatch(
+        &state,
+        req(
+            1,
+            "HINCRBYFLOAT",
+            vec![str_arg("rpc_hincrf"), str_arg("n"), SynapValue::Float(1.5)],
+        ),
+    )
+    .await;
+    assert_eq!(resp.result, Ok(SynapValue::Float(1.5)));
+}
+
+#[tokio::test]
 async fn test_hget_after_hset() {
     let state = make_state();
     dispatch(

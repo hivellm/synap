@@ -1211,3 +1211,214 @@ pub(super) async fn cmd_geosearch(state: &AppState, args: &[Resp3Value]) -> Resp
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
 }
+
+// ── Event streams ─────────────────────────────────────────────────────────────
+// Mirrors the SynapRPC stream family (SCREATE/SGETORCREATE/SPUBLISH/SREAD/
+// SDELETE/SLIST/SSTATS) so RESP3 clients — the TS/Python SDKs map `stream.*`
+// to these raw commands on every native transport — reach streams too.
+
+fn stream_manager_or_err(
+    state: &AppState,
+) -> Result<std::sync::Arc<crate::core::StreamManager>, Resp3Value> {
+    state
+        .stream_manager
+        .clone()
+        .ok_or_else(|| Resp3Value::Error("ERR stream subsystem not enabled".into()))
+}
+
+pub(super) async fn cmd_screate(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    // SCREATE room [max_events] — the SDKs send an optional max_events which
+    // the server ignores (rooms are configured server-side), like SynapRPC.
+    if args.len() < 2 {
+        return err_wrong_args("SCREATE");
+    }
+    let room = match arg_str(args, 1) {
+        Some(r) => r,
+        None => return err_wrong_args("SCREATE"),
+    };
+    let sm = match stream_manager_or_err(state) {
+        Ok(sm) => sm,
+        Err(e) => return e,
+    };
+    match sm.create_room(&room).await {
+        Ok(()) => Resp3Value::SimpleString("OK".into()),
+        Err(e) => Resp3Value::Error(format!("ERR {e}")),
+    }
+}
+
+pub(super) async fn cmd_sgetorcreate(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    if args.len() != 2 {
+        return err_wrong_args("SGETORCREATE");
+    }
+    let room = match arg_str(args, 1) {
+        Some(r) => r,
+        None => return err_wrong_args("SGETORCREATE"),
+    };
+    let sm = match stream_manager_or_err(state) {
+        Ok(sm) => sm,
+        Err(e) => return e,
+    };
+    match sm.get_or_create_room(&room).await {
+        Ok(created) => Resp3Value::SimpleString(if created { "CREATED" } else { "EXISTS" }.into()),
+        Err(e) => Resp3Value::Error(format!("ERR {e}")),
+    }
+}
+
+pub(super) async fn cmd_spublish(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    if args.len() != 4 {
+        return err_wrong_args("SPUBLISH");
+    }
+    let room = match arg_str(args, 1) {
+        Some(r) => r,
+        None => return err_wrong_args("SPUBLISH"),
+    };
+    let event_type = match arg_str(args, 2) {
+        Some(t) => t,
+        None => return err_wrong_args("SPUBLISH"),
+    };
+    let data = match arg_bytes(args, 3) {
+        Some(d) => d,
+        None => return err_wrong_args("SPUBLISH"),
+    };
+    let sm = match stream_manager_or_err(state) {
+        Ok(sm) => sm,
+        Err(e) => return e,
+    };
+    match sm.publish(&room, &event_type, data).await {
+        Ok(offset) => Resp3Value::Integer(offset as i64),
+        Err(e) => Resp3Value::Error(format!("ERR {e}")),
+    }
+}
+
+pub(super) async fn cmd_sread(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    if args.len() < 4 {
+        return err_wrong_args("SREAD");
+    }
+    let room = match arg_str(args, 1) {
+        Some(r) => r,
+        None => return err_wrong_args("SREAD"),
+    };
+    let subscriber_id = match arg_str(args, 2) {
+        Some(s) => s,
+        None => return err_wrong_args("SREAD"),
+    };
+    let from_offset = match arg_u64(args, 3) {
+        Some(o) => o,
+        None => return Resp3Value::Error("ERR offset must be an integer".into()),
+    };
+    let limit = arg_u64(args, 4).map(|n| n as usize).unwrap_or(100);
+    let sm = match stream_manager_or_err(state) {
+        Ok(sm) => sm,
+        Err(e) => return e,
+    };
+    match sm.consume(&room, &subscriber_id, from_offset, limit).await {
+        Ok(events) => Resp3Value::Array(
+            events
+                .into_iter()
+                .map(|e| {
+                    Resp3Value::Map(vec![
+                        (
+                            Resp3Value::BulkString(b"id".to_vec()),
+                            Resp3Value::BulkString(e.id.into_bytes()),
+                        ),
+                        (
+                            Resp3Value::BulkString(b"offset".to_vec()),
+                            Resp3Value::Integer(e.offset as i64),
+                        ),
+                        (
+                            Resp3Value::BulkString(b"event".to_vec()),
+                            Resp3Value::BulkString(e.event.into_bytes()),
+                        ),
+                        (
+                            Resp3Value::BulkString(b"data".to_vec()),
+                            Resp3Value::BulkString(e.data),
+                        ),
+                        (
+                            Resp3Value::BulkString(b"timestamp".to_vec()),
+                            Resp3Value::Integer(e.timestamp as i64),
+                        ),
+                    ])
+                })
+                .collect(),
+        ),
+        Err(e) => Resp3Value::Error(format!("ERR {e}")),
+    }
+}
+
+pub(super) async fn cmd_sdelete(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    if args.len() != 2 {
+        return err_wrong_args("SDELETE");
+    }
+    let room = match arg_str(args, 1) {
+        Some(r) => r,
+        None => return err_wrong_args("SDELETE"),
+    };
+    let sm = match stream_manager_or_err(state) {
+        Ok(sm) => sm,
+        Err(e) => return e,
+    };
+    match sm.delete_room(&room).await {
+        Ok(()) => Resp3Value::SimpleString("OK".into()),
+        Err(e) => Resp3Value::Error(format!("ERR {e}")),
+    }
+}
+
+pub(super) async fn cmd_slist(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    if args.len() != 1 {
+        return err_wrong_args("SLIST");
+    }
+    let sm = match stream_manager_or_err(state) {
+        Ok(sm) => sm,
+        Err(e) => return e,
+    };
+    let rooms = sm.list_rooms().await;
+    Resp3Value::Array(
+        rooms
+            .into_iter()
+            .map(|r| Resp3Value::BulkString(r.into_bytes()))
+            .collect(),
+    )
+}
+
+pub(super) async fn cmd_sstats(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    if args.len() != 2 {
+        return err_wrong_args("SSTATS");
+    }
+    let room = match arg_str(args, 1) {
+        Some(r) => r,
+        None => return err_wrong_args("SSTATS"),
+    };
+    let sm = match stream_manager_or_err(state) {
+        Ok(sm) => sm,
+        Err(e) => return e,
+    };
+    match sm.room_stats(&room).await {
+        Ok(s) => Resp3Value::Map(vec![
+            (
+                Resp3Value::BulkString(b"name".to_vec()),
+                Resp3Value::BulkString(s.name.into_bytes()),
+            ),
+            (
+                Resp3Value::BulkString(b"message_count".to_vec()),
+                Resp3Value::Integer(s.message_count as i64),
+            ),
+            (
+                Resp3Value::BulkString(b"min_offset".to_vec()),
+                Resp3Value::Integer(s.min_offset as i64),
+            ),
+            (
+                Resp3Value::BulkString(b"max_offset".to_vec()),
+                Resp3Value::Integer(s.max_offset as i64),
+            ),
+            (
+                Resp3Value::BulkString(b"subscriber_count".to_vec()),
+                Resp3Value::Integer(s.subscriber_count as i64),
+            ),
+            (
+                Resp3Value::BulkString(b"total_published".to_vec()),
+                Resp3Value::Integer(s.total_published as i64),
+            ),
+        ]),
+        Err(e) => Resp3Value::Error(format!("ERR {e}")),
+    }
+}

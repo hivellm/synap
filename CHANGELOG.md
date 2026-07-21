@@ -37,8 +37,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@hivehub/synap`, `synap_sdk`, `HiveLLM.Synap.SDK`; the Go and PHP submodules
   follow by tag in their own repositories).
 
+### Added
+
+- Server native protocols: `HINCRBY`/`HINCRBYFLOAT` on both RESP3 and
+  SynapRPC (every SDK maps `hash.incrby` to them), and the full event-stream
+  family (`SCREATE`/`SGETORCREATE`/`SPUBLISH`/`SREAD`/`SDELETE`/`SLIST`/
+  `SSTATS`) on RESP3 — previously SynapRPC-only, so RESP3 clients (including
+  the TS/Python SDKs on `resp3://`) could not reach streams at all.
+
 ### Fixed
 
+- **Cross-SDK ↔ server compatibility holes found by live-server release
+  validation** (the SDK suites were mocked or hard-skipped, so none of this
+  was covered):
+  - C# SDK over HTTP (its default transport) sent `kv.delete`/`hash.values`
+    (unknown to the server) and never unwrapped the command envelope, so
+    every read silently returned empty/default. Both fixed; scalar payloads
+    (e.g. `kv.get`) surface as `{"value": ...}`.
+  - C# SDK native transports: dead mapper keys (`hash.delete`, `hash.incr`)
+    made HDEL/HINCRBY throw, and SynapRPC list replies decoded to
+    `List<object?>` that the response shapers dropped (HVALS returned `[]`).
+  - Server `hash.del` command required a `fields` array while every SDK
+    sends a singular `field`; both are accepted now.
+  - Python SDK queues were broken on every transport: publish sent the raw
+    object instead of the byte-list wire shape, consume neither decoded
+    payloads nor understood the flat native reply; `hash.incrby` on native
+    transports silently incremented by 1 (payload key mismatch).
+  - Python SDK now **refuses** transactional writes over native transports
+    with `UnsupportedCommandError` instead of silently executing them
+    outside the `MULTI` (the raw wire commands carry no `client_id`);
+    native transaction queuing is tracked as follow-up work.
 - **Streams: consuming from an evicted offset no longer silently skips data.**
   Previously a consumer requesting a `from_offset` below a room's earliest
   retained offset (after retention evicted the older events) received a later

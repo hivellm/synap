@@ -28,7 +28,7 @@ class TestHyperLogLogS2S:
         async with client:
             key = f'test:hll:{os.getpid()}'
 
-            added = await client.hyperloglog.pfadd(key, ['user:1', 'user:2', 'user:3'])
+            added = await client.hyperloglog.pfadd(key, 'user:1', 'user:2', 'user:3')
             assert added >= 0 and added <= 3
 
             count = await client.hyperloglog.pfcount(key)
@@ -42,10 +42,10 @@ class TestHyperLogLogS2S:
             key2 = f'test:hll:merge2:{timestamp}'
             dest = f'test:hll:merge_dest:{timestamp}'
 
-            await client.hyperloglog.pfadd(key1, ['user:1', 'user:2', 'user:3'])
-            await client.hyperloglog.pfadd(key2, ['user:4', 'user:5', 'user:6'])
+            await client.hyperloglog.pfadd(key1, 'user:1', 'user:2', 'user:3')
+            await client.hyperloglog.pfadd(key2, 'user:4', 'user:5', 'user:6')
 
-            count = await client.hyperloglog.pfmerge(dest, [key1, key2])
+            count = await client.hyperloglog.pfmerge(dest, key1, key2)
             assert count >= 5 and count <= 7  # Approximate
 
     @pytest.mark.asyncio
@@ -53,10 +53,10 @@ class TestHyperLogLogS2S:
         async with client:
             key = f'test:hll:stats:{os.getpid()}'
 
-            await client.hyperloglog.pfadd(key, ['user:1', 'user:2'])
+            await client.hyperloglog.pfadd(key, 'user:1', 'user:2')
             await client.hyperloglog.pfcount(key)
 
             stats = await client.hyperloglog.stats()
-            assert stats['pfadd_count'] >= 1
-            assert stats['pfcount_count'] >= 1
+            assert stats.pfadd_count >= 1
+            assert stats.pfcount_count >= 1
 
