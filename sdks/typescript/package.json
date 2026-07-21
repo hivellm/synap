@@ -58,7 +58,7 @@
   },
   "homepage": "https://github.com/hivellm/synap#readme",
   "dependencies": {
-    "@hivehub/thunder": "^0.2.1",
+    "@hivehub/thunder": "^0.2.2",
     "rxjs": "^7.8.1",
     "uuid": "^14.0.1"
   },
