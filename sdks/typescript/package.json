@@ -69,7 +69,7 @@
     "@typescript-eslint/parser": "^8.65.0",
     "@vitest/coverage-v8": "^4.1.10",
     "eslint": "^10.6.0",
-    "msgpackr": "^2.0.4",
+    "msgpackr": "^2.0.5",
     "prettier": "^3.9.6",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
