@@ -104,20 +104,24 @@ curl http://localhost:15500/stream/notifications/stats
 **Response:**
 ```json
 {
+  "name": "notifications",
   "message_count": 156,
-  "subscribers": 3,
   "min_offset": 0,
   "max_offset": 155,
-  "partitions": [
-    {
-      "partition": 0,
-      "message_count": 156,
-      "min_offset": 0,
-      "max_offset": 155
-    }
-  ]
+  "subscriber_count": 3,
+  "total_published": 156,
+  "total_consumed": 402,
+  "dropped": 0,
+  "created_at": 1754400000123,
+  "generation": 1754400000123
 }
 ```
+
+`created_at` and `generation` identify this incarnation of the room: the room
+lives in memory, so a server restart wipes it and the next publish recreates it
+with offsets starting at 0. `generation` is strictly increasing across every
+room creation, so a consumer that remembers it detects the wipe and rewinds —
+see [Consuming Events](./CONSUMING.md#detect-a-room-wipe).
 
 ### Delete Stream
 

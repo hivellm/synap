@@ -1800,3 +1800,66 @@ async fn kv_watch_without_pubsub_router_is_rejected() {
     let resp = dispatch(&state, req(1, "KV.WATCH", vec![str_arg("k")])).await;
     assert!(resp.result.is_err());
 }
+
+// ── Stream room generation discriminator (issue #257) ─────────────────────
+
+/// Read an integer entry out of an `SSTATS` reply map.
+fn sstats_int(result: &Result<SynapValue, String>, field: &str) -> i64 {
+    match result {
+        Ok(SynapValue::Map(pairs)) => pairs
+            .iter()
+            .find(|(k, _)| *k == SynapValue::Str(field.into()))
+            .map(|(_, v)| match v {
+                SynapValue::Int(i) => *i,
+                other => panic!("SSTATS field {field} is not an integer: {other:?}"),
+            })
+            .unwrap_or_else(|| panic!("SSTATS reply is missing the {field} field: {result:?}")),
+        other => panic!("unexpected SSTATS result: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_stream_sstats_exposes_room_generation() {
+    let state = make_state_with_streams();
+
+    dispatch(&state, req(1, "SCREATE", vec![str_arg("room_gen")])).await;
+    dispatch(
+        &state,
+        req(
+            2,
+            "SPUBLISH",
+            vec![str_arg("room_gen"), str_arg("tick"), bytes_arg(b"{}")],
+        ),
+    )
+    .await;
+
+    let before = dispatch(&state, req(3, "SSTATS", vec![str_arg("room_gen")])).await;
+    assert!(sstats_int(&before.result, "created_at") > 0);
+    let generation = sstats_int(&before.result, "generation");
+    assert!(generation > 0);
+
+    // Wipe and refill with the same event count: every counter coincides, only
+    // the generation moves.
+    dispatch(&state, req(4, "SDELETE", vec![str_arg("room_gen")])).await;
+    dispatch(&state, req(5, "SCREATE", vec![str_arg("room_gen")])).await;
+    dispatch(
+        &state,
+        req(
+            6,
+            "SPUBLISH",
+            vec![str_arg("room_gen"), str_arg("tick"), bytes_arg(b"{}")],
+        ),
+    )
+    .await;
+
+    let after = dispatch(&state, req(7, "SSTATS", vec![str_arg("room_gen")])).await;
+    assert_eq!(
+        sstats_int(&before.result, "message_count"),
+        sstats_int(&after.result, "message_count")
+    );
+    assert!(
+        sstats_int(&after.result, "generation") > generation,
+        "generation must move after a wipe: {:?}",
+        after.result
+    );
+}

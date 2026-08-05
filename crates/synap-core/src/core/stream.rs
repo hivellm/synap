@@ -91,6 +91,44 @@ impl StreamEvent {
     }
 }
 
+/// Source of room generation ids (issue #257).
+///
+/// A generation must never repeat a value a consumer has already observed —
+/// including across a server restart, since rooms are ephemeral and an upstream
+/// publisher lazily recreates them. Seeding each id from the wall clock (in
+/// milliseconds) and forcing strict monotonicity gives both properties without
+/// any persisted state: a fresh process starts from "now", which is past every
+/// id the previous process could have emitted.
+static ROOM_GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Current epoch time in milliseconds.
+fn now_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
+
+/// Allocate the next room generation: the wall clock, bumped past the previous
+/// id when several rooms are created inside the same millisecond.
+fn next_generation() -> u64 {
+    use std::sync::atomic::Ordering;
+
+    let mut previous = ROOM_GENERATION.load(Ordering::Relaxed);
+    loop {
+        let candidate = now_millis().max(previous.saturating_add(1));
+        match ROOM_GENERATION.compare_exchange_weak(
+            previous,
+            candidate,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return candidate,
+            Err(actual) => previous = actual,
+        }
+    }
+}
+
 /// Room statistics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RoomStats {
@@ -114,6 +152,16 @@ pub struct RoomStats {
     /// data. Full durability (disk spill) is tracked separately in phase6f.
     #[serde(default)]
     pub dropped: u64,
+    /// Epoch milliseconds when this room was (re)created (issue #257).
+    #[serde(default)]
+    pub created_at: u64,
+    /// Identity of this incarnation of the room (issue #257). Strictly
+    /// increasing across every room creation, including after a server restart,
+    /// so a consumer that remembers the generation alongside its offset cursor
+    /// detects a wipe unambiguously: every counter below resets on a wipe and
+    /// can coincide with a pre-wipe value, this one cannot.
+    #[serde(default)]
+    pub generation: u64,
 }
 
 /// Subscriber information
@@ -155,6 +203,8 @@ impl Room {
                 total_published: 0,
                 total_consumed: 0,
                 dropped: 0,
+                created_at: now_millis(),
+                generation: next_generation(),
             },
             name,
             buffer: VecDeque::with_capacity(config.max_buffer_size),
@@ -791,5 +841,97 @@ mod tests {
         }
         assert_eq!(room.buffer.len(), 2);
         assert_eq!(room.stats().dropped, 0);
+    }
+
+    // ── Room generation discriminator (issue #257) ───────────────────────────
+
+    #[tokio::test]
+    async fn test_stream_stats_carry_creation_stamp() {
+        let before = now_millis();
+        let manager = StreamManager::new(StreamConfig::default());
+        manager.create_room("stamped").await.unwrap();
+
+        let stats = manager.room_stats("stamped").await.unwrap();
+        assert!(
+            stats.created_at >= before,
+            "created_at {} predates the creation call at {}",
+            stats.created_at,
+            before
+        );
+        // Seeded from the wall clock so a restarted process cannot re-emit an
+        // id the previous process already handed out.
+        assert!(
+            stats.generation >= before,
+            "generation {} is not seeded from the wall clock ({})",
+            stats.generation,
+            before
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stream_stats_stamp_is_stable_while_room_lives() {
+        let manager = StreamManager::new(StreamConfig::default());
+        manager.create_room("stable").await.unwrap();
+
+        let first = manager.room_stats("stable").await.unwrap();
+        manager
+            .publish("stable", "evt", b"x".to_vec())
+            .await
+            .unwrap();
+        let second = manager.room_stats("stable").await.unwrap();
+
+        assert_eq!(first.created_at, second.created_at);
+        assert_eq!(first.generation, second.generation);
+    }
+
+    #[tokio::test]
+    async fn test_stream_recreated_room_reports_new_generation() {
+        let manager = StreamManager::new(StreamConfig::default());
+        manager.create_room("wiped").await.unwrap();
+        manager
+            .publish("wiped", "evt", b"pre".to_vec())
+            .await
+            .unwrap();
+        let before = manager.room_stats("wiped").await.unwrap();
+
+        // Simulate the wipe: the room disappears and the publisher recreates it
+        // with exactly as many events as the consumer had already read, so every
+        // counter coincides with the pre-wipe state.
+        manager.delete_room("wiped").await.unwrap();
+        manager.create_room("wiped").await.unwrap();
+        manager
+            .publish("wiped", "evt", b"post".to_vec())
+            .await
+            .unwrap();
+        let after = manager.room_stats("wiped").await.unwrap();
+
+        assert_eq!(
+            before.max_offset, after.max_offset,
+            "the coincidence this test relies on no longer holds"
+        );
+        assert_eq!(before.total_published, after.total_published);
+        assert!(
+            after.generation > before.generation,
+            "generation {} must exceed the pre-wipe generation {}",
+            after.generation,
+            before.generation
+        );
+    }
+
+    #[tokio::test]
+    async fn test_stream_generations_are_strictly_increasing_across_rooms() {
+        let manager = StreamManager::new(StreamConfig::default());
+
+        let mut previous = 0u64;
+        for i in 0..64 {
+            let room = format!("room-{i}");
+            manager.create_room(&room).await.unwrap();
+            let generation = manager.room_stats(&room).await.unwrap().generation;
+            assert!(
+                generation > previous,
+                "generation {generation} did not exceed the previous {previous}"
+            );
+            previous = generation;
+        }
     }
 }

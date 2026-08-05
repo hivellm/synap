@@ -266,6 +266,38 @@ if not events:
         last_offset = stats.min_offset
 ```
 
+### Detect a Room Wipe
+
+Rooms are in-memory: a server restart drops them, and the next publish
+recreates the room with offsets starting back at 0. A cursor you kept across
+that wipe points past events you have never seen, and no counter in
+`stream.stats` can tell you — they all reset too, and can coincide with the
+values you last observed.
+
+`stream.stats` therefore carries two fields that do not reset to a previously
+seen value (Synap 1.3.1+, available on HTTP, SynapRPC and RESP3):
+
+- **`generation`** — the identity of this incarnation of the room. Strictly
+  increasing across every room creation, including across server restarts.
+- **`created_at`** — epoch milliseconds when the room was (re)created.
+
+Remember the generation next to your cursor and rewind whenever it changes:
+
+```python
+stats = client.stream.stats("notifications")
+
+if stats["generation"] != remembered_generation:
+    # The room was recreated: our cursor belongs to a room that no longer
+    # exists. Restart from the earliest retained event.
+    last_offset = stats["min_offset"]
+    remembered_generation = stats["generation"]
+
+events = client.stream.consume("notifications", "user-1", from_offset=last_offset, limit=10)
+```
+
+Rewinding to `min_offset` redelivers events (at-least-once); rewind to
+`max_offset + 1` instead if your consumer prefers skipping the backlog.
+
 ### Use Consumer Groups for Scaling
 
 ```python

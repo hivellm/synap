@@ -3380,6 +3380,28 @@ components:
           type: integer
           format: int64
           example: 7500
+        dropped:
+          type: integer
+          format: int64
+          description: >-
+            Events evicted from the buffer while still unread by the slowest
+            tracked subscriber. Non-zero means a lagging consumer lost data.
+          example: 0
+        created_at:
+          type: integer
+          format: int64
+          description: Epoch milliseconds when the room was (re)created.
+          example: 1754400000123
+        generation:
+          type: integer
+          format: int64
+          description: >-
+            Identity of this incarnation of the room. Strictly increasing across
+            every room creation, including server restarts. Remember it next to
+            your offset cursor: when it changes the room was wiped and recreated,
+            so the cursor must be rewound. Every counter above resets on a wipe
+            and can coincide with a pre-wipe value; this one cannot.
+          example: 1754400000123
 
     # Partitioned Streams Schemas
     CreateTopicRequest:

@@ -85,6 +85,16 @@ pub struct StreamStats {
     pub total_consumed: u64,
     #[serde(default)]
     pub subscriber_count: usize,
+    /// Epoch milliseconds when the room was (re)created.
+    #[serde(default)]
+    pub created_at: u64,
+    /// Identity of this incarnation of the room: strictly increasing across
+    /// every room creation, including server restarts. Remember it alongside
+    /// your offset cursor — when it changes, the room was wiped and recreated,
+    /// so the cursor is meaningless and must be rewound. Every other field here
+    /// resets on a wipe and can coincide with a pre-wipe value.
+    #[serde(default)]
+    pub generation: u64,
 }
 
 /// Pub/Sub message

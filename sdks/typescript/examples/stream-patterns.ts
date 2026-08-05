@@ -170,7 +170,7 @@ async function realtimeMonitoring() {
   // Monitor stream stats
   synap.stream.observeStats(ROOM, 1000).subscribe({
     next: (stats) => {
-      console.log(`Events: ${stats.event_count}, Subscribers: ${stats.subscribers}`);
+      console.log(`Events: ${stats.message_count}, Subscribers: ${stats.subscriber_count}`);
     }
   });
 

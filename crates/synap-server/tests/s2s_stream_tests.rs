@@ -370,6 +370,9 @@ async fn test_stream_stats_command() {
     assert_eq!(res["success"], true);
     assert_eq!(res["payload"]["name"], "stats_room"); // RoomStats has "name" field
     assert!(res["payload"]["message_count"].as_u64().unwrap() >= 3);
+    // Wipe discriminators (issue #257).
+    assert!(res["payload"]["created_at"].as_u64().unwrap() > 0);
+    assert!(res["payload"]["generation"].as_u64().unwrap() > 0);
 }
 
 #[tokio::test]

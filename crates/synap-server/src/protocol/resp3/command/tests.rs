@@ -1155,3 +1155,50 @@ async fn test_resp3_pubsub_server_push_delivers_to_channel() {
         .expect("expected push frame on channel after RESP3 PUBLISH");
     assert_eq!(msg.topic, "r3.push");
 }
+
+// ── Stream room generation discriminator (issue #257) ─────────────────────
+
+/// Read an integer entry out of an `SSTATS` reply map.
+fn sstats_int(reply: &Resp3Value, field: &str) -> i64 {
+    match reply {
+        Resp3Value::Map(pairs) => pairs
+            .iter()
+            .find(|(k, _)| matches!(k, Resp3Value::BulkString(b) if b == field.as_bytes()))
+            .map(|(_, v)| match v {
+                Resp3Value::Integer(i) => *i,
+                other => panic!("SSTATS field {field} is not an integer: {other:?}"),
+            })
+            .unwrap_or_else(|| panic!("SSTATS reply is missing the {field} field: {reply:?}")),
+        other => panic!("unexpected SSTATS result: {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn test_resp3_sstats_exposes_room_generation() {
+    let state = make_state_with_streams();
+    let sm = state.stream_manager.as_ref().unwrap();
+
+    sm.create_room("r3_gen").await.expect("create_room failed");
+    dispatch(&state, &args(&["SPUBLISH", "r3_gen", "click", "{}"])).await;
+
+    let before = dispatch(&state, &args(&["SSTATS", "r3_gen"])).await;
+    assert!(sstats_int(&before, "created_at") > 0, "{before:?}");
+    let generation = sstats_int(&before, "generation");
+    assert!(generation > 0, "{before:?}");
+
+    // Wipe and refill with the same event count: every counter coincides, only
+    // the generation moves.
+    dispatch(&state, &args(&["SDELETE", "r3_gen"])).await;
+    dispatch(&state, &args(&["SCREATE", "r3_gen"])).await;
+    dispatch(&state, &args(&["SPUBLISH", "r3_gen", "click", "{}"])).await;
+
+    let after = dispatch(&state, &args(&["SSTATS", "r3_gen"])).await;
+    assert_eq!(
+        sstats_int(&before, "message_count"),
+        sstats_int(&after, "message_count")
+    );
+    assert!(
+        sstats_int(&after, "generation") > generation,
+        "generation must move after a wipe: {after:?}"
+    );
+}

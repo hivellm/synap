@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Stream room wipe discriminator** (issue #257): `stream.stats` now returns
+  `created_at` (epoch ms of the room's creation) and `generation` (the identity
+  of this incarnation of the room, strictly increasing across every room
+  creation and seeded from the wall clock so a restarted server never re-emits
+  a value a consumer already saw). Rooms are in-memory, so a restart wipes them
+  and the next publish recreates them from offset 0 — every other stats field
+  resets too and can coincide with the pre-wipe value, which silently stranded
+  consumers whose cursor matched the new head. Served on all three transports:
+  REST `GET /stream/:room/stats`, `stream.stats`, RESP3 `SSTATS` and SynapRPC
+  `SSTATS`. The Rust SDK's `StreamStats` carries both fields; Python/PHP/C#
+  return the payload untyped, so they flow through unchanged.
+
+### Fixed
+
+- TypeScript SDK: `StreamStats` described a payload the server has never sent
+  (`subscribers`, `total_events`, `room`, `last_activity` were always
+  `undefined` at runtime). The interface now matches the server: `name`,
+  `message_count`, `min_offset`, `max_offset`, `subscriber_count`,
+  `total_published`, plus the HTTP-only `total_consumed`/`dropped` and the new
+  `created_at`/`generation`.
+
 ## [1.3.0] - 2026-07-21
 
 A correctness release driven by end-to-end validation: every SDK was exercised

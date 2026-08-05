@@ -304,20 +304,32 @@ export interface StreamConsumerOptions {
  * Stream room statistics
  */
 export interface StreamStats {
-  /** Maximum offset in stream */
-  max_offset: number;
-  /** Number of subscribers */
-  subscribers: number;
-  /** Total events published */
-  total_events: number;
-  /** Total events consumed */
-  total_consumed: number;
   /** Room name */
-  room: string;
-  /** Created timestamp */
+  name: string;
+  /** Events currently buffered in the room */
+  message_count: number;
+  /** Oldest offset still retained */
+  min_offset: number;
+  /** Latest assigned offset */
+  max_offset: number;
+  /** Number of tracked subscribers */
+  subscriber_count: number;
+  /** Total events published (all time) */
+  total_published: number;
+  /** Total events consumed (all time). HTTP transport only. */
+  total_consumed?: number;
+  /** Events evicted while still unread by the slowest subscriber. HTTP transport only. */
+  dropped?: number;
+  /** Epoch milliseconds when the room was (re)created */
   created_at: number;
-  /** Last activity timestamp */
-  last_activity: number;
+  /**
+   * Identity of this incarnation of the room: strictly increasing across every
+   * room creation, including server restarts. Remember it alongside your offset
+   * cursor — when it changes, the room was wiped and recreated, so the cursor is
+   * meaningless and must be rewound. Every counter above resets on a wipe and can
+   * coincide with a pre-wipe value; this one cannot.
+   */
+  generation: number;
 }
 
 /**

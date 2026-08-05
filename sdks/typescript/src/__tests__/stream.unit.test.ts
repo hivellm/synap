@@ -155,13 +155,16 @@ describe('StreamManager (Unit Tests - Additional Coverage)', () => {
   describe('observeStats() - Lines 269-282', () => {
     it('should emit stats at regular intervals', async () => {
       const mockStats = {
+        name: 'test-room',
+        message_count: 1000,
+        min_offset: 0,
         max_offset: 100,
-        subscribers: 5,
-        total_events: 1000,
+        subscriber_count: 5,
+        total_published: 1000,
         total_consumed: 950,
-        room: 'test-room',
+        dropped: 0,
         created_at: Date.now(),
-        last_activity: Date.now(),
+        generation: Date.now(),
       };
 
       vi.mocked(mockClient.sendCommand).mockResolvedValue(mockStats);
@@ -172,21 +175,24 @@ describe('StreamManager (Unit Tests - Additional Coverage)', () => {
 
       expect(stats).toHaveLength(3);
       expect(stats[0].max_offset).toBe(100);
-      expect(stats[0].subscribers).toBe(5);
-      expect(stats[1].room).toBe('test-room');
+      expect(stats[0].subscriber_count).toBe(5);
+      expect(stats[1].name).toBe('test-room');
     });
 
     it('should retry on errors', async () => {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       const mockStats = {
+        name: 'retry-room',
+        message_count: 500,
+        min_offset: 0,
         max_offset: 50,
-        subscribers: 2,
-        total_events: 500,
+        subscriber_count: 2,
+        total_published: 500,
         total_consumed: 450,
-        room: 'retry-room',
+        dropped: 0,
         created_at: Date.now(),
-        last_activity: Date.now(),
+        generation: Date.now(),
       };
 
       vi.mocked(mockClient.sendCommand)
@@ -231,13 +237,16 @@ describe('StreamManager (Unit Tests - Additional Coverage)', () => {
 
     it('should handle fast polling intervals', async () => {
       const mockStats = {
+        name: 'fast-room',
+        message_count: 100,
+        min_offset: 0,
         max_offset: 10,
-        subscribers: 1,
-        total_events: 100,
+        subscriber_count: 1,
+        total_published: 100,
         total_consumed: 100,
-        room: 'fast-room',
+        dropped: 0,
         created_at: Date.now(),
-        last_activity: Date.now(),
+        generation: Date.now(),
       };
 
       vi.mocked(mockClient.sendCommand).mockResolvedValue(mockStats);
@@ -247,7 +256,7 @@ describe('StreamManager (Unit Tests - Additional Coverage)', () => {
       );
 
       expect(stats).toHaveLength(5);
-      expect(stats.every(s => s.room === 'fast-room')).toBe(true);
+      expect(stats.every(s => s.name === 'fast-room')).toBe(true);
     });
   });
 
