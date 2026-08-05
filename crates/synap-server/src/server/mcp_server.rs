@@ -1,7 +1,7 @@
 use super::{AppState, get_mcp_tools, handle_mcp_tool};
 use crate::config::McpConfig;
 use rmcp::model::{
-    CallToolRequestParams, CallToolResult, ErrorData, Implementation, ProtocolVersion,
+    CallToolRequestParams, CallToolResponse, ErrorData, Implementation, ProtocolVersion,
     ServerCapabilities, ServerInfo,
 };
 use std::sync::Arc;
@@ -38,18 +38,18 @@ impl rmcp::ServerHandler for SynapMcpService {
 
         let tools = get_mcp_tools(&self.mcp_config);
 
-        Ok(ListToolsResult {
-            tools,
-            next_cursor: None,
-            meta: None,
-        })
+        Ok(ListToolsResult::with_all_items(tools))
     }
 
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
         _context: rmcp::service::RequestContext<rmcp::RoleServer>,
-    ) -> Result<CallToolResult, ErrorData> {
-        handle_mcp_tool(request, self.state.clone()).await
+    ) -> Result<CallToolResponse, ErrorData> {
+        // Synap tools always run to completion in-process: no elicitation, no
+        // long-running task handles, so every reply is a `Complete` response.
+        handle_mcp_tool(request, self.state.clone())
+            .await
+            .map(CallToolResponse::from)
     }
 }

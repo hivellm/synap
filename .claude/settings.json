@@ -1,6 +1,8 @@
 {
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
   "permissions": {
-    "defaultMode": "acceptEdits",
     "allow": [
       "Bash(*)",
       "Read(*)",
@@ -27,8 +29,11 @@
       "Bash(npm run type-check:*)",
       "Bash(npm test:*)",
       "Bash(*)",
-      "mcp__rulebook"
-    ]
+      "mcp__rulebook",
+      "Bash(git -C e:/HiveLLM/Synap status --short sdks/typescript)",
+      "Bash(npm i *)"
+    ],
+    "defaultMode": "acceptEdits"
   },
   "hooks": {
     "PreToolUse": [
@@ -42,8 +47,5 @@
         ]
       }
     ]
-  },
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   }
 }

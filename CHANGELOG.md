@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `SSTATS`. The Rust SDK's `StreamStats` carries both fields; Python/PHP/C#
   return the payload untyped, so they flow through unchanged.
 
+### Changed
+
+- Dependencies: `base64` 0.22 → 0.23 (workspace and Rust SDK), `rmcp` 2.1 → 3.0
+  in `synap-server` (the MCP `call_tool` handler now returns the 3.x
+  `CallToolResponse`, and `ListToolsResult` is built through its constructor),
+  and, in the TypeScript SDK, `msgpackr` → 2.0.5, `@types/node` → 26.1.2 and
+  `eslint` → 10.8.0. Closes Dependabot #252, #253, #254, #255, #256.
+
 ### Fixed
 
 - TypeScript SDK: `StreamStats` described a payload the server has never sent
