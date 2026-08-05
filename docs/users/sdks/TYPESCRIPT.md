@@ -178,6 +178,15 @@ const streams = await client.stream.list();
 
 // Get stats
 const stats = await client.stream.stats("notifications");
+
+// Detect a room wipe: `generation` identifies this incarnation of the room and
+// never repeats a value you have already seen, even across a server restart.
+// Every counter in the payload resets on a wipe and can coincide with the
+// pre-wipe value, so this is the only safe cursor guard.
+if (stats.generation !== rememberedGeneration) {
+  cursor = stats.min_offset;
+  rememberedGeneration = stats.generation;
+}
 ```
 
 ### Publishing Events

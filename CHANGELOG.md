@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-08-05
+
+A fix release: stream consumers get a way to detect a room wipe, and every
+dependency manifest in the repository was audited — server, all five SDKs and
+the desktop GUI — leaving no known advisory in anything that ships.
+
 ### Added
 
 - **Stream room wipe discriminator** (issue #257): `stream.stats` now returns
@@ -3539,7 +3545,10 @@ These limitations will be addressed in future phases.
 - Documentation
 - Security
 
-[Unreleased]: https://github.com/hivellm/synap/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/hivellm/synap/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/hivellm/synap/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/hivellm/synap/compare/v1.2.3...v1.3.0
+[1.2.3]: https://github.com/hivellm/synap/compare/v1.2.0...v1.2.3
 [1.2.0]: https://github.com/hivellm/synap/compare/v1.0.0...v1.2.0
 [1.0.0]: https://github.com/hivellm/synap/compare/v0.8.1...v1.0.0
 [0.8.1]: https://github.com/hivellm/synap/compare/v0.8.0...v0.8.1

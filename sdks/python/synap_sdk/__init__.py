@@ -9,7 +9,7 @@ from synap_sdk.modules.set import SetManager
 from synap_sdk.transport import TransportMode
 from synap_sdk.types import QueueMessage, StreamEvent, WatchEvent
 
-__version__ = "0.11.1"
+__version__ = "1.3.1"
 
 __all__ = [
     "SynapClient",
