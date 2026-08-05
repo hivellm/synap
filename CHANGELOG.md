@@ -28,6 +28,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CallToolResponse`, and `ListToolsResult` is built through its constructor),
   and, in the TypeScript SDK, `msgpackr` → 2.0.5, `@types/node` → 26.1.2 and
   `eslint` → 10.8.0. Closes Dependabot #252, #253, #254, #255, #256.
+- **Repository-wide dependency audit**, covering every manifest rather than the
+  two ecosystems Dependabot watches. Result: no advisory remains in any
+  shipped artifact.
+  - Rust: `cargo audit` clean after `event-listener` moved to 5.4.2 (the
+    RUSTSEC-2026-0221 unsoundness reached us through `redis`, a dev-dependency
+    of the comparison benchmark). Every semver-compatible upgrade applied, plus
+    the majors `colored` 2 → 3, `criterion` 0.7 → 0.8 and `ureq` 2 → 3 (the
+    protocol benchmark's HTTP client was ported to the 3.x `Agent`/`Body` API).
+    `bincode` stays at 2.0: the published 3.0.0 is a placeholder whose only
+    contents are a `compile_error!`.
+  - TypeScript SDK: 0 advisories — `esbuild` is pinned past GHSA-g7r4-m6w7-qqqr
+    through an `overrides` entry, and typescript-eslint moved to 8.66.
+  - GUI: 34 advisories (3 critical) down to 0 — Electron 33 → 43,
+    electron-builder 25 → 26, Vite 6 → 8 and the two Vite/Electron plugins to
+    their 1.x line. Six pre-existing TypeScript errors that blocked
+    `npm run build` were fixed so the upgrade could be verified end to end.
+  - Python SDK: `pip-audit` clean; the Thunder floor is now 0.2.2, matching
+    every other end of the wire.
+  - C# SDK: no vulnerable packages; `System.Text.Json` 8.0.5 → 10.0.10,
+    `Microsoft.CodeAnalysis.NetAnalyzers` 9 → 10 (still zero warnings under
+    `TreatWarningsAsErrors`), and the xunit/test-SDK stack refreshed.
+  - PHP SDK: a fresh `composer install` resolves Guzzle 7.15.3, clear of
+    CVE-2026-69245 and GHSA-v5mv-p594-2x33; no manifest change was needed
+    because `composer.lock` is not versioned there.
 
 ### Fixed
 

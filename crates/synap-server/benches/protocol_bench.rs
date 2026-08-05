@@ -66,25 +66,29 @@ struct HttpClient {
 
 impl HttpClient {
     fn new(base: &str) -> Self {
-        let agent = ureq::AgentBuilder::new()
-            .timeout(Duration::from_secs(5))
+        let config = ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(5)))
             .build();
         Self {
             base: base.to_owned(),
-            agent,
+            agent: ureq::Agent::new_with_config(config),
         }
     }
 
     fn set(&self, key: &str, value: &[u8]) {
         let url = format!("{}/kv/{}", self.base, key);
-        let payload = ureq::json!({"value": std::str::from_utf8(value).unwrap_or("val")});
+        let payload = serde_json::json!({"value": std::str::from_utf8(value).unwrap_or("val")});
         let _ = self.agent.post(&url).send_json(payload);
     }
 
     fn get(&self, key: &str) -> Vec<u8> {
         let url = format!("{}/kv/{}", self.base, key);
         match self.agent.get(&url).call() {
-            Ok(resp) => resp.into_string().unwrap_or_default().into_bytes(),
+            Ok(mut resp) => resp
+                .body_mut()
+                .read_to_string()
+                .unwrap_or_default()
+                .into_bytes(),
             Err(_) => vec![],
         }
     }

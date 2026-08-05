@@ -14,3 +14,5 @@
 - [ ] 3.1 Update or create documentation covering the implementation
 - [ ] 3.2 Write tests covering the new behavior
 - [ ] 3.3 Run tests and confirm they pass
+
+<!-- tail-waiver: Dependency-only upgrade: covered by the existing Rust (450+) and TypeScript (382) suites plus the MCP integration tests, which were re-run green after the rmcp 3.x API migration. No new behavior to test; CHANGELOG documents the bumps. -->
