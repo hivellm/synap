@@ -1,0 +1,19 @@
+{
+  "id": "wall-clock-seeded-generation-id-discriminates-ephemeral-state-wipes",
+  "type": "pattern",
+  "title": "Wall-clock-seeded generation id discriminates ephemeral-state wipes",
+  "category": "architecture",
+  "description": "When a server hands clients a cursor into ephemeral state, counters cannot tell them the state was destroyed and rebuilt: every counter resets on the wipe and can coincide with the value the client last saw, which is exactly when a stale cursor silently skips data. Stamp the incarnation instead — a `generation` drawn from a process-global source that is strictly increasing and seeded from the wall clock. Strict monotonicity covers many creations inside one millisecond; the wall-clock seed covers restarts, because a fresh process starts past every id the previous one could have emitted, with no persisted state. Clients hold (cursor, generation) and rewind when the generation changes. Expose it on every transport that serves stats, or consumers on the native wires keep the unfixable version of the problem.",
+  "example": "static ROOM_GENERATION: AtomicU64 = AtomicU64::new(0);\n\nfn next_generation() -> u64 {\n    let mut previous = ROOM_GENERATION.load(Ordering::Relaxed);\n    loop {\n        let candidate = now_millis().max(previous.saturating_add(1));\n        match ROOM_GENERATION.compare_exchange_weak(previous, candidate, Ordering::Relaxed, Ordering::Relaxed) {\n            Ok(_) => return candidate,\n            Err(actual) => previous = actual,\n        }\n    }\n}",
+  "whenToUse": "Any client-held cursor into state the server may drop and lazily recreate: stream rooms, in-memory queues, snapshot indexes.",
+  "whenNotToUse": "Durable state with a stable identity already persisted (use that id), or where the client can afford a full rescan on every poll.",
+  "createdAt": "2026-08-05T19:40:00.000Z",
+  "tags": [
+    "streams",
+    "stats",
+    "consumer-cursor",
+    "restart-safety",
+    "issue-257"
+  ],
+  "source": "manual"
+}
