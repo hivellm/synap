@@ -114,7 +114,14 @@
       "Bash(node -e \"console.log\\('typescript pkg version:', require\\('typescript/package.json'\\).version\\)\")",
       "Bash(node -e \"console.log\\('typescript-next pkg version:', require\\('typescript-next/package.json'\\).version\\)\")",
       "Bash(echo \"TS6 exit=$?\")",
-      "Bash(echo \"TS7 exit=$?\")"
+      "Bash(echo \"TS7 exit=$?\")",
+      "Bash(python C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/hangrepro.py 120 8)",
+      "Bash(python C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/hangrepro.py 300 12)",
+      "Bash(python -c \"import ast,sys; ast.parse\\(open\\(r'C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/hangrepro.py'\\).read\\(\\)\\)\")",
+      "Bash(python -c \"import ast; ast.parse\\(open\\(r'C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/hangrepro.py'\\).read\\(\\)\\)\")",
+      "Bash(python C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/hangrepro.py 180 8)",
+      "Bash(cp \"C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/hangrepro.py\" scripts/test/transport-soak.py)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('scripts/test/transport-soak.py'\\).read\\(\\)\\)\")"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [

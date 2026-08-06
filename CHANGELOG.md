@@ -84,6 +84,23 @@ harness that runs the same 37 module calls over all three transports.
 
 ### Fixed
 
+- **The server no longer kills its own worker threads under connection churn.**
+  All three async protocol paths held a `tracing::Span::enter()` guard across an
+  `.await`. That guard is thread-local, so when a task yielded the span stayed
+  entered on the worker and the next task scheduled there ran inside another
+  connection's span — the log shows four different RESP3 peers nested inside one
+  another. The subscriber was eventually asked to clone a span an earlier task
+  had already closed, which panics the worker
+  (`tracing-subscriber/registry/sharded.rs:317: tried to clone a span that
+  already closed`). Enough dead workers and the runtime has nothing left to
+  poll: every listener still accepts TCP, nothing answers, and the periodic
+  snapshot task stops too. The futures are now `.instrument()`ed instead.
+  Reproduced with connections that subscribe and vanish without unsubscribing —
+  what a finishing CLI or PHP process does: the old build stopped answering 2
+  seconds in, the fixed one survives 180s of the same load (107k churned
+  connections, 132k HTTP requests) with zero errors. Guarded by
+  `tracing_span_discipline_tests`, and the soak harness ships as
+  `scripts/test/transport-soak.py`.
 - **Listing pub/sub topics works on every transport.** `pubsub.topics` mapped
   to `TOPICS` for both native wires, but only SynapRPC dispatches it — RESP3
   answers `PUBSUB CHANNELS` and has no `TOPICS` — so listing topics over RESP3

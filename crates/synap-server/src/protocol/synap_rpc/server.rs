@@ -24,6 +24,7 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::Instrument;
 
 use thunder::server::{
     AuthError, Credentials, Dispatch, ListenerConfig, ListenerHandle, MetricsObserver, Principal,
@@ -113,11 +114,14 @@ impl Dispatch for SynapDispatch {
             }
         }
 
-        let result = {
-            let span = tracing::debug_span!("rpc.req", cmd = %command);
-            let _guard = span.enter();
-            run_command(&self.state, command, args).await
-        };
+        // `.instrument()`, never `span.enter()`: an `enter()` guard is
+        // thread-local, so holding it across an await leaves the span entered
+        // on a worker thread that then runs another connection's task — which
+        // nests unrelated requests and can make the subscriber clone an
+        // already-closed span, panicking the worker.
+        let result = run_command(&self.state, command, args)
+            .instrument(tracing::debug_span!("rpc.req", cmd = %command))
+            .await;
 
         // After SUBSCRIBE / KV.WATCH succeeds, bridge the connection's push
         // channel to the pubsub router so publish() reaches this client.
