@@ -1,15 +1,17 @@
 ## 1. Go SDK (hivellm/synap-sdk-go)
 
-- [ ] 1.1 Bump `github.com/hivellm/thunder-go` to v0.2.2
-- [ ] 1.2 Run `go test ./...` and `govulncheck ./...`
-- [ ] 1.3 Cover the 1.3.x protocol surface (TXQUEUE, RESP3 streams, `stream.stats` generation)
-- [ ] 1.4 Cut a 1.3.x release tag
+- [x] 1.1 Bump `github.com/hivellm/thunder-go` to v0.2.2
+- [x] 1.2 Run `go test ./...` and `govulncheck ./...`
+- [x] 1.3 Cover the 1.3.x stream surface (SREAD mapping, SGETORCREATE, `stream.stats` generation)
+- [ ] 1.4 Implement transactional writes (MULTI/EXEC/TXQUEUE) — the module does not exist in the Go SDK
+- [ ] 1.5 Cut a 1.3.x release tag (needs push access)
 
 ## 2. PHP SDK (hivellm/synap-sdk-php)
 
-- [ ] 2.1 Verify the 1.3.x protocol surface (TXQUEUE, RESP3 streams, `stream.stats` generation)
-- [ ] 2.2 Run `composer audit` on a fresh resolve and the PHPUnit suite against a live server
-- [ ] 2.3 Cut a 1.3.x release tag
+- [x] 2.1 Correct the native pub/sub command names and map `stream.stats` to SSTATS
+- [x] 2.2 Queue transactional writes through TXQUEUE (ADR 005)
+- [x] 2.3 Run `composer audit` on a fresh resolve and the PHPUnit unit suite
+- [ ] 2.4 Cut a 1.3.x release tag (needs push access)
 
 ## 3. This repository
 
@@ -18,6 +20,6 @@
 
 ## 4. Tail (docs + tests)
 
-- [ ] 4.1 Update or create documentation covering the implementation
-- [ ] 4.2 Write tests covering the new behavior
-- [ ] 4.3 Run tests and confirm they pass
+- [x] 4.1 Update or create documentation covering the implementation
+- [x] 4.2 Write tests covering the new behavior
+- [x] 4.3 Run tests and confirm they pass

@@ -65,9 +65,19 @@
       "Bash(sed -i '3s/\"version\": \"1.3.0\"/\"version\": \"1.3.1\"/' sdks/typescript/package.json)",
       "Bash(sed -i '7s/version = \"1.3.0\"/version = \"1.3.1\"/' sdks/python/pyproject.toml)",
       "Bash(sed -i '13s|<Version>1.3.0</Version>|<Version>1.3.1</Version>|' sdks/csharp/src/Synap.SDK/Synap.SDK.csproj)",
-      "Bash(sed -i '6s/version-1.3.0-blue/version-1.3.1-blue/' README.md)"
+      "Bash(sed -i '6s/version-1.3.0-blue/version-1.3.1-blue/' README.md)",
+      "Bash(gofmt -d client.go)",
+      "Bash(./vendor/bin/phpunit tests/Unit/CommandMapperStreamAndTransactionTest.php --testdox)",
+      "Bash(./vendor/bin/phpunit --testsuite Unit)",
+      "Bash(./vendor/bin/phpunit tests/Unit)",
+      "Bash(./vendor/bin/phpstan analyse *)",
+      "Bash(./vendor/bin/php-cs-fixer fix *)",
+      "Bash(cd e:/HiveLLM/Synap/sdks/php && timeout 300 ./vendor/bin/php-cs-fixer fix --dry-run --diff --sequential src/CommandMapper.php 2>&1 | sed -n '/---/,/Found/p' | head -30; echo \"=== is this pre-existing? ===\"; git stash list >/dev/null; git show HEAD:src/CommandMapper.php > /tmp/cm_orig.php && cp /tmp/cm_orig.php /tmp/cm_check.php && timeout 300 ./vendor/bin/php-cs-fixer fix --dry-run --sequential /tmp/cm_check.php 2>&1 | grep -E \"Found\" | tail -1)"
     ],
-    "defaultMode": "acceptEdits"
+    "defaultMode": "acceptEdits",
+    "additionalDirectories": [
+      "\\tmp"
+    ]
   },
   "hooks": {
     "PreToolUse": [
