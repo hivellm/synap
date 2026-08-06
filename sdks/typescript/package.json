@@ -26,6 +26,8 @@
     "test:all": "npm run test:unit && npm run test:s2s",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "type-check": "node node_modules/typescript/bin/tsc --noEmit",
+    "type-check:next": "node node_modules/typescript-next/bin/tsc --noEmit",
     "lint": "eslint src --ext .ts",
     "lint:fix": "eslint src --ext .ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
@@ -74,6 +76,7 @@
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.66.0",
+    "typescript-next": "npm:typescript@^7.0.2",
     "vitest": "^4.1.10"
   },
   "overrides": {

@@ -70,6 +70,18 @@ harness that runs the same 37 module calls over all three transports.
     CVE-2026-69245 and GHSA-v5mv-p594-2x33; no manifest change was needed
     because `composer.lock` is not versioned there.
 
+### Added
+
+- **TypeScript 7 readiness check.** The TypeScript SDK and the GUI each gained
+  a `type-check:next` script that runs the native TypeScript 7 compiler over
+  the same `tsconfig.json`, alongside the existing `type-check` on TypeScript 6.
+  Both are clean today. The pin stays at 6 because `@typescript-eslint` is built
+  on the JavaScript compiler API, which the `typescript` 7.x package no longer
+  exposes (`require('typescript').createProgram` is `undefined`), so upgrading
+  would break linting rather than just warn. The GUI's `tsconfig.json` dropped
+  `baseUrl`, removed in TypeScript 7 and redundant with its already-relative
+  `paths`.
+
 ### Fixed
 
 - **Listing pub/sub topics works on every transport.** `pubsub.topics` mapped

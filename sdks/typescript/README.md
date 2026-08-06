@@ -1049,12 +1049,29 @@ npm run test:watch
 # Coverage
 npm run test:coverage
 
+# Type-check
+npm run type-check         # TypeScript 6 — the version the linter is built for
+npm run type-check:next    # TypeScript 7 — readiness check, see below
+
 # Lint
 npm run lint
 
 # Format
 npm run format
 ```
+
+#### Why two compilers
+
+The SDK is pinned to TypeScript 6 because `@typescript-eslint` is built on the
+JavaScript compiler API, and the `typescript` 7.x package no longer exposes it
+(`require('typescript').createProgram` is `undefined` there). Installing 7 would
+leave the lint step broken, not merely warned about.
+
+The sources themselves are already clean under 7, and `type-check:next` keeps
+proving it: it runs the native TypeScript 7 compiler, installed alongside as
+`typescript-next`, over the same `tsconfig.json`. When typescript-eslint ships a
+release for the TypeScript 7 tooling API, the migration is a dependency swap
+with no source changes.
 
 ### Testing Strategy
 

@@ -20,8 +20,8 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
 
-    /* Path aliases */
-    "baseUrl": ".",
+    /* Path aliases. No `baseUrl`: the mappings are already relative to this
+       file, and TypeScript 7 removed the option. */
     "paths": {
       "@/*": ["./src/*"]
     },

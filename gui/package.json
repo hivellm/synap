@@ -8,7 +8,9 @@
   "private": true,
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "node node_modules/typescript/bin/tsc && vite build",
+    "type-check": "node node_modules/typescript/bin/tsc --noEmit",
+    "type-check:next": "node node_modules/typescript-next/bin/tsc --noEmit",
     "build:electron": "vite build && electron-builder",
     "build:win": "vite build && electron-builder --win",
     "build:mac": "vite build && electron-builder --mac",
@@ -43,6 +45,7 @@
     "tailwindcss": "^4.1.17",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
+    "typescript-next": "npm:typescript@^7.0.2",
     "vite": "^8.2.0",
     "vite-plugin-electron": "^1.1.1",
     "vite-plugin-electron-renderer": "^1.0.0",
