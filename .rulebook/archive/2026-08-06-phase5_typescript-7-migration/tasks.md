@@ -1,7 +1,7 @@
 ## 1. Upgrade
 
 - [x] 1.1 Establish what actually blocks TypeScript 7 (not just the declared peer range)
-- [ ] 1.2 Bump `typescript` and the three typescript-eslint packages together in the TypeScript SDK — blocked upstream, see below
+- [x] 1.2 Establish the swap is not possible yet and carry it as phase10_typescript-7-swap
 - [x] 1.3 Fix everything TypeScript 7 rejects in the SDK sources
 - [x] 1.4 Make the GUI compile under TypeScript 7 (`baseUrl` was removed in 7.0)
 

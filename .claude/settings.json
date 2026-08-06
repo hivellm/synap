@@ -121,7 +121,11 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\(r'C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/hangrepro.py'\\).read\\(\\)\\)\")",
       "Bash(python C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/hangrepro.py 180 8)",
       "Bash(cp \"C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/hangrepro.py\" scripts/test/transport-soak.py)",
-      "Bash(python -c \"import ast; ast.parse\\(open\\('scripts/test/transport-soak.py'\\).read\\(\\)\\)\")"
+      "Bash(python -c \"import ast; ast.parse\\(open\\('scripts/test/transport-soak.py'\\).read\\(\\)\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/audit-venv/Scripts/python.exe -m ruff check synap_sdk/command_map.py)",
+      "Bash(php C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/composer.phar show squizlabs/php_codesniffer)",
+      "Bash(python -c \"import json,sys; print\\('server version:', json.load\\(sys.stdin\\)['version']\\)\")"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [
