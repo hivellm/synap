@@ -13,6 +13,14 @@ A fix release: stream consumers get a way to detect a room wipe, and every
 dependency manifest in the repository was audited — server, all five SDKs and
 the desktop GUI — leaving no known advisory in anything that ships.
 
+All six SDKs sit at **1.3.1**. The Go and PHP SDKs live in their own
+repositories (`hivellm/synap-sdk-go`, `hivellm/synap-sdk-php`) and had been
+stuck at 1.2.3, missing both the 1.3.0 transaction work and these stream fixes;
+their submodule pointers move with this release. Both turned out to be carrying
+wire holes rather than merely missing features — commands mapped to names the
+server has never dispatched — so each now has a test pinning every command to
+the name the server actually answers.
+
 ### Added
 
 - **Stream room wipe discriminator** (issue #257): `stream.stats` now returns
