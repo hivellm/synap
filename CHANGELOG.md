@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.3.1] - 2026-08-05
+## [1.3.1] - 2026-08-06
 
 A fix release: stream consumers get a way to detect a room wipe, and every
 dependency manifest in the repository was audited — server, all five SDKs and
@@ -61,6 +61,14 @@ the desktop GUI — leaving no known advisory in anything that ships.
 
 ### Fixed
 
+- **Listing pub/sub topics works on every transport.** `pubsub.topics` mapped
+  to `TOPICS` for both native wires, but only SynapRPC dispatches it — RESP3
+  answers `PUBSUB CHANNELS` and has no `TOPICS` — so listing topics over RESP3
+  failed as an unknown command in the TypeScript and Python SDKs. Both mappers
+  now take the transport for the commands the two wires spell differently. The
+  TypeScript SDK additionally sent `pubsub.list`, which the server does not
+  dispatch, so the same call failed over HTTP too; it now sends
+  `pubsub.topics`.
 - TypeScript SDK: `StreamStats` described a payload the server has never sent
   (`subscribers`, `total_events`, `room`, `last_activity` were always
   `undefined` at runtime). The interface now matches the server: `name`,

@@ -134,6 +134,15 @@ class TestMapCommand:
         result = _map_command("kv.get", {"key": "foo"})
         assert result == ("GET", ["foo"])
 
+    def test_topic_listing_follows_the_transport(self) -> None:
+        # SynapRPC dispatches TOPICS and has no PUBSUB; RESP3 dispatches
+        # PUBSUB CHANNELS and has no TOPICS, so one mapping cannot serve both
+        # and listing topics over RESP3 failed as an unknown command.
+        assert _map_command("pubsub.topics", {}, "synaprpc") == ("TOPICS", [])
+        assert _map_command("pubsub.topics", {}, "resp3") == ("PUBSUB", ["CHANNELS"])
+        # The default keeps the SynapRPC spelling.
+        assert _map_command("pubsub.list", {}) == ("TOPICS", [])
+
     def test_kv_set_no_ttl(self) -> None:
         result = _map_command("kv.set", {"key": "foo", "value": {"Str": "bar"}})
         assert result == ("SET", ["foo", {"Str": "bar"}])
