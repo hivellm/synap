@@ -34,9 +34,23 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
+    # ICU/idna moved from Unicode-DFS-2016 to Unicode-3.0 (same permissive
+    # terms, relicensed upstream). Both are listed while older versions of the
+    # stack can still be resolved.
     "Unicode-DFS-2016",
+    "Unicode-3.0",
     "Unlicense",
     "CC0-1.0",
+    # Certificate-root *data*, not code: webpki-roots / webpki-root-certs.
+    "CDLA-Permissive-2.0",
+    # Boost, permissive and Apache-compatible: clipboard-win and error-code,
+    # both reached through rustyline in the CLI.
+    "BSL-1.0",
+    # File-level copyleft, triggered only by modifying the licensed files
+    # themselves. Reached through `colored` (CLI output) and `mockito` (a dev
+    # dependency of the Rust SDK); neither is modified here, so the obligation
+    # is to keep the notices, which linking satisfies.
+    "MPL-2.0",
 ]
 confidence-threshold = 0.8
 
