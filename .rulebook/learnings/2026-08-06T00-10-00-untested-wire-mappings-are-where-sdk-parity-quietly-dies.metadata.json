@@ -1,0 +1,16 @@
+{
+  "id": "2026-08-06T00-10-00-untested-wire-mappings-are-where-sdk-parity-quietly-dies",
+  "title": "Untested wire mappings are where SDK parity quietly dies",
+  "content": "Both submodule SDKs carried command names the server has never dispatched, and both had shipped that way for releases: Go mapped `stream.consume` to `SCONSUME` (the server only has `SREAD`), and PHP mapped every pub/sub command with a `P` prefix (`PPUBLISH`, `PSUBSCRIBE`, `PTOPICS`, …) that does not exist. Neither repository had a single test over its command mapper, so the names were never compared against anything — and because HTTP takes a different path, the SDK's own HTTP-only suite stayed green while the native transports were dead. The same blind spot hid a RESP3 reader in the Go SDK that could not decode `%` (map), which is what `SSTATS`, `SUBSCRIBE` and every `SREAD` entry reply with. Two cheap defences, both now in place: a table-driven test pinning every dotted command to the raw name the server dispatches (fast, no server needed, catches the whole class), and an integration suite parameterised over `{HTTP, SynapRPC, RESP3}` so a transport-specific hole cannot hide behind a passing HTTP run. When adding a command to any SDK, add the row to the mapping test in the same commit.",
+  "source": "manual",
+  "relatedTask": "phase7_go-sdk-transactions",
+  "tags": [
+    "sdk-parity",
+    "wire-protocol",
+    "go-sdk",
+    "php-sdk",
+    "testing",
+    "resp3"
+  ],
+  "createdAt": "2026-08-06T00:10:00.000Z"
+}

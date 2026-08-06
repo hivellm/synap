@@ -1,0 +1,6 @@
+# On Windows `localhost` resolves to IPv6 and hangs against a 0.0.0.0 bind
+**Source**: manual
+**Date**: 2026-08-05
+**Related Task**: phase3_dependency-audit-all-sdks
+**Tags**: windows, ipv6, s2s-tests, php-sdk, python-sdk, live-server-validation
+Validating 1.3.1 against a live server (`config/config.yml`, `server.host: 0.0.0.0`) worked for curl on 127.0.0.1 and for the TypeScript S2S suite, but the PHP and Python S2S suites stalled: every request died on a 30s cURL/httpx timeout with "0 bytes received". Cause is the harness, not the server — those suites default to `http://localhost:15500` (PHP hardcodes it in `phpunit.xml` via `<env name="SYNAP_URL">`, which wins over the shell environment), and on this Windows host `localhost` resolves to `::1` first while the listener is IPv4-only. The connection is accepted by the stack and then never answered, so it looks like a server hang instead of a wrong address. Verify with `curl -m 5 http://localhost:15500/health` versus `http://127.0.0.1:15500/health` before debugging anything else. Fixing it properly means either dual-stack binding on the server or making the SDK suites take the base URL from the environment without a hardcoded override.

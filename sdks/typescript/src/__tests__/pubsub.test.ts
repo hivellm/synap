@@ -275,7 +275,7 @@ describe('PubSubManager - Unit Tests', () => {
       const pubsub = new PubSubManager(mockClient);
       const topics = await pubsub.listTopics();
 
-      expect(mockClient.sendCommand).toHaveBeenCalledWith('pubsub.list', {});
+      expect(mockClient.sendCommand).toHaveBeenCalledWith('pubsub.topics', {});
       expect(topics).toEqual(['topic1', 'topic2', 'topic3']);
     });
   });

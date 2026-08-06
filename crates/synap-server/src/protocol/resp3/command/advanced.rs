@@ -1575,6 +1575,16 @@ pub(super) async fn cmd_sstats(state: &AppState, args: &[Resp3Value]) -> Resp3Va
                 Resp3Value::BulkString(b"total_published".to_vec()),
                 Resp3Value::Integer(s.total_published as i64),
             ),
+            // Wipe discriminators (issue #257): every counter above resets when
+            // a room is recreated, these do not.
+            (
+                Resp3Value::BulkString(b"created_at".to_vec()),
+                Resp3Value::Integer(s.created_at as i64),
+            ),
+            (
+                Resp3Value::BulkString(b"generation".to_vec()),
+                Resp3Value::Integer(s.generation as i64),
+            ),
         ]),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }

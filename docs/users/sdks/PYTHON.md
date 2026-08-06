@@ -167,6 +167,14 @@ streams = client.stream.list()
 
 # Get stats
 stats = client.stream.stats("notifications")
+
+# Detect a room wipe: `generation` identifies this incarnation of the room and
+# never repeats a value you have already seen, even across a server restart.
+# Every counter in the payload resets on a wipe and can coincide with the
+# pre-wipe value, so this is the only safe cursor guard.
+if stats["generation"] != remembered_generation:
+    cursor = stats["min_offset"]
+    remembered_generation = stats["generation"]
 ```
 
 ### Publishing Events

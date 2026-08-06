@@ -691,6 +691,16 @@ pub(super) async fn run(
                         SynapValue::Str("total_published".into()),
                         SynapValue::Int(s.total_published as i64),
                     ),
+                    // Wipe discriminators (issue #257): every counter above
+                    // resets when a room is recreated, these do not.
+                    (
+                        SynapValue::Str("created_at".into()),
+                        SynapValue::Int(s.created_at as i64),
+                    ),
+                    (
+                        SynapValue::Str("generation".into()),
+                        SynapValue::Int(s.generation as i64),
+                    ),
                 ])
             })
         }

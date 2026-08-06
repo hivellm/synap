@@ -206,7 +206,10 @@ export class PubSubManager {
    * List all active topics
    */
   async listTopics(): Promise<string[]> {
-    const result = await this.client.sendCommand<{ topics: string[] }>('pubsub.list', {});
+    // `pubsub.topics` is what the server dispatches; `pubsub.list` only ever
+    // worked because the native mapper accepted both spellings, so listing
+    // topics over HTTP came back "Unknown command: pubsub.list".
+    const result = await this.client.sendCommand<{ topics: string[] }>('pubsub.topics', {});
     return result.topics;
   }
 }

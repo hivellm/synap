@@ -3,7 +3,7 @@
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Rust Edition](https://img.shields.io/badge/Rust-2024%20(nightly%201.92%2B)-orange.svg)](https://www.rust-lang.org/)
 [![Tests](https://img.shields.io/badge/tests-1800%2B-brightgreen.svg)](docs/development/TESTING.md)
-[![Version](https://img.shields.io/badge/version-1.3.0-blue.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-1.3.1-blue.svg)](CHANGELOG.md)
 
 > **High-Performance In-Memory Key-Value Store & Message Broker**
 
@@ -279,10 +279,10 @@ docker run -d \
 **Multi-Architecture Build**:
 ```bash
 # Build and push multi-arch images (AMD64 + ARM64)
-./scripts/docker/docker-publish.sh 1.3.0
+./scripts/docker/docker-publish.sh 1.3.1
 
 # Or using PowerShell
-.\scripts\docker\docker-publish.ps1 1.3.0
+.\scripts\docker\docker-publish.ps1 1.3.1
 ```
 
 **Docker Compose**:
@@ -300,7 +300,7 @@ docker-compose up -d
 
 **Available Images**:
 - `hivehub/synap:latest` - Latest stable release
-- `hivehub/synap:<version>` - Specific version (e.g. `hivehub/synap:1.3.0`)
+- `hivehub/synap:<version>` - Specific version (e.g. `hivehub/synap:1.3.1`)
 - Supports `linux/amd64` and `linux/arm64` architectures
 
 📖 **For detailed Docker documentation, see [DOCKER_README.md](DOCKER_README.md)**

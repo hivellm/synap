@@ -189,7 +189,10 @@ async function runStreamSuite(synap: Synap, prefix: string): Promise<void> {
   expect(events[1].event).toBe('evt.b');
 
   const stats = await synap.stream.stats(room);
-  expect(stats.total_events).toBeGreaterThanOrEqual(2);
+  expect(stats.total_published).toBeGreaterThanOrEqual(2);
+  // Wipe discriminators (issue #257) — served on every transport.
+  expect(stats.created_at).toBeGreaterThan(0);
+  expect(stats.generation).toBeGreaterThan(0);
 
   await synap.stream.deleteRoom(room);
   const roomsAfter = await synap.stream.listRooms();

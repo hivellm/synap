@@ -200,6 +200,10 @@ Legend: ✅ implemented · ❌ not yet · N/A not applicable
 | LINDEX/LSET/LTRIM/LREM | ✅ | ❌ | ❌ |
 | LINSERT/LPUSHX/RPUSHX | ✅ | ❌ | ❌ |
 
+A ❌ here means the command has no native dispatcher, so an SDK on `synap://`
+or `resp3://` refuses it up front (`UnsupportedCommandError`) rather than
+sending a name the server would reject. Use the HTTP transport for these.
+
 ### Set
 
 | Command | HTTP | SynapRPC | RESP3 |
@@ -267,6 +271,13 @@ Legend: ✅ implemented · ❌ not yet · N/A not applicable
 | stream.list_rooms | ✅ | ✅ SLIST | ✅ SLIST (1.3.0) |
 | stream.stats | ✅ | ✅ SSTATS | ✅ SSTATS (1.3.0) |
 | stream.replay | ✅ | ❌ | ❌ |
+
+The `stream.stats` reply carries `created_at` and `generation` on all three
+transports since 1.3.1 (issue #257). `generation` identifies this incarnation
+of the room and is strictly increasing across every room creation, including
+server restarts, so a consumer that remembers it alongside its offset cursor
+detects a room wipe that every other counter hides. `total_consumed` and
+`dropped` remain HTTP-only — the native `SSTATS` replies never carried them.
 
 ### Pub/Sub
 

@@ -7,6 +7,115 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-08-06
+
+A fix release: stream consumers get a way to detect a room wipe, and every
+dependency manifest in the repository was audited — server, all five SDKs and
+the desktop GUI — leaving no known advisory in anything that ships.
+
+All six SDKs sit at **1.3.1**. The Go and PHP SDKs live in their own
+repositories (`hivellm/synap-sdk-go`, `hivellm/synap-sdk-php`) and had been
+stuck at 1.2.3, missing both the 1.3.0 transaction work and these stream fixes;
+their submodule pointers move with this release. Both turned out to be carrying
+wire holes rather than merely missing features — commands mapped to names the
+server has never dispatched — so each now has a test pinning every command to
+the name the server actually answers. The PHP SDK additionally had its whole
+read surface returning empty values over HTTP, because the client handed
+modules the response envelope instead of the payload; it now ships a parity
+harness that runs the same 37 module calls over all three transports.
+
+### Added
+
+- **Stream room wipe discriminator** (issue #257): `stream.stats` now returns
+  `created_at` (epoch ms of the room's creation) and `generation` (the identity
+  of this incarnation of the room, strictly increasing across every room
+  creation and seeded from the wall clock so a restarted server never re-emits
+  a value a consumer already saw). Rooms are in-memory, so a restart wipes them
+  and the next publish recreates them from offset 0 — every other stats field
+  resets too and can coincide with the pre-wipe value, which silently stranded
+  consumers whose cursor matched the new head. Served on all three transports:
+  REST `GET /stream/:room/stats`, `stream.stats`, RESP3 `SSTATS` and SynapRPC
+  `SSTATS`. The Rust SDK's `StreamStats` carries both fields; Python/PHP/C#
+  return the payload untyped, so they flow through unchanged.
+
+### Changed
+
+- Dependencies: `base64` 0.22 → 0.23 (workspace and Rust SDK), `rmcp` 2.1 → 3.0
+  in `synap-server` (the MCP `call_tool` handler now returns the 3.x
+  `CallToolResponse`, and `ListToolsResult` is built through its constructor),
+  and, in the TypeScript SDK, `msgpackr` → 2.0.5, `@types/node` → 26.1.2 and
+  `eslint` → 10.8.0. Closes Dependabot #252, #253, #254, #255, #256.
+- **Repository-wide dependency audit**, covering every manifest rather than the
+  two ecosystems Dependabot watches. Result: no advisory remains in any
+  shipped artifact.
+  - Rust: `cargo audit` clean after `event-listener` moved to 5.4.2 (the
+    RUSTSEC-2026-0221 unsoundness reached us through `redis`, a dev-dependency
+    of the comparison benchmark). Every semver-compatible upgrade applied, plus
+    the majors `colored` 2 → 3, `criterion` 0.7 → 0.8 and `ureq` 2 → 3 (the
+    protocol benchmark's HTTP client was ported to the 3.x `Agent`/`Body` API).
+    `bincode` stays at 2.0: the published 3.0.0 is a placeholder whose only
+    contents are a `compile_error!`.
+  - TypeScript SDK: 0 advisories — `esbuild` is pinned past GHSA-g7r4-m6w7-qqqr
+    through an `overrides` entry, and typescript-eslint moved to 8.66.
+  - GUI: 34 advisories (3 critical) down to 0 — Electron 33 → 43,
+    electron-builder 25 → 26, Vite 6 → 8 and the two Vite/Electron plugins to
+    their 1.x line. Six pre-existing TypeScript errors that blocked
+    `npm run build` were fixed so the upgrade could be verified end to end.
+  - Python SDK: `pip-audit` clean; the Thunder floor is now 0.2.2, matching
+    every other end of the wire.
+  - C# SDK: no vulnerable packages; `System.Text.Json` 8.0.5 → 10.0.10,
+    `Microsoft.CodeAnalysis.NetAnalyzers` 9 → 10 (still zero warnings under
+    `TreatWarningsAsErrors`), and the xunit/test-SDK stack refreshed.
+  - PHP SDK: a fresh `composer install` resolves Guzzle 7.15.3, clear of
+    CVE-2026-69245 and GHSA-v5mv-p594-2x33; no manifest change was needed
+    because `composer.lock` is not versioned there.
+
+### Added
+
+- **TypeScript 7 readiness check.** The TypeScript SDK and the GUI each gained
+  a `type-check:next` script that runs the native TypeScript 7 compiler over
+  the same `tsconfig.json`, alongside the existing `type-check` on TypeScript 6.
+  Both are clean today. The pin stays at 6 because `@typescript-eslint` is built
+  on the JavaScript compiler API, which the `typescript` 7.x package no longer
+  exposes (`require('typescript').createProgram` is `undefined`), so upgrading
+  would break linting rather than just warn. The GUI's `tsconfig.json` dropped
+  `baseUrl`, removed in TypeScript 7 and redundant with its already-relative
+  `paths`.
+
+### Fixed
+
+- **The server no longer kills its own worker threads under connection churn.**
+  All three async protocol paths held a `tracing::Span::enter()` guard across an
+  `.await`. That guard is thread-local, so when a task yielded the span stayed
+  entered on the worker and the next task scheduled there ran inside another
+  connection's span — the log shows four different RESP3 peers nested inside one
+  another. The subscriber was eventually asked to clone a span an earlier task
+  had already closed, which panics the worker
+  (`tracing-subscriber/registry/sharded.rs:317: tried to clone a span that
+  already closed`). Enough dead workers and the runtime has nothing left to
+  poll: every listener still accepts TCP, nothing answers, and the periodic
+  snapshot task stops too. The futures are now `.instrument()`ed instead.
+  Reproduced with connections that subscribe and vanish without unsubscribing —
+  what a finishing CLI or PHP process does: the old build stopped answering 2
+  seconds in, the fixed one survives 180s of the same load (107k churned
+  connections, 132k HTTP requests) with zero errors. Guarded by
+  `tracing_span_discipline_tests`, and the soak harness ships as
+  `scripts/test/transport-soak.py`.
+- **Listing pub/sub topics works on every transport.** `pubsub.topics` mapped
+  to `TOPICS` for both native wires, but only SynapRPC dispatches it — RESP3
+  answers `PUBSUB CHANNELS` and has no `TOPICS` — so listing topics over RESP3
+  failed as an unknown command in the TypeScript and Python SDKs. Both mappers
+  now take the transport for the commands the two wires spell differently. The
+  TypeScript SDK additionally sent `pubsub.list`, which the server does not
+  dispatch, so the same call failed over HTTP too; it now sends
+  `pubsub.topics`.
+- TypeScript SDK: `StreamStats` described a payload the server has never sent
+  (`subscribers`, `total_events`, `room`, `last_activity` were always
+  `undefined` at runtime). The interface now matches the server: `name`,
+  `message_count`, `min_offset`, `max_offset`, `subscriber_count`,
+  `total_published`, plus the HTTP-only `total_consumed`/`dropped` and the new
+  `created_at`/`generation`.
+
 ## [1.3.0] - 2026-07-21
 
 A correctness release driven by end-to-end validation: every SDK was exercised
@@ -3484,7 +3593,10 @@ These limitations will be addressed in future phases.
 - Documentation
 - Security
 
-[Unreleased]: https://github.com/hivellm/synap/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/hivellm/synap/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/hivellm/synap/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/hivellm/synap/compare/v1.2.3...v1.3.0
+[1.2.3]: https://github.com/hivellm/synap/compare/v1.2.0...v1.2.3
 [1.2.0]: https://github.com/hivellm/synap/compare/v1.0.0...v1.2.0
 [1.0.0]: https://github.com/hivellm/synap/compare/v0.8.1...v1.0.0
 [0.8.1]: https://github.com/hivellm/synap/compare/v0.8.0...v0.8.1

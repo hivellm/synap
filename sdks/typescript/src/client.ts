@@ -192,7 +192,7 @@ export class SynapClient {
     payload: Record<string, unknown> = {},
   ): Promise<T> {
     if (this.transport.kind !== 'http') {
-      const mapped = mapCommand(command, payload);
+      const mapped = mapCommand(command, payload, this.transport.kind);
       if (mapped) {
         if (this.debug) {
           console.log('[Synap] Native transport:', command, mapped.rawCmd, mapped.args);

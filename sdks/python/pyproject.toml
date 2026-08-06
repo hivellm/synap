@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "synap_sdk"
-version = "1.3.0"
+version = "1.3.1"
 description = "Official Python SDK for Synap - High-Performance In-Memory Key-Value Store & Message Broker"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -30,7 +30,7 @@ dependencies = [
     # The shared binary RPC client — the same protocol the Synap server runs
     # on, so the two ends of the wire cannot drift. It owns the MessagePack
     # codec, so the SDK no longer depends on `msgpack` directly.
-    "hivellm-thunder>=0.2.1",
+    "hivellm-thunder>=0.2.2",
 ]
 
 [project.optional-dependencies]

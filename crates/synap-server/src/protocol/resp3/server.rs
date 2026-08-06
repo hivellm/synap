@@ -20,6 +20,7 @@ use std::time::Instant;
 
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::Semaphore;
+use tracing::Instrument;
 
 use crate::metrics;
 use crate::server::handlers::AppState;
@@ -61,8 +62,18 @@ pub async fn spawn_resp3_listener(
                     tokio::spawn(async move {
                         let _permit = permit; // released when this connection ends
                         let span = tracing::info_span!("resp3.conn", peer = %peer);
-                        let _guard = span.enter();
-                        if let Err(e) = handle_connection(stream, state, idle_timeout).await {
+                        // `.instrument()`, never `span.enter()`: the guard from
+                        // `enter()` is thread-local, so holding it across an
+                        // await leaves the span entered on a worker thread that
+                        // then runs *another* connection's task. That nests
+                        // unrelated peers inside each other and eventually makes
+                        // the subscriber clone a span the first task already
+                        // closed — which panics the worker, and enough dead
+                        // workers take the whole runtime down.
+                        if let Err(e) = handle_connection(stream, state, idle_timeout)
+                            .instrument(span)
+                            .await
+                        {
                             tracing::debug!(peer = %peer, error = %e, "RESP3 connection error");
                         }
                         metrics::resp3_connection_close();
@@ -262,10 +273,7 @@ async fn handle_connection(
         // ── Dispatch with timing ─────────────────────────────────────────────
         let start = Instant::now();
         let cmd_span = tracing::debug_span!("resp3.cmd", cmd = %cmd_upper, peer = %peer);
-        let response = {
-            let _g = cmd_span.enter();
-            dispatch(&state, &args).await
-        };
+        let response = dispatch(&state, &args).instrument(cmd_span).await;
         let elapsed = start.elapsed().as_secs_f64();
 
         // Write response and measure bytes.

@@ -85,6 +85,10 @@ export interface QueueStats {
   total_published: number;
   total_consumed: number;
   consumers: number;
+  /** Server-side name for `size` (`GET /queue/{name}/stats` serializes the core QueueStats). */
+  depth?: number;
+  /** Server-side name for `dead_letter_count`. */
+  dlq_count?: number;
 }
 
 // Stream types
@@ -341,17 +345,17 @@ export class SynapApiClient {
   }
 
   // Stream operations - using correct OpenAPI endpoints
-  async streamCreate(room: string, partitions?: number): Promise<ApiResponse<boolean>> {
+  async streamCreate(room: string, _partitions?: number): Promise<ApiResponse<boolean>> {
     try {
       // Simple stream (room-based) - POST /stream/{room}
-      const response = await this.client.post(`/stream/${encodeURIComponent(room)}`);
+      await this.client.post(`/stream/${encodeURIComponent(room)}`);
       return { success: true, data: true };
     } catch (error: any) {
       return { success: false, error: error.response?.data?.error || error.message || 'Failed to create stream' };
     }
   }
 
-  async streamPublish(room: string, partition: number, message: string): Promise<ApiResponse<boolean>> {
+  async streamPublish(room: string, _partition: number, message: string): Promise<ApiResponse<boolean>> {
     try {
       // OpenAPI: POST /stream/{room}/publish with { event, data }
       const response = await this.client.post(`/stream/${encodeURIComponent(room)}/publish`, {

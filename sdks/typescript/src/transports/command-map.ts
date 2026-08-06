@@ -41,6 +41,8 @@ const TXQUEUEABLE = new Set([
 export function mapCommand(
   cmd: string,
   payload: Record<string, unknown>,
+  /** Target wire, for the few commands SynapRPC and RESP3 spell differently. */
+  transport: 'synaprpc' | 'resp3' = 'synaprpc',
 ): MappedCommand | null {
   // Transactional writes (payload carries a client_id) travel as
   // `TXQUEUE <client_id> <CMD> <args...>` so the server queues them into the
@@ -51,7 +53,7 @@ export function mapCommand(
   if (clientId != null && clientId !== '' && !cmd.startsWith('transaction.')) {
     const rest: Record<string, unknown> = { ...payload };
     delete rest['client_id'];
-    const inner = mapCommand(cmd, rest);
+    const inner = mapCommand(cmd, rest, transport);
     if (inner === null || !TXQUEUEABLE.has(inner.rawCmd)) return null;
     return { rawCmd: 'TXQUEUE', args: [String(clientId), inner.rawCmd, ...inner.args] };
   }
@@ -363,7 +365,11 @@ export function mapCommand(
 
     case 'pubsub.topics':
     case 'pubsub.list':
-      return { rawCmd: 'TOPICS', args: [] };
+      // The native wires name this differently: SynapRPC dispatches TOPICS and
+      // has no PUBSUB, RESP3 dispatches PUBSUB CHANNELS and has no TOPICS.
+      return transport === 'resp3'
+        ? { rawCmd: 'PUBSUB', args: ['CHANNELS'] }
+        : { rawCmd: 'TOPICS', args: [] };
 
     // ── Transactions ──────────────────────────────────────────────────────────
     case 'transaction.multi':   return { rawCmd: 'MULTI',   args: [s('client_id')] };

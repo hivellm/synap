@@ -42,7 +42,7 @@ rand.workspace = true
 bincode = { version = "2.0", features = ["serde"] }
 crc32fast = "1.4"
 compact_str.workspace = true
-rmcp = { version = "2.1.0", features = ["server", "transport-streamable-http-server"] }
+rmcp = { version = "3.0.1", features = ["server", "transport-streamable-http-server"] }
 hyper = "1.7"
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
 mlua = { version = "0.12.0", features = ["lua54", "async", "send", "serialize", "vendored"] }
@@ -101,12 +101,12 @@ thunder-rpc = { workspace = true, features = ["client", "server"] }
 # A path-only dev-dependency is stripped from the published manifest, so it
 # does not affect `cargo publish` for either crate.
 synap-sdk = { path = "../../sdks/rust" }
-criterion = { version = "0.7", features = ["async_tokio"] }
+criterion = { version = "0.8", features = ["async_tokio"] }
 reqwest = { version = "0.13", features = ["json", "blocking"] }
 tokio-test = "0.4"
 tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
 redis = { version = "1.2", features = ["tokio-comp"] }
-ureq = { version = "2", features = ["json"] }
+ureq = { version = "3", features = ["json"] }
 rmpv = "1"
 
 # NOTE: Benchmark declarations removed to allow Docker builds without copying benchmark files

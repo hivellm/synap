@@ -191,13 +191,16 @@ function handleStreamCommand(action: string, payload: any): any {
     
     case 'stats':
       return {
+        name: payload.room || 'test-room',
+        message_count: 10,
+        min_offset: 0,
         max_offset: 10,
-        subscribers: 1,
-        total_events: 10,
+        subscriber_count: 1,
+        total_published: 10,
         total_consumed: 5,
-        room: payload.room || 'test-room',
+        dropped: 0,
         created_at: Date.now(),
-        last_activity: Date.now(),
+        generation: Date.now(),
       };
     
     case 'list':

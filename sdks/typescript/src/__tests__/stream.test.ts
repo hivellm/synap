@@ -42,13 +42,16 @@ describe('StreamManager (Unit Tests)', () => {
 
     it('should get stream stats', async () => {
       const mockStats = {
+        name: 'test-room',
+        message_count: 100,
+        min_offset: 0,
         max_offset: 42,
-        subscribers: 3,
-        total_events: 100,
+        subscriber_count: 3,
+        total_published: 100,
         total_consumed: 95,
-        room: 'test-room',
+        dropped: 0,
         created_at: Date.now(),
-        last_activity: Date.now(),
+        generation: Date.now(),
       };
 
       vi.mocked(mockClient.sendCommand).mockResolvedValue(mockStats);
@@ -228,13 +231,16 @@ describe('StreamManager (Unit Tests)', () => {
   describe('observeStats()', () => {
     it('should emit stats at intervals', async () => {
       const mockStats = {
+        name: 'room',
+        message_count: 50,
+        min_offset: 0,
         max_offset: 10,
-        subscribers: 2,
-        total_events: 50,
+        subscriber_count: 2,
+        total_published: 50,
         total_consumed: 45,
-        room: 'room',
+        dropped: 0,
         created_at: Date.now(),
-        last_activity: Date.now(),
+        generation: Date.now(),
       };
 
       vi.mocked(mockClient.sendCommand).mockResolvedValue(mockStats);

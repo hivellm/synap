@@ -1,0 +1,20 @@
+{
+  "id": "span-enter-across-await-kills-tokio-workers",
+  "type": "anti-pattern",
+  "title": "`Span::enter()` across an await kills tokio workers",
+  "category": "concurrency",
+  "description": "tracing::Span::enter() returns a thread-local guard. A task that yields while holding one leaves the span entered on that worker, so the next task scheduled there runs inside a span it does not own. The subscriber is eventually asked to clone a span an earlier task already closed, which panics the worker thread; enough dead workers and the runtime has nothing left to poll. The process then presents as a total hang — listeners still accept TCP, nothing answers, background tasks go silent at the same moment — which reads like a lock deadlock and sends you hunting in the wrong place. The give-away is unrelated peers nested inside one another in the log's span field. Fix: attach the span to the future with tracing::Instrument instead of entering it. clippy::await_holding_lock does not catch this, since a span guard is not a lock.",
+  "example": "// Wrong — the guard outlives the poll:\ntokio::spawn(async move {\n    let span = tracing::info_span!(\"resp3.conn\", peer = %peer);\n    let _guard = span.enter();\n    handle_connection(stream, state).await\n});\n\n// Right — the span is entered per poll and exited on every yield:\nuse tracing::Instrument;\n\ntokio::spawn(async move {\n    handle_connection(stream, state)\n        .instrument(tracing::info_span!(\"resp3.conn\", peer = %peer))\n        .await\n});",
+  "whenToUse": "Any async code that wants a span: server accept loops, per-request spans, background tasks.",
+  "whenNotToUse": "Synchronous code, where the guard's scope and the thread's work genuinely coincide — there `enter()` is correct.",
+  "createdAt": "2026-08-06T16:10:00.000Z",
+  "tags": [
+    "tracing",
+    "tokio",
+    "resp3",
+    "synaprpc",
+    "panic",
+    "phase9"
+  ],
+  "source": "manual"
+}

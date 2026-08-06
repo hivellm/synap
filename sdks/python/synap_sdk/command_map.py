@@ -14,7 +14,9 @@ from typing import Any
 from synap_sdk.exceptions import UnsupportedCommandError
 
 
-def map_command(cmd: str, payload: dict[str, Any]) -> tuple[str, list[Any]]:
+def map_command(
+    cmd: str, payload: dict[str, Any], transport: str = "synaprpc"
+) -> tuple[str, list[Any]]:
     """Translate a dotted SDK command and JSON payload to a native wire command.
 
     Args:
@@ -27,13 +29,15 @@ def map_command(cmd: str, payload: dict[str, Any]) -> tuple[str, list[Any]]:
     Raises:
         UnsupportedCommandError: If ``cmd`` has no native mapping.
     """
-    result = _map_command_inner(cmd, payload)
+    result = _map_command_inner(cmd, payload, transport)
     if result is None:
         raise UnsupportedCommandError(cmd, "native")
     return result
 
 
-def map_command_optional(cmd: str, payload: dict[str, Any]) -> tuple[str, list[Any]] | None:
+def map_command_optional(
+    cmd: str, payload: dict[str, Any], transport: str = "synaprpc"
+) -> tuple[str, list[Any]] | None:
     """Translate a dotted SDK command to a native wire command, returning None if unmapped.
 
     Args:
@@ -43,7 +47,7 @@ def map_command_optional(cmd: str, payload: dict[str, Any]) -> tuple[str, list[A
     Returns:
         A ``(wire_command, args)`` tuple, or ``None`` if no native mapping exists.
     """
-    return _map_command_inner(cmd, payload)
+    return _map_command_inner(cmd, payload, transport)
 
 
 # Raw commands the server can queue inside a MULTI via TXQUEUE (ADR 005) —
@@ -59,7 +63,9 @@ _TXQUEUEABLE = frozenset(
 )
 
 
-def _map_command_inner(cmd: str, payload: dict[str, Any]) -> tuple[str, list[Any]] | None:  # noqa: C901, PLR0912
+def _map_command_inner(  # noqa: C901, PLR0912
+    cmd: str, payload: dict[str, Any], transport: str = "synaprpc"
+) -> tuple[str, list[Any]] | None:
     """Internal implementation — returns None for unmapped commands."""
     # Transactional writes (payload carries a client_id) travel as
     # `TXQUEUE <client_id> <CMD> <args...>` so the server queues them into the
@@ -68,7 +74,7 @@ def _map_command_inner(cmd: str, payload: dict[str, Any]) -> tuple[str, list[Any
     # silently executed outside the transaction.
     if (client_id := payload.get("client_id")) and not cmd.startswith("transaction."):
         stripped = {k: v for k, v in payload.items() if k != "client_id"}
-        inner = _map_command_inner(cmd, stripped)
+        inner = _map_command_inner(cmd, stripped, transport)
         if inner is None:
             return None
         raw_cmd, args = inner
@@ -375,6 +381,11 @@ def _map_command_inner(cmd: str, payload: dict[str, Any]) -> tuple[str, list[Any
             topics = payload.get("topics", [])
             return "UNSUBSCRIBE", [payload.get("subscriber_id", ""), *topics]
         case "pubsub.topics" | "pubsub.list":
+            # The native wires name this differently: SynapRPC dispatches TOPICS
+            # and has no PUBSUB, RESP3 dispatches PUBSUB CHANNELS and has no
+            # TOPICS.
+            if transport == "resp3":
+                return "PUBSUB", ["CHANNELS"]
             return "TOPICS", []
 
         # ── Transactions ──────────────────────────────────────────────────────

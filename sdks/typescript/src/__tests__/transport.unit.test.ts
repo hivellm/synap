@@ -184,6 +184,26 @@ describe('toWireValue / fromWireValue (via SynapRpcTransport loopback)', () => {
 // ── mapCommand ────────────────────────────────────────────────────────────────
 
 describe('mapCommand', () => {
+  describe('transport-specific spellings', () => {
+    // SynapRPC dispatches TOPICS and has no PUBSUB; RESP3 dispatches
+    // PUBSUB CHANNELS and has no TOPICS — one mapping cannot serve both, and
+    // listing topics over RESP3 failed as an unknown command.
+    it('"pubsub.topics" → TOPICS on SynapRPC', () => {
+      expect(mapCommand('pubsub.topics', {}, 'synaprpc')).toEqual({ rawCmd: 'TOPICS', args: [] });
+    });
+
+    it('"pubsub.topics" → PUBSUB CHANNELS on RESP3', () => {
+      expect(mapCommand('pubsub.topics', {}, 'resp3')).toEqual({
+        rawCmd: 'PUBSUB',
+        args: ['CHANNELS'],
+      });
+    });
+
+    it('defaults to the SynapRPC spelling when no transport is given', () => {
+      expect(mapCommand('pubsub.list', {})).toEqual({ rawCmd: 'TOPICS', args: [] });
+    });
+  });
+
   describe('KV commands', () => {
     it('"kv.get" with {key: "foo"} → {rawCmd: "GET", args: ["foo"]}', () => {
       const result = mapCommand('kv.get', { key: 'foo' });

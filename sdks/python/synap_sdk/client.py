@@ -240,7 +240,7 @@ class SynapClient:
         pl = payload or {}
 
         if self._native is not None:
-            mapped = map_command(command, pl)
+            mapped = map_command(command, pl, self._config.transport)
             if mapped is not None:
                 raw_cmd, args = mapped
                 try:
