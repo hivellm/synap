@@ -89,7 +89,22 @@
       "Bash(perl -0pi -e 's/mapCommandToWire\\\\\\(tc\\\\.command, payload\\\\\\)/mapCommandToWire\\(tc.command, payload, TransportSynapRPC\\)/' command_map_test.go)",
       "Bash(C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/audit-venv/Scripts/python.exe -m ruff check synap_sdk/command_map.py synap_sdk/client.py)",
       "Bash(C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/audit-venv/Scripts/python.exe -m pytest tests/test_transport.py -q --no-cov)",
-      "Bash(node C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/ts_live_topics.mjs)"
+      "Bash(node C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/ts_live_topics.mjs)",
+      "Bash(php C:/Users/Bolado/AppData/Local/Temp/claude/e--HiveLLM-Synap/e5fbf158-6ce2-4f77-ad37-da6997376782/scratchpad/php_parity.php)",
+      "Bash(sed -i '137d' src/CommandMapper.php)",
+      "Bash(php -l src/CommandMapper.php)",
+      "Bash(php -l src/SynapClient.php)",
+      "Bash(awk -F: '$1>500')",
+      "Bash(SYNAP_S2S=true ./vendor/bin/phpunit tests/Unit)",
+      "Bash(./vendor/bin/phpunit tests/Unit/HttpResponseShapeTest.php --testdox)",
+      "Bash(timeout 500 env SYNAP_S2S=true ./vendor/bin/phpunit tests/Unit)",
+      "Bash(timeout 200 env SYNAP_S2S=true ./vendor/bin/phpunit tests/Unit/Module/TransactionManagerS2STest.php --testdox)",
+      "Bash(timeout 200 env SYNAP_S2S=true ./vendor/bin/phpunit tests/Unit/Module/TransactionManagerS2STest.php)",
+      "Bash(timeout 10 python -c ' *)",
+      "Bash(taskkill //PID 69924 //F)",
+      "Bash(./target/release/synap-server.exe --config config/config.yml)",
+      "Bash(timeout 90 python -c ' *)",
+      "Bash(php scripts/transport-parity.php)"
     ],
     "defaultMode": "acceptEdits",
     "additionalDirectories": [

@@ -19,7 +19,10 @@ stuck at 1.2.3, missing both the 1.3.0 transaction work and these stream fixes;
 their submodule pointers move with this release. Both turned out to be carrying
 wire holes rather than merely missing features — commands mapped to names the
 server has never dispatched — so each now has a test pinning every command to
-the name the server actually answers.
+the name the server actually answers. The PHP SDK additionally had its whole
+read surface returning empty values over HTTP, because the client handed
+modules the response envelope instead of the payload; it now ships a parity
+harness that runs the same 37 module calls over all three transports.
 
 ### Added
 

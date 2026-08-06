@@ -200,6 +200,10 @@ Legend: ✅ implemented · ❌ not yet · N/A not applicable
 | LINDEX/LSET/LTRIM/LREM | ✅ | ❌ | ❌ |
 | LINSERT/LPUSHX/RPUSHX | ✅ | ❌ | ❌ |
 
+A ❌ here means the command has no native dispatcher, so an SDK on `synap://`
+or `resp3://` refuses it up front (`UnsupportedCommandError`) rather than
+sending a name the server would reject. Use the HTTP transport for these.
+
 ### Set
 
 | Command | HTTP | SynapRPC | RESP3 |
