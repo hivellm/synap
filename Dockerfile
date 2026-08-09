@@ -73,16 +73,7 @@ RUN apk add --no-cache \
     make \
     perl
 
-# Install nightly toolchain + musl target in one layer to avoid
-# overlayfs cross-device rename errors when rustup syncs channels.
 ARG TARGETARCH
-RUN case ${TARGETARCH} in \
-    amd64) TARGET_TRIPLE=x86_64-unknown-linux-musl ;; \
-    arm64) TARGET_TRIPLE=aarch64-unknown-linux-musl ;; \
-    *) TARGET_TRIPLE=x86_64-unknown-linux-musl ;; \
-    esac && \
-    rustup toolchain install nightly --target ${TARGET_TRIPLE} && \
-    rustup default nightly
 
 # Set working directory
 WORKDIR /usr/src/synap
@@ -120,13 +111,31 @@ RUN sed -i '/^# Configure benchmarks to use Criterion/,/^$/d' crates/synap-serve
 # - LTO + strip for smallest binary
 # - --bins flag skips benches/examples/tests
 # - BuildKit cache mounts for incremental compilation
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
+# The toolchain is installed *inside this step*, not in a layer of its own.
+# `rust-toolchain.toml` pins the channel to plain `nightly`, so rustup re-syncs
+# it whenever the published nightly is newer than the installed one — and that
+# sync renames files out of a directory baked into an earlier layer, which
+# overlayfs answers with EXDEV:
+#
+#   error: could not rename 'component' file from
+#   '/usr/local/rustup/toolchains/nightly-…/share/zsh/site-functions'
+#   to '/usr/local/rustup/tmp/…': Cross-device link (os error 18)
+#
+# Installing and building in one step keeps every rustup rename inside the same
+# writable layer. `/usr/local/rustup` is a cache mount so the toolchain still
+# survives between builds; the id is per-architecture because the amd64 and
+# arm64 legs would otherwise share one directory of native binaries.
+RUN --mount=type=cache,target=/usr/local/rustup,id=rustup-${TARGETARCH} \
+    --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/usr/src/synap/target \
+    --mount=type=cache,target=/usr/src/synap/target,id=target-${TARGETARCH} \
     case ${TARGETARCH} in \
     amd64) TARGET_TRIPLE=x86_64-unknown-linux-musl ;; \
     arm64) TARGET_TRIPLE=aarch64-unknown-linux-musl ;; \
+    *) TARGET_TRIPLE=x86_64-unknown-linux-musl ;; \
     esac && \
+    rustup toolchain install nightly --profile minimal --target ${TARGET_TRIPLE} && \
+    rustup default nightly && \
     cargo build --release --bins \
     --target ${TARGET_TRIPLE} && \
     strip /usr/src/synap/target/${TARGET_TRIPLE}/release/synap-server && \
