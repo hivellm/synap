@@ -54,6 +54,24 @@ migration notes before upgrading.
   all 24 tools are checked (11 were before). A call without an identity is
   refused in authenticated mode, and a legacy MCP session can no longer be
   used under credentials other than those that initialized it (`403`).
+- **Hub mode isolates tenants, and fails closed** (review finding S-03). The
+  production router never installed Hub authentication, so tenants with
+  different access keys read and wrote the same unscoped keys. With
+  `hub.enabled: true`, Hub authentication now replaces local authentication on
+  every route except `/health` and `/metrics`: a missing or rejected key answers
+  401 and local users and API keys are no longer accepted. Each tenant runs
+  with data-type permissions only and its names are scoped to `user_<id>:` on
+  REST (sorted sets, geospatial and queue stats included), `/api/v1/command`,
+  MCP, UMICP and the KV-watch, pub/sub, queue and stream WebSockets; envelope,
+  MCP and UMICP commands that cannot be confined to one tenant (keyspace-wide,
+  admin, scripting, transactions without a `client_id`) are refused, and
+  routes that are not tenant-isolated (stats, `/info`, `/slowlog`, `/clients`,
+  `/memory`, `/snapshot`, `/script/*`, REST `/transaction/*`, partitioned topics,
+  consumer groups, `/cluster/*`, `/auth/*`) answer 403. HiveHub cannot validate
+  access keys yet (hivellm/synap#230), so until it can every keyed Hub request
+  answers 503 and the server logs a startup warning. **Breaking:** the server
+  refuses to start in Hub mode while RESP3 or SynapRPC is enabled (both are on
+  by default), naming the listener, because neither authenticates tenants.
 
 ### Performance
 

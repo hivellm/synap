@@ -4,6 +4,7 @@ This guide walks you through configuring Synap to integrate with HiveHub.Cloud f
 
 ## Table of Contents
 
+1. [Hub Mode Policy and Current Status](#hub-mode-policy-and-current-status)
 1. [Prerequisites](#prerequisites)
 2. [Getting Your Service API Key](#getting-your-service-api-key)
 3. [Configuration](#configuration)
@@ -13,13 +14,39 @@ This guide walks you through configuring Synap to integrate with HiveHub.Cloud f
 7. [Troubleshooting](#troubleshooting)
 8. [Next Steps](#next-steps)
 
+## Hub Mode Policy and Current Status
+
+Read this before enabling Hub mode; the full policy is in
+[AUTHENTICATION.md](../features/AUTHENTICATION.md#hub-mode-policy).
+
+- **Access-key validation is unavailable.** hivehub-internal-sdk 1.0.0 has no
+  endpoint that validates an access-key secret, so Synap cannot resolve a key to
+  its tenant and fails closed: every request that needs a key answers 503 with
+  an error naming [hivellm/synap#230](https://github.com/hivellm/synap/issues/230),
+  and the server logs a warning at startup. `/health` and `/metrics` keep
+  answering.
+- **Hub keys only.** Hub authentication replaces local authentication: a request
+  without a key, or with a key the Hub rejects, answers 401; local users and
+  local API keys are not accepted.
+- **Tenant routes only.** Routes that cannot confine their data to one tenant
+  answer 403: keyspace-wide `/stats`, `/info`, `/slowlog`, `/clients`,
+  `/memory`, `/snapshot`, `/script/*`, `/transaction/*`, `/topics/*`,
+  `/consumer-groups/*`, `/cluster/*` and `/auth/*`.
+- **Every surface is scoped.** REST, the `/api/v1/command` envelope, MCP, UMICP
+  and the WebSockets rewrite every resource name to `user_<id>:<name>`;
+  envelope commands that cannot be confined (`kv.keys`, `*.stats`,
+  `script.eval`, ...) are refused.
+- **No native listeners.** The server refuses to start in Hub mode while RESP3
+  or SynapRPC is enabled, naming the listener. Both are enabled by default, so
+  set `resp3.enabled: false` and `synap_rpc.enabled: false`.
+
 ## Prerequisites
 
 Before integrating with HiveHub.Cloud, ensure you have:
 
-- [ ] **Synap server** compiled with `hub-integration` feature:
+- [ ] **Synap server** built (Hub support is always compiled in):
   ```bash
-  cargo build --release --features hub-integration
+  cargo build --release
   ```
 
 - [ ] **HiveHub.Cloud account** (sign up at https://hivehub.cloud)
@@ -92,31 +119,22 @@ hub:
   # Enable Hub integration
   enabled: true
 
-  # Service API key (use environment variable in production)
-  service_api_key: "${HIVEHUB_SERVICE_API_KEY}"
+  # Service API key (set SYNAP_HUB_SERVICE_API_KEY in production)
+  service_api_key: ""
 
   # Hub API base URL
-  base_url: "https://api.hivehub.cloud"
+  api_url: "https://api.hivehub.cloud"
 
-  # Access key validation settings
-  access_key:
-    cache_ttl_seconds: 60        # Cache validated keys for 60 seconds
-    cache_max_entries: 10000     # Maximum cached keys in memory
+  cache_ttl: 60                # Cache validated access keys for 60 s (10-300)
+  usage_report_interval: 300   # Report usage every 5 minutes (>= 60)
+  timeout: 30                  # Hub API timeout in seconds (5-120)
 
-  # Authentication settings
-  auth:
-    require_hub_auth: true       # Require Hub access keys
-    allow_local_auth_fallback: false  # Disable local auth (Hub-only mode)
-
-  # Quota settings
-  quota:
-    cache_ttl_seconds: 60        # Cache quota data for 60 seconds
-    usage_report_interval: 300   # Report usage every 5 minutes
-
-  # Usage tracking
-  usage:
-    buffer_size: 10000           # Max metrics in memory before flush
-    flush_interval_seconds: 300  # Force flush every 5 minutes
+# Hub mode refuses to start while these are enabled: they have no tenant
+# authentication.
+resp3:
+  enabled: false
+synap_rpc:
+  enabled: false
 ```
 
 ### Configuration Options Explained
@@ -131,25 +149,20 @@ hub:
 - **Required**: Yes (when `hub.enabled = true`)
 - **Description**: Service API key from HiveHub.Cloud. Always use environment variable in production.
 
-#### `hub.base_url`
+#### `hub.api_url`
 - **Type**: String (URL)
-- **Default**: `https://api.hivehub.cloud`
-- **Description**: HiveHub.Cloud API endpoint. Change only for custom deployments.
+- **Default**: `http://localhost:3000`
+- **Description**: HiveHub.Cloud API endpoint.
 
-#### `hub.access_key.cache_ttl_seconds`
-- **Type**: Integer
+#### `hub.cache_ttl`
+- **Type**: Integer (seconds, 10-300)
 - **Default**: `60`
-- **Description**: How long to cache access key validations. Higher values reduce Hub API calls but increase revocation latency.
+- **Description**: How long a validated access key is cached. Rejected keys are never cached. Higher values reduce Hub API calls but increase revocation latency.
 
-#### `hub.auth.require_hub_auth`
+#### `resp3.enabled` / `synap_rpc.enabled`
 - **Type**: Boolean
-- **Default**: `true` (when Hub enabled)
-- **Description**: Require Hub access keys for all requests.
-
-#### `hub.auth.allow_local_auth_fallback`
-- **Type**: Boolean
-- **Default**: `false`
-- **Description**: Allow local API keys as fallback. Set to `true` for hybrid mode during migration.
+- **Default**: `true`
+- **Description**: Must be `false` in Hub mode: these listeners authenticate local users only, and the server refuses to start with either enabled. There is no hybrid mode; Hub mode accepts Hub access keys only.
 
 ## Starting the Server
 

@@ -334,6 +334,10 @@ name = "mcp_identity_tests"
 required-features = ["full-tests"]
 
 [[test]]
+name = "hub_tenant_isolation_tests"
+required-features = ["full-tests"]
+
+[[test]]
 name = "mcp_tests"
 required-features = ["full-tests"]
 

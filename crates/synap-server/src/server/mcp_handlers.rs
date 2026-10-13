@@ -60,14 +60,38 @@ fn authorize_tool(
         .map_err(|denied| ErrorData::invalid_request(denied.to_string(), None))
 }
 
+/// In Hub mode, confine a tool call's arguments to the caller's tenant exactly
+/// as the envelope command the tool performs is confined; a caller without a
+/// tenant is refused there.
+fn confine_tool(
+    caller: &OperationContext,
+    hub_mode: bool,
+    request: &mut CallToolRequestParams,
+) -> Result<(), ErrorData> {
+    let refuse = |denied: crate::auth::Denied| ErrorData::invalid_request(denied.to_string(), None);
+    let Some(tenant) = caller.tenant_scope(hub_mode).map_err(refuse)? else {
+        return Ok(());
+    };
+    let command = tool_command(&request.name).unwrap_or("mcp.unknown-tool");
+    let mut arguments = serde_json::Value::Object(request.arguments.take().unwrap_or_default());
+    crate::auth::scope_envelope(command, &mut arguments, tenant).map_err(refuse)?;
+    request.arguments = match arguments {
+        serde_json::Value::Object(fields) => Some(fields),
+        _ => None,
+    };
+    Ok(())
+}
+
 /// Run one MCP tool for `caller`, whose identity the transport (MCP or UMICP)
-/// carried with the request. The call is authorized before any tool code runs.
+/// carried with the request. The call is authorized, and in Hub mode confined
+/// to the caller's tenant, before any tool code runs.
 pub async fn handle_mcp_tool(
-    request: CallToolRequestParams,
+    mut request: CallToolRequestParams,
     state: Arc<AppState>,
     caller: &OperationContext,
 ) -> Result<CallToolResult, ErrorData> {
     authorize_tool(caller, &request)?;
+    confine_tool(caller, state.hub_client.is_some(), &mut request)?;
 
     match request.name.as_ref() {
         // Essential KV tools (3)
@@ -1073,6 +1097,46 @@ mod tests {
                 )
             )
             .is_ok()
+        );
+    }
+
+    #[test]
+    fn hub_tools_are_confined_to_the_callers_tenant() {
+        let tenant = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let caller = OperationContext::unrestricted().with_tenant(Some(tenant));
+        let call = |tool: &str, args: serde_json::Value| {
+            CallToolRequestParams::new(tool.to_string())
+                .with_arguments(args.as_object().cloned().unwrap_or_default())
+        };
+
+        let mut set = call(
+            "synap_kv_set",
+            serde_json::json!({"key": "a", "value": "1"}),
+        );
+        confine_tool(&caller, true, &mut set).unwrap();
+        let arguments = set.arguments.unwrap();
+        assert_eq!(arguments["key"], "user_550e8400e29b41d4a716446655440000:a");
+        assert_eq!(arguments["value"], "1");
+
+        let mut untouched = call("synap_kv_set", serde_json::json!({"key": "a"}));
+        confine_tool(&caller, false, &mut untouched).unwrap();
+        assert_eq!(untouched.arguments.unwrap()["key"], "a");
+
+        let mut no_tenant = call("synap_kv_get", serde_json::json!({"key": "a"}));
+        assert!(confine_tool(&OperationContext::unrestricted(), true, &mut no_tenant).is_err());
+
+        // A transaction is the tenant's own: its id is scoped, and one is
+        // required because a generated id could not be addressed again.
+        let mut multi = call("synap_transaction_multi", serde_json::json!({}));
+        assert!(confine_tool(&caller, true, &mut multi).is_err());
+        let mut exec = call(
+            "synap_transaction_exec",
+            serde_json::json!({"client_id": "tx"}),
+        );
+        confine_tool(&caller, true, &mut exec).unwrap();
+        assert_eq!(
+            exec.arguments.unwrap()["client_id"],
+            "user_550e8400e29b41d4a716446655440000:tx"
         );
     }
 }

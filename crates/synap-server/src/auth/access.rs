@@ -15,10 +15,17 @@
 //! A command the classifiers do not know is denied while authentication is
 //! enforced, and a test walks every dispatcher's command table to make sure
 //! none is missing.
+//!
+//! In Hub mode the context also carries the caller's tenant, and
+//! [`scope_envelope`] confines an envelope payload (or MCP/UMICP tool
+//! arguments) to it, using the same field knowledge as [`classify_envelope`].
 
 use std::borrow::Cow;
 
+use uuid::Uuid;
+
 use super::{Action, AuthContext, Permission, User, UserManager, command_requires_admin};
+use crate::hub::MultiTenant;
 
 /// One resource a command touches and what it does to it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,6 +71,8 @@ pub struct OperationContext {
     permissions: Vec<Permission>,
     /// False only when authentication is disabled by configuration.
     enforced: bool,
+    /// The Hub tenant whose namespace every resource is confined to (Hub mode).
+    tenant: Option<Uuid>,
 }
 
 impl OperationContext {
@@ -74,6 +83,7 @@ impl OperationContext {
             is_admin: false,
             permissions: Vec::new(),
             enforced: false,
+            tenant: None,
         }
     }
 
@@ -86,6 +96,7 @@ impl OperationContext {
             is_admin: ctx.is_admin,
             permissions: ctx.permissions.clone(),
             enforced: true,
+            tenant: None,
         }
     }
 
@@ -104,14 +115,36 @@ impl OperationContext {
                 is_admin: user.is_admin,
                 permissions: manager.get_user_permissions(&user.username),
                 enforced: true,
+                tenant: None,
             },
             None => Self {
                 principal: None,
                 is_admin: false,
                 permissions: Vec::new(),
                 enforced: true,
+                tenant: None,
             },
         }
+    }
+
+    /// The same caller, confined to Hub tenant `tenant`.
+    #[must_use]
+    pub fn with_tenant(mut self, tenant: Option<Uuid>) -> Self {
+        self.tenant = tenant;
+        self
+    }
+
+    /// The Hub tenant this caller is confined to, if any.
+    pub fn tenant(&self) -> Option<&Uuid> {
+        self.tenant.as_ref()
+    }
+
+    /// The tenant this request's resources must be scoped to: `None` outside
+    /// Hub mode; in Hub mode the caller's tenant, and an error when there is
+    /// none, so scoping never falls back to a raw, shared name.
+    pub fn tenant_scope(&self, hub_mode: bool) -> Result<Option<&Uuid>, Denied> {
+        MultiTenant::required_tenant(hub_mode, self.tenant.as_ref())
+            .map_err(|_| Denied("NOPERM Hub mode: the request carries no Hub tenant".to_string()))
     }
 
     /// The authenticated principal, if any.
@@ -718,6 +751,114 @@ pub fn classify_envelope(command: &str, payload: &serde_json::Value) -> Option<V
     Some(accesses)
 }
 
+/// Scalar payload fields that name a resource in some envelope command (MCP
+/// and UMICP tool arguments use the same names): every scalar field
+/// [`classify_envelope`] reads a resource from. No command uses one of these
+/// names for anything but a resource.
+const RESOURCE_FIELDS: &[&str] = &[
+    "key",
+    "source",
+    "destination",
+    "queue",
+    "name",
+    "room",
+    "topic",
+];
+
+/// Array payload fields whose items name resources: every array field
+/// [`classify_envelope`] reads, plus the keys `transaction.watch` watches and
+/// the topics `pubsub.unsubscribe` leaves, which need no permission but must
+/// still name the tenant's own keys and topics.
+const RESOURCE_LISTS: &[&str] = &["keys", "sources", "source_keys", "topics"];
+
+/// Envelope commands that run commands their payload does not name, so no
+/// rewriting of the payload can confine them to a tenant.
+const RUNS_UNNAMED_COMMANDS: &[&str] = &["script.eval", "script.evalsha"];
+
+fn prefix_in_place(value: &mut serde_json::Value, prefix: &str) {
+    if let serde_json::Value::String(name) = value {
+        name.insert_str(0, prefix);
+    }
+}
+
+/// Whether `resource` (`<type>:<name>`) lies in the namespace `prefix`.
+fn in_namespace(resource: &str, prefix: &str) -> bool {
+    resource
+        .split_once(':')
+        .is_some_and(|(_, name)| name.starts_with(prefix))
+}
+
+fn hub_unavailable(command: &str, why: impl std::fmt::Display) -> Denied {
+    Denied(format!(
+        "NOPERM '{command}' is not available in Hub mode: {why}"
+    ))
+}
+
+/// Confine an `/api/v1/command` payload, or the arguments of the MCP/UMICP
+/// tool that performs `command`, to Hub tenant `tenant`: every resource name
+/// it carries and the `client_id` of its transaction are rewritten into the
+/// tenant's namespace (`user_<id>:<name>`, as `MultiTenant` scopes REST
+/// requests). Call it after authorization and before dispatch.
+///
+/// Fails closed. The command is refused when it has no policy, when it runs
+/// commands its payload does not name (scripts), when a transaction command
+/// has no string `client_id`, or when the classifier still sees a resource
+/// outside the tenant's namespace after rewriting: a keyspace-wide or admin
+/// access (`kv:*`, `admin:*`), or a name given as something other than a
+/// string. On refusal the payload may be partly rewritten and must not run.
+pub fn scope_envelope(
+    command: &str,
+    payload: &mut serde_json::Value,
+    tenant: &Uuid,
+) -> Result<(), Denied> {
+    use serde_json::Value;
+
+    if RUNS_UNNAMED_COMMANDS.contains(&command) {
+        return Err(hub_unavailable(
+            command,
+            "it runs commands its payload does not name",
+        ));
+    }
+    if command.starts_with("transaction.")
+        && payload.get("client_id").and_then(Value::as_str).is_none()
+    {
+        return Err(hub_unavailable(command, "it needs a string client_id"));
+    }
+
+    let prefix = MultiTenant::get_user_prefix(tenant);
+    if let Some(fields) = payload.as_object_mut() {
+        for name in RESOURCE_FIELDS.iter().chain(&["client_id"]) {
+            if let Some(value) = fields.get_mut(*name) {
+                prefix_in_place(value, &prefix);
+            }
+        }
+        for name in RESOURCE_LISTS {
+            if let Some(Value::Array(items)) = fields.get_mut(*name) {
+                items
+                    .iter_mut()
+                    .for_each(|item| prefix_in_place(item, &prefix));
+            }
+        }
+        if let Some(Value::Array(pairs)) = fields.get_mut("pairs") {
+            for key in pairs.iter_mut().filter_map(|pair| pair.get_mut("key")) {
+                prefix_in_place(key, &prefix);
+            }
+        }
+    }
+
+    let accesses = classify_envelope(command, payload).ok_or_else(|| unclassified(command))?;
+    match accesses
+        .iter()
+        .find(|access| !in_namespace(&access.resource, &prefix))
+    {
+        None => Ok(()),
+        Some(access) => Err(hub_unavailable(
+            command,
+            format_args!("'{}' is not confined to a tenant", access.resource),
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -737,6 +878,7 @@ mod tests {
             is_admin: false,
             permissions,
             enforced: true,
+            tenant: None,
         }
     }
 
@@ -1031,6 +1173,7 @@ mod tests {
             is_admin: true,
             permissions: Vec::new(),
             enforced: true,
+            tenant: None,
         };
         assert!(
             admin
@@ -1062,5 +1205,178 @@ mod tests {
                 .is_err()
         );
         assert!(OperationContext::for_user(None, None).is_unrestricted());
+    }
+
+    fn tenant_a() -> Uuid {
+        Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap()
+    }
+
+    fn tenant_b() -> Uuid {
+        Uuid::parse_str("650e8400-e29b-41d4-a716-446655440000").unwrap()
+    }
+
+    fn scoped(command: &str, payload: serde_json::Value, tenant: &Uuid) -> serde_json::Value {
+        let mut payload = payload;
+        scope_envelope(command, &mut payload, tenant)
+            .unwrap_or_else(|denied| panic!("{command} denied: {denied}"));
+        payload
+    }
+
+    #[test]
+    fn same_logical_key_lands_in_each_tenants_namespace() {
+        let a = scoped(
+            "kv.set",
+            json!({"key": "config", "value": "a"}),
+            &tenant_a(),
+        );
+        let b = scoped(
+            "kv.set",
+            json!({"key": "config", "value": "b"}),
+            &tenant_b(),
+        );
+        assert_eq!(a["key"], "user_550e8400e29b41d4a716446655440000:config");
+        assert_eq!(b["key"], "user_650e8400e29b41d4a716446655440000:config");
+        assert_eq!(a["value"], "a", "values are never rewritten");
+    }
+
+    #[test]
+    fn every_resource_field_is_scoped() {
+        let p = "user_550e8400e29b41d4a716446655440000:";
+        let mset = scoped(
+            "kv.mset",
+            json!({"pairs": [{"key": "x", "value": 1}, {"key": "y", "value": 2}], "client_id": "tx"}),
+            &tenant_a(),
+        );
+        assert_eq!(mset["pairs"][0]["key"], format!("{p}x"));
+        assert_eq!(mset["pairs"][1]["key"], format!("{p}y"));
+        assert_eq!(mset["client_id"], format!("{p}tx"));
+
+        let rename = scoped(
+            "key.rename",
+            json!({"source": "s", "destination": "d"}),
+            &tenant_a(),
+        );
+        assert_eq!(rename["source"], format!("{p}s"));
+        assert_eq!(rename["destination"], format!("{p}d"));
+
+        let bitop = scoped(
+            "bitmap.bitop",
+            json!({"destination": "d", "source_keys": ["a", "b"], "operation": "AND"}),
+            &tenant_a(),
+        );
+        assert_eq!(
+            bitop["source_keys"],
+            json!([format!("{p}a"), format!("{p}b")])
+        );
+        assert_eq!(bitop["operation"], "AND");
+
+        let subscribe = scoped(
+            "pubsub.subscribe",
+            json!({"topics": ["*", "orders.#"]}),
+            &tenant_a(),
+        );
+        assert_eq!(
+            subscribe["topics"],
+            json!([format!("{p}*"), format!("{p}orders.#")])
+        );
+
+        let watch = scoped(
+            "transaction.watch",
+            json!({"client_id": "tx", "keys": ["k"]}),
+            &tenant_a(),
+        );
+        assert_eq!(watch["keys"], json!([format!("{p}k")]));
+
+        let queue = scoped("queue.create", json!({"name": "jobs"}), &tenant_a());
+        assert_eq!(queue["name"], format!("{p}jobs"));
+    }
+
+    #[test]
+    fn unconfinable_commands_are_refused_in_hub_mode() {
+        for (command, payload) in [
+            ("kv.keys", json!({"pattern": "*"})),
+            ("kv.scan", json!({"prefix": "a"})),
+            ("kv.flushall", json!({})),
+            ("info", json!({})),
+            ("queue.list", json!({})),
+            ("pubsub.stats", json!({})),
+            ("script.load", json!({"script": "return 1"})),
+            ("script.eval", json!({"script": "return 1", "keys": ["k"]})),
+            ("transaction.exec", json!({})),
+            // A name given as a number cannot be confined: refused, not run raw.
+            ("kv.get", json!({"key": 42})),
+            ("kv.mget", json!({"keys": ["a", 7]})),
+            ("no.such.command", json!({"key": "a"})),
+        ] {
+            let mut payload = payload;
+            let denied = scope_envelope(command, &mut payload, &tenant_a()).expect_err(command);
+            assert!(denied.message().starts_with("NOPERM"), "{denied}");
+        }
+    }
+
+    #[test]
+    fn hub_mode_without_a_tenant_fails_closed() {
+        let caller = user_with(vec![Permission::new("kv:*", Action::All)]);
+        assert_eq!(caller.tenant_scope(false).unwrap(), None);
+        assert!(caller.tenant_scope(true).is_err());
+        let tenant = caller.with_tenant(Some(tenant_a()));
+        assert_eq!(tenant.tenant_scope(true).unwrap(), Some(&tenant_a()));
+        assert_eq!(tenant.tenant(), Some(&tenant_a()));
+    }
+
+    /// Every envelope command, given every resource field there is: either it
+    /// is refused because it touches something no tenant owns, or every field
+    /// it carries is rewritten and the classifier sees only tenant-owned
+    /// resources. A command that reads a new resource field the scoping does
+    /// not know fails here.
+    #[test]
+    fn every_envelope_command_is_confined_or_refused() {
+        let full = json!({
+            "key": "k", "keys": ["k1", "k2"], "source": "s", "destination": "d",
+            "sources": ["s1"], "source_keys": ["b1"], "pairs": [{"key": "p", "value": 1}],
+            "queue": "q", "name": "n", "room": "r", "topic": "t", "topics": ["t1"],
+            "client_id": "c"
+        });
+        let prefix = MultiTenant::get_user_prefix(&tenant_a());
+        let commands = command_table(
+            include_str!("../server/handlers/mod.rs"),
+            "async fn handle_command",
+        );
+        assert!(commands.len() >= 150);
+        let mut confined_without_resources = Vec::new();
+        for command in commands {
+            let unconfinable = RUNS_UNNAMED_COMMANDS.contains(&command.as_str())
+                || !classify_envelope(&command, &json!({}))
+                    .unwrap_or_default()
+                    .is_empty();
+            let mut payload = full.clone();
+            let outcome = scope_envelope(&command, &mut payload, &tenant_a());
+            assert_eq!(outcome.is_err(), unconfinable, "`{command}`: {outcome:?}");
+            if unconfinable {
+                continue;
+            }
+            let accesses = classify_envelope(&command, &payload).unwrap();
+            assert!(
+                accesses
+                    .iter()
+                    .all(|access| in_namespace(&access.resource, &prefix)),
+                "`{command}` still touches {accesses:?}"
+            );
+            if accesses.is_empty() {
+                confined_without_resources.push(command);
+            }
+        }
+        confined_without_resources.sort();
+        assert_eq!(
+            confined_without_resources,
+            [
+                "pubsub.unsubscribe",
+                "transaction.discard",
+                "transaction.exec",
+                "transaction.multi",
+                "transaction.unwatch",
+                "transaction.watch",
+            ]
+        );
     }
 }

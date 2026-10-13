@@ -1,6 +1,7 @@
 use super::{AppState, get_mcp_tools, handle_mcp_tool};
 use crate::auth::{AuthContext, OperationContext};
 use crate::config::McpConfig;
+use crate::hub::HubUserContext;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, ErrorData, Implementation, ProtocolVersion,
     ServerCapabilities, ServerConfig,
@@ -20,18 +21,20 @@ pub struct SynapMcpService {
 impl SynapMcpService {
     /// The identity of the HTTP request behind this MCP call. rmcp hands every
     /// request's `http::request::Parts` to the handler, and the `/mcp` auth
-    /// layer put the request's `AuthContext` in their extensions, so each call
-    /// is judged by its own credentials — never by ambient state.
+    /// layer put the request's `AuthContext` (and, in Hub mode, its
+    /// `HubUserContext`) in their extensions, so each call is judged and
+    /// scoped by its own credentials — never by ambient state.
     fn caller(
         &self,
         context: &rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<OperationContext, ErrorData> {
-        let auth = context
-            .extensions
-            .get::<axum::http::request::Parts>()
-            .and_then(|parts| parts.extensions.get::<AuthContext>());
+        let parts = context.extensions.get::<axum::http::request::Parts>();
+        let auth = parts.and_then(|parts| parts.extensions.get::<AuthContext>());
+        let tenant = parts
+            .and_then(|parts| parts.extensions.get::<HubUserContext>())
+            .map(|hub| hub.user_id);
         match auth {
-            Some(auth) => Ok(OperationContext::from_auth_context(auth)),
+            Some(auth) => Ok(OperationContext::from_auth_context(auth).with_tenant(tenant)),
             None if !self.auth_enabled => Ok(OperationContext::unrestricted()),
             None => Err(ErrorData::invalid_request(
                 "NOPERM the request carries no identity",

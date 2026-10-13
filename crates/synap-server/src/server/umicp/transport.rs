@@ -18,8 +18,12 @@ pub async fn umicp_handler(State(state): State<UmicpState>, request: Request) ->
     // The router's auth layer attaches the caller's identity to every request
     // (an admin context when authentication is disabled); without one the
     // request is refused rather than run unrestricted.
+    let tenant = request
+        .extensions()
+        .get::<crate::hub::HubUserContext>()
+        .map(|hub| hub.user_id);
     let caller = match request.extensions().get::<crate::auth::AuthContext>() {
-        Some(auth) => crate::auth::OperationContext::from_auth_context(auth),
+        Some(auth) => crate::auth::OperationContext::from_auth_context(auth).with_tenant(tenant),
         None => {
             return (
                 StatusCode::FORBIDDEN,

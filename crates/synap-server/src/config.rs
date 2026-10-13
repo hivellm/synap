@@ -446,11 +446,61 @@ impl ServerConfig {
     pub fn server_addr(&self) -> String {
         format!("{}:{}", self.server.host, self.server.port)
     }
+
+    /// Refuse Hub mode alongside a listener that has no tenant authentication.
+    ///
+    /// Hub mode confines every tenant to its own namespace on the HTTP
+    /// transports, which authenticate a Hub access key per request. The RESP3
+    /// and SynapRPC listeners authenticate local users only, so they would
+    /// serve every tenant's data unscoped; the error names each enabled one.
+    pub fn validate_hub_listeners(&self) -> Result<(), String> {
+        if !self.hub.enabled {
+            return Ok(());
+        }
+        let mut listeners = Vec::new();
+        if self.resp3.enabled {
+            listeners.push("RESP3 (resp3.enabled)");
+        }
+        if self.synap_rpc.enabled {
+            listeners.push("SynapRPC (synap_rpc.enabled)");
+        }
+        if listeners.is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "Hub mode (hub.enabled: true) cannot start with the {} listener enabled: \
+             it has no Hub tenant authentication and would serve every tenant's data \
+             unscoped. Disable it to run in Hub mode.",
+            listeners.join(" and ")
+        ))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hub_mode_refuses_listeners_without_tenant_auth() {
+        let mut config = ServerConfig::default();
+        assert!(config.validate_hub_listeners().is_ok(), "standalone");
+
+        config.hub.enabled = true;
+        let err = config.validate_hub_listeners().unwrap_err();
+        assert!(err.contains("RESP3") && err.contains("SynapRPC"), "{err}");
+
+        config.synap_rpc.enabled = false;
+        let err = config.validate_hub_listeners().unwrap_err();
+        assert!(err.contains("RESP3") && !err.contains("SynapRPC"), "{err}");
+
+        config.resp3.enabled = false;
+        config.synap_rpc.enabled = true;
+        let err = config.validate_hub_listeners().unwrap_err();
+        assert!(err.contains("SynapRPC") && !err.contains("RESP3"), "{err}");
+
+        config.synap_rpc.enabled = false;
+        assert!(config.validate_hub_listeners().is_ok());
+    }
 
     #[test]
     fn resp3_enabled_default_is_consistent() {

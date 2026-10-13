@@ -5,6 +5,7 @@
 
 use super::client::HubClient;
 use super::restrictions::Plan;
+use crate::auth::{Action, AuthContext, Permission};
 use crate::core::error::SynapError;
 
 use axum::{
@@ -13,9 +14,26 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use std::net::IpAddr;
 use std::sync::Arc;
 use tracing::{debug, warn};
 use uuid::Uuid;
+
+/// The resource types a Hub tenant may use, each confined to the tenant's own
+/// namespace. Everything else (`admin`, `script`, cluster management) has no
+/// tenant scoping and is not granted.
+pub const TENANT_RESOURCE_TYPES: &[&str] = &[
+    "kv",
+    "hash",
+    "list",
+    "set",
+    "sortedset",
+    "hyperloglog",
+    "bitmap",
+    "queue",
+    "stream",
+    "pubsub",
+];
 
 /// User context extracted from Hub access key
 #[derive(Debug, Clone)]
@@ -46,6 +64,24 @@ impl HubUserContext {
     /// Get user plan
     pub fn plan(&self) -> Plan {
         self.plan
+    }
+
+    /// The identity a Hub tenant runs as on every transport: `hub:<user id>`,
+    /// never an admin, with full access to the [`TENANT_RESOURCE_TYPES`] and
+    /// nothing else, so every existing authorization check applies to it. The
+    /// names it touches are confined to the tenant by scoping, not by these
+    /// grants.
+    pub fn auth_context(&self, client_ip: IpAddr) -> AuthContext {
+        AuthContext {
+            user_id: Some(format!("hub:{}", self.user_id)),
+            api_key_id: None,
+            client_ip,
+            permissions: TENANT_RESOURCE_TYPES
+                .iter()
+                .map(|kind| Permission::new(format!("{kind}:*"), Action::All))
+                .collect(),
+            is_admin: false,
+        }
     }
 }
 
@@ -219,6 +255,22 @@ mod tests {
         assert_eq!(ctx.user_id(), &user_id);
         assert_eq!(ctx.plan(), Plan::Pro);
         assert_eq!(ctx.access_key, access_key);
+    }
+
+    #[test]
+    fn tenant_identity_holds_data_grants_only() {
+        let user_id = Uuid::new_v4();
+        let ctx = HubUserContext::new(user_id, Plan::Free, "key".to_string())
+            .auth_context(IpAddr::from([127, 0, 0, 1]));
+
+        assert_eq!(ctx.user_id, Some(format!("hub:{user_id}")));
+        assert!(!ctx.is_admin);
+        for kind in TENANT_RESOURCE_TYPES {
+            assert!(ctx.has_permission(&format!("{kind}:anything"), Action::Write));
+        }
+        assert!(!ctx.has_permission("admin:*", Action::Admin));
+        assert!(!ctx.has_permission("script:*", Action::Write));
+        assert!(!ctx.has_permission("cluster:*", Action::Read));
     }
 
     #[test]

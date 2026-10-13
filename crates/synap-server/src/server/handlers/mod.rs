@@ -298,6 +298,7 @@ pub fn default_unit() -> String {
 pub async fn command_handler(
     State(state): State<AppState>,
     AuthContextExtractor(auth): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Json(request): Json<Request>,
 ) -> Result<Json<Response>, SynapError> {
     debug!(
@@ -305,25 +306,73 @@ pub async fn command_handler(
         request.command, request.request_id
     );
 
-    let ctx = crate::auth::OperationContext::from_auth_context(&auth);
+    let ctx = crate::auth::OperationContext::from_auth_context(&auth)
+        .with_tenant(hub_ctx.map(|hub| hub.user_id));
     let response = handle_command(state, &ctx, request).await?;
     Ok(Json(response))
 }
 
+/// Authorize an envelope command for `ctx` and, in Hub mode, confine its
+/// payload to the caller's tenant before anything runs.
+fn admit_command(
+    state: &AppState,
+    ctx: &crate::auth::OperationContext,
+    request: &mut Request,
+) -> Result<(), crate::auth::Denied> {
+    ctx.authorize_envelope(&request.command, &request.payload)?;
+    let Some(tenant) = ctx.tenant_scope(state.hub_client.is_some())? else {
+        return Ok(());
+    };
+    // The transaction handlers fall back to the request id when no client id
+    // is given; pin that fallback first so it is confined like any other id.
+    if request.command.starts_with("transaction.")
+        && request
+            .payload
+            .get("client_id")
+            .and_then(|v| v.as_str())
+            .is_none()
+    {
+        if request.payload.is_null() {
+            request.payload = serde_json::json!({});
+        }
+        if let Some(fields) = request.payload.as_object_mut() {
+            fields.insert(
+                "client_id".to_string(),
+                serde_json::Value::String(request.request_id.clone()),
+            );
+        }
+    }
+    crate::auth::scope_envelope(&request.command, &mut request.payload, tenant)
+}
+
 /// Handle individual commands. Every command is authorized against `ctx`
-/// before it runs, with the same policy as the native protocols.
+/// before it runs, with the same policy as the native protocols, and in Hub
+/// mode confined to the caller's tenant.
 async fn handle_command(
     state: AppState,
     ctx: &crate::auth::OperationContext,
-    request: Request,
+    mut request: Request,
 ) -> Result<Response, SynapError> {
     let request_id = request.request_id.clone();
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
 
-    if let Err(denied) = ctx.authorize_envelope(&request.command, &request.payload) {
+    if let Err(denied) = admit_command(&state, ctx, &mut request) {
         // A refused write aimed at an open transaction aborts it, so its EXEC
-        // applies nothing rather than the commands that were allowed.
-        if let Some(client_id) = request.payload.get("client_id").and_then(|v| v.as_str()) {
-            state.transaction_manager.abort(client_id, denied.message());
+        // applies nothing rather than the commands that were allowed. In Hub
+        // mode the transaction is the tenant's own, under its scoped id.
+        let transaction = match ctx.tenant_scope(state.hub_client.is_some()) {
+            Ok(None) => client_id,
+            Ok(Some(tenant)) => client_id.map(|id| crate::hub::ResourceNaming::format(tenant, &id)),
+            Err(_) => None,
+        };
+        if let Some(transaction) = transaction {
+            state
+                .transaction_manager
+                .abort(&transaction, denied.message());
         }
         return Ok(Response {
             success: false,

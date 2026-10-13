@@ -1,0 +1,21 @@
+{
+  "id": "tenant-scoping-verified-by-reclassifying-the-rewritten-payload",
+  "type": "pattern",
+  "title": "Tenant scoping verified by reclassifying the rewritten payload",
+  "category": "security",
+  "description": "Hub mode rewrites envelope/MCP/UMICP resource fields into user_<id>:<name> (auth::scope_envelope, next to classify_envelope), then reclassifies the rewritten payload and refuses the command unless every access lies in the tenant namespace. One check fails closed for keyspace-wide/admin accesses, non-string names and any field the rewrite missed; scripts are refused explicitly. An exhaustive unit test walks every envelope command with every resource field filled in. HTTP routes use an allow-list (router::is_tenant_route) so new routes answer 403 in Hub mode until reviewed.",
+  "example": "rewrite_resource_fields(payload, &prefix);\nlet accesses = classify_envelope(command, payload).ok_or_else(|| unclassified(command))?;\nif let Some(a) = accesses.iter().find(|a| !in_namespace(&a.resource, &prefix)) { return Err(hub_unavailable(command, a)); }",
+  "whenToUse": "Any rewrite of untrusted input that must stay in lockstep with an existing classifier or policy table.",
+  "whenNotToUse": "When the classifier is not authoritative about what the handler touches; fix the classifier first.",
+  "createdAt": "2026-10-13T12:00:00.000Z",
+  "tags": [
+    "hub",
+    "multi-tenant",
+    "scoping",
+    "envelope",
+    "mcp",
+    "umicp",
+    "phase18"
+  ],
+  "source": "manual"
+}

@@ -244,6 +244,13 @@ async fn main() -> Result<()> {
         config.logging.format, config.logging.level
     );
 
+    // Hub mode isolates tenants only on transports that authenticate a Hub
+    // access key: refuse to start with a listener that would bypass it.
+    if let Err(e) = config.validate_hub_listeners() {
+        error!("{}", e);
+        return Err(anyhow::Error::msg(e));
+    }
+
     // Recover from persistence or create fresh
     let kv_config = config.to_kv_config();
     let queue_config = config.to_queue_config();

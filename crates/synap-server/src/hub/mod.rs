@@ -30,14 +30,15 @@ pub mod usage;
 
 pub mod cluster_quota;
 
-pub use client::HubClient;
+pub use client::{ACCESS_KEY_VALIDATION_UNAVAILABLE, AccessKeyValidator, HubClient};
 
 pub use config::HubConfig;
 
 pub use extractor::HubContextExtractor;
 
 pub use hub_auth::{
-    HubUserContext, extract_access_key, hub_auth_middleware, require_hub_auth_middleware,
+    HubUserContext, TENANT_RESOURCE_TYPES, extract_access_key, hub_auth_middleware,
+    require_hub_auth_middleware,
 };
 
 pub use multi_tenant::MultiTenant;
