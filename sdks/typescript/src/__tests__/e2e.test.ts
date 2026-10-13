@@ -263,8 +263,8 @@ async function runScriptSuite(synap: Synap, _prefix: string): Promise<void> {
   const sha1 = await synap.script.load('return ARGV[1]');
   expect(typeof sha1).toBe('string');
 
-  const existsResp = await synap.script.exists([sha1]);
-  expect(existsResp.exists[0]).toBe(true);
+  const exists = await synap.script.exists([sha1]);
+  expect(exists[0]).toBe(true);
 
   const evalshaResp = await synap.script.evalsha<string>(sha1, { args: ['from-evalsha'] });
   expect(evalshaResp.result).toBe('from-evalsha');
@@ -420,13 +420,12 @@ describeE2E('Synap SDK E2E (real server, all transports)', () => {
   });
 
   // ── UnsupportedCommandError regression (8.2) ───────────────────────────────
+  // kv.stats is HTTP-only: no native mapping exists for it.
 
   it('SynapRPC — unmapped command raises UnsupportedCommandError', async () => {
     const c = rpcClient();
     try {
-      await expect(
-        c.bitmap.setbit('e2e:ts:rpc:bitmap', 0, 1),
-      ).rejects.toBeInstanceOf(UnsupportedCommandError);
+      await expect(c.kv.stats()).rejects.toBeInstanceOf(UnsupportedCommandError);
     } finally {
       c.close();
     }
@@ -435,9 +434,7 @@ describeE2E('Synap SDK E2E (real server, all transports)', () => {
   it('RESP3 — unmapped command raises UnsupportedCommandError', async () => {
     const c = resp3Client();
     try {
-      await expect(
-        c.bitmap.setbit('e2e:ts:resp3:bitmap', 0, 1),
-      ).rejects.toBeInstanceOf(UnsupportedCommandError);
+      await expect(c.kv.stats()).rejects.toBeInstanceOf(UnsupportedCommandError);
     } finally {
       c.close();
     }
@@ -446,10 +443,8 @@ describeE2E('Synap SDK E2E (real server, all transports)', () => {
   it('HTTP — unmapped command succeeds (no UnsupportedCommandError)', async () => {
     const c = httpClient();
     try {
-      const key = 'e2e:ts:http:bitmap';
-      const result = await c.bitmap.setbit(key, 0, 1);
-      expect(typeof result).toBe('number');
-      await c.kv.del(key);
+      const stats = await c.kv.stats();
+      expect(typeof stats).toBe('object');
     } finally {
       c.close();
     }

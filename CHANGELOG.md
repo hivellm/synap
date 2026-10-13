@@ -113,9 +113,32 @@ versions stay aligned.
   from the repository root after the file moved to `config/`. Its config
   patches also expected `enabled:` directly under each section header, so
   persistence would have stayed on with the WAL pointed at `/data`. Both are
-  fixed. The suite now runs and fails 9 of 22 tests, including
-  `listQueues()`/`listRooms()` returning `undefined` over SynapRPC and RESP3.
-  Those are tracked as `phase13_ts-e2e-native-parity`.
+  fixed, and all 22 tests pass on HTTP, SynapRPC and RESP3.
+- **The TypeScript SDK's queues, streams and scripts work over SynapRPC and
+  RESP3.** The first E2E run in months failed 9 of 22 tests, and every native
+  failure was a reply the SDK did not translate into the shape its HTTP path
+  returns:
+  - `listQueues()` and `listRooms()` returned `undefined`.
+  - Publishing to a queue stored the text `[104,101,…]` instead of the bytes
+    of the message, because the byte array the manager builds for HTTP JSON
+    was serialised as a string. Over RESP3 even a `Uint8Array` payload
+    arrived as `104,101,…`, because the transport stringified every
+    argument. It now frames arguments as bytes.
+  - `consume()` always returned `null`, `ack()`/`nack()` returned
+    `undefined`, and `stats()` over RESP3 had no fields (the reply is flat
+    `[key, value, …]` pairs).
+  - `script.eval()`/`evalsha()` returned the raw result instead of
+    `{ result, sha1 }`, still JSON-encoded as the server sends it, and
+    `script.load()`/`exists()`/`flush()`/`kill()` over RESP3 were sent as
+    `SCRIPT.LOAD`, which RESP3 rejects; RESP3 takes `SCRIPT LOAD`.
+
+  Each fix has a unit test against the reply shape the server actually sends.
+  The other E2E failures were stale tests: one read `script.exists()` as an
+  envelope, and the unmapped-command checks used `bitmap.setbit`, which the
+  native transports now map. Still unmapped natively, and so raising
+  `UnsupportedCommandError` there: `kv.mset`, `kv.msetnx`, `kv.mdel`,
+  `kv.scan`, `kv.persist`, `kv.flushdb`, `kv.flushall`, `kv.dbsize`,
+  `kv.stats` and `pubsub.stats`.
 - **The Docker image builds again.** `rust-toolchain.toml` pins plain
   `nightly`, so rustup re-syncs whenever a newer nightly is published. With the
   toolchain installed in a layer of its own, that sync renamed files out of a
