@@ -1076,6 +1076,7 @@ mod tests {
             enable_queue_tools: true,
             enable_sortedset_tools: true,
             enable_transaction_tools: true,
+            ..McpConfig::default()
         };
         crate::server::get_mcp_tools(&config)
             .into_iter()

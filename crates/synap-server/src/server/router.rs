@@ -23,7 +23,8 @@ use tracing::{debug, warn};
 /// A liveness probe that requires authentication is not a liveness probe: the
 /// container HEALTHCHECK, Kubernetes, and any load balancer all probe
 /// unauthenticated. `/metrics` is the same contract — a scraper is not a user.
-fn is_public_path(path: &str) -> bool {
+/// The rate limiter exempts them for the same reason.
+pub(crate) fn is_public_path(path: &str) -> bool {
     matches!(path, "/health" | "/metrics")
 }
 
@@ -543,6 +544,24 @@ pub fn create_router(
         .merge(auth_router) // Authentication endpoints
         .merge(api_router); // Main API endpoints
 
+    // Rate limiting (`server::rate_limit`): the principal layer goes on first
+    // so it runs inside authentication, where the principal is known; the
+    // peer-address layer goes on after it so it runs before authentication.
+    let rate_limiter = rate_limit_config.enabled.then(|| {
+        Arc::new(super::rate_limit::RateLimiter::new(
+            rate_limit_config.clone(),
+        ))
+    });
+    if let Some(limiter) = &rate_limiter {
+        let limiter = Arc::clone(limiter);
+        router = router.layer(axum::middleware::from_fn(
+            move |req: axum::extract::Request, next: axum::middleware::Next| {
+                let limiter = Arc::clone(&limiter);
+                async move { super::rate_limit::limit_by_principal(limiter, req, next).await }
+            },
+        ));
+    }
+
     // Apply authentication middleware: Hub authentication in Hub mode, local
     // authentication otherwise (its behavior depends on auth_enabled).
     if let Some(hub) = hub_client {
@@ -641,27 +660,29 @@ pub fn create_router(
         ));
     }
 
-    router = router
-        .layer(CompressionLayer::new()) // Gzip compression for responses
-        .layer(TraceLayer::new_for_http())
-        .layer(cors);
-
-    // NOTE: Rate limiting implementation available but disabled by default
-    // The rate_limit::RateLimiter is fully implemented with token bucket algorithm
-    // To enable, set rate_limit.enabled = true in config.yml
-    // Implementation details in src/server/rate_limit.rs
-
-    if rate_limit_config.enabled {
-        tracing::warn!(
-            "Rate limiting configured ({} req/s, burst: {}) but not active - requires middleware integration",
+    // Outside authentication: limited clients are refused before their
+    // credentials are checked.
+    if let Some(limiter) = rate_limiter {
+        router = router.layer(axum::middleware::from_fn(
+            move |req: axum::extract::Request, next: axum::middleware::Next| {
+                let limiter = Arc::clone(&limiter);
+                async move { super::rate_limit::limit_by_peer(limiter, req, next).await }
+            },
+        ));
+        tracing::info!(
+            "Rate limiting enforced: {} req/s, burst {}, per client address before \
+             authentication and per authenticated principal (/health and /metrics exempt)",
             rate_limit_config.requests_per_second,
             rate_limit_config.burst_size
         );
     } else {
-        tracing::info!("Rate limiting disabled (default)");
+        tracing::info!("Rate limiting disabled: requests are not rate limited");
     }
 
     router
+        .layer(CompressionLayer::new()) // Gzip compression for responses
+        .layer(TraceLayer::new_for_http())
+        .layer(cors)
 }
 
 /// The credentials behind an MCP request: the authenticated user and, when it

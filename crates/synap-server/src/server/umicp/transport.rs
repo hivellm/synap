@@ -33,9 +33,16 @@ pub async fn umicp_handler(State(state): State<UmicpState>, request: Request) ->
         }
     };
 
-    // Read body
-    let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+    // Read the body up to the configured limit. A declared length above it is
+    // refused before anything is read; a chunked body stops being read as soon
+    // as it passes the limit, so no more than the limit is ever buffered.
+    let limit = state.mcp_config.umicp_max_body_bytes;
+    if declared_length(&request).is_some_and(|length| length > limit as u64) {
+        return payload_too_large(limit);
+    }
+    let body_bytes = match axum::body::to_bytes(request.into_body(), limit).await {
         Ok(bytes) => bytes,
+        Err(e) if exceeds_limit(&e) => return payload_too_large(limit),
         Err(e) => {
             error!("Failed to read body: {}", e);
             return (
@@ -110,6 +117,34 @@ pub async fn umicp_handler(State(state): State<UmicpState>, request: Request) ->
                 .into_response()
         }
     }
+}
+
+/// The `Content-Length` the request declares, if any. An unparsable value is
+/// left to the body reader, which still enforces the limit.
+fn declared_length(request: &Request) -> Option<u64> {
+    request
+        .headers()
+        .get(axum::http::header::CONTENT_LENGTH)?
+        .to_str()
+        .ok()?
+        .parse()
+        .ok()
+}
+
+/// Whether reading the body failed because it passed the limit.
+fn exceeds_limit(error: &axum::Error) -> bool {
+    std::error::Error::source(error)
+        .is_some_and(|source| source.is::<http_body_util::LengthLimitError>())
+}
+
+/// 413 naming the limit the body exceeded.
+fn payload_too_large(limit: usize) -> Response {
+    debug!("UMICP body exceeds the {} byte limit", limit);
+    (
+        StatusCode::PAYLOAD_TOO_LARGE,
+        format!(r#"{{"error":"UMICP request body exceeds the {limit} byte limit"}}"#),
+    )
+        .into_response()
 }
 
 /// UMICP Discovery Handler - Returns all available operations
