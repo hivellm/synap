@@ -9,6 +9,7 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -647,55 +648,83 @@ impl ListStore {
         keys: Vec<String>,
         timeout_secs: Option<u64>,
     ) -> Result<(String, Vec<u8>)> {
+        let (key, value, ()) = self.blpop_guarded(keys, timeout_secs, || async {}).await?;
+        Ok((key, value))
+    }
+
+    /// BLPOP whose every pop attempt runs while holding the guard `lock`
+    /// returns. A successful attempt hands that guard back with the popped
+    /// value, so the caller can record the pop before releasing it; waiting
+    /// for a push happens without the guard. The persistence layer passes its
+    /// per-key ordering lock here so a blocking pop reaches the WAL in the same
+    /// order as the pushes it races with.
+    pub async fn blpop_guarded<G, F, Fut>(
+        &self,
+        keys: Vec<String>,
+        timeout_secs: Option<u64>,
+        lock: F,
+    ) -> Result<(String, Vec<u8>, G)>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = G>,
+    {
+        let popped = self
+            .blocking_pop_guarded(keys, timeout_secs, true, lock)
+            .await?;
+        self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
+        Ok(popped)
+    }
+
+    /// BRPOP - Blocking pop from right with timeout
+    pub async fn brpop(
+        &self,
+        keys: Vec<String>,
+        timeout_secs: Option<u64>,
+    ) -> Result<(String, Vec<u8>)> {
+        let (key, value, ()) = self.brpop_guarded(keys, timeout_secs, || async {}).await?;
+        Ok((key, value))
+    }
+
+    /// BRPOP with a guard around every pop attempt; see
+    /// [`blpop_guarded`](Self::blpop_guarded).
+    pub async fn brpop_guarded<G, F, Fut>(
+        &self,
+        keys: Vec<String>,
+        timeout_secs: Option<u64>,
+        lock: F,
+    ) -> Result<(String, Vec<u8>, G)>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = G>,
+    {
+        let popped = self
+            .blocking_pop_guarded(keys, timeout_secs, false, lock)
+            .await?;
+        self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
+        Ok(popped)
+    }
+
+    /// Shared body of BLPOP/BRPOP: try every key in order under the guard,
+    /// then wait for pushes and retry until `timeout_secs` (`None` = forever).
+    async fn blocking_pop_guarded<G, F, Fut>(
+        &self,
+        keys: Vec<String>,
+        timeout_secs: Option<u64>,
+        left: bool,
+        mut lock: F,
+    ) -> Result<(String, Vec<u8>, G)>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = G>,
+    {
         // Try immediate pop first
-        for key in &keys {
-            if let Ok(mut values) = self.lpop(key, Some(1))
-                && !values.is_empty()
-            {
-                self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
-                return Ok((key.clone(), values.remove(0)));
-            }
+        if let Some(popped) = self.try_pop_any(&keys, left, &mut lock).await {
+            return Ok(popped);
         }
 
         // No immediate result, wait for notification
-        if let Some(timeout_secs) = timeout_secs {
-            // Create receivers for all keys
-            let mut receivers: Vec<_> =
-                keys.iter().map(|k| self.get_or_create_channel(k)).collect();
-
-            let duration = Duration::from_secs(timeout_secs);
-            let result = timeout(duration, async {
-                loop {
-                    // Wait for any notification
-                    for rx in &mut receivers {
-                        let _ = rx.recv().await;
-                    }
-
-                    // Try to pop from any key
-                    for key in &keys {
-                        if let Ok(mut values) = self.lpop(key, Some(1))
-                            && !values.is_empty()
-                        {
-                            return Ok((key.clone(), values.remove(0)));
-                        }
-                    }
-                }
-            })
-            .await;
-
-            match result {
-                Ok(Ok(value)) => {
-                    self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
-                    Ok(value)
-                }
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(SynapError::Timeout),
-            }
-        } else {
-            // Wait indefinitely
-            let mut receivers: Vec<_> =
-                keys.iter().map(|k| self.get_or_create_channel(k)).collect();
-
+        let mut receivers: Vec<_> = keys.iter().map(|k| self.get_or_create_channel(k)).collect();
+        let wait = async {
             loop {
                 // Wait for any notification
                 for rx in &mut receivers {
@@ -703,16 +732,45 @@ impl ListStore {
                 }
 
                 // Try to pop from any key
-                for key in &keys {
-                    if let Ok(mut values) = self.lpop(key, Some(1))
-                        && !values.is_empty()
-                    {
-                        self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
-                        return Ok((key.clone(), values.remove(0)));
-                    }
+                if let Some(popped) = self.try_pop_any(&keys, left, &mut lock).await {
+                    return popped;
                 }
             }
+        };
+
+        match timeout_secs {
+            Some(timeout_secs) => timeout(Duration::from_secs(timeout_secs), wait)
+                .await
+                .map_err(|_| SynapError::Timeout),
+            None => Ok(wait.await),
         }
+    }
+
+    /// One pop attempt over `keys`, in order, while holding `lock`'s guard.
+    async fn try_pop_any<G, F, Fut>(
+        &self,
+        keys: &[String],
+        left: bool,
+        lock: &mut F,
+    ) -> Option<(String, Vec<u8>, G)>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = G>,
+    {
+        let guard = lock().await;
+        for key in keys {
+            let popped = if left {
+                self.lpop(key, Some(1))
+            } else {
+                self.rpop(key, Some(1))
+            };
+            if let Ok(mut values) = popped
+                && !values.is_empty()
+            {
+                return Some((key.clone(), values.remove(0), guard));
+            }
+        }
+        None
     }
 
     /// BRPOPLPUSH - Blocking RPOPLPUSH with timeout
@@ -722,112 +780,52 @@ impl ListStore {
         destination: &str,
         timeout_secs: Option<u64>,
     ) -> Result<Vec<u8>> {
+        let (value, ()) = self
+            .brpoplpush_guarded(source, destination, timeout_secs, || async {})
+            .await?;
+        Ok(value)
+    }
+
+    /// BRPOPLPUSH with a guard around every attempt; see
+    /// [`blpop_guarded`](Self::blpop_guarded).
+    pub async fn brpoplpush_guarded<G, F, Fut>(
+        &self,
+        source: &str,
+        destination: &str,
+        timeout_secs: Option<u64>,
+        mut lock: F,
+    ) -> Result<(Vec<u8>, G)>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = G>,
+    {
         // Try immediate operation first
-        if let Ok(value) = self.rpoplpush(source, destination) {
-            return Ok(value);
+        {
+            let guard = lock().await;
+            if let Ok(value) = self.rpoplpush(source, destination) {
+                return Ok((value, guard));
+            }
         }
 
         // No immediate result, wait for notification
-        let rx = self.get_or_create_channel(source);
-
-        if let Some(timeout_secs) = timeout_secs {
-            let duration = Duration::from_secs(timeout_secs);
-            let result = timeout(duration, async {
-                let mut receiver = rx;
-                loop {
-                    let _ = receiver.recv().await;
-
-                    // Try operation after notification
-                    if let Ok(value) = self.rpoplpush(source, destination) {
-                        return Ok(value);
-                    }
-                }
-            })
-            .await;
-
-            match result {
-                Ok(Ok(value)) => Ok(value),
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(SynapError::Timeout),
-            }
-        } else {
-            // Wait indefinitely
-            let mut receiver = rx;
+        let mut receiver = self.get_or_create_channel(source);
+        let wait = async {
             loop {
                 let _ = receiver.recv().await;
 
+                // Try operation after notification
+                let guard = lock().await;
                 if let Ok(value) = self.rpoplpush(source, destination) {
-                    return Ok(value);
+                    return (value, guard);
                 }
             }
-        }
-    }
+        };
 
-    /// BRPOP - Blocking pop from right with timeout
-    pub async fn brpop(
-        &self,
-        keys: Vec<String>,
-        timeout_secs: Option<u64>,
-    ) -> Result<(String, Vec<u8>)> {
-        // Try immediate pop first
-        for key in &keys {
-            if let Ok(mut values) = self.rpop(key, Some(1))
-                && !values.is_empty()
-            {
-                self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
-                return Ok((key.clone(), values.remove(0)));
-            }
-        }
-
-        // No immediate result, wait for notification
-        if let Some(timeout_secs) = timeout_secs {
-            let mut receivers: Vec<_> =
-                keys.iter().map(|k| self.get_or_create_channel(k)).collect();
-
-            let duration = Duration::from_secs(timeout_secs);
-            let result = timeout(duration, async {
-                loop {
-                    for rx in &mut receivers {
-                        let _ = rx.recv().await;
-                    }
-
-                    for key in &keys {
-                        if let Ok(mut values) = self.rpop(key, Some(1))
-                            && !values.is_empty()
-                        {
-                            return Ok((key.clone(), values.remove(0)));
-                        }
-                    }
-                }
-            })
-            .await;
-
-            match result {
-                Ok(Ok(value)) => {
-                    self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
-                    Ok(value)
-                }
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(SynapError::Timeout),
-            }
-        } else {
-            let mut receivers: Vec<_> =
-                keys.iter().map(|k| self.get_or_create_channel(k)).collect();
-
-            loop {
-                for rx in &mut receivers {
-                    let _ = rx.recv().await;
-                }
-
-                for key in &keys {
-                    if let Ok(mut values) = self.rpop(key, Some(1))
-                        && !values.is_empty()
-                    {
-                        self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
-                        return Ok((key.clone(), values.remove(0)));
-                    }
-                }
-            }
+        match timeout_secs {
+            Some(timeout_secs) => timeout(Duration::from_secs(timeout_secs), wait)
+                .await
+                .map_err(|_| SynapError::Timeout),
+            None => Ok(wait.await),
         }
     }
 

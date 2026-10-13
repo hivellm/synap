@@ -214,7 +214,7 @@ async fn committed_transaction_reaches_replica() {
         CommittedWrite::KvSet {
             key: "tk".to_string(),
             value: b"tv".to_vec(),
-            ttl: None,
+            expires_at_ms: None,
         },
         CommittedWrite::HashSet {
             key: "th".to_string(),

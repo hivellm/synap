@@ -58,7 +58,9 @@ pub use sorted_set::{
     ZAddOptions,
 };
 pub use stream::{RoomStats, StreamConfig, StreamEvent, StreamManager};
-pub use transaction::{CommittedWrite, Transaction, TransactionCommand, TransactionManager};
+pub use transaction::{
+    CommittedWrite, ExecOutcome, Transaction, TransactionCommand, TransactionManager,
+};
 pub use types::{
     EvictionPolicy, Expiry, KVConfig, KVStats, SetOptions, SetResult, StoredValue, StringWrite,
     ttl_secs_from_deadline,

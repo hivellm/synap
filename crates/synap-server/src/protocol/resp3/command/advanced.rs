@@ -782,27 +782,27 @@ pub(super) async fn cmd_exec(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         Some(id) => id,
         None => return Resp3Value::Error("ERR client_id must be a string".into()),
     };
-    match state.transaction_manager.exec(&client_id).await {
-        Ok(Some((results, writes))) => {
-            // Persist + replicate the whole transaction atomically (audit M-010).
-            // A commit that could not be logged is not durable: report it.
-            if let Some(ref persistence) = state.persistence
-                && let Err(e) = persistence.log_transaction(&writes).await
-            {
-                tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
-                return Resp3Value::Error(format!(
-                    "ERR {}",
-                    crate::persistence::layer::exec_not_durable_message(&e)
-                ));
-            }
-            Resp3Value::Array(
-                results
-                    .into_iter()
-                    .map(|v| Resp3Value::BulkString(v.to_string().into_bytes()))
-                    .collect(),
-            )
-        }
+    // Persist + replicate the whole transaction atomically (audit M-010),
+    // ordered against plain writers and snapshots (phase23). A commit that
+    // could not be logged is not durable: report it.
+    match crate::persistence::durable::exec(
+        state.persistence.as_deref(),
+        &state.transaction_manager,
+        &client_id,
+    )
+    .await
+    {
+        Ok(Some((results, _writes))) => Resp3Value::Array(
+            results
+                .into_iter()
+                .map(|v| Resp3Value::BulkString(v.to_string().into_bytes()))
+                .collect(),
+        ),
         Ok(None) => Resp3Value::Null,
+        Err(e @ crate::persistence::durable::ExecError::NotDurable(_)) => {
+            tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
+            Resp3Value::Error(format!("ERR {e}"))
+        }
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
 }

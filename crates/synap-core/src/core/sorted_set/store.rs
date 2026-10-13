@@ -114,7 +114,10 @@ impl SortedSetStore {
         keys: Vec<String>,
         timeout_secs: Option<u64>,
     ) -> Result<(String, Vec<u8>, f64), crate::core::SynapError> {
-        self.bzpop(keys, timeout_secs, true).await
+        let (popped, ()) = self
+            .bzpop_guarded(keys, timeout_secs, true, || async {})
+            .await?;
+        Ok(popped)
     }
 
     /// BZPOPMAX — like [`bzpopmin`](Self::bzpopmin) but pops the highest score.
@@ -123,41 +126,41 @@ impl SortedSetStore {
         keys: Vec<String>,
         timeout_secs: Option<u64>,
     ) -> Result<(String, Vec<u8>, f64), crate::core::SynapError> {
-        self.bzpop(keys, timeout_secs, false).await
+        let (popped, ()) = self
+            .bzpop_guarded(keys, timeout_secs, false, || async {})
+            .await?;
+        Ok(popped)
     }
 
-    async fn bzpop(
+    /// BZPOPMIN (`min`) / BZPOPMAX whose every pop attempt runs while holding
+    /// the guard `lock` returns. A successful attempt hands that guard back
+    /// with the popped member, so the caller can record the pop before
+    /// releasing it; waiting for a ZADD happens without the guard. The
+    /// persistence layer passes its per-key ordering lock here.
+    pub async fn bzpop_guarded<G, F, Fut>(
         &self,
         keys: Vec<String>,
         timeout_secs: Option<u64>,
         min: bool,
-    ) -> Result<(String, Vec<u8>, f64), crate::core::SynapError> {
+        mut lock: F,
+    ) -> Result<((String, Vec<u8>, f64), G), crate::core::SynapError>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = G>,
+    {
         // Immediate attempt across all keys, in order.
-        let pop = |key: &str| -> Option<ScoredMember> {
-            let popped = if min {
-                self.zpopmin(key, 1)
-            } else {
-                self.zpopmax(key, 1)
-            };
-            popped.into_iter().next()
-        };
-        for key in &keys {
-            if let Some(sm) = pop(key) {
-                return Ok((key.clone(), sm.member, sm.score));
-            }
+        if let Some(popped) = self.try_zpop_any(&keys, min, &mut lock).await {
+            return Ok(popped);
         }
 
+        let mut receivers: Vec<_> = keys.iter().map(|k| self.get_or_create_channel(k)).collect();
         let wait = async {
-            let mut receivers: Vec<_> =
-                keys.iter().map(|k| self.get_or_create_channel(k)).collect();
             loop {
                 for rx in &mut receivers {
                     let _ = rx.recv().await;
                 }
-                for key in &keys {
-                    if let Some(sm) = pop(key) {
-                        return (key.clone(), sm.member, sm.score);
-                    }
+                if let Some(popped) = self.try_zpop_any(&keys, min, &mut lock).await {
+                    return popped;
                 }
             }
         };
@@ -171,6 +174,31 @@ impl SortedSetStore {
             }
             _ => Ok(wait.await),
         }
+    }
+
+    /// One ZPOPMIN/ZPOPMAX attempt over `keys`, in order, under `lock`'s guard.
+    async fn try_zpop_any<G, F, Fut>(
+        &self,
+        keys: &[String],
+        min: bool,
+        lock: &mut F,
+    ) -> Option<((String, Vec<u8>, f64), G)>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = G>,
+    {
+        let guard = lock().await;
+        for key in keys {
+            let popped = if min {
+                self.zpopmin(key, 1)
+            } else {
+                self.zpopmax(key, 1)
+            };
+            if let Some(sm) = popped.into_iter().next() {
+                return Some(((key.clone(), sm.member, sm.score), guard));
+            }
+        }
+        None
     }
 
     /// Attach the shared cross-datatype memory budget (audit M-018).

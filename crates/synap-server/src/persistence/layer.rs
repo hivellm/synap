@@ -1,8 +1,13 @@
 use super::apply::{StoreArcs, StoreRefs};
+use super::order::{StripeGuards, WriteOrder};
+use super::snapshot::SnapshotImage;
 use super::types::{FsyncMode, Operation, PersistenceConfig, PersistenceError};
+use super::wal_async::WalAck;
 use super::{AsyncWAL, SnapshotManager};
 use crate::core::sorted_set::ZAddOptions;
 use parking_lot::RwLock;
+use std::future::Future;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::info;
@@ -22,6 +27,64 @@ pub struct PersistenceLayer {
     /// connected replicas (audit M-005). Propagation is decoupled from the WAL
     /// so a master replicates even when persistence is disabled (phase6j).
     replication_master: Option<Arc<crate::replication::MasterNode>>,
+    /// Per-key ordering lock and snapshot barrier (phase23): writers hold
+    /// their keys' stripes from applying a write until its record is queued,
+    /// a snapshot holds every stripe while it records its cutoff and copies
+    /// the stores.
+    order: WriteOrder,
+}
+
+/// A record handed to replication and to the WAL writer queue, not yet
+/// durable. [`Submitted::wait`] waits for the WAL group commit.
+#[must_use = "a submitted record is durable only once `wait` succeeds"]
+pub struct Submitted {
+    ack: Option<WalAck>,
+}
+
+impl Submitted {
+    /// Wait until the record reached the WAL (and the disk, per the fsync
+    /// mode). Immediate without a WAL.
+    pub async fn wait(self) -> super::types::Result<()> {
+        match self.ack {
+            Some(ack) => ack.wait().await.map(|_| ()),
+            None => Ok(()),
+        }
+    }
+}
+
+/// The ordering stripes of one write's keys, held from before the write is
+/// applied until its record is queued (see [`PersistenceLayer::order`]).
+pub struct Ordered<'a> {
+    layer: &'a PersistenceLayer,
+    _stripes: StripeGuards<'a>,
+}
+
+impl Ordered<'_> {
+    /// Queue `operation` while the stripes are still held, release them, then
+    /// wait for the record to be durable.
+    pub async fn commit(self, operation: Operation) -> super::types::Result<()> {
+        let submitted = self.layer.submit(operation, 1)?;
+        drop(self);
+        submitted.wait().await
+    }
+
+    /// [`commit`](Self::commit) for a command that produced several effects:
+    /// they are queued as ONE record (see [`PersistenceLayer::log_operations`]).
+    pub async fn commit_all(self, operations: Vec<Operation>) -> super::types::Result<()> {
+        let submitted = self.layer.submit_all(operations)?;
+        drop(self);
+        submitted.wait().await
+    }
+
+    /// [`commit`](Self::commit) for a committed MULTI/EXEC transaction.
+    pub async fn commit_transaction(
+        self,
+        writes: &[crate::core::CommittedWrite],
+    ) -> super::types::Result<()> {
+        let submitted = self.layer.submit_transaction(writes)?;
+        drop(self);
+        submitted.wait().await
+    }
 }
 
 impl PersistenceLayer {
@@ -65,6 +128,30 @@ impl PersistenceLayer {
             last_snapshot: Arc::new(RwLock::new(Instant::now())),
             operations_since_snapshot: Arc::new(RwLock::new(0)),
             replication_master,
+            order: WriteOrder::new(),
+        }
+    }
+
+    /// Lock the ordering stripes of `keys` for one write.
+    ///
+    /// Take this BEFORE applying the write and finish with
+    /// [`Ordered::commit`]: the record is then queued for replication and the
+    /// WAL before any later write to the same keys, so both see writes to a
+    /// key in the order memory applied them, and a snapshot can never capture
+    /// the write's effect while its record lands after the snapshot's cutoff.
+    pub async fn order<'k>(&self, keys: impl IntoIterator<Item = &'k str>) -> Ordered<'_> {
+        Ordered {
+            layer: self,
+            _stripes: self.order.lock(keys).await,
+        }
+    }
+
+    /// Lock every ordering stripe for a write that touches every key (FLUSHDB):
+    /// it is ordered against all writers and against snapshots as a whole.
+    pub async fn order_all(&self) -> Ordered<'_> {
+        Ordered {
+            layer: self,
+            _stripes: self.order.lock_all().await,
         }
     }
 
@@ -83,14 +170,47 @@ impl PersistenceLayer {
     /// persistence being enabled (phase6j); WAL logging follows when durable
     /// persistence is active.
     async fn record(&self, operation: Operation) -> super::types::Result<()> {
+        self.submit(operation, 1)?.wait().await
+    }
+
+    /// Hand one record (standing for `count` operations) to replication and to
+    /// the WAL writer queue, synchronously, without waiting for durability.
+    fn submit(&self, operation: Operation, count: usize) -> super::types::Result<Submitted> {
         self.maybe_replicate(&operation);
+        let ack = match &self.wal {
+            Some(wal) => {
+                let ack = wal.enqueue(operation)?;
+                *self.operations_since_snapshot.write() += count;
+                Some(ack)
+            }
+            None => None,
+        };
+        Ok(Submitted { ack })
+    }
 
-        if let Some(wal) = &self.wal {
-            wal.append(operation).await?;
-            *self.operations_since_snapshot.write() += 1;
+    /// Submit the effects of one command: several operations become ONE
+    /// [`Operation::Transaction`] record; one operation is submitted as itself.
+    fn submit_all(&self, mut operations: Vec<Operation>) -> super::types::Result<Submitted> {
+        match operations.len() {
+            0 => Ok(Submitted { ack: None }),
+            1 => self.submit(operations.remove(0), 1),
+            count => self.submit(Operation::Transaction { operations }, count),
         }
+    }
 
-        Ok(())
+    /// Submit a committed transaction as ONE [`Operation::Transaction`] record.
+    fn submit_transaction(
+        &self,
+        writes: &[crate::core::CommittedWrite],
+    ) -> super::types::Result<Submitted> {
+        if writes.is_empty() {
+            return Ok(Submitted { ack: None });
+        }
+        let operations: Vec<Operation> = writes
+            .iter()
+            .map(Self::committed_write_to_operation)
+            .collect();
+        self.submit(Operation::Transaction { operations }, writes.len())
     }
 
     /// Record the effect of one write that has already been applied in memory:
@@ -104,20 +224,8 @@ impl PersistenceLayer {
     /// (MSET, HMSET, GEOADD, ...) as ONE [`Operation::Transaction`] record, so
     /// replicas and WAL replay apply the command whole or not at all. A single
     /// operation is recorded as itself.
-    pub async fn log_operations(&self, mut operations: Vec<Operation>) -> super::types::Result<()> {
-        match operations.len() {
-            0 => Ok(()),
-            1 => self.record(operations.remove(0)).await,
-            count => {
-                let record = Operation::Transaction { operations };
-                self.maybe_replicate(&record);
-                if let Some(wal) = &self.wal {
-                    wal.append(record).await?;
-                    *self.operations_since_snapshot.write() += count;
-                }
-                Ok(())
-            }
-        }
+    pub async fn log_operations(&self, operations: Vec<Operation>) -> super::types::Result<()> {
+        self.submit_all(operations)?.wait().await
     }
 
     /// Log an entire committed transaction as one atomic unit (audit M-010,
@@ -135,35 +243,30 @@ impl PersistenceLayer {
         &self,
         writes: &[crate::core::CommittedWrite],
     ) -> super::types::Result<()> {
-        if writes.is_empty() {
-            return Ok(());
-        }
-
-        let operations: Vec<Operation> = writes
-            .iter()
-            .map(Self::committed_write_to_operation)
-            .collect();
-        let record = Operation::Transaction { operations };
-
-        // Propagate to replicas first (decoupled from the WAL, phase6j).
-        self.maybe_replicate(&record);
-
-        if let Some(wal) = &self.wal {
-            wal.append(record).await?;
-            *self.operations_since_snapshot.write() += writes.len();
-        }
-
-        Ok(())
+        self.submit_transaction(writes)?.wait().await
     }
 
     /// Map a committed transaction effect to its durable persistence operation.
     fn committed_write_to_operation(write: &crate::core::CommittedWrite) -> Operation {
         use crate::core::CommittedWrite as Cw;
         match write {
-            Cw::KvSet { key, value, ttl } => Operation::KVSet {
+            Cw::KvSet {
+                key,
+                value,
+                expires_at_ms: None,
+            } => Operation::KVSet {
                 key: key.clone(),
                 value: value.clone(),
-                ttl: *ttl,
+                ttl: None,
+            },
+            Cw::KvSet {
+                key,
+                value,
+                expires_at_ms,
+            } => Operation::KVSetAt {
+                key: key.clone(),
+                value: value.clone(),
+                expires_at_ms: *expires_at_ms,
             },
             Cw::KvDel { keys } => Operation::KVDel { keys: keys.clone() },
             Cw::HashSet { key, field, value } => Operation::HashSet {
@@ -434,20 +537,62 @@ impl PersistenceLayer {
 
         if should_snapshot {
             info!("Creating periodic snapshot");
-
-            // A WAL-less layer (persistence disabled) has no offset to record.
-            let wal_offset = self.wal.as_ref().map(|w| w.current_offset()).unwrap_or(0);
-
-            self.snapshot_mgr
-                .create_snapshot(stores, wal_offset)
-                .await?;
-
-            // Reset counters
-            *self.last_snapshot.write() = Instant::now();
-            *self.operations_since_snapshot.write() = 0;
+            self.snapshot(stores).await?;
         }
 
         Ok(())
+    }
+
+    /// Write a snapshot now, paired exactly with its WAL cutoff.
+    ///
+    /// Under the write barrier (every ordering stripe held, so no write is
+    /// between being applied and being queued) it places a mark in the WAL
+    /// queue and copies the stores; then it releases the barrier, learns the
+    /// cutoff from the mark, and serializes outside the barrier. Every write
+    /// is either in the image (queued before the mark, offset below the
+    /// cutoff, not replayed) or after the cutoff (not in the image, replayed),
+    /// never both. Without a WAL the cutoff is 0.
+    pub async fn snapshot(&self, stores: StoreRefs<'_>) -> super::types::Result<PathBuf> {
+        self.snapshot_with_pause(stores, std::future::ready(()))
+            .await
+    }
+
+    /// [`snapshot`](Self::snapshot) that awaits `at_cutoff` while the barrier
+    /// holds, right after the cutoff is recorded and before the stores are
+    /// copied. A test seam: writers issued meanwhile wait for the barrier, so
+    /// they land after the cutoff and outside the image.
+    pub async fn snapshot_with_pause(
+        &self,
+        stores: StoreRefs<'_>,
+        at_cutoff: impl Future<Output = ()>,
+    ) -> super::types::Result<PathBuf> {
+        let started = Instant::now();
+        let (image, mark) = {
+            let _barrier = self.order.lock_all().await;
+            let mark = self.wal.as_ref().map(|wal| wal.mark()).transpose()?;
+            at_cutoff.await;
+            let image = SnapshotImage::capture(stores).await?;
+            *self.operations_since_snapshot.write() = 0;
+            (image, mark)
+        };
+        let barrier_held = started.elapsed();
+        let wal_offset = match mark {
+            Some(mark) => mark.offset().await?,
+            None => 0,
+        };
+        let path = self
+            .snapshot_mgr
+            .write_image(image, stores.stream_manager, wal_offset)
+            .await?;
+        *self.last_snapshot.write() = Instant::now();
+        info!(
+            "Snapshot {:?} at WAL offset {} (writes paused {:?}, total {:?})",
+            path,
+            wal_offset,
+            barrier_held,
+            started.elapsed()
+        );
+        Ok(path)
     }
 
     /// Start background snapshot task
@@ -725,7 +870,7 @@ mod tests {
             CommittedWrite::KvSet {
                 key: "k".into(),
                 value: b"v".to_vec(),
-                ttl: Some(60),
+                expires_at_ms: Some(4_102_444_800_000),
             },
             CommittedWrite::KvDel {
                 keys: vec!["k2".into()],
@@ -980,7 +1125,7 @@ mod tests {
                     CommittedWrite::KvSet {
                         key: "tk".into(),
                         value: b"tv".to_vec(),
-                        ttl: None,
+                        expires_at_ms: None,
                     },
                     CommittedWrite::HashSet {
                         key: "th".into(),

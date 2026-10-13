@@ -73,6 +73,41 @@ enum WriteRequest {
     Shutdown {
         response_tx: oneshot::Sender<Result<()>>,
     },
+    /// Report the offset the next entry queued behind this mark will get,
+    /// i.e. one past every entry queued before it. Writes nothing.
+    Mark { response_tx: oneshot::Sender<u64> },
+}
+
+/// Acknowledgement of one entry handed to the writer with
+/// [`AsyncWAL::enqueue`]: resolves once its group reached the OS (and disk,
+/// per the fsync mode) with the entry's offset, or with the failure.
+pub struct WalAck {
+    response_rx: oneshot::Receiver<Result<u64>>,
+}
+
+impl WalAck {
+    /// Wait for the entry to be written and flushed.
+    pub async fn wait(self) -> Result<u64> {
+        self.response_rx
+            .await
+            .map_err(|_| broken_pipe("WAL writer response channel closed"))?
+    }
+}
+
+/// The WAL position at a [`AsyncWAL::mark`]; see [`WalMark::offset`].
+pub struct WalMark {
+    response_rx: oneshot::Receiver<u64>,
+}
+
+impl WalMark {
+    /// The offset the first entry queued after the mark got (or will get):
+    /// every entry queued before the mark has a smaller offset, every entry
+    /// queued after it this offset or a larger one.
+    pub async fn offset(self) -> Result<u64> {
+        self.response_rx
+            .await
+            .map_err(|_| broken_pipe("WAL writer stopped before reaching the snapshot mark"))
+    }
 }
 
 /// Asynchronous Write-Ahead Log with group commit optimization
@@ -179,12 +214,36 @@ impl AsyncWAL {
 
     /// Append an operation to the WAL (returns immediately, actual write is batched)
     pub async fn append(&self, operation: Operation) -> Result<u64> {
+        self.enqueue(operation)?.wait().await
+    }
+
+    /// Queue an operation for the writer without waiting for it.
+    ///
+    /// Synchronous: once this returns, the entry has its place in the writer's
+    /// queue, so entries queued one after another (for instance while holding
+    /// a per-key lock) are written, and get offsets, in that order. Await the
+    /// returned [`WalAck`] for durability.
+    pub fn enqueue(&self, operation: Operation) -> Result<WalAck> {
         self.check_poison()?;
-        self.request(|response_tx| WriteRequest::Single {
-            operation,
-            response_tx,
-        })
-        .await
+        let (response_tx, response_rx) = oneshot::channel();
+        self.writer_tx
+            .send(WriteRequest::Single {
+                operation,
+                response_tx,
+            })
+            .map_err(|_| broken_pipe("WAL writer channel closed"))?;
+        Ok(WalAck { response_rx })
+    }
+
+    /// Place a mark in the writer's queue (synchronous) and return a handle
+    /// that resolves to the WAL position at the mark: the snapshot cutoff.
+    pub fn mark(&self) -> Result<WalMark> {
+        self.check_poison()?;
+        let (response_tx, response_rx) = oneshot::channel();
+        self.writer_tx
+            .send(WriteRequest::Mark { response_tx })
+            .map_err(|_| broken_pipe("WAL writer channel closed"))?;
+        Ok(WalMark { response_rx })
     }
 
     /// Append a committed transaction as ONE record (audit M-010, phase22).
@@ -362,6 +421,10 @@ impl<S: WalSink> Writer<S> {
                     // Requests queued behind the shutdown are dropped, so
                     // their callers get an error rather than an acknowledgement.
                     return Flow::Stop;
+                }
+                WriteRequest::Mark { response_tx } => {
+                    // Every entry ahead of the mark has taken its offset.
+                    let _ = response_tx.send(self.current_offset.load(Ordering::SeqCst));
                 }
             }
         }

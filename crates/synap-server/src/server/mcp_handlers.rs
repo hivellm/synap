@@ -1007,32 +1007,36 @@ async fn handle_transaction_exec(
         .ok_or_else(|| ErrorData::invalid_params("Missing client_id", None))?
         .to_string();
 
-    match state
-        .transaction_manager
-        .exec(&client_id)
-        .await
-        .map_err(|e| ErrorData::internal_error(format!("Transaction exec failed: {}", e), None))?
+    // Persist + replicate the whole transaction atomically (audit M-010),
+    // ordered against plain writers and snapshots (phase23). A commit that
+    // could not be logged is not durable: report it.
+    let outcome = match crate::persistence::durable::exec(
+        state.persistence.as_deref(),
+        &state.transaction_manager,
+        &client_id,
+    )
+    .await
     {
-        Some((results, writes)) => {
-            // Persist + replicate the whole transaction atomically (audit M-010).
-            // A commit that could not be logged is not durable: report it.
-            if let Some(ref persistence) = state.persistence
-                && let Err(e) = persistence.log_transaction(&writes).await
-            {
-                tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
-                return Err(ErrorData::internal_error(
-                    crate::persistence::layer::exec_not_durable_message(&e),
-                    None,
-                ));
-            }
-            Ok(CallToolResult::success(vec![ContentBlock::text(
-                json!({
-                    "success": true,
-                    "results": results
-                })
-                .to_string(),
-            )]))
+        Ok(outcome) => outcome,
+        Err(crate::persistence::durable::ExecError::Failed(e)) => {
+            return Err(ErrorData::internal_error(
+                format!("Transaction exec failed: {}", e),
+                None,
+            ));
         }
+        Err(e @ crate::persistence::durable::ExecError::NotDurable(_)) => {
+            tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
+            return Err(ErrorData::internal_error(e.to_string(), None));
+        }
+    };
+    match outcome {
+        Some((results, _writes)) => Ok(CallToolResult::success(vec![ContentBlock::text(
+            json!({
+                "success": true,
+                "results": results
+            })
+            .to_string(),
+        )])),
         None => Ok(CallToolResult::success(vec![ContentBlock::text(
             json!({
                 "aborted": true,

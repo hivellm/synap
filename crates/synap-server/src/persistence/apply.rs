@@ -19,10 +19,20 @@
 
 use crate::core::sorted_set::{SortedSetStore, ZAddOptions};
 use crate::core::{
-    Aggregate, BitfieldOperation, BitmapOperation, BitmapStore, HashStore, HyperLogLogStore,
-    KVStore, ListStore, QueueManager, SetStore, StreamManager, SynapError,
+    Aggregate, BitfieldOperation, BitmapOperation, BitmapStore, Expiry, HashStore,
+    HyperLogLogStore, KVStore, ListStore, QueueManager, SetOptions, SetStore, StreamManager,
+    SynapError,
 };
 use crate::persistence::types::Operation;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Current Unix time in milliseconds.
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 
 /// Borrowed bundle of every store a persistence routine can touch.
 ///
@@ -198,6 +208,38 @@ async fn apply_single(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapE
         },
         Operation::KVFlush => {
             kv_store.clear().await;
+        }
+        // Absolute expiry (phase23). A deadline that has already passed means
+        // the write happened and the key then expired: it is removed, never
+        // resurrected.
+        Operation::KVSetAt {
+            key,
+            value,
+            expires_at_ms,
+        } => match expires_at_ms {
+            None => {
+                kv_store.set(key, value, None).await?;
+            }
+            Some(deadline) if deadline <= now_ms() => {
+                kv_store.delete(&key).await?;
+            }
+            Some(deadline) => {
+                kv_store
+                    .set_with_opts(
+                        &key,
+                        value,
+                        Some(Expiry::UnixMilliseconds(deadline)),
+                        SetOptions::default(),
+                    )
+                    .await?;
+            }
+        },
+        Operation::KVExpireAt { key, expires_at_ms } => {
+            if expires_at_ms <= now_ms() {
+                kv_store.delete(&key).await?;
+            } else {
+                kv_store.expire_at(&key, expires_at_ms).await?;
+            }
         }
 
         // ── Queue ───────────────────────────────────────────────────────────
@@ -451,6 +493,15 @@ async fn apply_single(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapE
         } => {
             if let Some(h) = hyperloglog_store {
                 h.pfmerge(&destination, sources)?;
+            }
+        }
+        Operation::HllAddAt {
+            key,
+            elements,
+            expires_at_ms,
+        } => {
+            if let Some(h) = hyperloglog_store {
+                h.pfadd_until(&key, elements, expires_at_ms)?;
             }
         }
 

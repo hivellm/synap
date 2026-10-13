@@ -1,6 +1,7 @@
 pub mod apply;
 pub mod durable;
 pub mod layer;
+pub mod order;
 pub mod queue_persistence;
 pub mod recovery;
 pub mod snapshot;
@@ -22,7 +23,7 @@ pub use apply::{StoreArcs, StoreRefs};
 pub use layer::PersistenceLayer;
 pub use queue_persistence::QueuePersistence;
 pub use recovery::{RecoveredStores, recover, recover_all};
-pub use snapshot::SnapshotManager;
+pub use snapshot::{SnapshotImage, SnapshotManager};
 pub use stream_persistence::{StreamEvent, StreamPersistence};
 pub use types::{
     BitfieldWrite, Operation, PersistenceConfig, PersistenceError, Result, Snapshot, WALEntry,

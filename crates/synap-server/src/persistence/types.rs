@@ -350,6 +350,76 @@ pub enum Operation {
         key: String,
         writes: Vec<BitfieldWrite>,
     },
+
+    // phase23 variants: absolute expiry. Appended after the phase21 ones so
+    // every earlier index keeps decoding. Writes that leave no expiry keep the
+    // older records (`KVSet { ttl: None }`, `KVExpire { ttl: None }`,
+    // `HllAdd { ttl: None }`), since "no expiry" is already absolute.
+    /// KV SET family that left the key expiring at `expires_at_ms` (Unix
+    /// milliseconds; `None` = persistent).
+    KVSetAt {
+        key: String,
+        value: Vec<u8>,
+        expires_at_ms: Option<u64>,
+    },
+
+    /// KV EXPIRE: the existing key now expires at `expires_at_ms` (Unix ms).
+    KVExpireAt { key: String, expires_at_ms: u64 },
+
+    /// HyperLogLog PFADD with a TTL: the HLL now expires at `expires_at_ms`
+    /// (Unix ms, whole seconds).
+    HllAddAt {
+        key: String,
+        elements: Vec<Vec<u8>>,
+        expires_at_ms: u64,
+    },
+}
+
+impl Operation {
+    /// Rewrite a relative-TTL record into its absolute-expiry form, using the
+    /// time it was written (`written_at_secs`, the WAL entry's timestamp in
+    /// Unix seconds). Records written before phase23 carried TTLs relative to
+    /// that moment; replaying them relative to boot time would restart every
+    /// TTL and bring back keys that expired while the server was down.
+    /// Records without a relative TTL are returned unchanged; a transaction
+    /// record is rewritten operation by operation.
+    pub fn with_absolute_expiry(self, written_at_secs: u64) -> Operation {
+        let deadline = |ttl: u64| written_at_secs.saturating_add(ttl).saturating_mul(1_000);
+        match self {
+            Operation::KVSet {
+                key,
+                value,
+                ttl: Some(ttl),
+            } => Operation::KVSetAt {
+                key,
+                value,
+                expires_at_ms: Some(deadline(ttl)),
+            },
+            Operation::KVExpire {
+                key,
+                ttl: Some(ttl),
+            } => Operation::KVExpireAt {
+                key,
+                expires_at_ms: deadline(ttl),
+            },
+            Operation::HllAdd {
+                key,
+                elements,
+                ttl: Some(ttl),
+            } => Operation::HllAddAt {
+                key,
+                elements,
+                expires_at_ms: deadline(ttl),
+            },
+            Operation::Transaction { operations } => Operation::Transaction {
+                operations: operations
+                    .into_iter()
+                    .map(|op| op.with_absolute_expiry(written_at_secs))
+                    .collect(),
+            },
+            other => other,
+        }
+    }
 }
 
 /// One field written by a BITFIELD command, as the value it holds afterwards.
@@ -361,7 +431,7 @@ pub struct BitfieldWrite {
     pub value: i64,
 }
 
-/// Snapshot containing full system state
+/// Snapshot containing full system state, as loaded from a snapshot file.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Snapshot {
     pub version: u32,
@@ -379,6 +449,16 @@ pub struct Snapshot {
     pub sorted_set_data: HashMap<String, Vec<(Vec<u8>, f64)>>, // Key -> Vec<(member, score)>
     #[serde(default)]
     pub hash_data: HashMap<String, HashMap<String, Vec<u8>>>, // Key -> field -> value
+    /// Absolute expiry (Unix ms) of every expiring key in `kv_data` (v4+;
+    /// empty for v2/v3 files, whose keys load without expiry).
+    #[serde(default)]
+    pub kv_expires_at_ms: HashMap<String, u64>,
+    /// HyperLogLog values, each with its own absolute expiry (v4+).
+    #[serde(default)]
+    pub hyperloglog_data: HashMap<String, crate::core::HyperLogLogValue>,
+    /// Bitmap values, each with its own expiry (v4+).
+    #[serde(default)]
+    pub bitmap_data: HashMap<String, crate::core::BitmapValue>,
 }
 
 /// Stream event for snapshot (simplified from stream::StreamEvent)

@@ -289,23 +289,28 @@ pub(super) async fn handle_transaction_exec_cmd(
         .unwrap_or(&request.request_id);
 
     debug!("StreamableHTTP EXEC client_id={}", client_id);
-    match state.transaction_manager.exec(client_id).await? {
-        Some((results, writes)) => {
-            // Persist + replicate the whole transaction atomically (audit M-010).
-            // A commit that could not be logged is not durable: report it.
-            if let Some(ref persistence) = state.persistence
-                && let Err(e) = persistence.log_transaction(&writes).await
-            {
-                error!("Failed to log EXEC transaction to WAL: {}", e);
-                return Err(SynapError::InternalError(
-                    crate::persistence::layer::exec_not_durable_message(&e),
-                ));
-            }
-            Ok(serde_json::json!({
-                "success": true,
-                "results": results
-            }))
+    // Persist + replicate the whole transaction atomically (audit M-010),
+    // ordered against plain writers and snapshots (phase23). A commit that
+    // could not be logged is not durable: report it.
+    let outcome = match crate::persistence::durable::exec(
+        state.persistence.as_deref(),
+        &state.transaction_manager,
+        client_id,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(crate::persistence::durable::ExecError::Failed(e)) => return Err(e),
+        Err(e @ crate::persistence::durable::ExecError::NotDurable(_)) => {
+            error!("Failed to log EXEC transaction to WAL: {}", e);
+            return Err(SynapError::InternalError(e.to_string()));
         }
+    };
+    match outcome {
+        Some((results, _writes)) => Ok(serde_json::json!({
+            "success": true,
+            "results": results
+        })),
         None => Ok(serde_json::json!({
             "aborted": true,
             "message": "Transaction aborted: watched keys changed"
