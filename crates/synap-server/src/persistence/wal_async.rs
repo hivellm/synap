@@ -272,6 +272,26 @@ impl AsyncWAL {
             .await
     }
 
+    /// Flush and fsync every entry appended before this call, whatever the
+    /// fsync mode. A snapshot calls this before it is published, so the WAL
+    /// durably holds every record below the snapshot's cutoff.
+    pub async fn sync(&self) -> Result<()> {
+        self.check_poison()?;
+        self.request(|response_tx| WriteRequest::Flush {
+            sync: true,
+            response_tx,
+        })
+        .await
+    }
+
+    /// Make the next entry get offset `next` or a later one. Startup calls
+    /// this with the offset recovery ended at, so a record written after a
+    /// snapshot never gets an offset below the snapshot's cutoff, even when
+    /// the WAL lost records the snapshot holds.
+    pub fn continue_at(&self, next: u64) {
+        self.current_offset.fetch_max(next, Ordering::SeqCst);
+    }
+
     /// Flush and fsync every entry appended before this call, then stop the
     /// writer. Later appends fail instead of being acknowledged after the
     /// final fsync. Used by graceful shutdown.

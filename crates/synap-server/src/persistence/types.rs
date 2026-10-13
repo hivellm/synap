@@ -1,4 +1,4 @@
-use crate::core::queue::{QueueConfig, QueueMessage};
+use crate::core::queue::{QueueConfig, QueueMessage, QueueState};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -62,6 +62,12 @@ pub enum PersistenceError {
         found: u32,
         supported: u32,
     },
+
+    /// The newest snapshot file(s) are damaged or unreadable and no older
+    /// starting point is provably complete (the WAL no longer holds every
+    /// record after it), so recovering would lose acknowledged writes.
+    #[error("cannot recover from the snapshots: {0}")]
+    SnapshotUnrecoverable(String),
 }
 
 impl PersistenceError {
@@ -69,14 +75,18 @@ impl PersistenceError {
     ///
     /// Interior corruption, a WAL written by a newer format and a damaged WAL
     /// header all mean the WAL holds acknowledged history this process cannot
-    /// replay safely. Starting fresh would hide that history and append after
-    /// it, so startup must fail instead.
+    /// replay safely; so does a damaged snapshot recovery cannot safely fall
+    /// back from. Starting fresh would hide that history, append after it and
+    /// let the next snapshot and retention delete it, so startup must fail
+    /// instead.
     pub fn refuses_startup(&self) -> bool {
         matches!(
             self,
             PersistenceError::WALInteriorCorruption { .. }
                 | PersistenceError::WALUnsupportedVersion { .. }
                 | PersistenceError::WALCorrupted { .. }
+                | PersistenceError::SnapshotCorrupted(_)
+                | PersistenceError::SnapshotUnrecoverable(_)
         )
     }
 }
@@ -460,6 +470,33 @@ pub struct QueueImage {
     pub in_flight: Vec<QueueMessageRecord>,
     /// Dead-lettered messages, oldest first (v5+).
     pub dead_letter: Vec<QueueMessageRecord>,
+}
+
+impl From<&QueueState> for QueueImage {
+    fn from(state: &QueueState) -> Self {
+        let records = |list: &[QueueMessage]| list.iter().map(QueueMessageRecord::from).collect();
+        Self {
+            config: Some(state.config.clone()),
+            ready: records(&state.ready),
+            in_flight: records(&state.in_flight),
+            dead_letter: records(&state.dead_letter),
+        }
+    }
+}
+
+impl QueueImage {
+    /// The queue state this image describes, for
+    /// `QueueManager::restore_queue`; `default_config` stands in for a
+    /// configuration the image does not hold (v2-v4 snapshots).
+    pub fn into_state(self, default_config: QueueConfig) -> QueueState {
+        let messages = |list: Vec<QueueMessageRecord>| list.into_iter().map(Into::into).collect();
+        QueueState {
+            config: self.config.unwrap_or(default_config),
+            ready: messages(self.ready),
+            in_flight: messages(self.in_flight),
+            dead_letter: messages(self.dead_letter),
+        }
+    }
 }
 
 impl Operation {

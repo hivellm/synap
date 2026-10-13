@@ -407,6 +407,15 @@ impl SetStore {
         out
     }
 
+    /// Remove every set, e.g. before a replica loads a full-sync image. The
+    /// memory contribution is recomputed.
+    pub fn clear(&self) {
+        for shard in self.shards.iter() {
+            shard.write().clear();
+        }
+        self.refresh_memory();
+    }
+
     /// Create new set store
     pub fn new() -> Self {
         let mut shards = Vec::with_capacity(SHARD_COUNT);

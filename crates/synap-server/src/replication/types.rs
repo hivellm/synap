@@ -18,7 +18,8 @@ pub enum NodeRole {
 /// Replication command (sent from master to replica)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ReplicationCommand {
-    /// Full sync - initial snapshot transfer
+    /// Full sync as sent by 1.3.x masters: KV keys and stream events only.
+    /// Still accepted by replicas so they can be upgraded before the master.
     FullSync { snapshot_data: Vec<u8>, offset: u64 },
 
     /// Partial sync - incremental updates from offset
@@ -35,6 +36,18 @@ pub enum ReplicationCommand {
 
     /// Acknowledge - replica confirms receipt
     Ack { replica_id: String, offset: u64 },
+
+    /// Full sync (phase31): every replicated datatype as of `offset`.
+    ///
+    /// `image` is a bincode-encoded `sync::FullSyncData` in format
+    /// `version`, protected by the CRC32 `checksum`. Appended after every
+    /// earlier variant so their encoding is unchanged.
+    FullSyncImage {
+        version: u32,
+        offset: u64,
+        checksum: u32,
+        image: Vec<u8>,
+    },
 }
 
 /// Operation to be replicated
@@ -107,6 +120,9 @@ pub enum ReplicationError {
 
     #[error("Invalid offset: expected {expected}, got {actual}")]
     InvalidOffset { expected: u64, actual: u64 },
+
+    #[error("Full sync failed: {0}")]
+    FullSync(String),
 }
 
 impl From<serde_json::Error> for ReplicationError {

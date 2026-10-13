@@ -34,14 +34,21 @@ Periodic snapshots reduce WAL replay time on restart.
 Every N minutes OR M operations:
     │
     ▼
-Create Snapshot (full state dump)
+Capture the stores under the write barrier, record the WAL cutoff
     │
     ▼
-Truncate WAL (remove old entries)
+Fsync the WAL up to the cutoff (whatever fsync_mode is)
     │
     ▼
-Keep last K snapshots
+Write snapshot-v5-<sequence>.bin.tmp, fsync, rename, fsync the directory
+    │
+    ▼
+Keep the last K snapshots (never the one just written)
 ```
+
+The server never truncates the WAL: recovery can always fall back from a
+damaged snapshot to an older one (or to the whole WAL) as long as nobody cut
+the WAL by hand. See "Snapshot Files and Crash Safety" below.
 
 ## Data Structure
 
@@ -353,6 +360,15 @@ pub async fn auto_snapshot_task(
 
 ### WAL Truncation
 
+The server does not truncate or rotate the WAL; `WriteAheadLog::truncate`
+exists as an API but nothing in the server calls it. A caller that does
+must only cut below the cutoff of a snapshot that is already durable (it
+was published by `SnapshotManager::write_image`, which fsyncs and renames
+before returning) and verified (`SnapshotManager::load` succeeds). After a
+cut, recovery refuses to fall back to a snapshot older than the cut (see
+"Snapshot Files and Crash Safety"). The sketch below is the historical
+design; the current implementation also keeps every entry's original offset.
+
 ```rust
 impl WriteAheadLog {
     pub async fn truncate(&mut self, up_to_offset: u64) -> Result<()> {
@@ -506,9 +522,9 @@ WAL (always):      10K ops/sec  (98% reduction)
 │   └── synap.wal              # Write-ahead log
 │
 ├── snapshots/
-│   ├── snapshot-1697410800.bin
-│   ├── snapshot-1697411100.bin
-│   └── snapshot-1697411400.bin
+│   ├── snapshot-v5-00000000000000000041.bin
+│   ├── snapshot-v5-00000000000000000042.bin
+│   └── snapshot-v5-00000000000000000043.bin
 │
 └── metadata/
     └── recovery.json          # Recovery metadata
@@ -592,10 +608,12 @@ Time: 1-5 seconds
    fail startup with the byte position of the bad frame
 5. Write the header of a new file, or upgrade a 1.3.x file in place
    (temp file with header + unchanged frames, fsync, rename)
-6. Load latest valid snapshot
+6. Load the newest valid snapshot; a damaged newer one is skipped only when
+   the WAL still covers the older snapshot (see "Corrupted Snapshot")
 7. Replay WAL from the snapshot offset; a transaction record applies every
    operation it holds
-8. Resume operations
+8. New WAL records continue at or above the snapshot's cutoff
+9. Resume operations
 Time: 1-10 seconds
 ```
 
@@ -637,7 +655,9 @@ The same stripes order writes to one key: their records reach the WAL and
 the replication stream in the order memory applied them, so replaying
 resulting-value records (APPEND, INCR, SETRANGE) ends on the value the key
 held. Blocking pops hold the stripes only while they pop, not while they
-wait.
+wait: a blocked client is queued on every key it waits on
+(`synap-core` `core/blocking.rs`) and takes the stripes again for each pop
+attempt after a push wakes it.
 
 Writers pause while the snapshot copies the stores (measured: ~58 ms for
 160,000 KV keys plus 10,000 ten-field hashes in a release build; KV values
@@ -650,7 +670,7 @@ disabled no stripe is taken.
 Expiry is stored as an absolute Unix-millisecond deadline everywhere it is
 persisted:
 
-- Snapshot v4 stores each KV key's deadline (`0` = persistent) and the
+- Snapshots (v4 and later) store each KV key's deadline (`0` = persistent) and the
   HyperLogLog and bitmap values, which carry `created_at + ttl_secs`.
 - WAL records that set or change expiry carry the deadline the store stored:
   `KVSetAt { key, value, expires_at_ms }` (SET EX/PX/EXAT/PXAT/KEEPTTL, and
@@ -692,15 +712,64 @@ afterwards is acknowledged. `PersistenceLayer::flush` is an awaited barrier:
 it returns once every earlier entry reached the OS (and the disk unless
 `fsync_mode` is `never`).
 
+### Snapshot Files and Crash Safety
+
+A snapshot is written to `snapshot-v5-<20-digit sequence>.bin.tmp` in the
+snapshot directory (named after its format version), fsynced, renamed to
+`snapshot-v5-<sequence>.bin`, and the
+directory is fsynced (Unix). On Windows the directory cannot be fsynced; NTFS
+renames are atomic and journaled in order, so after a crash the new name
+either exists with the complete, already-flushed file or does not exist,
+and the retention deletes that follow cannot survive without it. A crash at
+any byte of the write therefore leaves the previous snapshots untouched plus,
+at most, a temporary file: recovery never lists temporary files and the next
+snapshot removes them.
+
+The sequence is one past the highest sequence in the directory and snapshots
+run one at a time, so two snapshots in the same second get different names
+and a later name always has a later (or equal) WAL cutoff. Recovery orders
+files by that sequence, not by the clock. Files named by earlier releases
+(`snapshot-v<N>-<unix seconds>.bin`) still load and count as older than every
+sequenced file.
+
+Before a snapshot is published the WAL is fsynced up to its cutoff, even with
+`fsync_mode: never`, so the WAL never ends below a published snapshot's
+cutoff. If it does anyway (a power loss right after a snapshot taken by an
+earlier release), recovery logs it and new WAL records continue at the
+snapshot's cutoff instead of reusing offsets the next recovery would skip.
+
+### Snapshot Retention
+
+After the new snapshot is durable, the oldest files beyond `max_snapshots` are
+removed. At least one snapshot is always kept and the one just written is
+never removed (`max_snapshots: 0` keeps one). A failed removal is logged as a
+warning; the snapshot itself succeeded.
+
 ### Corrupted Snapshot
 
+Recovery tries snapshots newest first. A file that is truncated, fails its
+CRC64, has an unknown magic, or holds a record that does not decode is
+damaged; every length in the file is checked against the file size before
+it is read, so a damaged length cannot trigger a huge allocation.
+
 ```
-1. Skip corrupted snapshot
-2. Try previous snapshot
-3. If all snapshots corrupted, replay full WAL
-4. Create new snapshot
-Time: 10-60 seconds
+1. Skip a damaged snapshot and try the previous one (or none)
+2. Fall back only if the WAL still holds every record after that snapshot's
+   cutoff (the whole history when no valid snapshot is left):
+   - the WAL is enabled,
+   - its first record is at or before the cutoff (offsets start at 1),
+   - its offsets have no break after the cutoff,
+   - it holds records if that snapshot was taken after some were written
+3. Otherwise refuse to start, naming the damaged files and the reason
+4. Replay the WAL from the chosen snapshot's cutoff
 ```
+
+A snapshot that cannot be read for another reason (permissions, device
+errors) also refuses startup, since the file may be intact. Before 1.4.0
+recovery read only the newest file; when it was damaged the server started
+with empty stores, and the next snapshot and retention deleted the older
+data. To accept a loss deliberately, restore the damaged file from a backup
+or move it out of the snapshot directory before starting the server.
 
 ## Replication with Persistence
 
@@ -783,8 +852,8 @@ systemctl restart synap
 
 ### Snapshot Binary Format
 
-Streamed sections ending in a CRC64 digest; the current layout is v4 (magic
-`SYNAP004`), described byte by byte in
+Streamed sections ending in a CRC64 digest; the current layout is v5 (magic
+`SYNAP005`), described byte by byte in
 [`docs/internals/persistence-snapshot-format.md`](../internals/persistence-snapshot-format.md):
 
 ```

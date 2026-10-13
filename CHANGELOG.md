@@ -122,6 +122,23 @@ migration notes before upgrading.
   one offset: a replica whose connection drops mid-transaction applies none of
   it and receives it whole on resync. A replica still applies the operations of
   a transaction one after another, so a reader there can observe it half-applied.
+- **Replica full sync carries every datatype, exactly.** A new or resyncing
+  replica received only KV keys and stream events; it now receives hashes,
+  lists, sets, sorted sets (geo), HyperLogLogs, bitmaps and queues too, with KV
+  keys keeping their absolute expiry. The master captures the image under the
+  same write barrier as snapshots, paired with its replication offset, so
+  writes made during a full sync apply once on the replica (they could apply
+  twice or be lost). The replica verifies the whole image (version, CRC32)
+  before clearing and loading, so keys deleted on the master while it was away
+  are gone; a failed load forces a full sync on reconnect. A full sync is sent
+  whenever the replica lacks usable history: offset 0, an offset older than
+  the log, or one beyond the master's offset (a fresh replica connecting after
+  the master's first write used to get a partial sync and miss everything
+  recovered at boot). Records now reach replicas in offset order: concurrent
+  writers to different keys could queue offset N+1 before N, and the replica
+  dropped N. **Breaking (mixed versions):** the full sync uses a new versioned
+  command a 1.3.x replica cannot decode, so upgrade replicas before the
+  master; 1.4.0 replicas still accept a 1.3.x master's full sync.
 - **Counter amounts behave the same on every transport** (review finding
   E-04). The SDK native maps (Rust, TypeScript, Python, C#, PHP, Go) send
   `INCRBY`/`DECRBY` when `kv.incr`/`kv.decr` carries an `amount` and keep
@@ -235,6 +252,29 @@ migration notes before upgrading.
   - Startup verifies frame checksums and lengths and truncates a torn tail
     before appending, so writes made after a crash stay recoverable; a corrupt
     length can no longer trigger a huge allocation.
+- **Snapshots are crash-safe and never cost acknowledged data.**
+  - A damaged newest snapshot (truncated or corrupt) made recovery fail and the
+    server start with empty stores, keep appending to the old WAL, and on the
+    next snapshot let retention delete the older valid ones, losing every write
+    acknowledged before the crash. Recovery now falls back to an older snapshot
+    only when the WAL provably still covers it (from its cutoff on, with no
+    gaps), and otherwise refuses to start with an error naming the damaged
+    files.
+  - Snapshots are written to a temporary file, fsynced, renamed and the
+    directory fsynced (Unix; NTFS renames are atomic), so a crash mid-snapshot
+    no longer leaves a truncated newest file. Files are named
+    `snapshot-v4-<sequence>.bin` and loaded in sequence order, so two snapshots
+    in the same second no longer overwrite each other; old timestamp names
+    still load, as older. Every length read from a snapshot is bounded by the
+    file size.
+  - Each snapshot fsyncs the WAL up to its cutoff before it is published, and
+    after a restart new WAL records continue at or above the loaded snapshot's
+    cutoff, so a power loss right after a snapshot no longer makes later writes
+    invisible to the next recovery.
+  - Retention runs only once the new snapshot is durable, never removes the
+    snapshot just written (`max_snapshots: 0` keeps one) and logs failed
+    removals as warnings. Restore snapshots and WAL together (see
+    `docs/users/operations/BACKUP.md`).
 - **Replicas can reach the master by hostname.** `replication.master_address`
   accepted only `IP:port`, so the docker-compose replicas could not point at
   the `master` service. It now takes `host:port` with an IP or a DNS name,
@@ -255,6 +295,18 @@ migration notes before upgrading.
   `tests/` directories, and cargo refuses to parse a manifest whose test file
   is missing, even for `cargo build --bins`. The builder stage now copies them;
   they are never compiled into the image.
+- **Multi-key blocking pops wake on whichever key gets data.** BLPOP, BRPOP,
+  BZPOPMIN and BZPOPMAX on several keys waited for each key's notification in
+  turn, so a push to a later key went unnoticed until the earlier keys were
+  pushed or the timeout expired, and a push landing between the last emptiness
+  check and the start of the wait could be missed. A blocked client now waits
+  on all its keys at once and pops from the first non-empty key in argument
+  order; clients blocked on one key are served in the order they blocked, and
+  a woken client that times out, disconnects or pops another key passes its
+  wake-up on. ZINCRBY, ZINTERSTORE, ZUNIONSTORE and ZDIFFSTORE now also wake
+  BZPOPMIN/BZPOPMAX clients (only ZADD did). Applies to RESP3 and SynapRPC,
+  with or without persistence; the per-key wake-up channels, whose map never
+  shrank, are replaced by one waiter registry.
 
 ## [1.3.2] - 2026-10-13
 

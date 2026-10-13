@@ -33,6 +33,11 @@ impl QueueManager {
         }
     }
 
+    /// The configuration a queue gets when it is created without one.
+    pub fn default_config(&self) -> &QueueConfig {
+        &self.default_config
+    }
+
     /// Attach the shared cross-datatype memory budget (audit M-018). Queues are
     /// already depth-capped, so they contribute to the accounted total (subject
     /// to eviction/refusal on other write paths) via `refresh_memory`.

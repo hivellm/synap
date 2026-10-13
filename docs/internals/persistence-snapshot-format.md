@@ -1,9 +1,36 @@
 # Snapshot format
 
 Point-in-time snapshots are written by `SnapshotManager::write_image` (the
-image is captured by `SnapshotImage::capture`) and read by `load_latest`
-(`crates/synap-server/src/persistence/snapshot.rs`). The format is a single
-streamed binary file ending in a CRC64 integrity digest.
+image is captured by `SnapshotImage::capture`) and read by
+`SnapshotManager::load` (`crates/synap-server/src/persistence/snapshot.rs`).
+The format is a single streamed binary file ending in a CRC64 integrity
+digest.
+
+## File names and write protocol
+
+A snapshot is named `snapshot-v<version>-<sequence>.bin` after the format
+version it is written in (`snapshot-v5-...` today), the sequence being 20
+zero-padded decimal digits, one past the highest sequence already in the
+directory whatever the version in the name (a per-manager lock serializes
+writes, and `PersistenceLayer::snapshot` runs one snapshot at a time).
+Loading orders sequenced files by sequence alone, so `snapshot-v4-...7.bin`
+comes before `snapshot-v5-...8.bin`; any other `snapshot-*.bin` name (earlier
+releases used `snapshot-v<N>-<unix seconds>.bin`) is older than every
+sequenced file and ordered among the others by name, as before.
+
+`write_image`:
+
+1. creates the directory if needed (fsyncing its parent) and removes
+   `snapshot-*.tmp` files left by a write that never finished;
+2. streams the image to `<final name>.tmp` and fsyncs it;
+3. renames it to the final name and fsyncs the directory (Unix; on Windows
+   NTFS renames are atomic and journaled in order);
+4. removes the oldest files beyond `max_snapshots`, keeping at least one and
+   never the file just written; a failed removal is a warning.
+
+`PersistenceLayer::snapshot` fsyncs the WAL up to the cutoff (whatever its
+fsync mode) before step 1, so a published snapshot never has a cutoff past
+the durable end of the WAL.
 
 ## Layout (v5 — magic `SYNAP005`)
 
@@ -52,7 +79,23 @@ numeric length/count fields are digested little-endian (raw bytes for
 keys/values). On load the digest is recomputed identically and compared to
 the trailing checksum; a mismatch returns
 `PersistenceError::SnapshotCorrupted` instead of loading corrupt data (audit
-M-002).
+M-002). So do an unknown magic, a version byte that does not match it, a
+file that ends early and a record that does not decode. Every length and
+count is checked against the bytes left in the file before it is read, so a
+damaged length fails as a truncated file instead of allocating it.
+
+## Recovery and damaged files
+
+`recover_all` tries files newest first and skips a damaged one only when the
+WAL provably holds every record after the older snapshot's cutoff (or the
+whole history when no valid snapshot is left): the WAL is enabled, its first
+record is at or before the cutoff, its offsets do not break after the cutoff,
+and it holds records if the older snapshot was taken after some. Otherwise it
+returns `PersistenceError::SnapshotUnrecoverable`, which, like
+`SnapshotCorrupted`, refuses startup. Recovery also returns the offset the
+next WAL record must get (`RecoveredStores::wal_offset`: past the WAL and
+never below the loaded cutoff); `main.rs` passes it to
+`PersistenceLayer::continue_wal_at`.
 
 ## Pairing with the WAL
 

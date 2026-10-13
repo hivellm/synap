@@ -279,7 +279,7 @@ curl -X POST http://localhost:15500/snapshot
 ```json
 {
   "success": true,
-  "snapshot_path": "./data/snapshots/snapshot-v2-1234567890.bin"
+  "snapshot_path": "./data/snapshots/snapshot-v5-00000000000000000042.bin"
 }
 ```
 
@@ -294,7 +294,7 @@ curl http://localhost:15500/snapshots
 {
   "snapshots": [
     {
-      "path": "snapshot-v2-1234567890.bin",
+      "path": "snapshot-v5-00000000000000000042.bin",
       "size_bytes": 1048576,
       "created_at": "2025-01-01T12:00:00Z"
     }

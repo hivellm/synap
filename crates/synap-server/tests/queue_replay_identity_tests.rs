@@ -560,3 +560,119 @@ async fn master_and_replica_keep_identical_message_ids() {
             .contains(&"doomed".to_string())
     );
 }
+
+/// A replica that connects after the master already holds queue state gets
+/// it through a FULL sync: the same message IDs and metadata, the message in
+/// flight on the master ready on the replica, dead letters and configuration
+/// kept. A later streamed ACK then settles the in-flight message by ID.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn late_replica_full_sync_keeps_message_ids_and_queue_state() {
+    let addr: SocketAddr = format!("127.0.0.1:{}", free_port()).parse().unwrap();
+    let master_queues = Arc::new(QueueManager::new(QueueConfig::default()));
+    let master = Arc::new(
+        MasterNode::with_stores(
+            ReplicationConfig {
+                enabled: true,
+                role: NodeRole::Master,
+                replica_listen_address: Some(addr),
+                heartbeat_interval_ms: 100,
+                ..Default::default()
+            },
+            StoreArcs {
+                queue_manager: Some(Arc::clone(&master_queues)),
+                stream_manager: Some(Arc::new(StreamManager::new(StreamConfig::default()))),
+                ..StoreArcs::kv_only(Arc::new(KVStore::new(KVConfig::default())))
+            },
+        )
+        .await
+        .unwrap(),
+    );
+    let mut persistence = PersistenceConfig::default();
+    persistence.enabled = false;
+    let layer = PersistenceLayer::new_with_replication(persistence, Some(master))
+        .await
+        .unwrap();
+    let log = Some(&layer);
+    let qm = master_queues.as_ref();
+    let custom = QueueConfig {
+        max_depth: 44,
+        ..QueueConfig::default()
+    };
+    durable::queue_create(log, qm, "q", Some(custom))
+        .await
+        .unwrap();
+    durable::queue_create(log, qm, "empty", None).await.unwrap();
+    let dead = durable::queue_publish(log, qm, "q", b"dead".to_vec(), Some(9), Some(0))
+        .await
+        .unwrap();
+    let retried = durable::queue_publish(log, qm, "q", b"retried".to_vec(), Some(8), None)
+        .await
+        .unwrap();
+    let in_flight = durable::queue_publish(log, qm, "q", b"in-flight".to_vec(), Some(7), None)
+        .await
+        .unwrap();
+    let waiting = publish(&layer, qm, "q", "waiting").await;
+    assert_eq!(qm.consume("q", "c").await.unwrap().unwrap().id, dead.id);
+    durable::queue_nack(log, qm, "q", &dead.id, false)
+        .await
+        .unwrap();
+    assert_eq!(qm.consume("q", "c").await.unwrap().unwrap().id, retried.id);
+    durable::queue_nack(log, qm, "q", &retried.id, true)
+        .await
+        .unwrap();
+    assert_eq!(
+        qm.consume("q", "c").await.unwrap().unwrap().id,
+        in_flight.id
+    );
+
+    // The replica connects only now: everything above reaches it as the
+    // full-sync image, not as streamed records.
+    let replica_queues = Arc::new(QueueManager::new(QueueConfig::default()));
+    let _replica = ReplicaNode::new(
+        ReplicationConfig {
+            enabled: true,
+            role: NodeRole::Replica,
+            master_address: Some(addr.into()),
+            auto_reconnect: true,
+            reconnect_delay_ms: 100,
+            ..Default::default()
+        },
+        StoreArcs {
+            queue_manager: Some(Arc::clone(&replica_queues)),
+            stream_manager: Some(Arc::new(StreamManager::new(StreamConfig::default()))),
+            ..StoreArcs::kv_only(Arc::new(KVStore::new(KVConfig::default())))
+        },
+    )
+    .await
+    .unwrap();
+    let pair = Pair {
+        layer,
+        master_queues: QueueManager::new(QueueConfig::default()),
+        replica_queues,
+        _replica,
+    };
+    replica_converges(&pair, &view(qm, &[]), "full sync").await;
+
+    let state = pair.replica_queues.dump_state().remove("q").unwrap();
+    assert_eq!(state.config.max_depth, 44);
+    assert_eq!(ids(&state.dead_letter), vec![dead.id.as_str()]);
+    let ready: HashMap<&str, &QueueMessage> =
+        state.ready.iter().map(|m| (m.id.as_str(), m)).collect();
+    assert_eq!(ready.len(), 3);
+    assert_eq!(ready[retried.id.as_str()].retry_count, 1);
+    assert_eq!(identity(ready[in_flight.id.as_str()]), identity(&in_flight));
+    assert_eq!(identity(ready[waiting.id.as_str()]), identity(&waiting));
+    assert!(pair.replica_queues.dump_state().contains_key("empty"));
+
+    // A streamed ACK after the full sync settles the in-flight message.
+    durable::queue_ack(Some(&pair.layer), qm, "q", &in_flight.id)
+        .await
+        .unwrap();
+    replica_converges(&pair, &view(qm, &[]), "ACK after full sync").await;
+    assert!(
+        !pair.replica_queues.dump_state()["q"]
+            .ready
+            .iter()
+            .any(|m| m.id == in_flight.id)
+    );
+}

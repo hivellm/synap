@@ -342,7 +342,7 @@ async fn main() -> Result<()> {
         queue_manager,
         hyperloglog_store_recovered,
         bitmap_store_recovered,
-        _wal_offset,
+        recovered_wal_offset,
     ): RecoveredStores = if config.persistence.enabled {
         info!("Persistence enabled, attempting recovery...");
         match recover_all(&config.persistence, kv_config.clone(), queue_config.clone()).await {
@@ -521,89 +521,6 @@ async fn main() -> Result<()> {
         Some(pubsub_router_inner)
     };
 
-    // Start the replication node (self-runs on construction). The master is
-    // handed to the persistence layer so every logged write is propagated to
-    // replicas; the replica keeps itself alive via its own background loop.
-    let replication_master = if config.replication.enabled {
-        use synap_server::replication::MasterNode;
-        match config.replication.role {
-            NodeRole::Master if config.replication.replica_listen_address.is_some() => {
-                match MasterNode::new(
-                    config.replication.clone(),
-                    kv_store.clone(),
-                    stream_manager.clone(),
-                )
-                .await
-                {
-                    Ok(m) => {
-                        info!("Replication master node started");
-                        Some(Arc::new(m))
-                    }
-                    Err(e) => {
-                        warn!("Failed to start replication master: {}", e);
-                        None
-                    }
-                }
-            }
-            NodeRole::Replica if config.replication.master_address.is_some() => {
-                // The replica node is created after all datatype stores exist
-                // (below), so it can converge every datatype, not just KV.
-                None
-            }
-            _ => None,
-        }
-    } else {
-        None
-    };
-
-    // Live replication handle for INFO/metrics (phase6j item 1.4). The master
-    // handle is known now; the replica handle is filled in below once its
-    // datatype stores exist.
-    let mut replication_handle: Option<synap_server::replication::ReplicationHandle> =
-        replication_master
-            .clone()
-            .map(synap_server::replication::ReplicationHandle::Master);
-
-    // Create the persistence layer when persistence is enabled OR a replication
-    // master is present. The layer is the shared propagate hook: even with
-    // persistence disabled, a master must still forward every write to replicas
-    // (phase6j — replication decoupled from the WAL). A replication-only layer
-    // opens no WAL file.
-    let persistence = if config.persistence.enabled || replication_master.is_some() {
-        match PersistenceLayer::new_with_replication(
-            config.persistence.clone(),
-            replication_master.clone(),
-        )
-        .await
-        {
-            Ok(layer) => {
-                info!("Persistence layer initialized (WAL + Snapshots)");
-                // The background snapshot task is started later, once every
-                // store (hash/list/set/sorted-set) has been constructed.
-                Some(Arc::new(layer))
-            }
-            Err(e) if e.refuses_startup() => {
-                error!("Failed to initialize persistence: {}", e);
-                return Err(anyhow::anyhow!("refusing to start: {e}"));
-            }
-            Err(e) => {
-                warn!("Failed to initialize persistence: {}", e);
-                None
-            }
-        }
-    } else {
-        None
-    };
-
-    // Requeue in-flight queue messages whose ACK deadline passed, recording
-    // each requeue as a NACK so recovery and replicas count the same retries.
-    if let Some(ref qm) = queue_manager {
-        synap_server::persistence::durable::spawn_queue_deadline_checker(
-            persistence.clone(),
-            qm.clone(),
-        );
-    }
-
     // Use recovered hash store (fallback shares the cross-datatype budget too).
     let hash_store: Arc<synap_server::core::HashStore> =
         hash_store_recovered.unwrap_or_else(|| {
@@ -656,6 +573,104 @@ async fn main() -> Result<()> {
     info!("HyperLogLog store initialized");
     let bitmap_store = bitmap_store_recovered.unwrap_or_else(|| Arc::new(BitmapStore::new()));
     info!("Bitmap store initialized");
+
+    // Start the replication node (self-runs on construction). The master is
+    // handed to the persistence layer so every logged write is propagated to
+    // replicas; the replica keeps itself alive via its own background loop.
+    // The master is built after every datatype store exists, so its full
+    // sync ships all of them from the first replica on (phase31), and the
+    // persistence layer below shares its write-order lock.
+    let replication_master = if config.replication.enabled {
+        use synap_server::replication::MasterNode;
+        match config.replication.role {
+            NodeRole::Master if config.replication.replica_listen_address.is_some() => {
+                match MasterNode::with_stores(
+                    config.replication.clone(),
+                    synap_server::persistence::StoreArcs {
+                        kv_store: kv_store.clone(),
+                        hash_store: Some(hash_store.clone()),
+                        list_store: Some(list_store.clone()),
+                        set_store: Some(set_store.clone()),
+                        sorted_set_store: Some(sorted_set_store.clone()),
+                        queue_manager: queue_manager.clone(),
+                        stream_manager: stream_manager.clone(),
+                        hyperloglog_store: Some(hyperloglog_store.clone()),
+                        bitmap_store: Some(bitmap_store.clone()),
+                    },
+                )
+                .await
+                {
+                    Ok(m) => {
+                        info!("Replication master node started");
+                        Some(Arc::new(m))
+                    }
+                    Err(e) => {
+                        warn!("Failed to start replication master: {}", e);
+                        None
+                    }
+                }
+            }
+            NodeRole::Replica if config.replication.master_address.is_some() => {
+                // The replica node is created after all datatype stores exist
+                // (below), so it can converge every datatype, not just KV.
+                None
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    // Live replication handle for INFO/metrics (phase6j item 1.4). The master
+    // handle is known now; the replica handle is filled in below once its
+    // datatype stores exist.
+    let mut replication_handle: Option<synap_server::replication::ReplicationHandle> =
+        replication_master
+            .clone()
+            .map(synap_server::replication::ReplicationHandle::Master);
+
+    // Create the persistence layer when persistence is enabled OR a replication
+    // master is present. The layer is the shared propagate hook: even with
+    // persistence disabled, a master must still forward every write to replicas
+    // (phase6j — replication decoupled from the WAL). A replication-only layer
+    // opens no WAL file.
+    let persistence = if config.persistence.enabled || replication_master.is_some() {
+        match PersistenceLayer::new_with_replication(
+            config.persistence.clone(),
+            replication_master.clone(),
+        )
+        .await
+        {
+            Ok(layer) => {
+                info!("Persistence layer initialized (WAL + Snapshots)");
+                // New WAL records continue after everything recovery saw,
+                // never below the loaded snapshot's cutoff.
+                layer.continue_wal_at(recovered_wal_offset);
+                // The background snapshot task is started later, once every
+                // store (hash/list/set/sorted-set) has been constructed.
+                Some(Arc::new(layer))
+            }
+            Err(e) if e.refuses_startup() => {
+                error!("Failed to initialize persistence: {}", e);
+                return Err(anyhow::anyhow!("refusing to start: {e}"));
+            }
+            Err(e) => {
+                warn!("Failed to initialize persistence: {}", e);
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Requeue in-flight queue messages whose ACK deadline passed, recording
+    // each requeue as a NACK so recovery and replicas count the same retries.
+    if let Some(ref qm) = queue_manager {
+        synap_server::persistence::durable::spawn_queue_deadline_checker(
+            persistence.clone(),
+            qm.clone(),
+        );
+    }
 
     // Periodically recompute collection/broker memory into the shared budget so
     // `maxmemory` reflects all datatypes (audit M-018). KV updates its counter

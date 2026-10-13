@@ -1,4 +1,5 @@
 pub mod bitmap;
+pub(crate) mod blocking;
 pub mod cache;
 pub mod consumer_group;
 pub mod error;

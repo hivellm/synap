@@ -726,13 +726,20 @@ impl HashStore {
         stats.clone()
     }
 
-    /// Clear all hashes (for testing)
-    #[cfg(test)]
+    /// Remove every hash, e.g. before a replica loads a full-sync image. The
+    /// size counters are reset and the memory contribution is recomputed;
+    /// operation counters are kept.
     pub fn clear(&self) {
         for shard in self.shards.iter() {
             shard.data.write().clear();
         }
-        *self.stats.write() = HashStats::default();
+        {
+            let mut stats = self.stats.write();
+            stats.total_hashes = 0;
+            stats.total_fields = 0;
+            stats.total_memory_bytes = 0;
+        }
+        self.refresh_memory();
     }
 }
 
