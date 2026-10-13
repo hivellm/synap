@@ -250,6 +250,10 @@ async fn main() -> Result<()> {
         error!("{}", e);
         return Err(anyhow::Error::msg(e));
     }
+    if let Err(e) = config.rate_limit.validate() {
+        error!("{}", e);
+        return Err(anyhow::Error::msg(e));
+    }
 
     // Recover from persistence or create fresh
     let kv_config = config.to_kv_config();
@@ -918,7 +922,8 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Create router with rate limiting and authentication
+    // Create router with rate limiting and authentication. The router logs
+    // whether rate limiting is enforced, since it is what installs the limiter.
     let app = create_router(
         app_state,
         config.rate_limit.clone(),
@@ -929,13 +934,6 @@ async fn main() -> Result<()> {
         config.auth.require_auth,
     );
 
-    if config.rate_limit.enabled {
-        info!(
-            "Rate limiting enabled: {} req/s (burst: {})",
-            config.rate_limit.requests_per_second, config.rate_limit.burst_size
-        );
-    }
-
     // Bind server
     let addr: SocketAddr = config.server_addr().parse()?;
     info!("Listening on http://{}", addr);
@@ -945,15 +943,21 @@ async fn main() -> Result<()> {
     // connection cannot block exit), then drain and fsync the WAL.
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let signalled = Arc::new(tokio::sync::Notify::new());
-    let server = axum::serve(listener, app)
-        .with_graceful_shutdown({
-            let signalled = Arc::clone(&signalled);
-            async move {
-                shutdown_signal().await;
-                signalled.notify_one();
-            }
-        })
-        .into_future();
+    // Connection info gives every request its TCP peer address: the rate
+    // limiter keys clients by it, authentication records it as the client IP,
+    // and the WebSocket handlers extract it.
+    let server = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown({
+        let signalled = Arc::clone(&signalled);
+        async move {
+            shutdown_signal().await;
+            signalled.notify_one();
+        }
+    })
+    .into_future();
     let served = tokio::select! {
         result = server => result,
         _ = async {

@@ -25,6 +25,20 @@ Synap now supports **UMICP (Universal Matrix Intelligent Communication Protocol)
 
 Accepts UMICP envelopes and routes to appropriate MCP handlers.
 
+**Body limit**: the server reads at most `mcp.umicp_max_body_bytes` bytes of a
+request body (default 16 MiB):
+
+```yaml
+mcp:
+  umicp_max_body_bytes: 16777216
+```
+
+A larger body answers `413 Payload Too Large` with
+`{"error":"UMICP request body exceeds the <limit> byte limit"}`. A
+`Content-Length` above the limit is refused before any of the body is read;
+a chunked body stops being read as soon as it passes the limit, so the server
+never buffers more than the limit. A body of exactly the limit is accepted.
+
 **Example Request**:
 ```json
 {

@@ -122,6 +122,23 @@ migration notes before upgrading.
 
 ### Fixed
 
+- **Configured rate limits are enforced** (review finding S-06, breaking for
+  deployments with `rate_limit.enabled: true`, which was logged as enabled but
+  never installed). Each client gets a token bucket (`burst_size`, refilled at
+  `requests_per_second`), keyed by TCP peer address before authentication —
+  so password and API-key checks are bounded — and by authenticated principal
+  (user, API key or Hub tenant) after it. A limited request answers `429` with
+  `Retry-After`; `/health` and `/metrics` are exempt. The startup log says
+  whether limiting is enforced, and an enabled limiter with a zero rate or burst
+  refuses to start.
+- **UMICP request bodies are bounded** (review finding S-07): `POST /umicp`
+  reads at most `mcp.umicp_max_body_bytes` (default 16 MiB) and answers `413`
+  above it, refusing an oversized `Content-Length` before reading and stopping
+  a chunked body at the limit.
+- **The HTTP server passes the real client address to handlers.** It was not
+  served with connection info, so authentication saw every client as
+  127.0.0.1 and the WebSocket handlers, which read the client address, could
+  not extract it.
 - **The WAL keeps what it acknowledges** (review findings D-01, D-02, D-06).
   - Periodic fsync mode now syncs on its own interval even when the server is
     idle, and every group of writes reaches the OS before it is acknowledged;
