@@ -481,9 +481,9 @@ async fn main() -> Result<()> {
     // Start TTL cleanup task
     kv_store.start_ttl_cleanup();
 
-    // Start queue deadline checker if queue enabled
-    if let Some(ref qm) = queue_manager {
-        qm.start_deadline_checker();
+    // The queue deadline checker starts once the persistence layer exists
+    // (below), so the requeues it performs are recorded.
+    if queue_manager.is_some() {
         info!("Queue system enabled");
     } else {
         info!("Queue system disabled");
@@ -662,6 +662,15 @@ async fn main() -> Result<()> {
     } else {
         None
     };
+
+    // Requeue in-flight queue messages whose ACK deadline passed, recording
+    // each requeue as a NACK so recovery and replicas count the same retries.
+    if let Some(ref qm) = queue_manager {
+        synap_server::persistence::durable::spawn_queue_deadline_checker(
+            persistence.clone(),
+            qm.clone(),
+        );
+    }
 
     // Periodically recompute collection/broker memory into the shared budget so
     // `maxmemory` reflects all datatypes (audit M-018). KV updates its counter

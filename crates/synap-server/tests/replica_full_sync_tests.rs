@@ -65,8 +65,10 @@ impl Node {
         }
     }
 
-    /// A comparable description of every value. Queue message ids and stream
-    /// event ids are assigned anew on a replica, so payloads are compared.
+    /// A comparable description of every value. Queue messages keep their
+    /// ids and metadata on a replica (phase24; in-flight messages are ready
+    /// there, so both lists are compared as one set). Stream event ids are
+    /// assigned anew on a replica, so payloads are compared.
     async fn fingerprint(&self) -> Vec<String> {
         let mut out = Vec::new();
         for (key, value, expiry) in self.kv.dump_with_expiry().await.unwrap() {
@@ -94,13 +96,28 @@ impl Node {
         for (key, bitmap) in self.bitmap.dump() {
             out.push(format!("bitmap:{key}={:?}", bitmap.data));
         }
-        for (queue, messages) in self.queues.dump().await.unwrap() {
-            let mut payloads: Vec<_> = messages
+        for (queue, state) in self.queues.dump_state() {
+            let mut messages: Vec<_> = state
+                .ready
                 .iter()
-                .map(|m| (m.payload.to_vec(), m.priority, m.max_retries))
+                .chain(&state.in_flight)
+                .map(|m| {
+                    (
+                        m.id.clone(),
+                        m.payload.to_vec(),
+                        m.priority,
+                        m.retry_count,
+                        m.max_retries,
+                        m.created_at,
+                    )
+                })
                 .collect();
-            payloads.sort();
-            out.push(format!("queue:{queue}={payloads:?}"));
+            messages.sort();
+            let dead: Vec<_> = state.dead_letter.iter().map(|m| &m.id).collect();
+            out.push(format!(
+                "queue:{queue}={messages:?} dead={dead:?} max_depth={}",
+                state.config.max_depth
+            ));
         }
         for (room, events) in self.streams.get_all_events().await {
             let events: Vec<_> = events.iter().map(|e| (&e.event, &e.data)).collect();

@@ -18,7 +18,7 @@ pub(super) async fn cmd_qcreate(state: &AppState, args: &[Resp3Value]) -> Resp3V
         Some(qm) => qm,
         None => return Resp3Value::Error("ERR queue subsystem not enabled".into()),
     };
-    match qm.create_queue(&name, None).await {
+    match durable::queue_create(state.persistence.as_deref(), qm, &name, None).await {
         Ok(()) => Resp3Value::SimpleString("OK".into()),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -36,7 +36,7 @@ pub(super) async fn cmd_qdelete(state: &AppState, args: &[Resp3Value]) -> Resp3V
         Some(qm) => qm,
         None => return Resp3Value::Error("ERR queue subsystem not enabled".into()),
     };
-    match qm.delete_queue(&name).await {
+    match durable::queue_delete(state.persistence.as_deref(), qm, &name).await {
         Ok(true) => Resp3Value::Integer(1),
         Ok(false) => Resp3Value::Integer(0),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
@@ -222,7 +222,7 @@ pub(super) async fn cmd_qpurge(state: &AppState, args: &[Resp3Value]) -> Resp3Va
         Some(qm) => qm,
         None => return Resp3Value::Error("ERR queue subsystem not enabled".into()),
     };
-    match qm.purge(&name).await {
+    match durable::queue_purge(state.persistence.as_deref(), qm, &name).await {
         Ok(count) => Resp3Value::Integer(count as i64),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }

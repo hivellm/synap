@@ -181,7 +181,7 @@ async fn test_snapshot_create_and_load() {
     // Load snapshot
     let (snapshot, _path) = snapshot_mgr.load_latest().await.unwrap().unwrap();
 
-    assert_eq!(snapshot.version, 4); // v4 adds KV expiry and HLL/bitmap sections
+    assert_eq!(snapshot.version, 5); // v5 stores queues whole (v4 added KV expiry, HLL, bitmaps)
     assert_eq!(snapshot.wal_offset, 42);
     assert_eq!(snapshot.kv_data.len(), 2);
     assert_eq!(snapshot.kv_data.get("key1").unwrap(), b"value1");
@@ -295,7 +295,7 @@ async fn test_snapshot_roundtrip_all_datatypes() {
 
     let (snapshot, _path) = snapshot_mgr.load_latest().await.unwrap().unwrap();
 
-    assert_eq!(snapshot.version, 4);
+    assert_eq!(snapshot.version, 5);
     assert_eq!(snapshot.wal_offset, 99);
     assert_eq!(snapshot.kv_data.get("kvk").unwrap(), b"kvv");
     let h = snapshot.hash_data.get("h").unwrap();

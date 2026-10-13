@@ -825,3 +825,327 @@ async fn test_priority_with_concurrent_consumers() {
         );
     }
 }
+
+// ── phase24: restore and replay primitives ──────────────────────────────────
+
+/// A message built with explicit metadata, as a WAL record would carry it.
+fn recorded_message(id: &str, priority: u8, retry_count: u32) -> QueueMessage {
+    let mut message = QueueMessage::new(id.as_bytes().to_vec(), priority, 5);
+    message.id = id.to_string();
+    message.retry_count = retry_count;
+    message.created_at = 1_700_000_000;
+    message.headers.insert("origin".into(), id.into());
+    message
+}
+
+/// Drain `queue` and return the IDs in delivery order. Each delivery uses
+/// its own consumer, so a prefetch limit does not stop the drain early.
+async fn drain_ids(manager: &QueueManager, queue: &str) -> Vec<String> {
+    let mut ids = Vec::new();
+    while let Some(m) = manager
+        .consume(queue, &format!("drain-{}", ids.len()))
+        .await
+        .unwrap()
+    {
+        ids.push(m.id);
+    }
+    ids
+}
+
+/// The restore primitive keeps every field of the message and places it
+/// where publishing would (behind messages of the same or higher priority),
+/// ignoring the depth limit the message already passed when published.
+#[tokio::test]
+async fn restore_message_keeps_identity_metadata_and_priority_position() {
+    let manager = QueueManager::new(QueueConfig::default());
+    manager
+        .create_queue(
+            "q",
+            Some(QueueConfig {
+                max_depth: 1,
+                ..QueueConfig::default()
+            }),
+        )
+        .await
+        .unwrap();
+    manager
+        .restore_message("q", recorded_message("low", 1, 0))
+        .await
+        .unwrap();
+    manager
+        .restore_message("q", recorded_message("high", 9, 2))
+        .await
+        .unwrap();
+    manager
+        .restore_message("q", recorded_message("mid", 5, 1))
+        .await
+        .unwrap();
+
+    let first = manager.consume("q", "c").await.unwrap().unwrap();
+    assert_eq!(first.id, "high");
+    assert_eq!(first.priority, 9);
+    assert_eq!(first.retry_count, 2);
+    assert_eq!(first.max_retries, 5);
+    assert_eq!(first.created_at, 1_700_000_000);
+    assert_eq!(first.headers["origin"], "high");
+    assert_eq!(*first.payload, b"high".to_vec());
+    assert_eq!(drain_ids(&manager, "q").await, vec!["mid", "low"]);
+
+    assert!(matches!(
+        manager
+            .restore_message("missing", recorded_message("x", 1, 0))
+            .await,
+        Err(SynapError::QueueNotFound(_))
+    ));
+}
+
+/// A replayed ACK removes the message whether it is ready (deliveries are
+/// not logged) or pending; a second replay reports not-found.
+#[tokio::test]
+async fn replay_ack_removes_ready_or_pending_messages() {
+    let manager = QueueManager::new(QueueConfig::default());
+    manager.create_queue("q", None).await.unwrap();
+    let ready = manager
+        .publish("q", b"a".to_vec(), None, None)
+        .await
+        .unwrap();
+    let pending = manager
+        .publish("q", b"b".to_vec(), None, None)
+        .await
+        .unwrap();
+    manager.consume("q", "c").await.unwrap(); // takes `ready`
+    manager.consume("q", "c").await.unwrap(); // takes `pending`
+    manager.nack("q", &ready, true).await.unwrap(); // `ready` is ready again
+
+    manager.replay_ack("q", &ready).await.unwrap();
+    manager.replay_ack("q", &pending).await.unwrap();
+    let stats = manager.stats("q").await.unwrap();
+    assert_eq!(stats.depth, 0);
+    assert_eq!(stats.consumers, 0);
+    assert_eq!(stats.acked, 2);
+    assert!(manager.consume("q", "c").await.unwrap().is_none());
+
+    assert!(matches!(
+        manager.replay_ack("q", &ready).await,
+        Err(SynapError::MessageNotFound(_))
+    ));
+    assert!(matches!(
+        manager.replay_ack("nope", &ready).await,
+        Err(SynapError::QueueNotFound(_))
+    ));
+}
+
+/// A replayed NACK on a ready message does what the live NACK did: the retry
+/// counter grows, then requeue at the back, dead-letter past the limit, or
+/// drop without requeue.
+#[tokio::test]
+async fn replay_nack_on_a_ready_message_matches_the_live_nack() {
+    let manager = QueueManager::new(QueueConfig::default());
+    manager.create_queue("q", None).await.unwrap();
+    manager
+        .restore_message("q", recorded_message("a", 5, 0))
+        .await
+        .unwrap();
+    manager
+        .restore_message("q", recorded_message("b", 5, 0))
+        .await
+        .unwrap();
+    manager
+        .restore_message("q", recorded_message("dead", 5, 5))
+        .await
+        .unwrap();
+    manager
+        .restore_message("q", recorded_message("dropped", 5, 0))
+        .await
+        .unwrap();
+
+    manager.replay_nack("q", "a", true).await.unwrap();
+    manager.replay_nack("q", "dead", true).await.unwrap();
+    manager.replay_nack("q", "dropped", false).await.unwrap();
+
+    let state = manager.dump_state().remove("q").unwrap();
+    let ready: Vec<(&str, u32)> = state
+        .ready
+        .iter()
+        .map(|m| (m.id.as_str(), m.retry_count))
+        .collect();
+    assert_eq!(ready, vec![("b", 0), ("a", 1)]);
+    assert_eq!(state.dead_letter.len(), 1);
+    assert_eq!(state.dead_letter[0].id, "dead");
+    assert_eq!(state.dead_letter[0].retry_count, 6);
+    let stats = manager.stats("q").await.unwrap();
+    assert_eq!(stats.nacked, 3);
+    assert_eq!(stats.dead_lettered, 1);
+    assert!(matches!(
+        manager.replay_nack("q", "a-missing", true).await,
+        Err(SynapError::MessageNotFound(_))
+    ));
+}
+
+/// The captured state lists every message with its metadata (in-flight in
+/// delivery order), and restoring it rebuilds the queue: config kept,
+/// in-flight messages ready again ahead of waiting messages of the same or
+/// lower priority, dead letters kept.
+#[tokio::test]
+async fn dump_and_restore_queue_state_round_trip() {
+    let config = QueueConfig {
+        max_depth: 50,
+        ack_deadline_secs: 7,
+        default_max_retries: 0,
+        default_priority: 4,
+        prefetch_limit: 3,
+    };
+    let manager = QueueManager::new(QueueConfig::default());
+    manager
+        .create_queue("q", Some(config.clone()))
+        .await
+        .unwrap();
+    let mut ids = Vec::new();
+    for (payload, priority) in [("p1", 5), ("p2", 5), ("p3", 5), ("hi", 9), ("lo", 1)] {
+        ids.push(
+            manager
+                .publish("q", payload.as_bytes().to_vec(), Some(priority), None)
+                .await
+                .unwrap(),
+        );
+    }
+    // Deliver hi, p1, p2 (in that order); dead-letter p2 (max_retries 0).
+    let d1 = manager.consume("q", "c").await.unwrap().unwrap();
+    let d2 = manager.consume("q", "c").await.unwrap().unwrap();
+    let d3 = manager.consume("q", "c").await.unwrap().unwrap();
+    assert_eq!(
+        [d1.id.as_str(), d2.id.as_str(), d3.id.as_str()],
+        [ids[3].as_str(), ids[0].as_str(), ids[1].as_str()]
+    );
+    manager.nack("q", &d3.id, false).await.unwrap();
+
+    let state = manager.dump_state().remove("q").unwrap();
+    assert_eq!(state.config.prefetch_limit, 3);
+    assert_eq!(state.config.ack_deadline_secs, 7);
+    let in_flight: Vec<&str> = state.in_flight.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(in_flight, vec![ids[3].as_str(), ids[0].as_str()]);
+    let ready: Vec<&str> = state.ready.iter().map(|m| m.id.as_str()).collect();
+    assert_eq!(ready, vec![ids[2].as_str(), ids[4].as_str()]);
+    assert_eq!(state.dead_letter[0].id, ids[1]);
+    let created_at = state.ready[0].created_at;
+
+    let restored = QueueManager::new(QueueConfig::default());
+    restored.restore_queue("q", state);
+    let restored_state = restored.dump_state().remove("q").unwrap();
+    assert_eq!(restored_state.config.max_depth, 50);
+    assert_eq!(restored_state.config.default_priority, 4);
+    assert!(restored_state.in_flight.is_empty());
+    assert_eq!(restored_state.dead_letter[0].id, ids[1]);
+    assert_eq!(restored_state.ready[2].created_at, created_at);
+    // hi (9) first, then p1 ahead of the waiting p3 (same priority), then lo.
+    assert_eq!(
+        drain_ids(&restored, "q").await,
+        vec![
+            ids[3].clone(),
+            ids[0].clone(),
+            ids[2].clone(),
+            ids[4].clone()
+        ]
+    );
+}
+
+/// A purge reports the IDs it removed; replaying it by ID removes exactly
+/// those, leaving messages that were delivered at purge time (and so not
+/// purged) in place.
+#[tokio::test]
+async fn purge_ids_and_remove_messages_replay_a_purge_exactly() {
+    let manager = QueueManager::new(QueueConfig::default());
+    manager.create_queue("q", None).await.unwrap();
+    let delivered = manager
+        .publish("q", b"d".to_vec(), None, None)
+        .await
+        .unwrap();
+    let waiting = manager
+        .publish("q", b"w".to_vec(), None, None)
+        .await
+        .unwrap();
+    manager.consume("q", "c").await.unwrap();
+    assert_eq!(manager.purge_ids("q").await.unwrap(), vec![waiting.clone()]);
+
+    // A replay holds both as ready (the delivery was not logged).
+    let replay = QueueManager::new(QueueConfig::default());
+    replay.create_queue("q", None).await.unwrap();
+    replay
+        .restore_message("q", recorded_message(&delivered, 5, 0))
+        .await
+        .unwrap();
+    replay
+        .restore_message("q", recorded_message(&waiting, 5, 0))
+        .await
+        .unwrap();
+    assert_eq!(
+        replay
+            .remove_messages("q", std::slice::from_ref(&waiting))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(drain_ids(&replay, "q").await, vec![delivered]);
+    assert!(matches!(
+        replay.remove_messages("none", &[waiting]).await,
+        Err(SynapError::QueueNotFound(_))
+    ));
+}
+
+/// `create_queue_if_absent` reports the configuration only when it created
+/// the queue; an existing queue keeps its configuration.
+#[tokio::test]
+async fn create_queue_if_absent_reports_only_real_creations() {
+    let manager = QueueManager::new(QueueConfig::default());
+    let custom = QueueConfig {
+        max_depth: 9,
+        ..QueueConfig::default()
+    };
+    let created = manager
+        .create_queue_if_absent("q", Some(custom))
+        .await
+        .unwrap();
+    assert_eq!(created.unwrap().max_depth, 9);
+    assert!(
+        manager
+            .create_queue_if_absent("q", None)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(manager.dump_state()["q"].config.max_depth, 9);
+}
+
+/// Expired deliveries are found per queue and requeued with their IDs
+/// returned, so the caller can record each requeue.
+#[tokio::test]
+async fn requeue_expired_returns_the_requeued_ids() {
+    let manager = QueueManager::new(QueueConfig::default());
+    manager
+        .create_queue(
+            "q",
+            Some(QueueConfig {
+                ack_deadline_secs: 0,
+                ..QueueConfig::default()
+            }),
+        )
+        .await
+        .unwrap();
+    manager.create_queue("idle", None).await.unwrap();
+    let id = manager
+        .publish("q", b"m".to_vec(), None, None)
+        .await
+        .unwrap();
+    manager.consume("q", "c").await.unwrap();
+
+    assert_eq!(
+        manager.queues_with_expired_deliveries(),
+        vec!["q".to_string()]
+    );
+    assert_eq!(manager.requeue_expired("q"), vec![id.clone()]);
+    assert!(manager.requeue_expired("q").is_empty());
+    assert!(manager.requeue_expired("missing").is_empty());
+    let again = manager.consume("q", "c").await.unwrap().unwrap();
+    assert_eq!(again.id, id);
+    assert_eq!(again.retry_count, 1);
+}

@@ -16,7 +16,13 @@
 //! whole: the WAL stores it as one checksummed frame and replication ships it
 //! as one length-prefixed command, so a torn or interrupted record is never
 //! decoded. [`apply_operation`] then applies every operation in it.
+//!
+//! Queue records keep message identity (phase24): a publish is restored with
+//! its original ID and metadata, and ACK/NACK/purge act by message ID whether
+//! the message is ready or pending. Deliveries are not logged, so during a
+//! replay a delivered message is ready until its ACK or NACK arrives.
 
+use crate::core::QueueMessage;
 use crate::core::sorted_set::{SortedSetStore, ZAddOptions};
 use crate::core::{
     Aggregate, BitfieldOperation, BitmapOperation, BitmapStore, Expiry, HashStore,
@@ -119,10 +125,12 @@ impl StoreArcs {
 
 /// Apply an [`Operation`] to the provided stores.
 ///
-/// Errors from KV and hash writes propagate; list/set/sorted-set/queue/stream
+/// Errors from KV, hash and queue writes propagate; list/set/sorted-set/stream
 /// applies are best-effort (idempotent replays), matching WAL recovery
-/// semantics. A transaction record applies every operation it holds (see
-/// [`apply_transaction`]).
+/// semantics. Queue ACK, NACK and purge records tolerate only a missing
+/// message or queue (a snapshot taken after the message was settled no
+/// longer holds it); any other queue error fails the apply. A transaction
+/// record applies every operation it holds (see [`apply_transaction`]).
 pub async fn apply_operation(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapError> {
     match op {
         Operation::Transaction { operations } => apply_transaction(operations, stores).await,
@@ -243,22 +251,21 @@ async fn apply_single(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapE
         }
 
         // ── Queue ───────────────────────────────────────────────────────────
+        // Records written before phase24 carry no creation time; the message
+        // keeps its ID and every other field.
         Operation::QueuePublish { queue, message } => {
-            if let Some(qm) = queue_manager
-                && qm.create_queue(&queue, None).await.is_ok()
-            {
-                qm.publish(
-                    &queue,
-                    (*message.payload).clone(),
-                    Some(message.priority),
-                    Some(message.max_retries),
-                )
-                .await?;
+            if let Some(qm) = queue_manager {
+                restore_published(qm, &queue, message).await?;
+            }
+        }
+        Operation::QueuePublishFull { queue, message } => {
+            if let Some(qm) = queue_manager {
+                restore_published(qm, &queue, message.into()).await?;
             }
         }
         Operation::QueueAck { queue, message_id } => {
             if let Some(qm) = queue_manager {
-                let _ = qm.ack(&queue, &message_id).await;
+                tolerate_not_found(qm.replay_ack(&queue, &message_id).await)?;
             }
         }
         Operation::QueueNack {
@@ -267,7 +274,22 @@ async fn apply_single(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapE
             requeue,
         } => {
             if let Some(qm) = queue_manager {
-                let _ = qm.nack(&queue, &message_id, requeue).await;
+                tolerate_not_found(qm.replay_nack(&queue, &message_id, requeue).await)?;
+            }
+        }
+        Operation::QueueCreate { queue, config } => {
+            if let Some(qm) = queue_manager {
+                qm.create_queue(&queue, Some(config)).await?;
+            }
+        }
+        Operation::QueueDelete { queue } => {
+            if let Some(qm) = queue_manager {
+                qm.delete_queue(&queue).await?;
+            }
+        }
+        Operation::QueuePurge { queue, message_ids } => {
+            if let Some(qm) = queue_manager {
+                tolerate_not_found(qm.remove_messages(&queue, &message_ids).await.map(|_| ()))?;
             }
         }
 
@@ -541,6 +563,28 @@ async fn apply_single(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapE
         Operation::Transaction { .. } => return Err(nested_transaction_error()),
     }
     Ok(())
+}
+
+/// Insert a replayed publish with its original ID and metadata. The queue is
+/// created with the default configuration when it does not exist: queues
+/// created before phase24 have no creation record.
+async fn restore_published(
+    qm: &QueueManager,
+    queue: &str,
+    message: QueueMessage,
+) -> Result<(), SynapError> {
+    qm.create_queue(queue, None).await?;
+    qm.restore_message(queue, message).await
+}
+
+/// A replayed ACK, NACK or purge whose message (or queue) is gone is expected:
+/// a snapshot taken after the message was settled no longer holds it. Any
+/// other error is returned.
+fn tolerate_not_found(result: Result<(), SynapError>) -> Result<(), SynapError> {
+    match result {
+        Err(SynapError::MessageNotFound(_) | SynapError::QueueNotFound(_)) => Ok(()),
+        other => other,
+    }
 }
 
 /// Whether `key` holds a value in any keyed store present in `stores`.
@@ -1074,6 +1118,119 @@ mod tests {
         )
         .await;
         assert!(s.stream.list_rooms().await.contains(&"r".to_string()));
+    }
+
+    /// Queue records keep message identity: a publish (legacy or full) is
+    /// restored with its ID and metadata, an ACK or NACK replayed on the
+    /// ready message settles it by ID, and lifecycle records apply.
+    #[tokio::test]
+    async fn queue_replay_keeps_identity_and_settles_by_id() {
+        use crate::persistence::types::QueueMessageRecord;
+        let s = stores();
+        apply(
+            &s,
+            Operation::QueueCreate {
+                queue: "q".into(),
+                config: QueueConfig {
+                    max_depth: 4,
+                    ..QueueConfig::default()
+                },
+            },
+        )
+        .await;
+        let mut full = crate::core::queue::QueueMessage::new(b"full".to_vec(), 9, 3);
+        full.created_at = 1_600_000_000;
+        full.retry_count = 2;
+        let legacy = crate::core::queue::QueueMessage::new(b"legacy".to_vec(), 1, 3);
+        let acked = crate::core::queue::QueueMessage::new(b"acked".to_vec(), 5, 3);
+        apply(
+            &s,
+            Operation::QueuePublishFull {
+                queue: "q".into(),
+                message: QueueMessageRecord::from(&full),
+            },
+        )
+        .await;
+        for message in [&legacy, &acked] {
+            apply(
+                &s,
+                Operation::QueuePublish {
+                    queue: "q".into(),
+                    message: message.clone(),
+                },
+            )
+            .await;
+        }
+        // Delivered on the master, ready here: the ACK removes it by ID.
+        apply(
+            &s,
+            Operation::QueueAck {
+                queue: "q".into(),
+                message_id: acked.id.clone(),
+            },
+        )
+        .await;
+        apply(
+            &s,
+            Operation::QueueNack {
+                queue: "q".into(),
+                message_id: full.id.clone(),
+                requeue: true,
+            },
+        )
+        .await;
+
+        let state = s.queue.dump_state().remove("q").unwrap();
+        assert_eq!(state.config.max_depth, 4);
+        let ready: Vec<(&str, u32, u32)> = state
+            .ready
+            .iter()
+            .map(|m| (m.id.as_str(), m.retry_count, m.created_at))
+            .collect();
+        assert_eq!(
+            ready,
+            vec![
+                (legacy.id.as_str(), 0, state.ready[0].created_at),
+                (full.id.as_str(), 3, 1_600_000_000),
+            ]
+        );
+
+        apply(
+            &s,
+            Operation::QueuePurge {
+                queue: "q".into(),
+                message_ids: vec![legacy.id.clone()],
+            },
+        )
+        .await;
+        assert_eq!(s.queue.dump_state()["q"].ready.len(), 1);
+        apply(&s, Operation::QueueDelete { queue: "q".into() }).await;
+        assert!(s.queue.list_queues().await.unwrap().is_empty());
+        // Settling records for a queue or message that is gone are tolerated.
+        apply(
+            &s,
+            Operation::QueuePurge {
+                queue: "q".into(),
+                message_ids: vec![full.id.clone()],
+            },
+        )
+        .await;
+    }
+
+    /// Only a missing message or queue is tolerated on replay; any other
+    /// error is returned, so recovery fails instead of hiding it.
+    #[test]
+    fn only_not_found_is_tolerated() {
+        assert!(tolerate_not_found(Err(SynapError::MessageNotFound("m".into()))).is_ok());
+        assert!(tolerate_not_found(Err(SynapError::QueueNotFound("q".into()))).is_ok());
+        assert!(matches!(
+            tolerate_not_found(Err(SynapError::QueueFull("q".into()))),
+            Err(SynapError::QueueFull(_))
+        ));
+        assert!(matches!(
+            tolerate_not_found(Err(SynapError::InternalError("disk".into()))),
+            Err(SynapError::InternalError(_))
+        ));
     }
 
     /// With `stream_manager = None` (WAL recovery), a StreamPublish is skipped.

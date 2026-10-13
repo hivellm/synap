@@ -201,6 +201,19 @@ If `pending` is consistently high:
 - Increase processing capacity
 - Review message priority distribution
 
+## Durability Across Restarts
+
+When persistence is enabled:
+
+- Message IDs never change: a message you published keeps its ID, priority,
+  retry count and headers after a restart, and replicas report the same IDs
+  as the master.
+- An acknowledged message is never delivered again after a restart.
+- A message you consumed but did not acknowledge before the restart is
+  delivered again (at-least-once). Its ACK sent after the restart returns
+  "not found", so make processing idempotent (see Idempotent Processing).
+- Queue creation (with its configuration), purge and delete survive restarts.
+
 ## Related Topics
 
 - [Creating Queues](./CREATING.md) - Queue creation

@@ -36,7 +36,7 @@ curl -X POST http://localhost:15500/snapshot
 ```json
 {
   "success": true,
-  "snapshot_path": "./data/snapshots/snapshot-v4-00000000000000000042.bin"
+  "snapshot_path": "./data/snapshots/snapshot-v5-00000000000000000042.bin"
 }
 ```
 
@@ -51,7 +51,7 @@ curl http://localhost:15500/snapshots
 {
   "snapshots": [
     {
-      "path": "snapshot-v4-00000000000000000042.bin",
+      "path": "snapshot-v5-00000000000000000042.bin",
       "size_bytes": 1048576,
       "created_at": "2025-01-01T12:00:00Z"
     }
@@ -116,7 +116,7 @@ docker run --rm \
 
 Restore the snapshot directory and the WAL together, from the same backup.
 Recovery loads the snapshot with the highest sequence number in its name
-(`snapshot-v4-<sequence>.bin`), not the newest by date, so a single older
+(`snapshot-v<version>-<sequence>.bin`), not the newest by date, so a single older
 snapshot copied next to newer ones is not the one loaded. If the newest
 snapshot is damaged, the server falls back to an older one only when the WAL
 still covers it; otherwise it refuses to start and names the damaged file.

@@ -122,6 +122,24 @@ migration notes before upgrading.
   one offset: a replica whose connection drops mid-transaction applies none of
   it and receives it whole on resync. A replica still applies the operations of
   a transaction one after another, so a reader there can observe it half-applied.
+- **Queue messages keep their identity across restarts and replicas** (review
+  finding D-05). WAL replay, snapshot restore and replicas re-published every
+  message under a fresh ID, so a replayed ACK missed it and acknowledged
+  messages came back deliverable after a restart, and master and replica IDs
+  diverged. Messages are now restored with their original ID, priority, retry
+  counters, creation time and headers; replayed ACK/NACK settle by ID whether
+  the message is ready or pending, tolerating only "not found" and failing
+  recovery on any other error. QCREATE (with its configuration), QDELETE and
+  QPURGE are persisted and replicated on every transport (a purge replays
+  exactly the messages it removed), and ACK-deadline requeues are recorded as
+  NACKs so retry counters and dead-lettering match after a restart. Snapshot
+  format v5 stores each queue whole (in-flight messages come back ready for
+  redelivery); v4, v3 and v2 still load. Replica full sync carries whole queue
+  state, so a new replica holds the master's IDs, in-flight messages, dead
+  letters and configuration. Delivery stays at-least-once: an ACK sent after a
+  restart for a message delivered before it answers not-found and the message
+  is delivered again. **Breaking (downgrade only):** 1.3.x cannot read v5
+  snapshots.
 - **Replica full sync carries every datatype, exactly.** A new or resyncing
   replica received only KV keys and stream events; it now receives hashes,
   lists, sets, sorted sets (geo), HyperLogLogs, bitmaps and queues too, with KV
@@ -263,7 +281,7 @@ migration notes before upgrading.
   - Snapshots are written to a temporary file, fsynced, renamed and the
     directory fsynced (Unix; NTFS renames are atomic), so a crash mid-snapshot
     no longer leaves a truncated newest file. Files are named
-    `snapshot-v4-<sequence>.bin` and loaded in sequence order, so two snapshots
+    `snapshot-v<format>-<sequence>.bin` and loaded in sequence order, so two snapshots
     in the same second no longer overwrite each other; old timestamp names
     still load, as older. Every length read from a snapshot is bounded by the
     file size.

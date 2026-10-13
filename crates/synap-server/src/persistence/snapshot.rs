@@ -1,7 +1,9 @@
 use super::apply::StoreRefs;
-use super::types::{PersistenceError, Result, Snapshot, SnapshotConfig, StreamEvent};
+use super::types::{
+    PersistenceError, QueueImage, QueueMessageRecord, Result, Snapshot, SnapshotConfig, StreamEvent,
+};
 use super::wal_frame;
-use crate::core::queue::QueueMessage;
+use crate::core::queue::{QueueConfig, QueueMessage, QueueState};
 use crate::core::{BitmapValue, HyperLogLogValue, ListValue, SetValue, StreamManager};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -14,10 +16,14 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
-/// v2 = kv + queue + stream. v3 adds hash/list/set/sorted-set. v4 (current)
-/// adds each KV key's absolute expiry and the HyperLogLog and bitmap sections.
-const SNAPSHOT_VERSION: u8 = 4;
-const SNAPSHOT_MAGIC: &[u8; 8] = b"SYNAP004";
+/// v2 = kv + queue + stream. v3 adds hash/list/set/sorted-set. v4 adds each
+/// KV key's absolute expiry and the HyperLogLog and bitmap sections. v5
+/// (current) stores every queue whole: its configuration and its ready,
+/// in-flight and dead-lettered messages with their full metadata (creation
+/// time included); v2-v4 stored the ready messages only, without it.
+const SNAPSHOT_VERSION: u8 = 5;
+const SNAPSHOT_MAGIC: &[u8; 8] = b"SYNAP005";
+const SNAPSHOT_MAGIC_V4: &[u8; 8] = b"SYNAP004";
 const SNAPSHOT_MAGIC_V3: &[u8; 8] = b"SYNAP003";
 const SNAPSHOT_MAGIC_V2: &[u8; 8] = b"SYNAP002";
 
@@ -33,7 +39,7 @@ const SNAPSHOT_MAGIC_V2: &[u8; 8] = b"SYNAP002";
 /// (phase31) and reads its fields to build the replica's image.
 pub struct SnapshotImage {
     pub(crate) kv: Vec<(String, Arc<[u8]>, Option<u64>)>,
-    pub(crate) queues: HashMap<String, Vec<QueueMessage>>,
+    pub(crate) queues: HashMap<String, QueueState>,
     pub(crate) hashes: HashMap<String, HashMap<String, Vec<u8>>>,
     pub(crate) lists: HashMap<String, ListValue>,
     pub(crate) sets: HashMap<String, SetValue>,
@@ -47,10 +53,10 @@ impl SnapshotImage {
     pub async fn capture(stores: StoreRefs<'_>) -> Result<Self> {
         Ok(Self {
             kv: stores.kv_store.dump_with_expiry().await?,
-            queues: match stores.queue_manager {
-                Some(qm) => qm.dump().await?,
-                None => HashMap::new(),
-            },
+            queues: stores
+                .queue_manager
+                .map(|qm| qm.dump_state())
+                .unwrap_or_default(),
             hashes: stores.hash_store.map(|s| s.dump()).unwrap_or_default(),
             lists: stores.list_store.map(|s| s.dump()).unwrap_or_default(),
             sets: stores.set_store.map(|s| s.dump()).unwrap_or_default(),
@@ -74,7 +80,9 @@ const SEQUENCE_DIGITS: usize = 20;
 /// the rename that publishes it.
 const TEMP_SUFFIX: &str = ".tmp";
 
-/// Final file name of the snapshot with sequence number `sequence`.
+/// Final file name of the snapshot with sequence number `sequence`, named
+/// after the format version it is written in. Sequenced names of every
+/// version share one sequence, so v4 and v5 files order by sequence alone.
 fn snapshot_file_name(sequence: u64) -> String {
     format!(
         "snapshot-v{}-{:0width$}.bin",
@@ -155,7 +163,7 @@ impl SnapshotManager {
             .await
     }
 
-    /// Serialize `image` (plus the current stream events) as a v4 snapshot
+    /// Serialize `image` (plus the current stream events) as a v5 snapshot
     /// whose WAL replay starts at `wal_offset`, publish it atomically and
     /// prune old files.
     ///
@@ -378,7 +386,7 @@ async fn remove_temp(temp: &Path) {
     }
 }
 
-/// Stream `image` (plus the current stream events) to `path` as a v4
+/// Stream `image` (plus the current stream events) to `path` as a v5
 /// snapshot and fsync it. Returns the checksum written at the end.
 async fn write_snapshot_file(
     path: &Path,
@@ -447,39 +455,20 @@ async fn write_snapshot_file(
         checksum.update(&expiry.to_le_bytes());
     }
 
+    // Queue section (v5): per queue its name, its configuration and its
+    // ready, in-flight and dead-lettered messages, each message one
+    // length-prefixed `QueueMessageRecord`.
     let queue_count = queues.len() as u64;
     writer.write_u64(queue_count).await?;
     checksum.update(&queue_count.to_le_bytes());
 
     debug!("Streaming {} queue entries", queue_count);
 
-    for (queue_name, messages) in queues {
-        // Write queue name
-        let name_bytes = queue_name.as_bytes();
-        let name_len = name_bytes.len() as u32;
-
-        writer.write_u32(name_len).await?;
-        checksum.update(&name_len.to_le_bytes());
-
-        writer.write_all(name_bytes).await?;
-        checksum.update(name_bytes);
-
-        // Write messages count
-        let msg_count = messages.len() as u64;
-        writer.write_u64(msg_count).await?;
-        checksum.update(&msg_count.to_le_bytes());
-
-        // Serialize each message
-        for message in messages {
-            let msg_data = bincode::serde::encode_to_vec(&message, bincode::config::legacy())
-                .map_err(std::io::Error::other)?;
-            let msg_len = msg_data.len() as u32;
-
-            writer.write_u32(msg_len).await?;
-            checksum.update(&msg_len.to_le_bytes());
-
-            writer.write_all(&msg_data).await?;
-            checksum.update(&msg_data);
+    for (queue_name, state) in queues {
+        write_blob(&mut writer, &mut checksum, queue_name.as_bytes()).await?;
+        write_bincode(&mut writer, &mut checksum, &state.config).await?;
+        for messages in [&state.ready, &state.in_flight, &state.dead_letter] {
+            write_message_list(&mut writer, &mut checksum, messages).await?;
         }
     }
 
@@ -566,11 +555,14 @@ async fn write_snapshot_file(
 /// Decode a snapshot from `r`, verifying its trailing checksum.
 async fn read_snapshot(r: &mut SnapshotReader, path: &Path) -> Result<Snapshot> {
     // Header: magic (8 bytes) + version (1 byte). The magic names the format:
-    // v4 (current), v3 (no KV expiry, no HyperLogLog/bitmap sections) or v2
-    // (no collection sections either).
+    // v5 (current), v4 (queues hold their ready messages only), v3 (no KV
+    // expiry, no HyperLogLog/bitmap sections) or v2 (no collection sections
+    // either).
     let magic = r.bytes(8).await?;
     let expected_version: u8 = if magic[..] == SNAPSHOT_MAGIC[..] {
         SNAPSHOT_VERSION
+    } else if magic[..] == SNAPSHOT_MAGIC_V4[..] {
+        4
     } else if magic[..] == SNAPSHOT_MAGIC_V3[..] {
         3
     } else if magic[..] == SNAPSHOT_MAGIC_V2[..] {
@@ -590,6 +582,7 @@ async fn read_snapshot(r: &mut SnapshotReader, path: &Path) -> Result<Snapshot> 
     }
     let has_collections = version >= 3;
     let has_expiry_and_hll_bitmap = version >= 4;
+    let has_full_queues = version >= 5;
 
     let timestamp = r.u64().await?;
     let wal_offset = r.u64().await?;
@@ -610,17 +603,33 @@ async fn read_snapshot(r: &mut SnapshotReader, path: &Path) -> Result<Snapshot> 
         kv_data.insert(key, value);
     }
 
-    // Queue section
+    // Queue section: v5 holds whole queues; v2-v4 the ready messages only,
+    // in `QueueMessage`'s own encoding, which has no creation time (it
+    // decodes as "now").
     let queue_count = r.u64().await?;
     let mut queue_data = HashMap::new();
     for _ in 0..queue_count {
         let queue_name = r.string().await?;
-        let msg_count = r.u64().await?;
-        let mut messages = Vec::new();
-        for _ in 0..msg_count {
-            messages.push(r.decoded::<QueueMessage>().await?);
-        }
-        queue_data.insert(queue_name, messages);
+        let image = if has_full_queues {
+            QueueImage {
+                config: Some(r.decoded::<QueueConfig>().await?),
+                ready: r.message_list().await?,
+                in_flight: r.message_list().await?,
+                dead_letter: r.message_list().await?,
+            }
+        } else {
+            let msg_count = r.u64().await?;
+            let mut ready = Vec::new();
+            for _ in 0..msg_count {
+                let message = r.decoded::<QueueMessage>().await?;
+                ready.push(QueueMessageRecord::from(&message));
+            }
+            QueueImage {
+                ready,
+                ..QueueImage::default()
+            }
+        };
+        queue_data.insert(queue_name, image);
     }
 
     // Stream section (always present since v2, count may be 0)
@@ -693,6 +702,51 @@ async fn read_snapshot(r: &mut SnapshotReader, path: &Path) -> Result<Snapshot> 
         hyperloglog_data,
         bitmap_data,
     })
+}
+
+/// Write `bytes` prefixed with their length (u32), feeding the checksum the
+/// same bytes [`SnapshotReader::blob`] accumulates.
+async fn write_blob<W>(writer: &mut W, checksum: &mut CRC64, bytes: &[u8]) -> std::io::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    let len = u32::try_from(bytes.len()).map_err(invalid_data)?;
+    writer.write_u32(len).await?;
+    checksum.update(&len.to_le_bytes());
+    writer.write_all(bytes).await?;
+    checksum.update(bytes);
+    Ok(())
+}
+
+/// Write `value` bincode-encoded (legacy config) as one blob, read back by
+/// [`SnapshotReader::decoded`].
+async fn write_bincode<W, V>(writer: &mut W, checksum: &mut CRC64, value: &V) -> std::io::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+    V: Serialize,
+{
+    let data = bincode::serde::encode_to_vec(value, bincode::config::legacy())
+        .map_err(std::io::Error::other)?;
+    write_blob(writer, checksum, &data).await
+}
+
+/// Write a message list of the v5 queue section: count (u64), then each
+/// message as one [`QueueMessageRecord`] blob.
+async fn write_message_list<W>(
+    writer: &mut W,
+    checksum: &mut CRC64,
+    messages: &[QueueMessage],
+) -> std::io::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    let count = messages.len() as u64;
+    writer.write_u64(count).await?;
+    checksum.update(&count.to_le_bytes());
+    for message in messages {
+        write_bincode(writer, checksum, &QueueMessageRecord::from(message)).await?;
+    }
+    Ok(())
 }
 
 /// Write a `HashMap<String, V>` section: count (u64), then per entry the UTF-8
@@ -813,6 +867,17 @@ impl SnapshotReader {
         bincode::serde::decode_from_slice(&data, bincode::config::legacy())
             .map(|(value, _)| value)
             .map_err(invalid_data)
+    }
+
+    /// A message list written by [`write_message_list`]. Each record is a
+    /// bounded blob, so a damaged count fails at the first missing record.
+    async fn message_list(&mut self) -> std::io::Result<Vec<QueueMessageRecord>> {
+        let count = self.u64().await?;
+        let mut messages = Vec::new();
+        for _ in 0..count {
+            messages.push(self.decoded().await?);
+        }
+        Ok(messages)
     }
 
     /// A section written by [`write_map_section`].
@@ -988,7 +1053,7 @@ mod tests {
         mgr.create_snapshot(stores, 5).await.unwrap();
 
         let (snapshot, _) = mgr.load_latest().await.unwrap().unwrap();
-        assert_eq!(snapshot.version, 4);
+        assert_eq!(snapshot.version, 5);
         assert_eq!(snapshot.kv_expires_at_ms.len(), 1);
         assert_eq!(snapshot.kv_expires_at_ms["t"], deadline);
         assert_eq!(snapshot.kv_data["p"], b"v".to_vec());
@@ -997,6 +1062,121 @@ mod tests {
             hll.dump()["h"].expires_at_ms()
         );
         assert_eq!(snapshot.bitmap_data["b"].data, bitmap.dump()["b"].data);
+    }
+
+    /// A v4 file, written byte by byte here, still loads its queue section:
+    /// the ready messages keep their ID and metadata, with no configuration
+    /// and no in-flight or dead-lettered messages (v4 did not store them).
+    #[tokio::test]
+    async fn v4_queue_section_still_loads() {
+        let mgr = manager("v4_queue");
+        let mut message = QueueMessage::new(b"body".to_vec(), 7, 2);
+        message.retry_count = 1;
+        let encoded = bincode::serde::encode_to_vec(&message, bincode::config::legacy()).unwrap();
+        let mut f = Fixture::default();
+        f.raw(b"SYNAP004");
+        f.raw(&[4]);
+        f.u64(1_700_000_000); // timestamp
+        f.u64(3); // wal_offset
+        f.u64(0); // kv count
+        f.u64(1); // queue count
+        f.u32(1);
+        f.raw(b"q");
+        f.u64(1); // message count
+        f.u32(encoded.len() as u32);
+        f.raw(&encoded);
+        // stream, hash, list, set, sorted-set, HyperLogLog and bitmap: empty.
+        for _ in 0..7 {
+            f.u64(0);
+        }
+        let mut bytes = f.bytes;
+        bytes.extend_from_slice(&f.crc.finalize().to_be_bytes());
+        std::fs::write(
+            mgr.config
+                .directory
+                .join("snapshot-v4-00000000000000000001.bin"),
+            bytes,
+        )
+        .unwrap();
+
+        let (snapshot, _) = mgr.load_latest().await.unwrap().unwrap();
+        assert_eq!(snapshot.version, 4);
+        let queue = &snapshot.queue_data["q"];
+        assert!(queue.config.is_none());
+        assert!(queue.in_flight.is_empty() && queue.dead_letter.is_empty());
+        assert_eq!(queue.ready.len(), 1);
+        assert_eq!(queue.ready[0].id, message.id);
+        assert_eq!(queue.ready[0].payload, b"body".to_vec());
+        assert_eq!(queue.ready[0].priority, 7);
+        assert_eq!(queue.ready[0].retry_count, 1);
+        assert_eq!(queue.ready[0].max_retries, 2);
+
+        // The next write continues the sequence under the v5 name and is the
+        // newest file.
+        let kv = KVStore::new(KVConfig::default());
+        let next = mgr
+            .create_snapshot(StoreRefs::kv_only(&kv), 4)
+            .await
+            .unwrap();
+        assert!(next.ends_with(snapshot_file_name(2)));
+        assert_eq!(mgr.load_latest().await.unwrap().unwrap().1, next);
+    }
+
+    /// v5 stores each queue whole: configuration, ready, in-flight (in
+    /// delivery order) and dead-lettered messages, creation time included.
+    #[tokio::test]
+    async fn v5_snapshot_keeps_whole_queues() {
+        use crate::core::QueueManager;
+        let mgr = manager("v5_queues");
+        let kv = KVStore::new(KVConfig::default());
+        let qm = QueueManager::new(QueueConfig::default());
+        let config = QueueConfig {
+            max_depth: 21,
+            default_max_retries: 0,
+            ..QueueConfig::default()
+        };
+        qm.create_queue("q", Some(config)).await.unwrap();
+        for body in ["in-flight", "dead", "ready"] {
+            qm.publish("q", body.as_bytes().to_vec(), None, None)
+                .await
+                .unwrap();
+        }
+        let in_flight = qm.consume("q", "c").await.unwrap().unwrap();
+        let dead = qm.consume("q", "c").await.unwrap().unwrap();
+        qm.nack("q", &dead.id, false).await.unwrap();
+        let before = qm.dump_state().remove("q").unwrap();
+        let stores = StoreRefs {
+            queue_manager: Some(&qm),
+            ..StoreRefs::kv_only(&kv)
+        };
+        let path = mgr.create_snapshot(stores, 0).await.unwrap();
+
+        let (snapshot, _) = mgr.load_latest().await.unwrap().unwrap();
+        assert_eq!(snapshot.version, 5);
+        let queue = &snapshot.queue_data["q"];
+        assert_eq!(queue.config.as_ref().unwrap().max_depth, 21);
+        let records = |list: &[QueueMessage]| -> Vec<QueueMessageRecord> {
+            list.iter().map(QueueMessageRecord::from).collect()
+        };
+        assert_eq!(queue.ready, records(&before.ready));
+        assert_eq!(queue.in_flight, records(&before.in_flight));
+        assert_eq!(queue.dead_letter, records(&before.dead_letter));
+        assert_eq!(queue.in_flight[0].id, in_flight.id);
+        assert_eq!(queue.in_flight[0].created_at, in_flight.created_at);
+        assert_eq!(queue.dead_letter[0].id, dead.id);
+
+        // Every cut of the file inside the queue section loads as corrupted.
+        let bytes = std::fs::read(&path).unwrap();
+        for len in 0..bytes.len() {
+            std::fs::write(&path, &bytes[..len]).unwrap();
+            assert!(
+                matches!(
+                    mgr.load(&path).await,
+                    Err(PersistenceError::SnapshotCorrupted(_))
+                ),
+                "cut at {len}"
+            );
+        }
     }
 
     /// A manager over `./target/snapshot_format_<name>` keeping `max` files.
@@ -1024,8 +1204,11 @@ mod tests {
         let order = |name: &str| SnapshotOrder::of(name);
         assert_eq!(
             snapshot_file_name(7),
-            "snapshot-v4-00000000000000000007.bin"
+            "snapshot-v5-00000000000000000007.bin"
         );
+        // v4 and v5 sequenced names share one sequence.
+        assert!(order("snapshot-v4-00000000000000000006.bin") < order(&snapshot_file_name(7)));
+        assert!(order(&snapshot_file_name(7)) < order("snapshot-v4-00000000000000000008.bin"));
         assert_eq!(
             order(&snapshot_file_name(7)),
             Some(SnapshotOrder::Sequenced(7))

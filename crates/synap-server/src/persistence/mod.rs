@@ -26,7 +26,8 @@ pub use recovery::{RecoveredStores, recover, recover_all};
 pub use snapshot::{SnapshotImage, SnapshotManager};
 pub use stream_persistence::{StreamEvent, StreamPersistence};
 pub use types::{
-    BitfieldWrite, Operation, PersistenceConfig, PersistenceError, Result, Snapshot, WALEntry,
+    BitfieldWrite, Operation, PersistenceConfig, PersistenceError, QueueImage, QueueMessageRecord,
+    Result, Snapshot, WALEntry,
 };
 pub use wal::WriteAheadLog;
 pub use wal_async::{AsyncWAL, FileSink, WalSink};

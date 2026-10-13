@@ -6,13 +6,12 @@
 //! - Checksum verification
 
 use super::types::{ReplicationCommand, ReplicationError, ReplicationResult};
-use crate::core::queue::QueueMessage;
 use crate::core::{
     BitmapValue, HyperLogLogValue, KVStore, ListValue, SetValue, StreamEvent, StreamManager,
     SynapError, ZAddOptions,
 };
 use crate::persistence::apply::apply_operation;
-use crate::persistence::types::Operation;
+use crate::persistence::types::{Operation, QueueImage};
 use crate::persistence::{SnapshotImage, StoreRefs};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -28,8 +27,10 @@ pub const FULL_SYNC_VERSION: u32 = 2;
 /// offset (format version [`FULL_SYNC_VERSION`]).
 ///
 /// KV values carry their absolute expiry (Unix ms); HyperLogLog and bitmap
-/// values carry their own (`created_at + ttl_secs`). Queues hold their
-/// ready messages, as in snapshots.
+/// values carry their own (`created_at + ttl_secs`). Queues are whole, as in
+/// v5 snapshots: configuration and ready, in-flight and dead-lettered
+/// messages with every field, so the replica keeps the master's message IDs
+/// and metadata.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct FullSyncData {
     pub kv: Vec<(String, Vec<u8>, Option<u64>)>,
@@ -39,7 +40,7 @@ pub struct FullSyncData {
     pub sorted_sets: HashMap<String, Vec<(Vec<u8>, f64)>>,
     pub hyperloglogs: HashMap<String, HyperLogLogValue>,
     pub bitmaps: HashMap<String, BitmapValue>,
-    pub queues: HashMap<String, Vec<QueueMessage>>,
+    pub queues: HashMap<String, QueueImage>,
     pub streams: HashMap<String, Vec<StreamEvent>>,
 }
 
@@ -68,7 +69,10 @@ impl FullSyncData {
             sorted_sets,
             hyperloglogs,
             bitmaps,
-            queues,
+            queues: queues
+                .iter()
+                .map(|(name, state)| (name.clone(), QueueImage::from(state)))
+                .collect(),
             streams,
         }
     }
@@ -300,11 +304,15 @@ fn load_collections(
     Ok(())
 }
 
-/// Recreate every queue (empty ones included) and publish its messages
-/// through the shared applier, the same path a streamed `QueuePublish` takes.
+/// Recreate every queue (empty ones included) whole with
+/// `QueueManager::restore_queue`, the primitive recovery uses: same
+/// configuration, message IDs and metadata as the master, dead letters kept.
+/// Messages in flight on the master are ready on the replica, as streamed
+/// records leave them (deliveries are not replicated); the master's ACK or
+/// NACK settles them by ID.
 async fn load_queues(
     stores: StoreRefs<'_>,
-    queues: HashMap<String, Vec<QueueMessage>>,
+    queues: HashMap<String, QueueImage>,
 ) -> Result<(), SynapError> {
     let Some(qm) = stores.queue_manager else {
         if !queues.is_empty() {
@@ -312,22 +320,8 @@ async fn load_queues(
         }
         return Ok(());
     };
-    let queue_only = StoreRefs {
-        queue_manager: Some(qm),
-        ..StoreRefs::kv_only(stores.kv_store)
-    };
-    for (queue, messages) in queues {
-        qm.create_queue(&queue, None).await?;
-        for message in messages {
-            apply_operation(
-                Operation::QueuePublish {
-                    queue: queue.clone(),
-                    message,
-                },
-                queue_only,
-            )
-            .await?;
-        }
+    for (queue, image) in queues {
+        qm.restore_queue(&queue, image.into_state(qm.default_config().clone()));
     }
     Ok(())
 }
@@ -627,9 +621,10 @@ mod tests {
                 .unwrap();
         }
 
-        /// A comparable description of every value (queue message ids and
-        /// stream event ids are assigned anew on the replica, so payloads
-        /// are compared).
+        /// A comparable description of every value. Queue messages keep
+        /// their ids and metadata (in-flight messages are ready on the
+        /// replica, so both lists are compared as one set); stream event ids
+        /// are assigned anew on the replica, so payloads are compared.
         async fn fingerprint(&self) -> Vec<String> {
             let mut out = Vec::new();
             for (key, value, expiry) in self.kv.dump_with_expiry().await.unwrap() {
@@ -656,12 +651,29 @@ mod tests {
             for (key, bitmap) in self.bitmap.dump() {
                 out.push(format!("bitmap:{key}={:?}", bitmap.data));
             }
-            for (queue, messages) in self.queues.dump().await.unwrap() {
-                let payloads: Vec<_> = messages
+            for (queue, state) in self.queues.dump_state() {
+                let mut messages: Vec<_> = state
+                    .ready
                     .iter()
-                    .map(|m| (m.payload.to_vec(), m.priority, m.max_retries))
+                    .chain(&state.in_flight)
+                    .map(|m| {
+                        let m = crate::persistence::types::QueueMessageRecord::from(m);
+                        (
+                            m.id,
+                            m.payload,
+                            m.priority,
+                            m.retry_count,
+                            m.max_retries,
+                            m.created_at,
+                        )
+                    })
                     .collect();
-                out.push(format!("queue:{queue}={payloads:?}"));
+                messages.sort();
+                let dead: Vec<_> = state.dead_letter.iter().map(|m| &m.id).collect();
+                out.push(format!(
+                    "queue:{queue}={messages:?} dead={dead:?} max_depth={}",
+                    state.config.max_depth
+                ));
             }
             for (room, events) in self.streams.get_all_events().await {
                 let events: Vec<_> = events.iter().map(|e| (&e.event, &e.data)).collect();
