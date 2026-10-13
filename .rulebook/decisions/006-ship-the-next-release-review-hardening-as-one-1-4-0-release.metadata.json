@@ -1,0 +1,11 @@
+{
+  "id": 6,
+  "slug": "ship-the-next-release-review-hardening-as-one-1-4-0-release",
+  "title": "Ship the next-release review hardening as one 1.4.0 release",
+  "status": "accepted",
+  "date": "2026-10-13",
+  "relatedTasks": [
+    "phase30_release-v1-4-0"
+  ],
+  "supersededBy": null
+}

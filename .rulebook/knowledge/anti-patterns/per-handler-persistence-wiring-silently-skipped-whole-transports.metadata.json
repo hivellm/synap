@@ -1,0 +1,21 @@
+{
+  "id": "per-handler-persistence-wiring-silently-skipped-whole-transports",
+  "type": "anti-pattern",
+  "title": "Per-handler persistence wiring silently skipped whole transports",
+  "category": "persistence",
+  "description": "Persistence (WAL + replication) is wired call-site by call-site in the REST and envelope handlers. The RESP3 and SynapRPC dispatchers were written later and call the core stores directly (`kv_store.set(...)` then reply), so every non-transactional write over the native transports was neither logged nor replicated: the only persistence call under crates/synap-server/src/protocol/ was log_transaction in EXEC. The same per-site wiring also produced D-08 (REST and envelope APPEND/SETRANGE logged `log_kv_set(key, vec![], None)`). Neither a multi-agent review nor the transport tests caught it, because the tests check replies and never restart the server or read a replica. Rules: (1) when a cross-cutting concern (persistence, authorization, notifications, tenancy) is wired per handler, list every transport's dispatcher and grep each one for the concern before trusting it; `grep -rn persistence crates/synap-server/src/protocol/` returning only EXEC was the whole proof; (2) route the concern through one shared path that every transport must call; (3) parity tests must restart from the WAL and compare a replica, not just assert the reply.",
+  "example": "// Wrong: native dispatcher mutates and replies; WAL and replicas never see it\nmatch state.kv_store.set(key, value, ttl).await {\n    Ok(()) => Resp3Value::SimpleString(\"OK\".into()),\n    Err(e) => Resp3Value::Error(format!(\"ERR {e}\")),\n}\n// Right: every transport goes through one mutation path that records the effect first\napply_and_record(&state, ctx, Mutation::KvSet { key, value, ttl }).await",
+  "whenToUse": "Adding a transport, adding a cross-cutting concern, or reviewing durability/authorization claims across REST, envelope, RESP3, SynapRPC, MCP and UMICP.",
+  "whenNotToUse": "A concern implemented inside the core store itself, which every transport reaches by construction.",
+  "createdAt": "2026-10-13T04:35:43.673Z",
+  "tags": [
+    "persistence",
+    "wal",
+    "replication",
+    "resp3",
+    "synaprpc",
+    "transport-parity",
+    "analysis:next-release-review-2026-10-12"
+  ],
+  "source": "manual"
+}
