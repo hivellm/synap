@@ -25,15 +25,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        rust: [nightly]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt, clippy
+      - name: Install the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
@@ -41,18 +38,18 @@ jobs:
           key: ${{ matrix.os }}-test
 
       - name: Run cargo check
-        run: cargo check --workspace --all-targets --verbose
+        run: cargo check --workspace --all-targets --locked --verbose
 
       - name: Run unit tests
-        run: cargo test --workspace --lib --verbose
+        run: cargo test --workspace --lib --locked --verbose
 
       # Integration tests only build with the `full-tests` feature; the
       # `test-full` alias in .cargo/config.toml enables it workspace-wide.
       - name: Run integration tests
-        run: cargo test-full --tests --verbose
+        run: cargo test-full --tests --locked --verbose
 
       - name: Run doc tests
-        run: cargo test --workspace --doc --verbose
+        run: cargo test --workspace --doc --locked --verbose
 
   bench:
     name: Benchmarks
@@ -61,8 +58,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
@@ -70,7 +67,7 @@ jobs:
           key: bench
 
       - name: Run benchmarks (compile only)
-        run: cargo bench --workspace --no-run
+        run: cargo bench --workspace --no-run --locked
 
   build:
     name: Build Release
@@ -82,8 +79,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
@@ -91,10 +88,10 @@ jobs:
           key: ${{ matrix.os }}-build
 
       - name: Build synap-server
-        run: cargo build --release --package synap-server --verbose
+        run: cargo build --release --locked --package synap-server --verbose
 
       - name: Build synap-cli
-        run: cargo build --release --package synap-cli --verbose
+        run: cargo build --release --locked --package synap-cli --verbose
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -112,8 +109,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
+      - name: Install the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
         with:
           components: llvm-tools-preview
 
@@ -126,7 +123,7 @@ jobs:
           key: coverage
 
       - name: Generate coverage
-        run: cargo llvm-cov --lib --workspace --lcov --output-path lcov.info
+        run: cargo llvm-cov --lib --workspace --locked --lcov --output-path lcov.info
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
