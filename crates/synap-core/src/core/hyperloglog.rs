@@ -771,4 +771,47 @@ mod tests {
         assert_eq!(stats_after.pfcount_count, 0);
         assert_eq!(stats_after.pfmerge_count, 0);
     }
+
+    /// phase23: PFADD reports the absolute deadline it set, a replayed
+    /// deadline is applied as is (or removes the HLL once passed), and
+    /// dump/restore keep each value's own expiry, skipping expired ones.
+    #[test]
+    fn absolute_expiry_dump_and_restore() {
+        let store = HyperLogLogStore::new();
+        let now = HyperLogLogValue::current_timestamp();
+        let (_, deadline) = store
+            .pfadd_with_expiry("t", vec![b"a".to_vec()], Some(100))
+            .unwrap();
+        assert_eq!(deadline, Some((now + 100) * 1_000));
+        let (_, none) = store
+            .pfadd_with_expiry("p", vec![b"a".to_vec()], None)
+            .unwrap();
+        assert_eq!(none, None);
+
+        store
+            .pfadd_until("u", vec![b"a".to_vec(), b"b".to_vec()], (now + 60) * 1_000)
+            .unwrap();
+        assert_eq!(store.pfcount("u").unwrap(), 2);
+        let restored_deadline = store.dump()["u"].expires_at_ms().unwrap();
+        assert!(restored_deadline <= (now + 61) * 1_000 && restored_deadline >= (now + 59) * 1_000);
+
+        // A deadline already passed removes the key.
+        store
+            .pfadd_until("u", vec![b"c".to_vec()], (now - 1) * 1_000)
+            .unwrap();
+        assert!(store.pfcount("u").is_err());
+
+        let dump = store.dump();
+        assert_eq!(dump.len(), 2);
+        let other = HyperLogLogStore::new();
+        for (key, value) in dump {
+            other.restore(key, value);
+        }
+        let mut expired = HyperLogLogValue::new(Some(1));
+        expired.created_at = now - 10;
+        other.restore("old".into(), expired);
+        assert_eq!(other.pfcount("t").unwrap(), 1);
+        assert_eq!(other.dump()["t"].expires_at_ms(), deadline);
+        assert!(other.pfcount("old").is_err());
+    }
 }

@@ -1,0 +1,21 @@
+{
+  "id": "striped-order-lock-doubles-as-snapshot-barrier-with-a-queue-mark-for-the-cutoff",
+  "type": "pattern",
+  "title": "Striped order lock doubles as the snapshot barrier, with a queue mark for the cutoff",
+  "category": "persistence",
+  "description": "Writers lock their keys' stripes around apply + synchronous enqueue (release before awaiting durability), so same-key log order equals memory order. A snapshot locks every stripe, enqueues a mark into the log writer FIFO and copies the stores, then releases and awaits the mark, which resolves to the exact cutoff even though the writer task assigns offsets later. Stripes are the outermost lock; blocking pops lock per attempt; no lock without a persistence layer. Test ordering on every log record, not only the recovered final value.",
+  "example": "see striped-order-lock-doubles-as-snapshot-barrier-with-a-queue-mark-for-the-cutoff.md",
+  "whenToUse": "Apply-then-log write paths replayed on top of periodic images or applied in order by replicas.",
+  "whenNotToUse": "Log-before-apply under one global lock; fork/copy-on-write images that read the log position atomically.",
+  "createdAt": "2026-10-13T18:00:00.000Z",
+  "tags": [
+    "persistence",
+    "wal",
+    "snapshot",
+    "ordering",
+    "concurrency",
+    "expiry",
+    "phase23"
+  ],
+  "source": "manual"
+}

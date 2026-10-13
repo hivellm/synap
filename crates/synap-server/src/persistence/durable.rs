@@ -1624,4 +1624,41 @@ mod tests {
         assert!(matches!(r.kv_store.ttl("n").await, Ok(Some(t)) if t > 0));
         let _ = std::fs::remove_dir_all(dir);
     }
+
+    /// EXEC through the shared path: a transaction whose record cannot be
+    /// logged reports `NotDurable` (its effects stay in memory), one that
+    /// never ran reports `Failed`.
+    #[tokio::test]
+    async fn exec_separates_failed_from_not_durable() {
+        use crate::core::{ListStore, SetStore, SortedSetStore, TransactionCommand};
+        let (layer, faults) = faulty_layer("durable_exec").await;
+        let kv = Arc::new(KVStore::new(KVConfig::default()));
+        let tm = TransactionManager::new(
+            Arc::clone(&kv),
+            Arc::new(HashStore::new()),
+            Arc::new(ListStore::new()),
+            Arc::new(SetStore::new()),
+            Arc::new(SortedSetStore::new()),
+        );
+        assert!(matches!(
+            exec(Some(&layer), &tm, "nobody").await,
+            Err(ExecError::Failed(_))
+        ));
+
+        tm.multi("c".into()).unwrap();
+        tm.queue_command_if_transaction(
+            "c",
+            TransactionCommand::KVSet {
+                key: "k".into(),
+                value: b"v".to_vec(),
+                ttl: Some(100),
+            },
+        )
+        .unwrap();
+        faults.fail_next_flush();
+        let err = exec(Some(&layer), &tm, "c").await.unwrap_err();
+        assert!(matches!(err, ExecError::NotDurable(_)));
+        assert!(err.to_string().contains("not durable"), "{err}");
+        assert_eq!(kv.get("k").await.unwrap(), Some(b"v".to_vec()));
+    }
 }

@@ -101,11 +101,13 @@ microseconds) instead of one.
   change. Every `durable` function still returns the plain store call before
   touching the layer; no lock, no allocation.
 - Layer present, no contention: one `try_lock` on a stripe (an atomic CAS on
-  a semaphore) and one small `Vec` of stripe guards. The record was already
-  allocated and sent before; the WAL round trip (channel + oneshot + group
-  commit) is microseconds and dominates. Measured with
-  `same_key_writes_reach_the_wal_in_memory_order` style load (8 tasks x 1000
-  APPENDs on one key, Periodic fsync), see the report.
+  a semaphore) and one small `Vec` of stripe guards: 69 ns per lock + unlock
+  (release build, 1M iterations). The record was already allocated and sent
+  before; the WAL round trip (channel + oneshot + group commit) is tens of
+  microseconds and dominates. Durable SET, 8 tasks x 20,000 writes, Periodic
+  fsync, release build, one run each: distinct keys 76k ops/s with the
+  stripes vs 54k without, one hot key 53k vs 56k — differences inside the
+  run-to-run noise of a WAL-bound workload.
 - Same key, contended: writers to one key now serialize over
   apply + submit (a few hundred nanoseconds: the store call plus a channel
   push), not over the WAL wait. That is the price of 1.3; a hot single key was
@@ -113,8 +115,10 @@ microseconds) instead of one.
 - Snapshot: writers stall while the image is captured. The capture is an
   in-memory copy of the WAL-backed stores — KV values are shared `Arc<[u8]>`
   buffers (a refcount bump per key plus the key string), collections are
-  cloned — with no I/O and no serialization. Serialization, stream capture,
-  fsync and file rotation happen after the barrier is released.
+  cloned — with no I/O and no serialization: 58 ms for 160,000 KV keys plus
+  10,000 ten-field hashes (release build), against 0.9 s for the whole
+  snapshot. Serialization, stream capture, fsync and file rotation happen
+  after the barrier is released.
 
 ## 3. Absolute expiry (items 1.4, 1.5, 1.6)
 

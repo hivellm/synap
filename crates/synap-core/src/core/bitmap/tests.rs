@@ -707,3 +707,22 @@ fn test_bitfield_overflow_wrap_and_fail() {
             .is_err()
     );
 }
+
+/// phase23: bitmaps dump and restore as stored; expired values are skipped.
+#[test]
+fn bitmap_dump_and_restore() {
+    let store = BitmapStore::new();
+    store.setbit("b", 10, 1).unwrap();
+    let dump = store.dump();
+    assert_eq!(dump.len(), 1);
+
+    let other = BitmapStore::new();
+    for (key, value) in dump {
+        other.restore(key, value);
+    }
+    let mut expired = BitmapValue::new(Some(1));
+    expired.created_at = 0;
+    other.restore("old".into(), expired);
+    assert_eq!(other.getbit("b", 10).unwrap(), 1);
+    assert!(other.getbit("old", 0).is_err());
+}

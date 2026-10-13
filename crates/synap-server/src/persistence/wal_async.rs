@@ -871,4 +871,20 @@ mod tests {
         assert!(wal.poison_reason().unwrap().contains("fsync failed"));
         assert!(wal.append(set("b")).await.is_err());
     }
+
+    /// A mark resolves to the offset the first entry queued after it gets:
+    /// one past every entry queued before it.
+    #[tokio::test]
+    async fn mark_reports_the_offset_after_every_earlier_entry() {
+        let config = fresh_config("mark", FsyncMode::Periodic, 1000);
+        let wal = AsyncWAL::open(config).await.unwrap();
+        let first = wal.enqueue(set("a")).unwrap();
+        let second = wal.enqueue(set("b")).unwrap();
+        let mark = wal.mark().unwrap();
+        let after = wal.enqueue(set("c")).unwrap();
+        let cutoff = mark.offset().await.unwrap();
+        assert!(first.wait().await.unwrap() < cutoff);
+        assert_eq!(second.wait().await.unwrap() + 1, cutoff);
+        assert_eq!(after.wait().await.unwrap(), cutoff);
+    }
 }

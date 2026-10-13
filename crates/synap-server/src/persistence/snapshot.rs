@@ -674,3 +674,128 @@ impl CRC64 {
         !self.crc
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{BitmapStore, Expiry, HyperLogLogStore, KVConfig, KVStore, SetOptions};
+
+    /// Hand-written snapshot bytes: numbers are streamed big-endian and fed
+    /// to the CRC64 little-endian, as the format specifies.
+    struct Fixture {
+        bytes: Vec<u8>,
+        crc: CRC64,
+    }
+
+    impl Default for Fixture {
+        fn default() -> Self {
+            Self {
+                bytes: Vec::new(),
+                crc: CRC64::new(),
+            }
+        }
+    }
+
+    impl Fixture {
+        fn raw(&mut self, data: &[u8]) {
+            self.bytes.extend_from_slice(data);
+            self.crc.update(data);
+        }
+
+        fn u64(&mut self, v: u64) {
+            self.bytes.extend_from_slice(&v.to_be_bytes());
+            self.crc.update(&v.to_le_bytes());
+        }
+
+        fn u32(&mut self, v: u32) {
+            self.bytes.extend_from_slice(&v.to_be_bytes());
+            self.crc.update(&v.to_le_bytes());
+        }
+    }
+
+    fn manager(name: &str) -> SnapshotManager {
+        let dir = format!("./target/snapshot_format_{name}");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        SnapshotManager::new(SnapshotConfig {
+            directory: dir.into(),
+            ..SnapshotConfig::default()
+        })
+    }
+
+    /// A v3 file, written byte by byte here rather than by the v4 writer,
+    /// still loads: its keys come back without expiry and the v4-only
+    /// sections are empty.
+    #[tokio::test]
+    async fn v3_snapshot_still_loads() {
+        let mgr = manager("v3");
+        let mut f = Fixture::default();
+        f.raw(b"SYNAP003");
+        f.raw(&[3]);
+        f.u64(1_700_000_000); // timestamp
+        f.u64(9); // wal_offset
+        f.u64(1); // kv count
+        f.u32(1);
+        f.raw(b"k");
+        f.u32(1);
+        f.raw(b"v");
+        // queue, stream, hash, list, set and sorted-set sections: all empty.
+        for _ in 0..6 {
+            f.u64(0);
+        }
+        let mut bytes = f.bytes;
+        bytes.extend_from_slice(&f.crc.finalize().to_be_bytes());
+        std::fs::write(
+            mgr.config.directory.join("snapshot-v3-1700000000.bin"),
+            bytes,
+        )
+        .unwrap();
+
+        let (snapshot, _) = mgr.load_latest().await.unwrap().unwrap();
+        assert_eq!(snapshot.version, 3);
+        assert_eq!(snapshot.wal_offset, 9);
+        assert_eq!(snapshot.kv_data["k"], b"v".to_vec());
+        assert!(snapshot.kv_expires_at_ms.is_empty());
+        assert!(snapshot.hyperloglog_data.is_empty());
+        assert!(snapshot.bitmap_data.is_empty());
+    }
+
+    /// v4 keeps every KV key's absolute deadline (persistent keys have none)
+    /// and the HyperLogLog and bitmap values.
+    #[tokio::test]
+    async fn v4_snapshot_keeps_expiry_hyperloglog_and_bitmaps() {
+        let mgr = manager("v4");
+        let kv = KVStore::new(KVConfig::default());
+        let deadline = 4_102_444_800_000; // 2100-01-01
+        kv.set_with_opts(
+            "t",
+            b"v".to_vec(),
+            Some(Expiry::UnixMilliseconds(deadline)),
+            SetOptions::default(),
+        )
+        .await
+        .unwrap();
+        kv.set("p", b"v".to_vec(), None).await.unwrap();
+        let hll = HyperLogLogStore::new();
+        hll.pfadd("h", vec![b"a".to_vec()], Some(60)).unwrap();
+        let bitmap = BitmapStore::new();
+        bitmap.setbit("b", 3, 1).unwrap();
+        let stores = StoreRefs {
+            hyperloglog_store: Some(&hll),
+            bitmap_store: Some(&bitmap),
+            ..StoreRefs::kv_only(&kv)
+        };
+        mgr.create_snapshot(stores, 5).await.unwrap();
+
+        let (snapshot, _) = mgr.load_latest().await.unwrap().unwrap();
+        assert_eq!(snapshot.version, 4);
+        assert_eq!(snapshot.kv_expires_at_ms.len(), 1);
+        assert_eq!(snapshot.kv_expires_at_ms["t"], deadline);
+        assert_eq!(snapshot.kv_data["p"], b"v".to_vec());
+        assert_eq!(
+            snapshot.hyperloglog_data["h"].expires_at_ms(),
+            hll.dump()["h"].expires_at_ms()
+        );
+        assert_eq!(snapshot.bitmap_data["b"].data, bitmap.dump()["b"].data);
+    }
+}

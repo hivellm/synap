@@ -281,4 +281,45 @@ mod tests {
             remaining
         );
     }
+
+    /// phase23: the full-sync image carries each key's absolute deadline, so
+    /// a replica keeps the master's deadline and does not create a key whose
+    /// deadline passed while the image was in transit.
+    #[tokio::test]
+    async fn full_sync_carries_absolute_expiry() {
+        use crate::core::{Expiry, SetOptions};
+        let master = KVStore::new(KVConfig::default());
+        let deadline = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+            + 50_000;
+        master
+            .set_with_opts(
+                "long",
+                b"v".to_vec(),
+                Some(Expiry::UnixMilliseconds(deadline)),
+                SetOptions::default(),
+            )
+            .await
+            .unwrap();
+        master
+            .set_with_opts(
+                "short",
+                b"v".to_vec(),
+                Some(Expiry::Milliseconds(300)),
+                SetOptions::default(),
+            )
+            .await
+            .unwrap();
+        let image = create_snapshot(&master, 7).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+        let replica = KVStore::new(KVConfig::default());
+        assert_eq!(apply_snapshot(&replica, &image).await.unwrap(), 7);
+        let dump = replica.dump_with_expiry().await.unwrap();
+        assert_eq!(dump.len(), 1, "the expired key was created on the replica");
+        assert_eq!(dump[0].0, "long");
+        assert_eq!(dump[0].2, Some(deadline));
+    }
 }

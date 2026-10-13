@@ -548,3 +548,146 @@ pub enum FsyncMode {
     /// Never fsync (fastest, least safe)
     Never,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Relative TTLs are anchored at the record's own timestamp; records
+    /// without one, and records already absolute, are left alone.
+    #[test]
+    fn legacy_relative_ttls_become_absolute_deadlines() {
+        let at = |op: Operation| op.with_absolute_expiry(1_000);
+        assert!(matches!(
+            at(Operation::KVSet {
+                key: "k".into(),
+                value: vec![],
+                ttl: Some(100)
+            }),
+            Operation::KVSetAt {
+                expires_at_ms: Some(1_100_000),
+                ..
+            }
+        ));
+        assert!(matches!(
+            at(Operation::KVSet {
+                key: "k".into(),
+                value: vec![],
+                ttl: None
+            }),
+            Operation::KVSet { ttl: None, .. }
+        ));
+        assert!(matches!(
+            at(Operation::KVExpire {
+                key: "k".into(),
+                ttl: Some(5)
+            }),
+            Operation::KVExpireAt {
+                expires_at_ms: 1_005_000,
+                ..
+            }
+        ));
+        assert!(matches!(
+            at(Operation::KVExpire {
+                key: "k".into(),
+                ttl: None
+            }),
+            Operation::KVExpire { ttl: None, .. }
+        ));
+        assert!(matches!(
+            at(Operation::HllAdd {
+                key: "h".into(),
+                elements: vec![],
+                ttl: Some(1)
+            }),
+            Operation::HllAddAt {
+                expires_at_ms: 1_001_000,
+                ..
+            }
+        ));
+        assert!(matches!(
+            at(Operation::KVSetAt {
+                key: "k".into(),
+                value: vec![],
+                expires_at_ms: Some(7)
+            }),
+            Operation::KVSetAt {
+                expires_at_ms: Some(7),
+                ..
+            }
+        ));
+        match at(Operation::Transaction {
+            operations: vec![
+                Operation::KVSet {
+                    key: "a".into(),
+                    value: vec![],
+                    ttl: Some(2),
+                },
+                Operation::KVDel {
+                    keys: vec!["b".into()],
+                },
+            ],
+        }) {
+            Operation::Transaction { operations } => {
+                assert!(matches!(
+                    operations[0],
+                    Operation::KVSetAt {
+                        expires_at_ms: Some(1_002_000),
+                        ..
+                    }
+                ));
+                assert!(matches!(operations[1], Operation::KVDel { .. }));
+            }
+            other => panic!("expected a transaction, got {other:?}"),
+        }
+    }
+
+    /// The phase23 variants are appended after every earlier one, so the
+    /// bincode tags of 1.3.x, phase21 and phase22 records do not move.
+    #[test]
+    fn phase23_variants_keep_earlier_tags() {
+        let tag = |op: &Operation| {
+            let bytes = bincode::serde::encode_to_vec(op, bincode::config::legacy()).unwrap();
+            u32::from_le_bytes(bytes[..4].try_into().unwrap())
+        };
+        assert_eq!(
+            tag(&Operation::KVSet {
+                key: String::new(),
+                value: vec![],
+                ttl: None
+            }),
+            0
+        );
+        assert_eq!(tag(&Operation::Transaction { operations: vec![] }), 32);
+        assert_eq!(
+            tag(&Operation::BitmapField {
+                key: String::new(),
+                writes: vec![]
+            }),
+            40
+        );
+        assert_eq!(
+            tag(&Operation::KVSetAt {
+                key: String::new(),
+                value: vec![],
+                expires_at_ms: None
+            }),
+            41
+        );
+        assert_eq!(
+            tag(&Operation::KVExpireAt {
+                key: String::new(),
+                expires_at_ms: 0
+            }),
+            42
+        );
+        assert_eq!(
+            tag(&Operation::HllAddAt {
+                key: String::new(),
+                elements: vec![],
+                expires_at_ms: 0
+            }),
+            43
+        );
+    }
+}

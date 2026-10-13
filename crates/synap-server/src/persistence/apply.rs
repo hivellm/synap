@@ -1301,4 +1301,83 @@ mod tests {
         assert!(matches!(parse_aggregate("sum"), Aggregate::Sum));
         assert!(matches!(parse_aggregate("other"), Aggregate::Sum));
     }
+
+    /// phase23: absolute deadlines apply as is; a deadline already passed
+    /// removes the key (KV and HyperLogLog) instead of resurrecting it.
+    #[tokio::test]
+    async fn applies_absolute_expiry() {
+        let s = stores();
+        let now = now_ms();
+        apply(
+            &s,
+            Operation::KVSetAt {
+                key: "k".into(),
+                value: b"v".to_vec(),
+                expires_at_ms: Some(now + 60_000),
+            },
+        )
+        .await;
+        assert!(matches!(s.kv.ttl("k").await, Ok(Some(t)) if (55..=60).contains(&t)));
+        apply(
+            &s,
+            Operation::KVExpireAt {
+                key: "k".into(),
+                expires_at_ms: now + 20_000,
+            },
+        )
+        .await;
+        assert!(matches!(s.kv.ttl("k").await, Ok(Some(t)) if (15..=20).contains(&t)));
+        apply(
+            &s,
+            Operation::KVExpireAt {
+                key: "k".into(),
+                expires_at_ms: now - 1,
+            },
+        )
+        .await;
+        assert!(!s.kv.exists("k").await.unwrap());
+
+        s.kv.set("p", b"old".to_vec(), None).await.unwrap();
+        apply(
+            &s,
+            Operation::KVSetAt {
+                key: "p".into(),
+                value: b"new".to_vec(),
+                expires_at_ms: Some(now - 1),
+            },
+        )
+        .await;
+        assert!(!s.kv.exists("p").await.unwrap());
+        apply(
+            &s,
+            Operation::KVSetAt {
+                key: "p".into(),
+                value: b"v".to_vec(),
+                expires_at_ms: None,
+            },
+        )
+        .await;
+        assert_eq!(s.kv.ttl("p").await.unwrap(), None);
+
+        apply(
+            &s,
+            Operation::HllAddAt {
+                key: "h".into(),
+                elements: vec![b"a".to_vec()],
+                expires_at_ms: now + 30_000,
+            },
+        )
+        .await;
+        assert_eq!(s.hll.pfcount("h").unwrap(), 1);
+        apply(
+            &s,
+            Operation::HllAddAt {
+                key: "h".into(),
+                elements: vec![b"b".to_vec()],
+                expires_at_ms: now - 1_000,
+            },
+        )
+        .await;
+        assert!(s.hll.pfcount("h").is_err());
+    }
 }
