@@ -2,7 +2,7 @@ use super::{AppState, get_mcp_tools, handle_mcp_tool};
 use crate::config::McpConfig;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, ErrorData, Implementation, ProtocolVersion,
-    ServerCapabilities, ServerInfo,
+    ServerCapabilities, ServerConfig,
 };
 use std::sync::Arc;
 
@@ -14,8 +14,8 @@ pub struct SynapMcpService {
 }
 
 impl rmcp::ServerHandler for SynapMcpService {
-    fn get_info(&self) -> ServerInfo {
-        ServerInfo::new(
+    fn get_info(&self) -> ServerConfig {
+        ServerConfig::new(
             ServerCapabilities::builder()
                 .enable_tools()
                 .build(),

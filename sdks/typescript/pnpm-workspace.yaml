@@ -1,2 +1,6 @@
 onlyBuiltDependencies:
   - esbuild
+
+# Mirrors the `overrides` block in package.json, which pnpm does not read.
+overrides:
+  esbuild: ^0.28.1
