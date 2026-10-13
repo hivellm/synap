@@ -120,6 +120,10 @@ async def test_incr_returns_new_value(
     result = await kv_store.incr("counter", delta=5)
 
     assert result == 42
+    # `kv.incr` + `amount` is what the HTTP envelope understands.
+    mock_client.send_command.assert_called_once_with(  # type: ignore[attr-defined]
+        "kv.incr", {"key": "counter", "amount": 5}
+    )
 
 
 @pytest.mark.asyncio
@@ -133,6 +137,9 @@ async def test_decr_returns_new_value(
     result = await kv_store.decr("counter", delta=3)
 
     assert result == 10
+    mock_client.send_command.assert_called_once_with(  # type: ignore[attr-defined]
+        "kv.decr", {"key": "counter", "amount": 3}
+    )
 
 
 @pytest.mark.asyncio

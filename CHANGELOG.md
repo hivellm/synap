@@ -73,8 +73,28 @@ migration notes before upgrading.
   refuses to start in Hub mode while RESP3 or SynapRPC is enabled (both are on
   by default), naming the listener, because neither authenticates tenants.
 
+- **Counter amounts behave the same on every transport** (review finding
+  E-04). The SDK native maps (Rust, TypeScript, Python, C#, PHP, Go) send
+  `INCRBY`/`DECRBY` when `kv.incr`/`kv.decr` carries an `amount` and keep
+  `INCR`/`DECR` without one, so `INCR count 10` adds 10 over HTTP, SynapRPC
+  and RESP3 alike. The C# and PHP SDKs sent the step as `delta` and the Python
+  SDK as `kv.incrby`, which the HTTP API never read (so they always added 1);
+  all send `amount` now. The HTTP API refuses a malformed `amount` instead of
+  treating it as 1, and decrementing by `i64::MIN` fails as an overflow instead
+  of wrapping into an increment.
+- **The Rust SDK's RESP3 transport times out requests**, not only connects, so
+  a server that accepts a connection and never answers no longer hangs the
+  client; an empty-body HTTP error now names its status code.
+
 ### Changed
 
+- **`synap-cli PING` reports failures** (review finding E-05, breaking for
+  scripts). It uses a real protocol ping and exits 1 with the reason on stderr
+  when the connection is refused, times out or the credentials are rejected; it
+  used to print "Server unreachable" and exit 0. A malformed INCR/DECR amount
+  is refused before anything is sent, and errors go to stderr. New flags:
+  `--user`, `--password`, `--timeout`. The `/api/v1/command` endpoint gains a
+  `ping` command, which requires credentials when authentication is on.
 - **A WAL with interior corruption stops startup.** A bad frame followed by
   valid ones used to end the scan silently and lose the history after it;
   startup now fails with the byte position so an operator can decide.

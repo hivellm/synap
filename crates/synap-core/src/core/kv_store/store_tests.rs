@@ -235,6 +235,17 @@ async fn test_decr() {
 }
 
 #[tokio::test]
+async fn test_decr_by_i64_min_overflows_without_mutation() {
+    let store = KVStore::new(KVConfig::default());
+    store.set("counter", b"0".to_vec(), None).await.unwrap();
+
+    // -i64::MIN does not fit in an i64: the decrement must fail, not wrap
+    // into an increment by i64::MIN.
+    assert!(store.decr("counter", i64::MIN).await.is_err());
+    assert_eq!(store.incr("counter", 0).await.unwrap(), 0);
+}
+
+#[tokio::test]
 async fn test_mset_mget() {
     let store = KVStore::new(KVConfig::default());
 

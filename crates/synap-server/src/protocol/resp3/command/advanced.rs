@@ -654,7 +654,10 @@ pub(super) async fn cmd_txqueue(state: &AppState, args: &[Resp3Value]) -> Resp3V
                 },
             };
             let delta = if inner.starts_with("DECR") {
-                -magnitude
+                match magnitude.checked_neg() {
+                    Some(d) => d,
+                    None => return Resp3Value::Error("ERR Integer overflow on INCR/DECR".into()),
+                }
             } else {
                 magnitude
             };

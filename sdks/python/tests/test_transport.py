@@ -187,6 +187,25 @@ class TestMapCommand:
         result = _map_command("kv.incrby", {"key": "foo", "amount": 5})
         assert result == ("INCRBY", ["foo", 5])
 
+    def test_kv_incr_and_decr_with_amount_map_to_incrby_and_decrby(self) -> None:
+        # The HTTP envelope applies `amount`; the native maps must too.
+        for amount in (10, 0, -7):
+            assert _map_command("kv.incr", {"key": "c", "amount": amount}) == (
+                "INCRBY",
+                ["c", amount],
+            )
+        assert _map_command("kv.decr", {"key": "c", "amount": 4}) == ("DECRBY", ["c", 4])
+        assert _map_command("kv.decr", {"key": "c", "amount": None}) == ("DECR", ["c"])
+
+    def test_kv_incr_non_integer_amount_travels_as_json_text(self) -> None:
+        # Refused by the server on every transport, as it is over HTTP.
+        assert _map_command("kv.incr", {"key": "c", "amount": "10"}) == (
+            "INCRBY",
+            ["c", '"10"'],
+        )
+        assert _map_command("kv.incr", {"key": "c", "amount": 1.5}) == ("INCRBY", ["c", "1.5"])
+        assert _map_command("kv.incr", {"key": "c", "amount": True}) == ("INCRBY", ["c", "true"])
+
     def test_hash_get(self) -> None:
         result = _map_command("hash.get", {"key": "h", "field": "f1"})
         assert result == ("HGET", ["h", "f1"])

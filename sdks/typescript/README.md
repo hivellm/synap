@@ -270,6 +270,11 @@ await synap.kv.incr('counter', 3); // 8
 await synap.kv.decr('counter', 2); // 6
 ```
 
+An amount behaves the same on every transport: HTTP applies it in the
+`kv.incr`/`kv.decr` envelope, SynapRPC and RESP3 send `INCRBY`/`DECRBY`.
+Zero and negative amounts apply as given, a non-integer amount is refused,
+and a change past the 64-bit range fails and leaves the counter unchanged.
+
 ### Batch Operations
 
 ```typescript

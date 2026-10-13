@@ -386,6 +386,10 @@ name = "sdk_rpc_e2e_tests"
 required-features = ["full-tests"]
 
 [[test]]
+name = "counter_amount_parity_tests"
+required-features = ["full-tests"]
+
+[[test]]
 name = "set_integration_tests"
 required-features = ["full-tests"]
 

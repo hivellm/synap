@@ -160,7 +160,8 @@ await client.KV.SetAsync("session:abc", sessionData, ttl: 3600);
 // Get value (generic)
 var data = await client.KV.GetAsync<SessionData>("session:abc");
 
-// Atomic operations
+// Atomic operations (`delta` applies identically on every transport;
+// zero and negative steps apply as given, overflow fails without a change)
 var newValue = await client.KV.IncrAsync("counter", delta: 1);
 var exists = await client.KV.ExistsAsync("session:abc");
 

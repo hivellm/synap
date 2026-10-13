@@ -3,6 +3,23 @@ use serde_json::{Value, json};
 
 // ── Command mapper ────────────────────────────────────────────────────────────
 
+/// The `amount` argument of `kv.incr` / `kv.decr`, or `None` when the payload
+/// carries none (absent or `null`).
+///
+/// A JSON integer travels as an integer. Anything else travels as its JSON
+/// text, so the server rejects it as "not an integer" — the same refusal the
+/// HTTP envelope gives — instead of the SDK guessing at a number (a JSON string
+/// `"10"` is sent as `"10"` with its quotes and is refused, as over HTTP).
+fn counter_amount(payload: &Value) -> Option<WireValue> {
+    match payload.get("amount") {
+        None | Some(Value::Null) => None,
+        Some(amount) => Some(match amount.as_i64() {
+            Some(n) => WireValue::Int(n),
+            None => WireValue::Str(amount.to_string()),
+        }),
+    }
+}
+
 /// Translate a dotted SDK command + JSON payload into a raw Redis-style command
 /// plus an ordered arg list for the native protocols.
 ///
@@ -39,6 +56,10 @@ pub(crate) fn map_command(cmd: &str, payload: &Value) -> Option<(&'static str, V
     };
 
     Some(match cmd {
+        // ── Connection ────────────────────────────────────────────────────────
+        // The HTTP envelope answers `ping` with "PONG"; so does native PING.
+        "ping" => ("PING", vec![]),
+
         // ── KV ────────────────────────────────────────────────────────────────
         "kv.get" => ("GET", vec![field_str("key")]),
 
@@ -53,8 +74,16 @@ pub(crate) fn map_command(cmd: &str, payload: &Value) -> Option<(&'static str, V
 
         "kv.del" => ("DEL", vec![field_str("key")]),
         "kv.exists" => ("EXISTS", vec![field_str("key")]),
-        "kv.incr" => ("INCR", vec![field_str("key")]),
-        "kv.decr" => ("DECR", vec![field_str("key")]),
+        // An explicit `amount` travels as INCRBY/DECRBY, exactly as the HTTP
+        // envelope applies it; without one the command stays INCR/DECR.
+        "kv.incr" => match counter_amount(payload) {
+            Some(amount) => ("INCRBY", vec![field_str("key"), amount]),
+            None => ("INCR", vec![field_str("key")]),
+        },
+        "kv.decr" => match counter_amount(payload) {
+            Some(amount) => ("DECRBY", vec![field_str("key"), amount]),
+            None => ("DECR", vec![field_str("key")]),
+        },
 
         "kv.keys" => {
             let prefix = payload["prefix"].as_str().unwrap_or("");
