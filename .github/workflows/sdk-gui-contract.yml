@@ -1,0 +1,309 @@
+name: SDK, GUI and Contract Checks
+
+# Pull-request gates for everything outside the Rust workspace, and for the
+# contract between the server and its clients:
+#   - every SDK in this repository (TypeScript, Python, C#) and the PHP SDK
+#     submodule runs its tests; the first three are held to their coverage
+#     floors (.github/coverage-floors.json)
+#   - the GUI type-checks, lints, builds and runs its contract tests against a
+#     real server
+#   - the SDKs run their server-to-server suites, the TypeScript end-to-end
+#     suite exercises HTTP, SynapRPC and RESP3, and the cross-language interop
+#     matrix runs every cell, against the release build of this commit
+# A renamed server command that a client still sends, or a native command map
+# that drops a counter amount, fails here before it merges.
+# See docs/development/CI_GATES.md.
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server:
+    name: Build synap-server (release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: contract-server
+
+      - name: Build synap-server
+        run: cargo build --release --locked --package synap-server --bin synap-server
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: synap-server-linux
+          path: target/release/synap-server
+          retention-days: 3
+          if-no-files-found: error
+
+  sdk-typescript:
+    name: TypeScript SDK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/typescript
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+
+      - run: npm ci
+
+      - name: Type-check
+        run: npm run type-check
+
+      - name: Unit tests with coverage
+        run: npm run test:unit -- --coverage --coverage.reporter=text-summary --coverage.reporter=lcov
+
+      - name: Coverage gate
+        working-directory: .
+        run: python3 scripts/ci/coverage_gate.py sdk-typescript
+
+      - name: Build
+        run: npm run build
+
+  sdk-python:
+    name: Python SDK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/python
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      # pyproject's `fail_under = 95` is the policy, which the suite does not
+      # meet yet; the enforced floor lives in .github/coverage-floors.json and
+      # is checked by the gate step, so pytest itself must not fail on it.
+      - name: Unit tests with coverage
+        run: pytest --cov-report=xml:coverage.xml --cov-fail-under=0
+
+      - name: Coverage gate
+        working-directory: .
+        run: python scripts/ci/coverage_gate.py sdk-python
+
+  sdk-csharp:
+    name: C# SDK
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdks/csharp
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Unit tests with coverage
+        run: dotnet test --configuration Release --collect:"XPlat Code Coverage" --results-directory coverage
+
+      - name: Coverage gate
+        working-directory: .
+        run: python3 scripts/ci/coverage_gate.py sdk-csharp
+
+  # The PHP SDK lives in its own repository (submodule sdks/php), which has no
+  # CI of its own. Its suite mixes unit and server-to-server tests, so it runs
+  # here against the server this commit builds.
+  sdk-php:
+    name: PHP SDK (submodule)
+    needs: server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: sockets, mbstring, curl
+          tools: composer
+
+      - name: Install
+        working-directory: sdks/php
+        run: composer install --no-interaction --no-progress
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: synap-server-linux
+          path: ${{ runner.temp }}/server
+
+      - name: Start synap-server
+        id: server
+        uses: ./.github/actions/start-synap-server
+        with:
+          binary: ${{ runner.temp }}/server/synap-server
+
+      - name: Tests
+        working-directory: sdks/php
+        run: vendor/bin/phpunit --no-coverage
+
+      - name: Server log
+        if: failure()
+        run: cat "${{ steps.server.outputs.log }}"
+
+  gui:
+    name: GUI
+    needs: server
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gui
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: gui/package-lock.json
+
+      - run: npm ci
+
+      - name: Type-check
+        run: npm run type-check
+
+      # Findings that predate the lint gate are recorded in
+      # eslint-suppressions.json; new ones, and recorded ones that no longer
+      # occur, fail.
+      - name: Lint
+        run: npm run lint
+
+      - name: Build
+        run: npm run build
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: synap-server-linux
+          path: ${{ runner.temp }}/server
+
+      # The API client and the structure inspector against a real server: a
+      # command the GUI sends that the server no longer registers fails here.
+      - name: Contract and smoke tests
+        env:
+          SYNAP_SERVER_BIN: ${{ runner.temp }}/server/synap-server
+        run: |
+          chmod +x "$SYNAP_SERVER_BIN"
+          npm test
+
+  contract:
+    name: SDK contracts and interop matrix
+    needs: server
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+
+      # The interop matrix builds and runs the Rust SDK's interop example.
+      - name: Install the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: contract-interop
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: sdks/go/go.mod
+          cache-dependency-path: sdks/go/go.sum
+
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: sockets, mbstring, curl
+          tools: composer
+
+      # The TypeScript end-to-end suite and the interop matrix both start the
+      # binary from target/release, as they do locally.
+      - uses: actions/download-artifact@v8
+        with:
+          name: synap-server-linux
+          path: target/release
+
+      - name: Install the SDKs
+        run: |
+          chmod +x target/release/synap-server
+          (cd sdks/typescript && npm ci && npm run build)
+          python -m pip install --upgrade pip
+          python -m pip install -e "sdks/python[dev]"
+          (cd sdks/php && composer install --no-interaction --no-progress)
+
+      # Starts its own server on ports 25510-25511/26389 and drives the KV,
+      # queue, stream, pub/sub, transaction and script APIs, counter amounts
+      # included, over HTTP, SynapRPC and RESP3.
+      - name: TypeScript end-to-end suite (HTTP, SynapRPC, RESP3)
+        working-directory: sdks/typescript
+        env:
+          RUN_E2E: "true"
+        run: npx vitest run src/__tests__/e2e.test.ts
+
+      - name: Start synap-server for the server-to-server suites
+        id: server
+        uses: ./.github/actions/start-synap-server
+        with:
+          binary: target/release/synap-server
+
+      - name: TypeScript server-to-server suites
+        working-directory: sdks/typescript
+        run: npm run test:s2s
+
+      - name: Python server-to-server suites
+        working-directory: sdks/python
+        env:
+          SYNAP_S2S: "true"
+        run: pytest --no-cov
+
+      # Every cell (Rust, TypeScript, Python, C#, Go, PHP, pre-Thunder
+      # replay) against one server it starts itself; --strict fails a cell
+      # that could not run instead of skipping it.
+      - name: Cross-language interop matrix
+        run: python scripts/interop/run-matrix.py --strict
+
+      - name: Server log
+        if: failure()
+        run: cat "${{ steps.server.outputs.log }}"

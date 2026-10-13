@@ -1,0 +1,46 @@
+{
+  "policy": 95.0,
+  "metric": "line coverage, percent",
+  "about": "Per-component floors enforced by scripts/ci/coverage_gate.py. Each floor is the coverage measured on 2026-10-13 in the mode CI runs, truncated to one decimal; every component is below the 95% policy, so the floor stops further drops while the gap is closed. Raise a floor when coverage rises; never lower one to make a pull request pass. See docs/development/CI_GATES.md.",
+  "components": {
+    "synap-core": {
+      "report": "lcov.info",
+      "include": "crates/synap-core",
+      "floor": 85.3,
+      "measured": "11747/13770 lines, 85.31%",
+      "mode": "cargo llvm-cov --lib --workspace (unit tests), Linux"
+    },
+    "synap-server": {
+      "report": "lcov.info",
+      "include": "crates/synap-server",
+      "floor": 47.7,
+      "measured": "15325/32098 lines, 47.74%",
+      "mode": "cargo llvm-cov --lib --workspace (unit tests), Linux"
+    },
+    "synap-sdk": {
+      "report": "lcov.info",
+      "include": "sdks/rust",
+      "floor": 45.0,
+      "measured": "2141/4752 lines, 45.05%",
+      "mode": "cargo llvm-cov --lib --workspace (unit tests), Linux"
+    },
+    "sdk-typescript": {
+      "report": "sdks/typescript/coverage/lcov.info",
+      "floor": 68.4,
+      "measured": "864/1263 lines, 68.41%",
+      "mode": "npm run test:unit -- --coverage (unit tests, no server)"
+    },
+    "sdk-python": {
+      "report": "sdks/python/coverage.xml",
+      "floor": 62.2,
+      "measured": "1090/1752 lines, 62.21%",
+      "mode": "pytest (unit tests; the s2s suites skip without a server)"
+    },
+    "sdk-csharp": {
+      "report": "sdks/csharp/coverage/*/coverage.cobertura.xml",
+      "floor": 38.2,
+      "measured": "702/1833 lines, 38.30%",
+      "mode": "dotnet test --collect \"XPlat Code Coverage\" (unit tests; the S2S tests skip without a server)"
+    }
+  }
+}

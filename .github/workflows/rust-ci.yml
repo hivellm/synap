@@ -125,6 +125,11 @@ jobs:
       - name: Generate coverage
         run: cargo llvm-cov --lib --workspace --locked --lcov --output-path lcov.info
 
+      # Fails when a crate drops below its floor in .github/coverage-floors.json
+      # and prints the gap to the 95% policy. See docs/development/CI_GATES.md.
+      - name: Coverage gate
+        run: python3 scripts/ci/coverage_gate.py synap-core synap-server synap-sdk
+
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
         with:
