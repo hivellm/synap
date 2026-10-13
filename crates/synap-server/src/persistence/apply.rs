@@ -11,6 +11,11 @@
 //! `StreamPersistence`), while a replica must apply them from the stream. This
 //! is expressed by the `stream_manager` argument — pass `None` to skip stream
 //! ops (recovery), `Some(..)` to apply them (replica).
+//!
+//! A transaction record ([`Operation::Transaction`]) reaches this module only
+//! whole: the WAL stores it as one checksummed frame and replication ships it
+//! as one length-prefixed command, so a torn or interrupted record is never
+//! decoded. [`apply_operation`] then applies every operation in it.
 
 use crate::core::sorted_set::{SortedSetStore, ZAddOptions};
 use crate::core::{
@@ -91,12 +96,51 @@ impl StoreArcs {
     }
 }
 
-/// Apply a single [`Operation`] to the provided stores.
+/// Apply an [`Operation`] to the provided stores.
 ///
 /// Errors from KV and hash writes propagate; list/set/sorted-set/queue/stream
 /// applies are best-effort (idempotent replays), matching WAL recovery
-/// semantics.
+/// semantics. A transaction record applies every operation it holds (see
+/// [`apply_transaction`]).
 pub async fn apply_operation(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapError> {
+    match op {
+        Operation::Transaction { operations } => apply_transaction(operations, stores).await,
+        op => apply_single(op, stores).await,
+    }
+}
+
+/// Apply a committed transaction record: every operation, in order.
+///
+/// A record that nests another transaction is rejected before anything is
+/// applied; the writer never produces one. Once applying has started, a
+/// failing operation does not stop the rest: the master committed every
+/// effect, so applying all the others is the closest state to it. The first
+/// error is returned (WAL recovery then refuses the whole replay).
+async fn apply_transaction(
+    operations: Vec<Operation>,
+    stores: StoreRefs<'_>,
+) -> Result<(), SynapError> {
+    if operations
+        .iter()
+        .any(|op| matches!(op, Operation::Transaction { .. }))
+    {
+        return Err(nested_transaction_error());
+    }
+    let mut first_error = None;
+    for operation in operations {
+        if let Err(e) = apply_single(operation, stores).await {
+            first_error.get_or_insert(e);
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+fn nested_transaction_error() -> SynapError {
+    SynapError::InvalidValue("a transaction record cannot contain another transaction".into())
+}
+
+/// Apply one non-transaction [`Operation`].
+async fn apply_single(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapError> {
     let StoreRefs {
         kv_store,
         hash_store,
@@ -365,6 +409,10 @@ pub async fn apply_operation(op: Operation, stores: StoreRefs<'_>) -> Result<(),
                 let _ = z.zdiffstore(&destination, &key_refs);
             }
         }
+
+        // Only reachable through a nested record, which `apply_transaction`
+        // rejects up front.
+        Operation::Transaction { .. } => return Err(nested_transaction_error()),
     }
     Ok(())
 }
@@ -808,6 +856,64 @@ mod tests {
         .await
         .unwrap();
         assert!(s.stream.list_rooms().await.is_empty());
+    }
+
+    /// A transaction record applies every operation it holds, across stores.
+    #[tokio::test]
+    async fn applies_every_operation_of_a_transaction() {
+        let s = stores();
+        apply(
+            &s,
+            Operation::Transaction {
+                operations: vec![
+                    Operation::KVSet {
+                        key: "tk".into(),
+                        value: b"tv".to_vec(),
+                        ttl: None,
+                    },
+                    Operation::HashSet {
+                        key: "th".into(),
+                        field: "f".into(),
+                        value: b"hv".to_vec(),
+                    },
+                    Operation::SetAdd {
+                        key: "ts".into(),
+                        members: vec![b"m".to_vec()],
+                    },
+                ],
+            },
+        )
+        .await;
+        assert_eq!(s.kv.get("tk").await.unwrap(), Some(b"tv".to_vec()));
+        assert_eq!(s.hash.hget("th", "f").unwrap(), Some(b"hv".to_vec()));
+        assert!(s.set.sismember("ts", b"m".to_vec()).unwrap());
+    }
+
+    /// A record nesting another transaction is rejected before any of its
+    /// operations is applied.
+    #[tokio::test]
+    async fn nested_transaction_record_applies_nothing() {
+        let s = stores();
+        let err = apply_operation(
+            Operation::Transaction {
+                operations: vec![
+                    Operation::KVSet {
+                        key: "outer".into(),
+                        value: b"v".to_vec(),
+                        ttl: None,
+                    },
+                    Operation::Transaction { operations: vec![] },
+                ],
+            },
+            StoreRefs::kv_only(&s.kv),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("cannot contain another transaction")
+        );
+        assert_eq!(s.kv.get("outer").await.unwrap(), None);
     }
 
     #[test]

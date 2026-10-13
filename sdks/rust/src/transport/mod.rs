@@ -336,7 +336,17 @@ impl Resp3Transport {
             }
             let conn = guard.as_mut().expect("just set");
 
-            if conn.writer.write_all(&frame).await.is_err() {
+            // The configured timeout bounds the whole request, as it does on
+            // HTTP and SynapRPC: a listener that accepts but never answers
+            // must not hang the caller. A timed-out connection may still
+            // deliver the late reply, so it is dropped rather than reused, and
+            // the command is not resent.
+            let written = tokio::time::timeout(self.timeout, conn.writer.write_all(&frame)).await;
+            let Ok(written) = written else {
+                *guard = None;
+                return Err(SynapError::Timeout);
+            };
+            if written.is_err() {
                 *guard = None;
                 if attempt == 0 {
                     continue;
@@ -344,7 +354,12 @@ impl Resp3Transport {
                 return Err(SynapError::Other("RESP3 write failed".into()));
             }
 
-            match parse_resp3(&mut conn.reader).await {
+            let reply = tokio::time::timeout(self.timeout, parse_resp3(&mut conn.reader)).await;
+            let Ok(reply) = reply else {
+                *guard = None;
+                return Err(SynapError::Timeout);
+            };
+            match reply {
                 Ok(v) => return Ok(v),
                 Err(e) => {
                     *guard = None;

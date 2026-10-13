@@ -4,9 +4,10 @@ use colored::Colorize;
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 use serde_json::{Value, json};
-use std::time::Instant;
-use synap_sdk::{SynapClient, SynapConfig};
+use std::time::{Duration, Instant};
+use synap_sdk::{SynapClient, SynapConfig, TransportMode};
 use tracing::{error, info};
+use tracing_subscriber::fmt::writer::MakeWriterExt;
 
 #[derive(Parser, Debug)]
 #[command(name = "synap-cli")]
@@ -34,6 +35,18 @@ struct Args {
     #[arg(long, default_value = "http")]
     transport: String,
 
+    /// Username to authenticate with (HTTP Basic auth, SynapRPC handshake)
+    #[arg(long, requires = "password")]
+    user: Option<String>,
+
+    /// Password for --user
+    #[arg(long, requires = "user")]
+    password: Option<String>,
+
+    /// Connection and request timeout, in seconds
+    #[arg(long, default_value_t = 30, value_parser = clap::value_parser!(u64).range(1..))]
+    timeout: u64,
+
     /// Command to execute (non-interactive mode)
     #[arg(trailing_var_arg = true)]
     command: Vec<String>,
@@ -59,8 +72,18 @@ struct CliClient {
 }
 
 impl CliClient {
-    fn new(url: &str) -> Result<Self> {
-        let config = SynapConfig::new(url);
+    fn new(url: &str, credentials: Option<(&str, &str)>, timeout: Duration) -> Result<Self> {
+        let mut config = SynapConfig::new(url).with_timeout(timeout);
+        if let Some((user, password)) = credentials {
+            // The SDK's RESP3 transport never sends AUTH: accepting the flags
+            // there would run every command unauthenticated without a word.
+            if matches!(config.transport, TransportMode::Resp3) {
+                return Err(anyhow::anyhow!(
+                    "--user/--password are not supported on resp3:// URLs; use http:// or synap://"
+                ));
+            }
+            config = config.with_basic_auth(user, password);
+        }
         let sdk =
             SynapClient::new(config).map_err(|e| anyhow::anyhow!("Failed to connect: {}", e))?;
         Ok(Self { sdk })
@@ -103,10 +126,30 @@ impl CliClient {
     // ── Command helpers ──────────────────────────────────────────────────────
 
     async fn send(&self, cmd: &str, payload: Value) -> Result<Value> {
+        // Keep the SDK error as the source, so `{:#}` prints the whole chain
+        // (e.g. the refused connection under "error sending request").
         self.sdk
             .send_command(cmd, payload)
             .await
-            .map_err(|e| anyhow::anyhow!("{}", e))
+            .map_err(anyhow::Error::new)
+    }
+
+    /// The `kv.incr` / `kv.decr` payload for `KEY [amount]`.
+    ///
+    /// Without an amount the server applies 1. A given amount must be a 64-bit
+    /// integer: a malformed one is refused before anything is sent, instead of
+    /// silently counting as 1.
+    fn counter_payload(usage: &str, args: &[String]) -> Result<Value> {
+        match args {
+            [key] => Ok(json!({"key": key})),
+            [key, raw] => {
+                let amount: i64 = raw.parse().map_err(|_| {
+                    anyhow::anyhow!("invalid amount '{raw}': expected a 64-bit integer")
+                })?;
+                Ok(json!({"key": key, "amount": amount}))
+            }
+            _ => Err(anyhow::anyhow!("Usage: {usage}")),
+        }
     }
 
     async fn cmd_set(&self, args: &[String]) -> Result<String> {
@@ -162,25 +205,15 @@ impl CliClient {
     }
 
     async fn cmd_incr(&self, args: &[String]) -> Result<String> {
-        if args.is_empty() {
-            return Err(anyhow::anyhow!("Usage: INCR key [amount]"));
-        }
-        let amount = args.get(1).and_then(|s| s.parse::<i64>().ok()).unwrap_or(1);
-        let res = self
-            .send("kv.incr", json!({"key": args[0], "amount": amount}))
-            .await?;
+        let payload = Self::counter_payload("INCR key [amount]", args)?;
+        let res = self.send("kv.incr", payload).await?;
         let value = res["value"].as_i64().or(res.as_i64()).unwrap_or(0);
         Ok(format!("(integer) {}", value))
     }
 
     async fn cmd_decr(&self, args: &[String]) -> Result<String> {
-        if args.is_empty() {
-            return Err(anyhow::anyhow!("Usage: DECR key [amount]"));
-        }
-        let amount = args.get(1).and_then(|s| s.parse::<i64>().ok()).unwrap_or(1);
-        let res = self
-            .send("kv.decr", json!({"key": args[0], "amount": amount}))
-            .await?;
+        let payload = Self::counter_payload("DECR key [amount]", args)?;
+        let res = self.send("kv.decr", payload).await?;
         let value = res["value"].as_i64().or(res.as_i64()).unwrap_or(0);
         Ok(format!("(integer) {}", value))
     }
@@ -280,11 +313,15 @@ impl CliClient {
         Ok(output.join("\n"))
     }
 
+    /// The protocol's own ping: `PING` on SynapRPC and RESP3, the `ping`
+    /// envelope command on HTTP (which, unlike `/health`, sits behind
+    /// authentication). A refused connection, a timeout or rejected
+    /// credentials is an error, so a script sees a non-zero exit status.
     async fn cmd_ping(&self) -> Result<String> {
-        // Use kv.dbsize as a connectivity check — works on all transports.
-        match self.send("kv.dbsize", json!({})).await {
-            Ok(_) => Ok("PONG".green().to_string()),
-            Err(_) => Ok("Server unreachable".red().to_string()),
+        let reply = self.send("ping", json!({})).await.context("PING failed")?;
+        match reply.as_str() {
+            Some("PONG") => Ok("PONG".green().to_string()),
+            _ => Err(anyhow::anyhow!("PING failed: unexpected reply {reply}")),
         }
     }
 
@@ -382,8 +419,14 @@ impl CliClient {
 #[tokio::main]
 async fn main() -> Result<()> {
     let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+    // Results go to stdout; errors and warnings to stderr, where scripts and
+    // health checks look for the diagnostic.
     tracing_subscriber::fmt()
-        .with_writer(std::io::stdout)
+        .with_writer(
+            std::io::stderr
+                .with_max_level(tracing::Level::WARN)
+                .or_else(std::io::stdout),
+        )
         .with_env_filter(tracing_subscriber::EnvFilter::new(log_level))
         .with_target(false)
         .with_thread_ids(false)
@@ -394,7 +437,8 @@ async fn main() -> Result<()> {
 
     let args = Args::parse();
     let url = args.effective_url();
-    let client = CliClient::new(&url)?;
+    let credentials = args.user.as_deref().zip(args.password.as_deref());
+    let client = CliClient::new(&url, credentials, Duration::from_secs(args.timeout))?;
 
     if !args.command.is_empty() {
         let cmd = &args.command[0];
@@ -405,7 +449,7 @@ async fn main() -> Result<()> {
                 Ok(())
             }
             Err(e) => {
-                error!(error = %e, "{}", format!("Error: {}", e).red());
+                error!("{}", format!("Error: {e:#}").red());
                 std::process::exit(1);
             }
         }
@@ -454,7 +498,7 @@ async fn run_interactive(client: CliClient, url: &str) -> Result<()> {
                 match client.execute_command(cmd, args).await {
                     Ok(output) => info!("{}", output),
                     Err(e) => {
-                        error!(error = %e, "{}", format!("Error: {}", e).red());
+                        error!("{}", format!("Error: {e:#}").red());
                     }
                 }
             }

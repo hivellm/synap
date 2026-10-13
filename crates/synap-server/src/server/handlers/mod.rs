@@ -419,6 +419,10 @@ async fn handle_command(
     }
 
     let result = match request.command.as_str() {
+        // The envelope's protocol ping: unlike the public `/health`, it runs
+        // behind the authentication layer, so it proves the caller's
+        // credentials are accepted as well as the server being up.
+        "ping" => Ok(serde_json::json!("PONG")),
         "kv.set" => kv_cmd::handle_kv_set_cmd(&state, &request).await,
         "kv.get" => kv_cmd::handle_kv_get_cmd(state.kv_store.clone(), &request).await,
         "kv.del" => kv_cmd::handle_kv_del_cmd(&state, &request).await,

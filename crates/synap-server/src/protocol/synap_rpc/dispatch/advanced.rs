@@ -928,7 +928,9 @@ pub(super) async fn run(
                         _ => arg_int(args, 3)?,
                     };
                     let delta = if inner.starts_with("DECR") {
-                        -magnitude
+                        magnitude
+                            .checked_neg()
+                            .ok_or("ERR Integer overflow on INCR/DECR")?
                     } else {
                         magnitude
                     };

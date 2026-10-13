@@ -63,6 +63,24 @@ _TXQUEUEABLE = frozenset(
 )
 
 
+def _counter(
+    plain: str, by: str, key: Any, payload: dict[str, Any]
+) -> tuple[str, list[Any]]:
+    """Map ``kv.incr``/``kv.decr``: INCR/DECR without an amount, INCRBY/DECRBY with one.
+
+    An integer amount travels as an integer. Anything else travels as its JSON
+    text -- the exact text the HTTP envelope receives -- so the server refuses
+    it as "not an integer" on every transport instead of one transport turning
+    it into a different number.
+    """
+    amount = payload.get("amount")
+    if amount is None:
+        return plain, [key]
+    if isinstance(amount, int) and not isinstance(amount, bool):
+        return by, [key, amount]
+    return by, [key, json.dumps(amount)]
+
+
 def _map_command_inner(  # noqa: C901, PLR0912
     cmd: str, payload: dict[str, Any], transport: str = "synaprpc"
 ) -> tuple[str, list[Any]] | None:
@@ -107,11 +125,11 @@ def _map_command_inner(  # noqa: C901, PLR0912
         case "kv.persist":
             return "PERSIST", [key]
         case "kv.incr":
-            return "INCR", [key]
+            return _counter("INCR", "INCRBY", key, payload)
         case "kv.incrby":
             return "INCRBY", [key, payload.get("amount", 1)]
         case "kv.decr":
-            return "DECR", [key]
+            return _counter("DECR", "DECRBY", key, payload)
         case "kv.decrby":
             return "DECRBY", [key, payload.get("amount", 1)]
         case "kv.append":

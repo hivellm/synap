@@ -592,6 +592,10 @@ pub fn classify_envelope(command: &str, payload: &serde_json::Value) -> Option<V
         // the configuration describes the whole deployment (secrets redacted).
         "info" | "slowlog.get" | "client.list" | "admin.config" => admin(),
 
+        // ── Connection ─────────────────────────────────────────────────────
+        // Touches no data, like the native PING.
+        "ping" => Vec::new(),
+
         // ── Transactions ───────────────────────────────────────────────────
         "transaction.multi"
         | "transaction.exec"
@@ -1372,6 +1376,7 @@ mod tests {
         assert_eq!(
             confined_without_resources,
             [
+                "ping",
                 "pubsub.unsubscribe",
                 "transaction.discard",
                 "transaction.exec",
