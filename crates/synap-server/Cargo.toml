@@ -466,3 +466,7 @@ required-features = ["full-tests"]
 [[test]]
 name = "snapshot_consistency_tests"
 required-features = ["full-tests"]
+
+[[test]]
+name = "queue_replay_identity_tests"
+required-features = ["full-tests"]

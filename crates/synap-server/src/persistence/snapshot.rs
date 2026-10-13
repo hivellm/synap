@@ -878,4 +878,94 @@ mod tests {
         );
         assert_eq!(snapshot.bitmap_data["b"].data, bitmap.dump()["b"].data);
     }
+
+    /// A v4 file, written byte by byte here, still loads its queue section:
+    /// the ready messages keep their ID and metadata, with no configuration
+    /// and no in-flight or dead-lettered messages (v4 did not store them).
+    #[tokio::test]
+    async fn v4_queue_section_still_loads() {
+        let mgr = manager("v4_queue");
+        let mut message = QueueMessage::new(b"body".to_vec(), 7, 2);
+        message.retry_count = 1;
+        let encoded = bincode::serde::encode_to_vec(&message, bincode::config::legacy()).unwrap();
+        let mut f = Fixture::default();
+        f.raw(b"SYNAP004");
+        f.raw(&[4]);
+        f.u64(1_700_000_000); // timestamp
+        f.u64(3); // wal_offset
+        f.u64(0); // kv count
+        f.u64(1); // queue count
+        f.u32(1);
+        f.raw(b"q");
+        f.u64(1); // message count
+        f.u32(encoded.len() as u32);
+        f.raw(&encoded);
+        // stream, hash, list, set, sorted-set, HyperLogLog and bitmap: empty.
+        for _ in 0..7 {
+            f.u64(0);
+        }
+        let mut bytes = f.bytes;
+        bytes.extend_from_slice(&f.crc.finalize().to_be_bytes());
+        std::fs::write(
+            mgr.config.directory.join("snapshot-v4-1700000000.bin"),
+            bytes,
+        )
+        .unwrap();
+
+        let (snapshot, _) = mgr.load_latest().await.unwrap().unwrap();
+        assert_eq!(snapshot.version, 4);
+        let queue = &snapshot.queue_data["q"];
+        assert!(queue.config.is_none());
+        assert!(queue.in_flight.is_empty() && queue.dead_letter.is_empty());
+        assert_eq!(queue.ready.len(), 1);
+        assert_eq!(queue.ready[0].id, message.id);
+        assert_eq!(queue.ready[0].payload, b"body".to_vec());
+        assert_eq!(queue.ready[0].priority, 7);
+        assert_eq!(queue.ready[0].retry_count, 1);
+        assert_eq!(queue.ready[0].max_retries, 2);
+    }
+
+    /// v5 stores each queue whole: configuration, ready, in-flight (in
+    /// delivery order) and dead-lettered messages, creation time included.
+    #[tokio::test]
+    async fn v5_snapshot_keeps_whole_queues() {
+        use crate::core::QueueManager;
+        let mgr = manager("v5_queues");
+        let kv = KVStore::new(KVConfig::default());
+        let qm = QueueManager::new(QueueConfig::default());
+        let config = QueueConfig {
+            max_depth: 21,
+            default_max_retries: 0,
+            ..QueueConfig::default()
+        };
+        qm.create_queue("q", Some(config)).await.unwrap();
+        for body in ["in-flight", "dead", "ready"] {
+            qm.publish("q", body.as_bytes().to_vec(), None, None)
+                .await
+                .unwrap();
+        }
+        let in_flight = qm.consume("q", "c").await.unwrap().unwrap();
+        let dead = qm.consume("q", "c").await.unwrap().unwrap();
+        qm.nack("q", &dead.id, false).await.unwrap();
+        let before = qm.dump_state().remove("q").unwrap();
+        let stores = StoreRefs {
+            queue_manager: Some(&qm),
+            ..StoreRefs::kv_only(&kv)
+        };
+        mgr.create_snapshot(stores, 0).await.unwrap();
+
+        let (snapshot, _) = mgr.load_latest().await.unwrap().unwrap();
+        assert_eq!(snapshot.version, 5);
+        let queue = &snapshot.queue_data["q"];
+        assert_eq!(queue.config.as_ref().unwrap().max_depth, 21);
+        let records = |list: &[QueueMessage]| -> Vec<QueueMessageRecord> {
+            list.iter().map(QueueMessageRecord::from).collect()
+        };
+        assert_eq!(queue.ready, records(&before.ready));
+        assert_eq!(queue.in_flight, records(&before.in_flight));
+        assert_eq!(queue.dead_letter, records(&before.dead_letter));
+        assert_eq!(queue.in_flight[0].id, in_flight.id);
+        assert_eq!(queue.in_flight[0].created_at, in_flight.created_at);
+        assert_eq!(queue.dead_letter[0].id, dead.id);
+    }
 }

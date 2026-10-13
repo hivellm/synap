@@ -1745,6 +1745,61 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// Queue lifecycle writes record only real changes: creating an existing
+    /// queue, purging an empty one or deleting a missing one logs nothing;
+    /// a publish is logged with the whole message.
+    #[tokio::test]
+    async fn queue_lifecycle_records_only_real_changes() {
+        let dir = "./target/durable_queue_lifecycle";
+        let _ = std::fs::remove_dir_all(dir);
+        let mut config = crate::persistence::PersistenceConfig::default();
+        config.wal.fsync_mode = crate::persistence::types::FsyncMode::Always;
+        config.wal.path = std::path::PathBuf::from(format!("{dir}/wal.log"));
+        config.snapshot.enabled = false;
+        config.snapshot.directory = std::path::PathBuf::from(format!("{dir}/snap"));
+        let layer = PersistenceLayer::new(config.clone()).await.unwrap();
+        let qm = QueueManager::new(QueueConfig::default());
+        let log = Some(&layer);
+
+        queue_create(log, &qm, "q", None).await.unwrap();
+        queue_create(log, &qm, "q", None).await.unwrap(); // exists: nothing
+        assert_eq!(queue_purge(log, &qm, "q").await.unwrap(), 0); // empty: nothing
+        assert!(!queue_delete(log, &qm, "missing").await.unwrap()); // nothing
+        let message = queue_publish(log, &qm, "q", b"m".to_vec(), Some(6), None)
+            .await
+            .unwrap();
+        assert_eq!(queue_purge(log, &qm, "q").await.unwrap(), 1);
+        assert!(queue_delete(log, &qm, "q").await.unwrap());
+        layer.shutdown().await.unwrap();
+
+        let wal = crate::persistence::WriteAheadLog::open(config.wal.clone())
+            .await
+            .unwrap();
+        let operations: Vec<Operation> = wal
+            .replay(0)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.operation)
+            .collect();
+        assert_eq!(operations.len(), 4, "{operations:?}");
+        assert!(matches!(&operations[0], Operation::QueueCreate { queue, .. } if queue == "q"));
+        match &operations[1] {
+            Operation::QueuePublishFull {
+                message: record, ..
+            } => {
+                assert_eq!(record, &QueueMessageRecord::from(&message));
+            }
+            other => panic!("expected a full publish record, got {other:?}"),
+        }
+        assert!(matches!(
+            &operations[2],
+            Operation::QueuePurge { message_ids, .. } if message_ids == &vec![message.id.clone()]
+        ));
+        assert!(matches!(&operations[3], Operation::QueueDelete { queue } if queue == "q"));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     /// EXEC through the shared path: a transaction whose record cannot be
     /// logged reports `NotDurable` (its effects stay in memory), one that
     /// never ran reports `Failed`.

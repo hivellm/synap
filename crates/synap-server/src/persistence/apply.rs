@@ -1120,6 +1120,119 @@ mod tests {
         assert!(s.stream.list_rooms().await.contains(&"r".to_string()));
     }
 
+    /// Queue records keep message identity: a publish (legacy or full) is
+    /// restored with its ID and metadata, an ACK or NACK replayed on the
+    /// ready message settles it by ID, and lifecycle records apply.
+    #[tokio::test]
+    async fn queue_replay_keeps_identity_and_settles_by_id() {
+        use crate::persistence::types::QueueMessageRecord;
+        let s = stores();
+        apply(
+            &s,
+            Operation::QueueCreate {
+                queue: "q".into(),
+                config: QueueConfig {
+                    max_depth: 4,
+                    ..QueueConfig::default()
+                },
+            },
+        )
+        .await;
+        let mut full = crate::core::queue::QueueMessage::new(b"full".to_vec(), 9, 3);
+        full.created_at = 1_600_000_000;
+        full.retry_count = 2;
+        let legacy = crate::core::queue::QueueMessage::new(b"legacy".to_vec(), 1, 3);
+        let acked = crate::core::queue::QueueMessage::new(b"acked".to_vec(), 5, 3);
+        apply(
+            &s,
+            Operation::QueuePublishFull {
+                queue: "q".into(),
+                message: QueueMessageRecord::from(&full),
+            },
+        )
+        .await;
+        for message in [&legacy, &acked] {
+            apply(
+                &s,
+                Operation::QueuePublish {
+                    queue: "q".into(),
+                    message: message.clone(),
+                },
+            )
+            .await;
+        }
+        // Delivered on the master, ready here: the ACK removes it by ID.
+        apply(
+            &s,
+            Operation::QueueAck {
+                queue: "q".into(),
+                message_id: acked.id.clone(),
+            },
+        )
+        .await;
+        apply(
+            &s,
+            Operation::QueueNack {
+                queue: "q".into(),
+                message_id: full.id.clone(),
+                requeue: true,
+            },
+        )
+        .await;
+
+        let state = s.queue.dump_state().remove("q").unwrap();
+        assert_eq!(state.config.max_depth, 4);
+        let ready: Vec<(&str, u32, u32)> = state
+            .ready
+            .iter()
+            .map(|m| (m.id.as_str(), m.retry_count, m.created_at))
+            .collect();
+        assert_eq!(
+            ready,
+            vec![
+                (legacy.id.as_str(), 0, state.ready[0].created_at),
+                (full.id.as_str(), 3, 1_600_000_000),
+            ]
+        );
+
+        apply(
+            &s,
+            Operation::QueuePurge {
+                queue: "q".into(),
+                message_ids: vec![legacy.id.clone()],
+            },
+        )
+        .await;
+        assert_eq!(s.queue.dump_state()["q"].ready.len(), 1);
+        apply(&s, Operation::QueueDelete { queue: "q".into() }).await;
+        assert!(s.queue.list_queues().await.unwrap().is_empty());
+        // Settling records for a queue or message that is gone are tolerated.
+        apply(
+            &s,
+            Operation::QueuePurge {
+                queue: "q".into(),
+                message_ids: vec![full.id.clone()],
+            },
+        )
+        .await;
+    }
+
+    /// Only a missing message or queue is tolerated on replay; any other
+    /// error is returned, so recovery fails instead of hiding it.
+    #[test]
+    fn only_not_found_is_tolerated() {
+        assert!(tolerate_not_found(Err(SynapError::MessageNotFound("m".into()))).is_ok());
+        assert!(tolerate_not_found(Err(SynapError::QueueNotFound("q".into()))).is_ok());
+        assert!(matches!(
+            tolerate_not_found(Err(SynapError::QueueFull("q".into()))),
+            Err(SynapError::QueueFull(_))
+        ));
+        assert!(matches!(
+            tolerate_not_found(Err(SynapError::InternalError("disk".into()))),
+            Err(SynapError::InternalError(_))
+        ));
+    }
+
     /// With `stream_manager = None` (WAL recovery), a StreamPublish is skipped.
     #[tokio::test]
     async fn stream_publish_skipped_without_manager() {
