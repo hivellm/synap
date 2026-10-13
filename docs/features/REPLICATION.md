@@ -2,7 +2,7 @@
 
 **Status**: ✅ **Wired for v1.0** — full-datatype replication, decoupled from
 persistence, status surfaced in INFO. See "Wiring status" below.
-**Last Updated**: 2026-07-09
+**Last Updated**: 2026-10-13
 
 ---
 
@@ -69,7 +69,7 @@ Synap implements **Master-Replica replication** inspired by Redis and Kafka:
 ### Key Features
 
 ✅ **TCP Communication** - Length-prefixed binary protocol (u32 + bincode)  
-✅ **Full Sync** - Complete snapshot transfer with CRC32 verification  
+✅ **Full Sync** - Versioned image of every datatype, taken under the write barrier, CRC32-verified  
 ✅ **Partial Sync** - Incremental updates from replication log offset  
 ✅ **Auto-Reconnect** - Replicas reconnect with intelligent full/partial resync  
 ✅ **Lag Monitoring** - Real-time offset tracking and lag calculation  
@@ -279,6 +279,38 @@ replication:
      applied them in memory, so resulting-value records (APPEND, INCR,
      SETRANGE) end on the master's value.
 
+8. **Full sync is an exact image of every datatype** (1.4.0)
+   - The image holds KV keys (with their absolute expiry), hashes, lists,
+     sets, sorted sets (geo included), HyperLogLogs, bitmaps and queues
+     (ready messages), plus stream events. Until 1.4.0 it held only KV keys
+     and stream events, so a new replica never received the other datatypes
+     the master already held.
+   - The master copies the stores under the same write barrier snapshots
+     use: it holds every write-order stripe while it reads the replication
+     offset and copies the stores, then serializes and sends outside the
+     barrier. Every write is either in the image (offset below the image's)
+     or streamed after it, never both and never neither, so LPUSH, HINCRBY
+     or INCR issued during a full sync take effect once on the replica.
+     Writes on the master pause for the in-memory copy only. Stream events
+     are not in the replication log and are read after the barrier.
+   - Records reach replicas in replication-offset order: the master assigns
+     the offset and queues the record for fan-out in one step, so a replica
+     never drops a write it received out of order.
+   - The replica checks the image (format version, CRC32) and decodes it
+     completely before it changes anything, so a bad image leaves it as it
+     was. It then **clears and loads**: every store the image covers is
+     emptied and refilled on the replication task, before any streamed
+     record is applied. Keys the master deleted while the replica was away
+     are therefore gone. Clients reading from the replica while an image
+     loads can see a partially loaded dataset. If loading fails part way, the
+     replica asks for a full sync again on its next connection.
+   - Queue messages are re-published on the replica, the same way streamed
+     `QueuePublish` records are applied.
+   - The master sends a full sync when the replica asks for offset 0 (it has
+     nothing from this master: a new or restarted replica), for an offset
+     older than the replication log, or for an offset beyond the master's
+     current offset (the master restarted and its log began again at 0).
+
 ### ❌ What Synap Does NOT Guarantee
 
 1. **Strong Consistency**
@@ -296,6 +328,14 @@ replication:
 4. **Multi-Master**
    - Only 1 master allowed
    - Replicas cannot accept writes
+
+5. **Detecting a restarted master whose log already passed the replica**
+   - The handshake carries only the replica's offset, not an identifier of
+     the master's run. A replica that reconnects to a restarted master is
+     fully resynced when its offset is beyond the new log; if the new log
+     has already grown past that offset, the replica gets a partial sync of
+     the new run's records instead. Restart replicas after restarting the
+     master (a restarted replica always gets a full sync).
 
 ---
 
@@ -330,9 +370,10 @@ curl -X POST http://replica1:5500/api/replication/promote
 1. Master detects missing heartbeat (timeout: 30s)
 2. Master marks replica as "disconnected"
 3. Master continues serving (no impact on writes)
-4. When replica restarts:
+4. When the replica restarts it has no offset and gets a **Full Sync**.
+5. When only the connection dropped, the replica reconnects with its offset:
    - If offset within buffer (1M ops): **Partial Sync**
-   - If offset too old: **Full Sync** (snapshot transfer)
+   - If offset too old, or beyond the master's offset: **Full Sync**
 
 ### Network Partition
 
@@ -384,6 +425,23 @@ Typical lag measurements:
   - 1K ops/sec = ~16 minutes
   - 10K ops/sec = ~1.6 minutes
   - 100K ops/sec = ~10 seconds
+
+---
+
+## Upgrading to 1.4.0
+
+The full sync moved to a new, versioned command (`FullSyncImage`, format
+version 2) that a 1.3.x replica cannot decode: it fails the sync and keeps
+reconnecting. **Upgrade replicas before the master** (the order phase22's
+transaction record already requires):
+
+- A 1.4.0 replica still accepts the 1.3.x full sync (KV keys and stream
+  events, which replace the replica's KV keys and stream rooms) while its
+  master is not upgraded yet.
+- A replica that receives a full-sync version it does not know refuses it
+  with an error naming both versions, for example
+  `the master sent full-sync image version 3, this replica reads version 2;
+  upgrade replicas before the master`, and changes nothing.
 
 ---
 

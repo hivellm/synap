@@ -470,3 +470,11 @@ required-features = ["full-tests"]
 [[test]]
 name = "snapshot_crash_safety_tests"
 required-features = ["full-tests"]
+
+[[test]]
+name = "blocking_pop_wakeup_tests"
+required-features = ["full-tests"]
+
+[[test]]
+name = "replica_full_sync_tests"
+required-features = ["full-tests"]

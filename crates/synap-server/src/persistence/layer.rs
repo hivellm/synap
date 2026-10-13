@@ -30,8 +30,9 @@ pub struct PersistenceLayer {
     /// Per-key ordering lock and snapshot barrier (phase23): writers hold
     /// their keys' stripes from applying a write until its record is queued,
     /// a snapshot holds every stripe while it records its cutoff and copies
-    /// the stores.
-    order: WriteOrder,
+    /// the stores. With a replication master it is the master's lock, so the
+    /// full sync uses the same barrier (phase31).
+    order: Arc<WriteOrder>,
     /// Serializes snapshots, so a later snapshot always has a later (or
     /// equal) cutoff and a higher file sequence number.
     snapshot_serial: tokio::sync::Mutex<()>,
@@ -123,6 +124,10 @@ impl PersistenceLayer {
         replication_master: Option<Arc<crate::replication::MasterNode>>,
     ) -> Self {
         let snapshot_mgr = SnapshotManager::new(config.snapshot.clone());
+        let order = replication_master
+            .as_ref()
+            .map(|master| master.write_order())
+            .unwrap_or_default();
 
         Self {
             wal: wal.map(Arc::new),
@@ -131,7 +136,7 @@ impl PersistenceLayer {
             last_snapshot: Arc::new(RwLock::new(Instant::now())),
             operations_since_snapshot: Arc::new(RwLock::new(0)),
             replication_master,
-            order: WriteOrder::new(),
+            order,
             snapshot_serial: tokio::sync::Mutex::new(()),
         }
     }

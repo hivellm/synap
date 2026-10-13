@@ -188,30 +188,50 @@ impl ReplicaNode {
         info!("Received sync command");
 
         match cmd {
+            ReplicationCommand::FullSyncImage {
+                version,
+                offset,
+                checksum,
+                image,
+            } => {
+                info!(
+                    "Receiving full sync, version {}, offset: {}, {} bytes",
+                    version,
+                    offset,
+                    image.len()
+                );
+                // Check and decode the whole image before touching a store:
+                // a bad or unsupported image leaves the replica as it was.
+                let data =
+                    super::sync::decode_full_sync(version, checksum, &image).map_err(|e| {
+                        error!("Rejected full sync: {}", e);
+                        e
+                    })?;
+                drop(image);
+                let loaded = super::sync::load_full_sync(data, self.stores()).await;
+                self.finish_full_sync(loaded.map_err(|e| e.to_string()), offset)?;
+            }
             ReplicationCommand::FullSync {
                 snapshot_data,
                 offset,
             } => {
                 info!(
-                    "Receiving full sync, offset: {}, {} bytes",
+                    "Receiving 1.3.x full sync (KV + streams), offset: {}, {} bytes",
                     offset,
                     snapshot_data.len()
                 );
-
-                // Apply snapshot with stream support
-                super::sync::apply_snapshot_with_streams(
+                let (_, operations) =
+                    super::sync::decode_legacy_snapshot(&snapshot_data).map_err(|e| {
+                        error!("Rejected full sync: {}", e);
+                        ReplicationError::SerializationError(e)
+                    })?;
+                super::sync::load_legacy_full_sync(
                     &self.kv_store,
-                    self.stream_manager.as_ref().map(|s| s.as_ref()),
-                    &snapshot_data,
+                    self.stream_manager.as_deref(),
+                    operations,
                 )
-                .await
-                .map_err(|e| {
-                    error!("Failed to apply snapshot: {}", e);
-                    ReplicationError::SerializationError(e)
-                })?;
-
-                self.current_offset.store(offset, Ordering::SeqCst);
-                info!("Full sync completed, data restored at offset {}", offset);
+                .await;
+                self.finish_full_sync(Ok(()), offset)?;
             }
             ReplicationCommand::PartialSync {
                 from_offset,
@@ -236,6 +256,44 @@ impl ReplicaNode {
         }
 
         Ok(())
+    }
+
+    /// Record the outcome of loading a full-sync image taken at `offset`.
+    ///
+    /// On success the replica continues from `offset`. A load that failed
+    /// part way (the stores were already cleared) resets the offset to 0, so
+    /// the next connection asks for, and gets, a full sync again instead of
+    /// replaying records on top of a partial image.
+    fn finish_full_sync(&self, loaded: Result<(), String>, offset: u64) -> ReplicationResult<()> {
+        match loaded {
+            Ok(()) => {
+                self.current_offset.store(offset, Ordering::SeqCst);
+                info!("Full sync completed, data restored at offset {}", offset);
+                Ok(())
+            }
+            Err(e) => {
+                self.current_offset.store(0, Ordering::SeqCst);
+                error!("Failed to load full sync: {}", e);
+                Err(ReplicationError::FullSync(format!(
+                    "loading the image: {e}"
+                )))
+            }
+        }
+    }
+
+    /// Every store this replica converges.
+    fn stores(&self) -> crate::persistence::apply::StoreRefs<'_> {
+        crate::persistence::apply::StoreRefs {
+            kv_store: &self.kv_store,
+            hash_store: self.hash_store.as_deref(),
+            list_store: self.list_store.as_deref(),
+            set_store: self.set_store.as_deref(),
+            sorted_set_store: self.sorted_set_store.as_deref(),
+            queue_manager: self.queue_manager.as_deref(),
+            stream_manager: self.stream_manager.as_deref(),
+            hyperloglog_store: self.hyperloglog_store.as_deref(),
+            bitmap_store: self.bitmap_store.as_deref(),
+        }
     }
 
     /// Read one length-prefixed command.
@@ -323,21 +381,8 @@ impl ReplicaNode {
         // Apply via the shared applier so the replica converges to the master
         // for EVERY datatype, not just KV + stream (audit M-005 completion,
         // phase6j). Streams are applied on the replica (Some(stream_manager)).
-        if let Err(e) = crate::persistence::apply::apply_operation(
-            op.operation.clone(),
-            crate::persistence::apply::StoreRefs {
-                kv_store: &self.kv_store,
-                hash_store: self.hash_store.as_deref(),
-                list_store: self.list_store.as_deref(),
-                set_store: self.set_store.as_deref(),
-                sorted_set_store: self.sorted_set_store.as_deref(),
-                queue_manager: self.queue_manager.as_deref(),
-                stream_manager: self.stream_manager.as_deref(),
-                hyperloglog_store: self.hyperloglog_store.as_deref(),
-                bitmap_store: self.bitmap_store.as_deref(),
-            },
-        )
-        .await
+        if let Err(e) =
+            crate::persistence::apply::apply_operation(op.operation.clone(), self.stores()).await
         {
             warn!(
                 "Failed to apply replicated operation at offset {}: {}",

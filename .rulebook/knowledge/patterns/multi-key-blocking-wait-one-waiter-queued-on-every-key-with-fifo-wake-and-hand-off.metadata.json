@@ -1,0 +1,22 @@
+{
+  "id": "multi-key-blocking-wait-one-waiter-queued-on-every-key-with-fifo-wake-and-hand-off",
+  "type": "pattern",
+  "title": "Multi-key blocking wait: one waiter queued on every key, FIFO wake and hand-off",
+  "category": "concurrency",
+  "description": "Register one waiter (own tokio Notify + woken flag) at the back of the FIFO of every key before the last emptiness check; pushes wake the oldest not-yet-woken waiters of the key after releasing the shard lock; the waiter clears its flag under the registry lock before each attempt; leaving (pop, timeout, cancel via Drop) dequeues first, then wakes the next waiter of each key that still holds data. Fixes sequential per-key waits and the check-then-subscribe lost wake-up. Test with a test-held gate lock passed as the guarded pop's lock.",
+  "example": "see multi-key-blocking-wait-one-waiter-queued-on-every-key-with-fifo-wake-and-hand-off.md",
+  "whenToUse": "Wait-for-any-of-several-keys-then-take APIs where the waiter performs the take itself.",
+  "whenNotToUse": "Producers that can hand the item to the waiter directly under one lock.",
+  "createdAt": "2026-10-13T22:00:00.000Z",
+  "tags": [
+    "blocking-pop",
+    "blpop",
+    "bzpopmin",
+    "tokio",
+    "notify",
+    "lost-wakeup",
+    "fairness",
+    "phase33"
+  ],
+  "source": "manual"
+}

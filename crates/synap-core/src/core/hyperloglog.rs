@@ -330,6 +330,14 @@ impl HyperLogLogStore {
         out
     }
 
+    /// Remove every HyperLogLog, e.g. before a replica loads a full-sync
+    /// image. Operation counters are kept.
+    pub fn clear(&self) {
+        for shard in &self.shards {
+            shard.write().clear();
+        }
+    }
+
     /// Restore one HLL from a snapshot, as stored (registers and absolute
     /// expiry). A value whose expiry has passed is skipped.
     pub fn restore(&self, key: String, value: HyperLogLogValue) {

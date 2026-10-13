@@ -44,6 +44,24 @@ impl ReplicationLog {
 
     /// Append operation to replication log
     pub fn append(&self, operation: Operation) -> u64 {
+        self.append_with(operation, |_| {})
+    }
+
+    /// Append `operation` and run `queued` on the appended record before any
+    /// other append can happen.
+    ///
+    /// The offset is assigned under the buffer lock, so the buffer holds
+    /// records in offset order, and whatever `queued` does (the master hands
+    /// the record to its fan-out channel) also happens in offset order. Two
+    /// writers to different keys could otherwise take offsets 5 and 6 and
+    /// queue 6 first; a replica, which skips offsets below the one it
+    /// expects, would then drop 5.
+    pub fn append_with(
+        &self,
+        operation: Operation,
+        queued: impl FnOnce(&ReplicationOperation),
+    ) -> u64 {
+        let mut ops = self.operations.write();
         let offset = self.current_offset.fetch_add(1, Ordering::SeqCst);
 
         let repl_op = ReplicationOperation {
@@ -51,8 +69,7 @@ impl ReplicationLog {
             timestamp: Self::current_timestamp(),
             operation,
         };
-
-        let mut ops = self.operations.write();
+        queued(&repl_op);
 
         // If buffer is full, remove oldest
         if ops.len() >= self.max_size
@@ -219,6 +236,44 @@ mod tests {
         // Requesting from offset 10 should require full sync
         let result = log.get_from_offset(10);
         assert!(matches!(result, Err(ReplicationError::FullSyncRequired)));
+    }
+
+    /// phase31: concurrent appenders see `append_with` run in offset order,
+    /// and the buffer holds records in offset order, so the master's fan-out
+    /// never queues a lower offset after a higher one.
+    #[test]
+    fn append_with_runs_in_offset_order() {
+        let log = Arc::new(ReplicationLog::new(100_000));
+        let queued = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let threads: Vec<_> = (0..8)
+            .map(|t| {
+                let log = Arc::clone(&log);
+                let queued = Arc::clone(&queued);
+                std::thread::spawn(move || {
+                    for i in 0..2_000 {
+                        let op = Operation::KVSet {
+                            key: format!("k{t}_{i}"),
+                            value: vec![],
+                            ttl: None,
+                        };
+                        log.append_with(op, |record| queued.lock().push(record.offset));
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        let queued = queued.lock();
+        assert_eq!(queued.len(), 16_000);
+        assert!(queued.windows(2).all(|w| w[0] + 1 == w[1]));
+        let buffered: Vec<u64> = log
+            .get_from_offset(0)
+            .unwrap()
+            .iter()
+            .map(|op| op.offset)
+            .collect();
+        assert_eq!(buffered, *queued);
     }
 
     #[test]
