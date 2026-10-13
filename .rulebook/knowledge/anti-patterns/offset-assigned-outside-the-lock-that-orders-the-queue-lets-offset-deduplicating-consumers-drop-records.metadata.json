@@ -1,0 +1,19 @@
+{
+  "id": "offset-assigned-outside-the-lock-that-orders-the-queue-lets-offset-deduplicating-consumers-drop-records",
+  "type": "anti-pattern",
+  "title": "Offset assigned outside the lock that orders the queue lets offset-deduplicating consumers drop records",
+  "category": "concurrency",
+  "description": "MasterNode::replicate took the replication offset with fetch_add, then pushed the record into the log buffer under a lock, then sent it to the fan-out channel. Two writers to different keys (different write-order stripes, so not serialized) could take offsets 5 and 6 and enqueue 6 first. The replica skips any record whose offset is below the one it expects (that is how it deduplicates records a full-sync image already covers), so it applied 6, expected 7, and silently dropped 5. Per-key ordering locks do not help: the inversion is between unrelated keys. Fix: assign the offset and enqueue for every downstream consumer inside ONE critical section (ReplicationLog::append_with runs the enqueue closure under the buffer lock). Verify with a concurrent test that records the enqueue order (strictly consecutive offsets), and with an end-to-end test of many writers on distinct keys while a replica follows: with the old two-step code plus a thread::yield_now between the steps, the end-to-end test failed 3/3 runs.",
+  "example": "see offset-assigned-outside-the-lock-that-orders-the-queue-lets-offset-deduplicating-consumers-drop-records.md",
+  "whenToUse": "Any log/sequence where offsets are assigned by one step and records are queued to consumers by another, and consumers deduplicate or detect gaps by offset.",
+  "whenNotToUse": "Single-producer logs, or consumers that reorder by offset (a reorder buffer) before applying.",
+  "createdAt": "2026-10-13T22:00:00.000Z",
+  "tags": [
+    "replication",
+    "ordering",
+    "offset",
+    "concurrency",
+    "phase31"
+  ],
+  "source": "manual"
+}
