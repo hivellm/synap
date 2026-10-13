@@ -39,9 +39,9 @@ wal:
   fsync_mode: "always"
 ```
 
-- Fsync every write
+- Every group of writes is fsynced before it is acknowledged
 - Safest, slowest (~1.7K ops/s)
-- Zero data loss on crash
+- Zero data loss on crash for acknowledged writes
 
 #### Periodic (Recommended)
 
@@ -51,9 +51,10 @@ wal:
   fsync_interval_ms: 10
 ```
 
-- Fsync every 10ms
+- Every group is handed to the OS before it is acknowledged; a timer fsyncs
+  every `fsync_interval_ms`, even while the server is idle
 - Balanced (~44K ops/s)
-- Minimal data loss (up to 10ms)
+- An OS crash or power loss loses at most the last interval of writes
 
 #### Never (Fastest)
 
@@ -62,9 +63,15 @@ wal:
   fsync_mode: "never"
 ```
 
-- OS handles fsync
+- Every group is handed to the OS before it is acknowledged; Synap never
+  fsyncs
 - Fastest (~44K ops/s)
-- Risk of data loss on crash
+- An OS crash or power loss can lose writes the OS had not written back
+
+Graceful shutdown (SIGINT/SIGTERM) flushes and fsyncs the WAL in every mode. A
+failed WAL write, flush or fsync fails the affected WAL appends and poisons the
+WAL until restart; `GET /health` then answers 503. See
+[Persistence Configuration](../configuration/PERSISTENCE.md#write-failures-and-the-poisoned-wal).
 
 ## Snapshots
 
@@ -100,8 +107,13 @@ curl http://localhost:15500/snapshots
 Synap automatically recovers on startup:
 
 1. Load latest snapshot
-2. Replay WAL from snapshot offset
-3. Server ready
+2. Verify every WAL frame and truncate a torn tail left by a crash
+3. Replay WAL from snapshot offset
+4. Server ready
+
+If a corrupted frame is followed by valid ones, the server refuses to start
+and reports the byte position instead of discarding history. See
+[Torn Tails and Corruption](../configuration/PERSISTENCE.md#torn-tails-and-corruption).
 
 ### Recovery Time
 

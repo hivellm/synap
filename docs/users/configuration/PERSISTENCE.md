@@ -55,9 +55,10 @@ persistence:
     fsync_mode: "always"
 ```
 
-- Fsync every write
+- Every group of writes is handed to the OS and fsynced before any of them is
+  acknowledged
 - Safest, slowest (~1.7K ops/s)
-- Zero data loss on crash
+- Zero data loss on crash for acknowledged writes
 
 #### Periodic (Recommended)
 
@@ -70,9 +71,13 @@ persistence:
     fsync_interval_ms: 10
 ```
 
-- Fsync every 10ms
+- Every group of writes is handed to the OS before it is acknowledged, so a
+  process crash loses nothing
+- An independent timer fsyncs every `fsync_interval_ms`, whether or not more
+  writes arrive, so an idle server still reaches the disk within the interval
 - Balanced (~44K ops/s)
-- Minimal data loss (up to 10ms)
+- An OS crash or power loss can lose at most the last `fsync_interval_ms` of
+  acknowledged writes
 
 #### Never (Fastest)
 
@@ -84,9 +89,44 @@ persistence:
     fsync_mode: "never"
 ```
 
-- OS handles fsync
+- Every group of writes is handed to the OS before it is acknowledged; Synap
+  never calls fsync, and the OS writes pages back on its own schedule
 - Fastest (~44K ops/s)
-- Risk of data loss on crash
+- A process crash loses nothing; an OS crash or power loss can lose any write
+  the OS had not yet written back
+
+### Graceful Shutdown
+
+On SIGINT (Ctrl-C) or SIGTERM the server stops accepting HTTP connections,
+waits up to 5 seconds for in-flight requests, then flushes and fsyncs the WAL
+(in every fsync mode) before exiting. After the drain the WAL refuses every
+further append.
+
+### Write Failures and the Poisoned WAL
+
+If a WAL write, flush or fsync fails (disk full, I/O error), every WAL append
+in that group fails, and the WAL is **poisoned**: every later WAL append fails
+until the server restarts. After a failed fsync the kernel may have
+dropped the dirty pages, so the file contents are unknown and the only safe
+recovery is a restart that rescans the file.
+
+A poisoned WAL is reported:
+
+- in the log, once, at error level: `WAL writer poisoned: fsync failed: ...;
+  every write fails until the server restarts`
+- by `GET /health`, which answers **503** with `"status": "unhealthy"`,
+  `"wal": "poisoned"` and the reason in `"wal_error"`, so a supervisor's health
+  check restarts the server. A healthy server reports `"wal": "ok"` (or
+  `"disabled"` without a WAL) with HTTP 200.
+
+How the failure reaches clients depends on the write path. With
+`fsync_mode: always` a single `SET` is logged before it is applied, so it fails
+and nothing changes in memory. A transaction (`EXEC`) is applied in memory
+first, so it returns an error saying the commit is not durable and its effects
+are not rolled back (see [Transactions](../../features/transactions.md#when-the-commit-cannot-be-logged)).
+In `periodic` and `never` mode a single write is applied in memory before it
+is logged and a WAL error is only logged, so that client still sees success:
+monitor `/health` to catch a poisoned WAL.
 
 ### WAL Size Limits
 
@@ -132,8 +172,29 @@ persistence:
 Synap automatically recovers on startup:
 
 1. Load latest snapshot
-2. Replay WAL from snapshot offset
-3. Server ready
+2. Verify every WAL frame (length and CRC32 checksum) and repair a torn tail
+3. Replay WAL from snapshot offset
+4. Server ready
+
+### Torn Tails and Corruption
+
+Each WAL frame is `length (u64) | CRC32 (u32) | payload`. On startup the WAL
+is scanned before anything is appended, and the first invalid frame (short
+header, length past the end of the file, checksum mismatch, or undecodable
+payload) is classified:
+
+- **Torn tail**: no complete, valid frame follows it. This is what a crash in
+  the middle of an append leaves. The file is truncated to the end of the last
+  valid frame (logged as a warning with the byte counts) and startup
+  continues, so new writes never land after garbage.
+- **Interior corruption**: a valid frame follows it. Truncating would discard
+  acknowledged history, so the server **refuses to start** with an error such
+  as `WAL "./data/wal/synap.wal" is corrupted at byte 4096: checksum mismatch
+  ...; a valid frame follows at byte 4213`. Restore the WAL from a backup, or
+  inspect it and remove the damaged range, before restarting.
+
+A declared frame length larger than the rest of the file is rejected before
+any memory is allocated for it.
 
 ### Recovery Time
 
@@ -266,6 +327,15 @@ curl http://localhost:15500/info
   }
 }
 ```
+
+### Check WAL Health
+
+```bash
+curl -i http://localhost:15500/health
+```
+
+HTTP 200 with `"wal": "ok"` while the WAL accepts writes; HTTP 503 with
+`"wal": "poisoned"` and `"wal_error"` after a write, flush or fsync failure.
 
 ### Monitor WAL Size
 

@@ -40,6 +40,27 @@ A committed `EXEC` is now durable and replicated, not just applied in memory:
   (phase6j), so a master replicates a transaction to its replicas even when
   `persistence.enabled = false`.
 
+### When the commit cannot be logged
+
+If the WAL cannot log the transaction (a write, flush or fsync fails, or the
+WAL is already poisoned by an earlier failure), every `EXEC` entry point
+returns an error instead of a success reply:
+
+| Transport | Error |
+|-----------|-------|
+| REST `POST /transaction/exec` | HTTP 500, `Internal error: transaction applied in memory but could not be logged to the WAL, so the commit is not durable ...` |
+| StreamableHTTP `transaction.exec` | same message in the error envelope |
+| MCP `synap_transaction_exec` | MCP internal error with the same message |
+| RESP3 `EXEC` | `-ERR transaction applied in memory but could not be logged to the WAL, so the commit is not durable ...` |
+| SynapRPC `EXEC` | `ERR ...` with the same message |
+
+The transaction's effects were already applied in memory when logging failed,
+and they are **not rolled back**: other clients can read them until the server
+restarts, and a restart recovers only what reached the WAL. Treat the error as
+"committed in memory, not durable". A failed flush or fsync also poisons the
+WAL, so every later WAL append fails until the server restarts (see
+[Persistence: write failures](../users/configuration/PERSISTENCE.md#write-failures-and-the-poisoned-wal)).
+
 ## Isolation (audit M-010, phase6k)
 
 Beyond serializing transactions against each other, an `EXEC` is now isolated

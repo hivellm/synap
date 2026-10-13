@@ -14,6 +14,7 @@ pub mod stream_persistence;
 pub mod types;
 pub mod wal;
 pub mod wal_async;
+pub mod wal_frame;
 pub mod wal_optimized;
 
 pub use apply::{StoreArcs, StoreRefs};
@@ -24,7 +25,7 @@ pub use snapshot::SnapshotManager;
 pub use stream_persistence::{StreamEvent, StreamPersistence};
 pub use types::{Operation, PersistenceConfig, PersistenceError, Result, Snapshot, WALEntry};
 pub use wal::WriteAheadLog;
-pub use wal_async::AsyncWAL;
+pub use wal_async::{AsyncWAL, FileSink, WalSink};
 pub use wal_optimized::OptimizedWAL;
 
 #[cfg(test)]

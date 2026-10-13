@@ -972,10 +972,15 @@ async fn handle_transaction_exec(
     {
         Some((results, writes)) => {
             // Persist + replicate the whole transaction atomically (audit M-010).
+            // A commit that could not be logged is not durable: report it.
             if let Some(ref persistence) = state.persistence
                 && let Err(e) = persistence.log_transaction(&writes).await
             {
                 tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
+                return Err(ErrorData::internal_error(
+                    crate::persistence::layer::exec_not_durable_message(&e),
+                    None,
+                ));
             }
             Ok(CallToolResult::success(vec![ContentBlock::text(
                 json!({
@@ -1000,6 +1005,43 @@ mod tests {
     use super::*;
     use crate::auth::{Action, AuthContext, Permission};
     use crate::config::McpConfig;
+
+    /// The MCP EXEC tool fails, saying the commit is not durable, when the WAL
+    /// cannot log the transaction.
+    #[tokio::test]
+    async fn exec_tool_reports_a_transaction_the_wal_could_not_log() {
+        let mut state = crate::server::handlers::test_app_state();
+        let (layer, faults) =
+            crate::persistence::layer::test_support::faulty_layer("mcp_exec").await;
+        state.persistence = Some(layer);
+        state
+            .transaction_manager
+            .multi("mcp_client".to_string())
+            .unwrap();
+        state
+            .transaction_manager
+            .queue_command_if_transaction(
+                "mcp_client",
+                crate::core::TransactionCommand::KVSet {
+                    key: "mcp:k".into(),
+                    value: b"v".to_vec(),
+                    ttl: None,
+                },
+            )
+            .unwrap();
+
+        faults.fail_next_flush();
+        let request = CallToolRequestParams::new("synap_transaction_exec").with_arguments(
+            json!({"client_id": "mcp_client"})
+                .as_object()
+                .cloned()
+                .unwrap_or_default(),
+        );
+        match handle_transaction_exec(request, Arc::new(state)).await {
+            Err(error) => assert!(error.message.contains("not durable"), "{error:?}"),
+            Ok(result) => panic!("EXEC must fail when the WAL rejects it, got {result:?}"),
+        }
+    }
 
     fn every_tool() -> Vec<String> {
         let config = McpConfig {

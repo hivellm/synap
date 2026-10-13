@@ -1178,11 +1178,15 @@ pub async fn transaction_exec(
     match state.transaction_manager.exec(client_id).await? {
         Some((results, writes)) => {
             // Persist + replicate the whole transaction as one atomic unit
-            // (audit M-010).
+            // (audit M-010). A commit that could not be logged is not durable,
+            // so the client gets an error instead of a false success.
             if let Some(ref persistence) = state.persistence
                 && let Err(e) = persistence.log_transaction(&writes).await
             {
                 error!("Failed to log EXEC transaction to WAL: {}", e);
+                return Err(SynapError::InternalError(
+                    crate::persistence::layer::exec_not_durable_message(&e),
+                ));
             }
             Ok(Json(ExecResponse::Success { results }))
         }

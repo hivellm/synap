@@ -1,15 +1,15 @@
 ## 1. Implementation
-- [ ] 1.1 Flush and fsync the WAL on an independent interval in Periodic mode, including while idle
-- [ ] 1.2 Hand buffered bytes to the OS after each group in Never mode, without fsync
-- [ ] 1.3 Add an awaited flush barrier, back `PersistenceLayer::flush` with it, and drain the WAL on graceful shutdown
-- [ ] 1.4 Fail every acknowledgement in a group whose flush or fsync fails, and poison the writer so every subsequent append fails until restart
-- [ ] 1.5 Report a poisoned WAL in the health endpoint and logs
-- [ ] 1.6 Return an error from the REST, admin, MCP, RESP3 and SynapRPC EXEC paths when the transaction could not be logged
-- [ ] 1.7 Verify checksums and bound frame length while scanning, in both the async and sync scanners
-- [ ] 1.8 Truncate a torn tail to the last valid frame before appending, and fail startup on interior corruption with the byte position
-- [ ] 1.9 Add a writer seam that injects flush and fsync failures, and fault-injection tests for the idle interval, shutdown, injected failures, and every torn-tail shape across two restarts
+- [x] 1.1 Flush and fsync the WAL on an independent interval in Periodic mode, including while idle (Writer tick fsyncs every `fsync_interval_ms` in Periodic mode, idle or not (`wal_async.rs` `Writer::run`))
+- [x] 1.2 Hand buffered bytes to the OS after each group in Never mode, without fsync (Every group is flushed to the OS before acknowledgement; Never mode never calls fsync)
+- [x] 1.3 Add an awaited flush barrier, back `PersistenceLayer::flush` with it, and drain the WAL on graceful shutdown (`AsyncWAL::flush`/`shutdown` barriers back `PersistenceLayer::flush`/`shutdown`; `main.rs` drains and fsyncs the WAL after a SIGINT/SIGTERM graceful HTTP shutdown (5 s drain cap); channel close also drains)
+- [x] 1.4 Fail every acknowledgement in a group whose flush or fsync fails, and poison the writer so every subsequent append fails until restart (A failed write/flush/fsync fails every pending ack in the group and sets a write-once poison; later appends, flushes and shutdown fail with `PersistenceError::WALPoisoned`)
+- [x] 1.5 Report a poisoned WAL in the health endpoint and logs (Poisoning logs once at error level; `GET /health` answers 503 with `wal: poisoned` and `wal_error`)
+- [x] 1.6 Return an error from the REST, admin, MCP, RESP3 and SynapRPC EXEC paths when the transaction could not be logged (REST, admin envelope, MCP, RESP3 and SynapRPC EXEC return `exec_not_durable_message` errors)
+- [x] 1.7 Verify checksums and bound frame length while scanning, in both the async and sync scanners (Shared scanner `persistence/wal_frame.rs` verifies CRC32 and payload decode and rejects lengths past EOF before allocating; used by `AsyncWAL` and `WriteAheadLog` open and replay)
+- [x] 1.8 Truncate a torn tail to the last valid frame before appending, and fail startup on interior corruption with the byte position (`wal_frame::repair` truncates a torn tail before the append handle opens; interior corruption returns `WALInteriorCorruption` with the byte position and `main.rs` refuses to start)
+- [x] 1.9 Add a writer seam that injects flush and fsync failures, and fault-injection tests for the idle interval, shutdown, injected failures, and every torn-tail shape across two restarts (`WalSink` trait + `FileSink`, `AsyncWAL::open_with_sink`, `PersistenceLayer::with_wal`; test `FaultSink` injects flush/fsync failures; tests cover idle interval, shutdown, Never mode, injected failures (single, batch, group, EXEC on all five transports), every torn-tail shape across two restarts, interior corruption)
 
 ## 2. Tail (docs + tests — check or waive with tailWaiver)
-- [ ] 2.1 Update or create documentation covering the implementation
-- [ ] 2.2 Write tests covering the new behavior
-- [ ] 2.3 Run tests and confirm they pass
+- [x] 2.1 Update or create documentation covering the implementation (Updated docs/features/transactions.md, docs/users/configuration/PERSISTENCE.md, docs/users/guides/PERSISTENCE.md, docs/specs/PERSISTENCE.md)
+- [x] 2.2 Write tests covering the new behavior (Unit tests in wal_frame.rs, wal_async.rs, layer.rs, persistence/tests.rs, handlers/mod.rs, mcp_handlers.rs, resp3 and SynapRPC test modules)
+- [x] 2.3 Run tests and confirm they pass (`cargo test -p synap-server --lib` 486 passed; integration binaries transaction_durability (3), integration_persistence_e2e (4), integration_tests (11), http_status_codes (35), auth_edge_cases (39), datatype_replication (4), kv_replication (16) all passed)

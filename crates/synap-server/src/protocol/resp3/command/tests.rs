@@ -1208,3 +1208,21 @@ async fn test_resp3_sstats_exposes_room_generation() {
         "generation must move after a wipe: {after:?}"
     );
 }
+
+/// EXEC over RESP3 returns an error saying the commit is not durable when the
+/// WAL cannot log the transaction (spec: EXEC with failed logging).
+#[tokio::test]
+async fn test_exec_reports_a_transaction_the_wal_could_not_log() {
+    let mut state = make_state();
+    let (layer, faults) = crate::persistence::layer::test_support::faulty_layer("resp3_exec").await;
+    state.persistence = Some(layer);
+    let cid = "wal_fail_client";
+    dispatch(&state, &args(&["MULTI", cid])).await;
+    dispatch(&state, &args(&["TXQUEUE", cid, "SET", "wal:k", "v"])).await;
+
+    faults.fail_next_flush();
+    match dispatch(&state, &args(&["EXEC", cid])).await {
+        Resp3Value::Error(message) => assert!(message.contains("not durable"), "{message}"),
+        other => panic!("EXEC must fail when the WAL rejects it, got {other:?}"),
+    }
+}

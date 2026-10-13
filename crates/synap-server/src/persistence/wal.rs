@@ -1,11 +1,12 @@
-use super::types::{FsyncMode, Operation, PersistenceError, Result, WALConfig, WALEntry};
+use super::types::{FsyncMode, Operation, Result, WALConfig, WALEntry};
+use super::wal_frame;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::SystemTime;
 use tokio::fs::{File, OpenOptions};
-use tokio::io::{AsyncReadExt, AsyncWriteExt, BufWriter};
-use tracing::{debug, info, warn};
+use tokio::io::{AsyncWriteExt, BufWriter};
+use tracing::{debug, info};
 
 /// Write-Ahead Log for durability
 pub struct WriteAheadLog {
@@ -24,6 +25,10 @@ impl WriteAheadLog {
             tokio::fs::create_dir_all(parent).await?;
         }
 
+        // Verify every frame and truncate a torn tail before opening for
+        // append; interior corruption fails here with its byte position.
+        let report = wal_frame::repair_async(config.path.clone()).await?;
+
         // Open or create file (append mode)
         let file = OpenOptions::new()
             .create(true)
@@ -32,16 +37,13 @@ impl WriteAheadLog {
             .open(&config.path)
             .await?;
 
-        let mut wal = Self {
+        let wal = Self {
             file: BufWriter::with_capacity(config.buffer_size_kb * 1024, file),
             path: config.path.clone(),
-            current_offset: Arc::new(AtomicU64::new(0)),
+            current_offset: Arc::new(AtomicU64::new(report.next_offset())),
             config,
             last_fsync: std::time::Instant::now(),
         };
-
-        // Read current offset from file
-        wal.scan_for_last_offset().await?;
 
         info!(
             "WAL opened at {:?}, current offset: {}",
@@ -50,43 +52,6 @@ impl WriteAheadLog {
         );
 
         Ok(wal)
-    }
-
-    /// Scan WAL file to find the last valid offset
-    async fn scan_for_last_offset(&mut self) -> Result<()> {
-        let mut file = File::open(&self.path).await?;
-        let mut max_offset = 0u64;
-
-        // Read until EOF (read_u64 errors at end of file)
-        while let Ok(size) = file.read_u64().await {
-            // Read checksum
-            let _checksum = match file.read_u32().await {
-                Ok(c) => c,
-                Err(_) => break,
-            };
-
-            // Read entry data
-            let mut data = vec![0u8; size as usize];
-            if file.read_exact(&mut data).await.is_err() {
-                warn!("Incomplete WAL entry detected, truncating");
-                break;
-            }
-
-            // Try to deserialize
-            match bincode::serde::decode_from_slice::<WALEntry, _>(&data, bincode::config::legacy())
-            {
-                Ok((entry, _)) => {
-                    max_offset = max_offset.max(entry.offset);
-                }
-                Err(_) => {
-                    warn!("Corrupted WAL entry detected, stopping scan");
-                    break;
-                }
-            }
-        }
-
-        self.current_offset.store(max_offset + 1, Ordering::SeqCst);
-        Ok(())
     }
 
     /// Append an operation to the WAL
@@ -138,54 +103,13 @@ impl WriteAheadLog {
         Ok(offset)
     }
 
-    /// Replay WAL entries from a specific offset
+    /// Replay WAL entries from a specific offset.
+    ///
+    /// Every frame's checksum and length are verified; replay stops at a torn
+    /// tail and fails on interior corruption.
     pub async fn replay(&self, from_offset: u64) -> Result<Vec<WALEntry>> {
-        let mut file = File::open(&self.path).await?;
-        let mut entries = Vec::new();
-
         debug!("Replaying WAL from offset {}", from_offset);
-
-        // Read until EOF (read_u64 errors at end of file)
-        while let Ok(size) = file.read_u64().await {
-            // Read checksum
-            let checksum_expected = match file.read_u32().await {
-                Ok(c) => c,
-                Err(_) => {
-                    warn!("Incomplete WAL entry header");
-                    break;
-                }
-            };
-
-            // Read entry data
-            let mut data = vec![0u8; size as usize];
-            if file.read_exact(&mut data).await.is_err() {
-                warn!("Incomplete WAL entry data");
-                break;
-            }
-
-            // Verify checksum
-            let checksum_actual = crc32fast::hash(&data);
-            if checksum_actual != checksum_expected {
-                warn!(
-                    "Checksum mismatch: expected {}, got {}",
-                    checksum_expected, checksum_actual
-                );
-                return Err(PersistenceError::ChecksumMismatch {
-                    expected: checksum_expected as u64,
-                    actual: checksum_actual as u64,
-                });
-            }
-
-            // Deserialize
-            let (entry, _): (WALEntry, _) =
-                bincode::serde::decode_from_slice(&data, bincode::config::legacy())
-                    .map_err(|_| PersistenceError::InvalidEntry)?;
-
-            if entry.offset >= from_offset {
-                entries.push(entry);
-            }
-        }
-
+        let entries = wal_frame::read_entries(self.path.clone(), from_offset).await?;
         info!("Replayed {} WAL entries", entries.len());
         Ok(entries)
     }
