@@ -7,6 +7,6 @@
 - [x] 1.6 Run retention only after the new snapshot is durable, never delete the snapshot just written, and treat removal failures as warnings
 
 ## 2. Tail (docs + tests — check or waive with tailWaiver)
-- [ ] 2.1 Update or create documentation covering the implementation
+- [x] 2.1 Update or create documentation covering the implementation
 - [x] 2.2 Write tests covering the new behavior
 - [ ] 2.3 Run tests and confirm they pass
