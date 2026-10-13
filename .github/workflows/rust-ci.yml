@@ -46,8 +46,10 @@ jobs:
       - name: Run unit tests
         run: cargo test --workspace --lib --verbose
 
+      # Integration tests only build with the `full-tests` feature; the
+      # `test-full` alias in .cargo/config.toml enables it workspace-wide.
       - name: Run integration tests
-        run: cargo test --workspace --tests --verbose
+        run: cargo test-full --tests --verbose
 
       - name: Run doc tests
         run: cargo test --workspace --doc --verbose

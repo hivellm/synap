@@ -7,6 +7,105 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-10-13
+
+A dependency and stability release: the eleven Dependabot pull requests open
+against 1.3.1 land together, along with a Docker build fix that went in after
+the 1.3.1 tag. Validating the release against a live server also caught a
+`PFMERGE` deadlock that could hang the whole server, present since HyperLogLog
+support landed. Nothing changes on the wire. Every artifact (Cargo workspace,
+TypeScript, Python and C# SDKs, desktop GUI) moves to **1.3.2** so the
+versions stay aligned.
+
+### Changed
+
+- **Dependencies**, closing Dependabot #266, #269, #281 and #283–#290:
+  - Server: `zstd` 0.13 → 0.14 (`zstd-safe` 8). It bundles the same libzstd
+    1.5.7, so frames written before the upgrade still decode.
+  - TypeScript SDK: `vitest` and `@vitest/coverage-v8` 4 → 5, the
+    typescript-eslint trio 8.66 → 8.71, `eslint` 10.12, `prettier` 3.9.10,
+    `@types/node` 26.6, `msgpackr` 2.1 and `uuid` 14.0.3, the only runtime
+    dependency in the batch. The unit suite runs unchanged on vitest 5.
+- **The TypeScript SDK's toolchain is advisory-free again.** Six advisories
+  had accumulated in its dev dependencies since 1.3.1: `vitest`,
+  `@vitest/mocker` and `@vitest/coverage-v8` (GHSA-82fw-gwwq-j7x9, closed by
+  the vitest 5 upgrade), plus `brace-expansion` (GHSA-q2hr-2g5m-vwhr,
+  GHSA-qhr7-859c-m2p7, GHSA-6j4f-fj2g-mc7p), `nanoid` (GHSA-2v37-7h3g-55p8)
+  and `source-map-js` (GHSA-68fv-2mgg-jv7q), which moved to their patched
+  releases within the existing ranges. `npm audit` and `pnpm audit` both
+  report zero.
+- **Rust advisories cleared.** Seven advisories published after 1.3.1 hit
+  transitive dependencies: `h2` (RUSTSEC-2026-0258), `quinn-proto`
+  (RUSTSEC-2026-0338 to -0342) and `rustls` (RUSTSEC-2026-0285). All of them
+  are patched within the existing semver ranges, so a semver-compatible
+  `cargo update` resolved them (`h2` 0.4.20, `quinn-proto` 0.11.19, `rustls`
+  0.23.45) and replaced the yanked `chacha20` 0.10.1 with 0.10.2. `Cargo.lock` is not
+  versioned, but the Docker build copies it into the image, so this lock is
+  the one the published image is built from.
+- **`rmcp` floor raised to 3.5.1.** The fresh resolve lands `rmcp` 3.5.1,
+  which deprecates `rmcp::model::ServerInfo` in favour of the identical
+  `ServerConfig` (added in 3.4.0), and that broke `cargo clippy -D warnings`.
+  The MCP handler now returns `ServerConfig`, and the manifest requires the
+  release that provides it.
+- **`cargo deny check advisories` passes again.** The RustSec database added
+  RUSTSEC-2024-0449 (`unsafe-libyaml` unmaintained) on 2026-10-12, which made
+  the CI lint job fail on every branch. The crate comes in through
+  `serde_yaml` 0.9, itself deprecated, which reads `config.yml`. It is now
+  ignored with that rationale, the same treatment `bincode` gets, until
+  `serde_yaml` is replaced. Six ignore entries whose advisories no longer
+  match anything in the graph were removed, so a regression to one of those
+  versions would fail the check instead of passing silently.
+- **`pnpm-lock.yaml` is current again.** It had been stale since before the
+  Thunder adoption (no `@hivehub/thunder`, `msgpackr` still on 1.x), so the
+  partial edits Dependabot made to it were not worth applying. It is now
+  regenerated from the manifest, and `pnpm-workspace.yaml` mirrors the
+  `esbuild` override that npm reads from `package.json` and pnpm ignores.
+- **`cargo test` runs the fast suite; `cargo test-full` runs everything.**
+  The 81 integration test binaries in `crates/synap-server/tests/` and
+  `sdks/rust/tests/` each link the whole server, so compiling them took most
+  of a 15-minute `cargo test`. They now require the new `full-tests` feature,
+  so plain `cargo test` builds and runs only the unit tests and doctests
+  (1027 tests, about 20 seconds warm). `cargo test-full`, an alias in
+  `.cargo/config.toml`, enables the feature workspace-wide for the release
+  gate, and CI's integration step uses it, so CI coverage is unchanged.
+  `s2s-tests` and the Rust SDK's `e2e` feature imply `full-tests`, so their
+  documented commands still work.
+- TypeScript 7 is still held back: typescript-eslint 8.71 keeps
+  `typescript >=4.8.4 <6.1.0` as its peer range.
+
+### Fixed
+
+- **`PFMERGE` no longer hangs the whole server.** It held the destination
+  shard's write lock while taking each source's read lock. When a source key
+  hashed to the destination's shard (1 in 64 per source), the thread asked a
+  `parking_lot::RwLock` it already held for writing for a read guard. That
+  lock is not reentrant, so the call never returned. Every later command that
+  touched the shard, `hyperloglog.stats` included since it walks all shards,
+  then parked another runtime worker behind it until HTTP, RESP3 and SynapRPC
+  all stopped answering, with no panic and no log line. It has been there since
+  HyperLogLog support landed, and the 1.3.2 release validation caught it as
+  an intermittent hang during the TypeScript S2S suite. The sources are now
+  read before the destination is locked, the same order `SUNIONSTORE`,
+  `ZUNIONSTORE` and `BITOP` already use. An audit of the other multi-key
+  commands found no other nested shard locks. Guarded by
+  `pfmerge_source_in_destination_shard_completes`.
+- **The TypeScript SDK's E2E suite runs again.** `RUN_E2E=true` had failed
+  before its first test since 1.0.0, because the harness read `config.yml`
+  from the repository root after the file moved to `config/`. Its config
+  patches also expected `enabled:` directly under each section header, so
+  persistence would have stayed on with the WAL pointed at `/data`. Both are
+  fixed. The suite now runs and fails 9 of 22 tests, including
+  `listQueues()`/`listRooms()` returning `undefined` over SynapRPC and RESP3.
+  Those are tracked as `phase13_ts-e2e-native-parity`.
+- **The Docker image builds again.** `rust-toolchain.toml` pins plain
+  `nightly`, so rustup re-syncs whenever a newer nightly is published. With the
+  toolchain installed in a layer of its own, that sync renamed files out of a
+  directory baked into an earlier layer, and overlayfs failed it with `EXDEV`
+  (`Cross-device link`). Install and build share one step again, with
+  `/usr/local/rustup` as a cache mount, and the rustup and target caches are
+  keyed per architecture so the amd64 and arm64 legs stop sharing native
+  binaries.
+
 ## [1.3.1] - 2026-08-06
 
 A fix release: stream consumers get a way to detect a room wipe, and every
@@ -3593,7 +3692,8 @@ These limitations will be addressed in future phases.
 - Documentation
 - Security
 
-[Unreleased]: https://github.com/hivellm/synap/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/hivellm/synap/compare/v1.3.2...HEAD
+[1.3.2]: https://github.com/hivellm/synap/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/hivellm/synap/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/hivellm/synap/compare/v1.2.3...v1.3.0
 [1.2.3]: https://github.com/hivellm/synap/compare/v1.2.0...v1.2.3

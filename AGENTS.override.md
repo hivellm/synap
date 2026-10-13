@@ -14,11 +14,17 @@ Synap is a high-performance in-memory key-value store and message broker built i
 # Build (requires Rust nightly 1.85+)
 cargo build --release
 
-# Tests (528+ tests)
+# Tests: day to day — unit tests + doctests only (~1000 tests, seconds)
 cargo test
 cargo test test_name                          # single test
 cargo test --package synap-server test_name   # scoped
-cargo test --features s2s-tests               # S2S (needs running server)
+
+# Full suite — adds the integration tests in tests/ (~1900 tests, minutes).
+# Run it at release time; CI runs it on every push. Integration test targets
+# require the `full-tests` feature, so they do not even compile without it.
+cargo test-full                               # alias in .cargo/config.toml
+cargo test-full --test auth_security_tests    # one integration binary
+cargo test --features s2s-tests               # S2S (needs running server; implies full-tests)
 
 # Lint / format
 cargo fmt
@@ -128,7 +134,10 @@ Environment variables override config: `SYNAP_AUTH_ENABLED=true`.
 ## Testing
 
 - Unit tests: `#[cfg(test)]` modules in same file
-- Integration tests: `synap-server/tests/`
+- Integration tests: `crates/synap-server/tests/` and `sdks/rust/tests/`, gated
+  behind the `full-tests` feature; run them with `cargo test-full`. A new file
+  in `tests/` needs a `[[test]]` entry with `required-features = ["full-tests"]`
+  in its crate's `Cargo.toml`, or plain `cargo test` will build it.
 - S2S tests (require running server): `cargo test --features s2s-tests`
 - Benchmarks: `synap-server/benches/`
 

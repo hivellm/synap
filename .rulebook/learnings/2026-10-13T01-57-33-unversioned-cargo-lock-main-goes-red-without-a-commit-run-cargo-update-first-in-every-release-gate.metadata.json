@@ -1,0 +1,19 @@
+{
+  "id": "2026-10-13T01-57-33-unversioned-cargo-lock-main-goes-red-without-a-commit-run-cargo-update-first-in-every-release-gate",
+  "title": "Unversioned Cargo.lock: main goes red without a commit — run `cargo update` first in every release gate",
+  "content": "Synap gitignores Cargo.lock, so CI resolves the newest semver-compatible graph on every run while a developer's local lock stays frozen. Between 1.3.1 (2026-08-06) and 1.3.2 (2026-10-12) main went red with zero commits: (1) rmcp resolved 3.5.1 under `rmcp = \"3.0.1\"`, and 3.4.0 deprecated `rmcp::model::ServerInfo` in favour of `ServerConfig`, so `cargo clippy -D warnings` failed; (2) the RustSec DB added RUSTSEC-2024-0449 (unsafe-libyaml unmaintained, via serde_yaml 0.9) on 2026-10-12, so `cargo deny check advisories` failed. The stale local lock hid both: clippy was green locally until `cargo update` ran. Also, the Dockerfile does `COPY Cargo.lock`, so the published image is built from whatever lock the releasing machine has — a stale one ships advisories CI never sees (h2, quinn-proto, rustls here). Rules: start every release gate with a full semver-compatible `cargo update`, then fmt/clippy/deny/test; when a fix uses an API newer than the manifest floor (ServerConfig needs rmcp >= 3.4), raise the floor in Cargo.toml too. When pruning the deny.toml ignore list, `cargo deny` reports `advisory-not-detected` for entries that no longer match — remove them, because a stale ignore silently re-admits a regression to the vulnerable version.",
+  "source": "manual",
+  "relatedTask": "phase11_v1-3-2-dependabot-fixes",
+  "tags": [
+    "release",
+    "cargo",
+    "lockfile",
+    "cargo-deny",
+    "rmcp",
+    "docker",
+    "phase11"
+  ],
+  "createdAt": "2026-10-13T01:57:33.873Z",
+  "occurrences": 1,
+  "lastSeenAt": "2026-10-13T01:57:33.873Z"
+}

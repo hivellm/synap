@@ -282,20 +282,11 @@ impl HyperLogLogStore {
 
     /// PFMERGE - Merge multiple HyperLogLogs into destination
     pub fn pfmerge(&self, dest_key: &str, source_keys: Vec<String>) -> Result<u64> {
-        let dest_shard = self.shard(dest_key);
-        let mut dest_map = dest_shard.write();
-
-        // Create or get destination HLL
-        let dest_hll = dest_map
-            .entry(dest_key.to_string())
-            .or_insert_with(|| HyperLogLogValue::new(None));
-
-        if dest_hll.is_expired() {
-            let ttl = dest_hll.ttl_secs;
-            *dest_hll = HyperLogLogValue::new(ttl);
-        }
-
-        // Collect source HLLs
+        // Collect source HLLs before taking the destination's write lock. A
+        // source can hash to the destination's shard, and parking_lot's RwLock
+        // is not reentrant: reading it while this thread holds it for writing
+        // never returns, and every later operation on that shard then parks a
+        // runtime worker behind it until the server stops answering.
         let mut source_hlls = Vec::new();
         for source_key in &source_keys {
             if source_key == dest_key {
@@ -310,6 +301,19 @@ impl HyperLogLogStore {
             {
                 source_hlls.push(source_hll.clone());
             }
+        }
+
+        let dest_shard = self.shard(dest_key);
+        let mut dest_map = dest_shard.write();
+
+        // Create or get destination HLL
+        let dest_hll = dest_map
+            .entry(dest_key.to_string())
+            .or_insert_with(|| HyperLogLogValue::new(None));
+
+        if dest_hll.is_expired() {
+            let ttl = dest_hll.ttl_secs;
+            *dest_hll = HyperLogLogValue::new(ttl);
         }
 
         // Merge all sources into destination
@@ -542,6 +546,39 @@ mod tests {
         // Destination should now exist
         let count = store.pfcount("new_dest").unwrap();
         assert!(count >= 1);
+    }
+
+    #[test]
+    fn pfmerge_source_in_destination_shard_completes() {
+        let store = Arc::new(HyperLogLogStore::new());
+
+        // A source that hashes to the destination's shard is the case that
+        // used to self-deadlock: the destination's write lock was still held
+        // when the source's read lock was taken on the same RwLock.
+        let dest = "dest";
+        let dest_idx = store.shard_index(dest);
+        let source = (0..)
+            .map(|i| format!("source:{i}"))
+            .find(|key| store.shard_index(key) == dest_idx)
+            .unwrap();
+
+        store
+            .pfadd(&source, vec![b"alpha".to_vec(), b"beta".to_vec()], None)
+            .unwrap();
+
+        // Run on another thread so a regression fails the test instead of
+        // hanging the whole run.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let worker = Arc::clone(&store);
+        thread::spawn(move || {
+            let _ = tx.send(worker.pfmerge(dest, vec![source]));
+        });
+
+        let merged = rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("pfmerge deadlocked on a source in the destination's shard")
+            .unwrap();
+        assert!(merged >= 2);
     }
 
     #[test]
