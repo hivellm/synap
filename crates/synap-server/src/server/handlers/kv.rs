@@ -1,4 +1,5 @@
 use super::*;
+use crate::persistence::durable;
 
 /// Encode a request value the way the KV store expects it.
 ///
@@ -8,7 +9,7 @@ use super::*;
 /// ([`decode_stored_value`]) is written against exactly this rule — `APPEND`
 /// used to JSON-encode instead, which turned `SET ab` + `APPEND cd` into
 /// `ab"cd"`.
-fn encode_value_bytes(value: &serde_json::Value) -> Result<Vec<u8>, SynapError> {
+pub(super) fn encode_value_bytes(value: &serde_json::Value) -> Result<Vec<u8>, SynapError> {
     match value.as_str() {
         Some(s) => Ok(s.as_bytes().to_vec()),
         None => {
@@ -69,16 +70,6 @@ pub async fn kv_set(
         )));
     }
 
-    // WAL write-ahead: when durability mode is Sync (fsync_mode=Always),
-    // log to WAL BEFORE writing to memory. If WAL fails the request fails
-    // and no data is written — true write-ahead semantics.
-    // Otherwise WAL is written after the memory write (Async/Periodic mode).
-    let is_sync = state
-        .persistence
-        .as_ref()
-        .map(|p| p.is_sync_durability())
-        .unwrap_or(false);
-
     // Read the clock ONCE here (S-07) and convert relative expiries to absolute ms.
     // Expiry::to_unix_ms() inside set_with_opts will see UnixMilliseconds and skip
     // an additional clock read, giving us a single SystemTime::now() call per SET.
@@ -100,33 +91,6 @@ pub async fn kv_set(
             already_absolute => already_absolute,
         });
 
-    // Clone value only when WAL persistence is active; move the original into set_with_opts.
-    let wal_value = if state.persistence.is_some() {
-        Some(value_bytes.clone())
-    } else {
-        None
-    };
-
-    // WAL write-ahead (sync mode): log BEFORE writing to memory
-    if is_sync && let Some(ref persistence) = state.persistence {
-        let ttl_secs = expiry.and_then(|e| match e {
-            Expiry::Seconds(s) => Some(s),
-            Expiry::Milliseconds(ms) => Some(ms / 1_000),
-            _ => None,
-        });
-        persistence
-            .log_kv_set(
-                scoped_key.clone().into_owned(),
-                value_bytes.clone(),
-                ttl_secs,
-            )
-            .await
-            .map_err(|e| {
-                error!("WAL write failed (sync mode), aborting SET: {}", e);
-                SynapError::InternalError(format!("WAL write failed: {e}"))
-            })?;
-    }
-
     let opts = SetOptions {
         if_absent: req.nx,
         if_present: req.xx,
@@ -134,35 +98,19 @@ pub async fn kv_set(
         return_old: req.get,
     };
 
-    // Set in KV store — move value_bytes (no extra clone when WAL is disabled).
-    let result = state
-        .kv_store
-        .set_with_opts(&scoped_key, value_bytes, expiry, opts)
-        .await?;
-
-    // Async WAL: log after memory write (default, Periodic/Never modes)
-    // Only log when the write actually happened (NX/XX condition was met).
-    if result.written
-        && !is_sync
-        && let Some(ref persistence) = state.persistence
-    {
-        let ttl_secs = expiry.and_then(|e| match e {
-            Expiry::Seconds(s) => Some(s),
-            Expiry::Milliseconds(ms) => Some(ms / 1_000),
-            _ => None,
-        });
-        // wal_value is Some when persistence is active (cloned above).
-        if let Some(wv) = wal_value
-            && let Err(e) = persistence
-                .log_kv_set(scoped_key.into_owned(), wv, ttl_secs)
-                .await
-        {
-            error!(
-                "Failed to log KV SET to WAL (async mode, data in memory): {}",
-                e
-            );
-        }
-    }
+    // Apply and record through the shared mutation path: the WAL/replicas get
+    // the written value with the expiry the key ended up with (KEEPTTL
+    // included), only when the NX/XX condition let the write happen, and a
+    // logging failure fails the request.
+    let result = durable::kv_set_with_opts(
+        state.persistence.as_deref(),
+        &state.kv_store,
+        &scoped_key,
+        value_bytes,
+        expiry,
+        opts,
+    )
+    .await?;
 
     // Convert old_value bytes → JSON for the response
     let old_value_json = result.old_value.as_deref().and_then(decode_stored_value);
@@ -234,15 +182,8 @@ pub async fn kv_delete(
     let scoped_key =
         crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
 
-    let deleted = state.kv_store.delete(&scoped_key).await?;
-
-    // Log to WAL if persistence is enabled
-    if deleted
-        && let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence.log_kv_del(vec![scoped_key.into_owned()]).await
-    {
-        error!("Failed to log KV DELETE to WAL: {}", e);
-    }
+    let deleted =
+        durable::kv_delete(state.persistence.as_deref(), &state.kv_store, &scoped_key).await?;
 
     Ok(Json(DeleteResponse { deleted, key }))
 }
@@ -266,6 +207,8 @@ pub async fn trigger_snapshot(
                 sorted_set_store: Some(state.sorted_set_store.as_ref()),
                 queue_manager: state.queue_manager.as_deref(),
                 stream_manager: state.stream_manager.as_deref(),
+                hyperloglog_store: Some(state.hyperloglog_store.as_ref()),
+                bitmap_store: Some(state.bitmap_store.as_ref()),
             })
             .await
             .map_err(|e| SynapError::InternalError(format!("Snapshot failed: {}", e)))?;
@@ -394,18 +337,14 @@ pub async fn kv_append(
 
     let value_bytes = encode_value_bytes(&req.value)?;
 
-    let length = state.kv_store.append(&scoped_key, value_bytes).await?;
-
-    // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence {
-        // APPEND is logged as SET since we reconstruct full value
-        if let Err(e) = persistence
-            .log_kv_set(scoped_key.into_owned(), vec![], None)
-            .await
-        {
-            error!("Failed to log KV APPEND to WAL: {}", e);
-        }
-    }
+    // Recorded as the whole resulting value and its expiry (D-08).
+    let length = durable::kv_append(
+        state.persistence.as_deref(),
+        &state.kv_store,
+        &scoped_key,
+        value_bytes,
+    )
+    .await?;
 
     Ok(Json(AppendResponse { length }))
 }
@@ -472,21 +411,15 @@ pub async fn kv_setrange(
 
     let value_bytes = encode_value_bytes(&req.value)?;
 
-    let length = state
-        .kv_store
-        .setrange(&scoped_key, req.offset, value_bytes)
-        .await?;
-
-    // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence {
-        // SETRANGE is logged as SET since we reconstruct full value
-        if let Err(e) = persistence
-            .log_kv_set(scoped_key.into_owned(), vec![], None)
-            .await
-        {
-            error!("Failed to log KV SETRANGE to WAL: {}", e);
-        }
-    }
+    // Recorded as the whole resulting value and its expiry (D-08).
+    let length = durable::kv_setrange(
+        state.persistence.as_deref(),
+        &state.kv_store,
+        &scoped_key,
+        req.offset,
+        value_bytes,
+    )
+    .await?;
 
     Ok(Json(SetRangeResponse { length }))
 }
@@ -535,19 +468,13 @@ pub async fn kv_getset(
 
     let value_bytes = encode_value_bytes(&req.value)?;
 
-    let old_value = state
-        .kv_store
-        .getset(&scoped_key, value_bytes.clone())
-        .await?;
-
-    // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence
-            .log_kv_set(scoped_key.into_owned(), value_bytes, None)
-            .await
-    {
-        error!("Failed to log KV GETSET to WAL: {}", e);
-    }
+    let old_value = durable::kv_getset(
+        state.persistence.as_deref(),
+        &state.kv_store,
+        &scoped_key,
+        value_bytes,
+    )
+    .await?;
 
     if let Some(old_bytes) = old_value {
         let old_str = String::from_utf8(old_bytes.clone())
@@ -587,24 +514,16 @@ pub async fn kv_msetnx(
     // Apply multi-tenant scoping if Hub mode is active
 
     let scoped_pairs: Vec<(String, Vec<u8>)> = pairs
-        .iter()
+        .into_iter()
         .map(|(key, value)| {
             let scoped_key =
-                crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), key);
-            (scoped_key.into_owned(), value.clone())
+                crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+            (scoped_key.into_owned(), value)
         })
         .collect();
 
-    let success = state.kv_store.msetnx(scoped_pairs.clone()).await?;
-
-    // Log to WAL if all keys were set
-    if success && let Some(ref persistence) = state.persistence {
-        for (key, value_bytes) in scoped_pairs {
-            if let Err(e) = persistence.log_kv_set(key, value_bytes, None).await {
-                error!("Failed to log KV MSETNX to WAL: {}", e);
-            }
-        }
-    }
+    let success =
+        durable::kv_msetnx(state.persistence.as_deref(), &state.kv_store, scoped_pairs).await?;
 
     Ok(Json(MSetNxResponse { success }))
 }
@@ -741,17 +660,13 @@ pub async fn key_rename(
     };
 
     let manager = create_key_manager(&state);
-    manager.rename(&scoped_source, &scoped_dest).await?;
-
-    // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence
-            .log_kv_rename(scoped_source.into_owned(), scoped_dest.into_owned())
-            .await
-    {
-        error!("Failed to log RENAME to WAL: {}", e);
-        // Don't fail the request, just log the error
-    }
+    durable::key_rename(
+        state.persistence.as_deref(),
+        &manager,
+        &scoped_source,
+        &scoped_dest,
+    )
+    .await?;
 
     Ok(Json(RenameResponse {
         success: true,
@@ -789,7 +704,13 @@ pub async fn key_renamenx(
     };
 
     let manager = create_key_manager(&state);
-    let success = manager.renamenx(&scoped_source, &scoped_dest).await?;
+    let success = durable::key_renamenx(
+        state.persistence.as_deref(),
+        &manager,
+        &scoped_source,
+        &scoped_dest,
+    )
+    .await?;
 
     if !success {
         return Err(SynapError::InvalidRequest(
@@ -834,7 +755,14 @@ pub async fn key_copy(
 
     let manager = create_key_manager(&state);
     let replace = req.replace.unwrap_or(false);
-    let success = manager.copy(&scoped_source, &scoped_dest, replace).await?;
+    let success = durable::key_copy(
+        state.persistence.as_deref(),
+        &manager,
+        &scoped_source,
+        &scoped_dest,
+        replace,
+    )
+    .await?;
 
     if !success {
         // Destination exists and replace=false - return 409 Conflict instead of error

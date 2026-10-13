@@ -1,4 +1,5 @@
 use super::*;
+use crate::persistence::durable;
 
 // ==================== Sorted Set Handlers ====================
 
@@ -118,7 +119,15 @@ pub(super) async fn handle_sortedset_zadd_cmd(
             .unwrap_or(false),
     };
 
-    let (added, changed) = state.sorted_set_store.zadd(key, member_bytes, score, &opts);
+    let (added, changed) = durable::zadd(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        member_bytes,
+        score,
+        &opts,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "added": added, "changed": changed, "key": key }))
 }
@@ -149,7 +158,13 @@ pub(super) async fn handle_sortedset_zrem_cmd(
         .collect();
     let member_bytes = member_bytes?;
 
-    let removed = state.sorted_set_store.zrem(key, &member_bytes);
+    let removed = durable::zrem(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        &member_bytes,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "removed": removed, "key": key }))
 }
@@ -215,7 +230,14 @@ pub(super) async fn handle_sortedset_zincrby_cmd(
 
     let member_bytes = member.as_bytes().to_vec();
 
-    let new_score = state.sorted_set_store.zincrby(key, member_bytes, increment);
+    let new_score = durable::zincrby(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        member_bytes,
+        increment,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "score": new_score, "key": key }))
 }
@@ -377,7 +399,13 @@ pub(super) async fn handle_sortedset_zpopmin_cmd(
         .and_then(|v| v.as_u64())
         .unwrap_or(1) as usize;
 
-    let members = state.sorted_set_store.zpopmin(key, count);
+    let members = durable::zpopmin(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        count,
+    )
+    .await?;
     let result_count = members.len();
     let serialized = serialize_scored_members(members);
 
@@ -400,7 +428,13 @@ pub(super) async fn handle_sortedset_zpopmax_cmd(
         .and_then(|v| v.as_u64())
         .unwrap_or(1) as usize;
 
-    let members = state.sorted_set_store.zpopmax(key, count);
+    let members = durable::zpopmax(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        count,
+    )
+    .await?;
     let result_count = members.len();
     let serialized = serialize_scored_members(members);
 
@@ -465,7 +499,14 @@ pub(super) async fn handle_sortedset_zremrangebyrank_cmd(
         .and_then(|v| v.as_i64())
         .unwrap_or(-1);
 
-    let removed = state.sorted_set_store.zremrangebyrank(key, start, stop);
+    let removed = durable::zremrangebyrank(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        start,
+        stop,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "removed": removed, "key": key }))
 }
@@ -492,7 +533,14 @@ pub(super) async fn handle_sortedset_zremrangebyscore_cmd(
         .and_then(|v| v.as_f64())
         .unwrap_or(f64::INFINITY);
 
-    let removed = state.sorted_set_store.zremrangebyscore(key, min, max);
+    let removed = durable::zremrangebyscore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        min,
+        max,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "removed": removed, "key": key }))
 }
@@ -533,10 +581,15 @@ pub(super) async fn handle_sortedset_zinterstore_cmd(
         _ => crate::core::Aggregate::Sum,
     };
 
-    let count =
-        state
-            .sorted_set_store
-            .zinterstore(destination, &key_strs, weights.as_deref(), aggregate);
+    let count = durable::zinterstore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        destination,
+        &key_strs,
+        weights.as_deref(),
+        aggregate,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "count": count, "destination": destination }))
 }
@@ -577,10 +630,15 @@ pub(super) async fn handle_sortedset_zunionstore_cmd(
         _ => crate::core::Aggregate::Sum,
     };
 
-    let count =
-        state
-            .sorted_set_store
-            .zunionstore(destination, &key_strs, weights.as_deref(), aggregate);
+    let count = durable::zunionstore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        destination,
+        &key_strs,
+        weights.as_deref(),
+        aggregate,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "count": count, "destination": destination }))
 }
@@ -603,7 +661,13 @@ pub(super) async fn handle_sortedset_zdiffstore_cmd(
 
     let key_strs: Vec<&str> = keys.iter().filter_map(|v| v.as_str()).collect();
 
-    let count = state.sorted_set_store.zdiffstore(destination, &key_strs);
+    let count = durable::zdiffstore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        destination,
+        &key_strs,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "count": count, "destination": destination }))
 }
@@ -690,9 +754,15 @@ pub async fn sortedset_zadd(
             let member_bytes = serde_json::to_vec(&member).map_err(|e| {
                 SynapError::InvalidValue(format!("Failed to serialize member: {}", e))
             })?;
-            let (added, _) = state
-                .sorted_set_store
-                .zadd(&key, member_bytes, score, &opts);
+            let (added, _) = durable::zadd(
+                state.persistence.as_deref(),
+                &state.sorted_set_store,
+                &key,
+                member_bytes,
+                score,
+                &opts,
+            )
+            .await?;
             added
         }
         ZAddRequest::Multiple {
@@ -709,9 +779,15 @@ pub async fn sortedset_zadd(
                 let member_bytes = serde_json::to_vec(&member).map_err(|e| {
                     SynapError::InvalidValue(format!("Failed to serialize member: {}", e))
                 })?;
-                let (added, _) = state
-                    .sorted_set_store
-                    .zadd(&key, member_bytes, score, &opts);
+                let (added, _) = durable::zadd(
+                    state.persistence.as_deref(),
+                    &state.sorted_set_store,
+                    &key,
+                    member_bytes,
+                    score,
+                    &opts,
+                )
+                .await?;
                 total_added += added;
             }
             total_added
@@ -738,7 +814,13 @@ pub async fn sortedset_zrem(
     let members = members
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize members: {}", e)))?;
 
-    let removed = state.sorted_set_store.zrem(&key, &members);
+    let removed = durable::zrem(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &key,
+        &members,
+    )
+    .await?;
 
     Ok(Json(json!({ "removed": removed, "key": key })))
 }
@@ -802,9 +884,14 @@ pub async fn sortedset_zincrby(
     let member_bytes = serde_json::to_vec(&member)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize member: {}", e)))?;
 
-    let new_score = state
-        .sorted_set_store
-        .zincrby(&key, member_bytes, increment);
+    let new_score = durable::zincrby(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &key,
+        member_bytes,
+        increment,
+    )
+    .await?;
 
     Ok(Json(json!({ "score": new_score, "key": key })))
 }
@@ -918,9 +1005,15 @@ pub async fn sortedset_zinterstore(
         _ => crate::core::Aggregate::Sum,
     };
 
-    let count = state
-        .sorted_set_store
-        .zinterstore(&req.destination, &keys, weights, aggregate);
+    let count = durable::zinterstore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &req.destination,
+        &keys,
+        weights,
+        aggregate,
+    )
+    .await?;
 
     Ok(Json(
         json!({ "count": count, "destination": req.destination }),
@@ -952,9 +1045,15 @@ pub async fn sortedset_zunionstore(
         _ => crate::core::Aggregate::Sum,
     };
 
-    let count = state
-        .sorted_set_store
-        .zunionstore(&req.destination, &keys, weights, aggregate);
+    let count = durable::zunionstore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &req.destination,
+        &keys,
+        weights,
+        aggregate,
+    )
+    .await?;
 
     Ok(Json(
         json!({ "count": count, "destination": req.destination }),
@@ -1092,7 +1191,13 @@ pub async fn sortedset_zpopmin(
 
     debug!("REST ZPOPMIN key={} count={}", key, count);
 
-    let members = state.sorted_set_store.zpopmin(&key, count);
+    let members = durable::zpopmin(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &key,
+        count,
+    )
+    .await?;
 
     Ok(Json(
         json!({ "members": members, "count": members.len(), "key": key }),
@@ -1115,7 +1220,13 @@ pub async fn sortedset_zpopmax(
 
     debug!("REST ZPOPMAX key={} count={}", key, count);
 
-    let members = state.sorted_set_store.zpopmax(&key, count);
+    let members = durable::zpopmax(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &key,
+        count,
+    )
+    .await?;
 
     Ok(Json(
         json!({ "members": members, "count": members.len(), "key": key }),
@@ -1145,7 +1256,14 @@ pub async fn sortedset_zremrangebyrank(
         key, start, stop
     );
 
-    let removed = state.sorted_set_store.zremrangebyrank(&key, start, stop);
+    let removed = durable::zremrangebyrank(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &key,
+        start,
+        stop,
+    )
+    .await?;
 
     Ok(Json(json!({ "removed": removed, "key": key })))
 }
@@ -1170,7 +1288,14 @@ pub async fn sortedset_zremrangebyscore(
 
     debug!("REST ZREMRANGEBYSCORE key={} min={} max={}", key, min, max);
 
-    let removed = state.sorted_set_store.zremrangebyscore(&key, min, max);
+    let removed = durable::zremrangebyscore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &key,
+        min,
+        max,
+    )
+    .await?;
 
     Ok(Json(json!({ "removed": removed, "key": key })))
 }
@@ -1192,7 +1317,13 @@ pub async fn sortedset_zdiffstore(
     );
 
     let keys: Vec<&str> = req.keys.iter().map(|s| s.as_str()).collect();
-    let count = state.sorted_set_store.zdiffstore(&req.destination, &keys);
+    let count = durable::zdiffstore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &req.destination,
+        &keys,
+    )
+    .await?;
 
     Ok(Json(
         json!({ "count": count, "destination": req.destination }),

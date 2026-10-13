@@ -27,6 +27,14 @@ recovery path uses too — so the two never diverge.
   when persistence is enabled. A master therefore replicates even with
   `persistence.enabled = false`; a replication-only persistence layer opens no
   WAL file.
+- **Every transport feeds replication (phase21).** Until 1.4.0 only some REST
+  and envelope writes reached `record()`; RESP3, SynapRPC, scripts and most
+  datatype endpoints mutated memory and replied without it, so replicas never
+  saw those writes. Every transport now writes through the shared mutation path
+  (`persistence::durable`), which records each command's resulting effect, and
+  HyperLogLog and bitmap writes have their own `Operation` variants. Parity
+  across transports, restart and replica is checked by
+  `tests/transport_write_parity_tests.rs`.
 - **Status is exposed in INFO.** The `replication` section reports the live role,
   connected replica count, replication offset, and (on a replica) master link
   status and lag — see [Monitoring → INFO](#info-replication-section).

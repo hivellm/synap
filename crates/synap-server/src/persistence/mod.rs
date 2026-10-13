@@ -1,4 +1,5 @@
 pub mod apply;
+pub mod durable;
 pub mod layer;
 pub mod queue_persistence;
 pub mod recovery;
@@ -20,10 +21,12 @@ pub mod wal_optimized;
 pub use apply::{StoreArcs, StoreRefs};
 pub use layer::PersistenceLayer;
 pub use queue_persistence::QueuePersistence;
-pub use recovery::recover;
+pub use recovery::{RecoveredStores, recover, recover_all};
 pub use snapshot::SnapshotManager;
 pub use stream_persistence::{StreamEvent, StreamPersistence};
-pub use types::{Operation, PersistenceConfig, PersistenceError, Result, Snapshot, WALEntry};
+pub use types::{
+    BitfieldWrite, Operation, PersistenceConfig, PersistenceError, Result, Snapshot, WALEntry,
+};
 pub use wal::WriteAheadLog;
 pub use wal_async::{AsyncWAL, FileSink, WalSink};
 pub use wal_optimized::OptimizedWAL;

@@ -4,9 +4,11 @@
 //! Split out of the oversized `store.rs` (phase2 modularization) as a separate
 //! `impl KVStore` block. `KVStore` and its private fields live in the parent
 //! module and stay reachable because this is a descendant module.
+use super::super::storage::ShardStorage;
 use super::KVStore;
 use crate::core::error::Result;
-use crate::core::types::StoredValue;
+use crate::core::types::{StoredValue, StringWrite};
+use std::sync::Arc;
 use std::sync::atomic::Ordering;
 use tracing::debug;
 
@@ -17,6 +19,13 @@ impl KVStore {
 
     /// APPEND: Append bytes to an existing value, or create new key with value if it doesn't exist
     pub async fn append(&self, key: &str, value: Vec<u8>) -> Result<usize> {
+        Ok(self.append_returning(key, value).await?.len)
+    }
+
+    /// APPEND that also returns the whole resulting value and the expiry the
+    /// key still carries, both read under the shard lock that covered the
+    /// write, so the effect can be persisted and replicated exactly.
+    pub async fn append_returning(&self, key: &str, value: Vec<u8>) -> Result<StringWrite> {
         debug!("APPEND key={}, append_size={}", key, value.len());
 
         let shard = self.get_shard(key);
@@ -58,6 +67,7 @@ impl KVStore {
             }
             value.len()
         };
+        let written = resulting_write(&data, key, new_length);
 
         self.stats.sets.fetch_add(1, Ordering::Relaxed);
 
@@ -70,7 +80,7 @@ impl KVStore {
         self.notify_keyspace(crate::core::EventClass::String, "append", key);
         self.notify_watch("append", key, watch_value.as_deref());
 
-        Ok(new_length)
+        Ok(written)
     }
 
     /// GETRANGE: Get substring using Redis-style negative indices
@@ -121,6 +131,18 @@ impl KVStore {
     /// SETRANGE: Overwrite a substring at offset, extending the string if necessary
     /// Returns the new length of the string
     pub async fn setrange(&self, key: &str, offset: usize, value: Vec<u8>) -> Result<usize> {
+        Ok(self.setrange_returning(key, offset, value).await?.len)
+    }
+
+    /// SETRANGE that also returns the whole resulting value and the expiry the
+    /// key still carries, both read under the shard lock that covered the
+    /// write, so the effect can be persisted and replicated exactly.
+    pub async fn setrange_returning(
+        &self,
+        key: &str,
+        offset: usize,
+        value: Vec<u8>,
+    ) -> Result<StringWrite> {
         debug!(
             "SETRANGE key={}, offset={}, value_size={}",
             key,
@@ -174,6 +196,7 @@ impl KVStore {
             }
             new_data.len()
         };
+        let written = resulting_write(&data, key, new_length);
 
         self.stats.sets.fetch_add(1, Ordering::Relaxed);
 
@@ -186,7 +209,7 @@ impl KVStore {
         self.notify_keyspace(crate::core::EventClass::String, "setrange", key);
         self.notify_watch("setrange", key, watch_value.as_deref());
 
-        Ok(new_length)
+        Ok(written)
     }
 
     /// STRLEN: Get the length of the string value in bytes
@@ -297,5 +320,23 @@ impl KVStore {
             .fetch_add(pairs.len() as u64, Ordering::Relaxed);
 
         Ok(true)
+    }
+}
+
+/// Read the value a partial string mutation just left under `key`, while the
+/// caller still holds the shard's write guard (`data`), so no other writer can
+/// change it in between. Every APPEND/SETRANGE branch leaves the key present.
+fn resulting_write(data: &ShardStorage, key: &str, len: usize) -> StringWrite {
+    match data.get(key) {
+        Some(stored) => StringWrite {
+            len,
+            value: stored.data_arc(),
+            expires_at_ms: stored.expires_at_ms(),
+        },
+        None => StringWrite {
+            len,
+            value: Arc::from(&[][..]),
+            expires_at_ms: None,
+        },
     }
 }

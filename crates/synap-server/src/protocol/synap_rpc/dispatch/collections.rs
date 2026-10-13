@@ -1,5 +1,6 @@
 use super::{AppState, SynapValue, arg_bytes, arg_float, arg_int, arg_str};
 use crate::core::sorted_set::ZAddOptions;
+use crate::persistence::durable;
 
 pub(super) async fn run(
     state: &AppState,
@@ -18,7 +19,15 @@ pub(super) async fn run(
             while i + 1 < args.len() {
                 let field = arg_str(args, i)?;
                 let value = arg_bytes(args, i + 1)?;
-                match state.hash_store.hset(&key, &field, value) {
+                match durable::hset(
+                    state.persistence.as_deref(),
+                    &state.hash_store,
+                    &key,
+                    &field,
+                    value,
+                )
+                .await
+                {
                     Ok(is_new) => {
                         if is_new {
                             added += 1;
@@ -45,31 +54,45 @@ pub(super) async fn run(
                 .iter()
                 .filter_map(|v| v.as_str().map(|s| s.to_owned()))
                 .collect();
-            state
-                .hash_store
-                .hdel(&key, &fields)
-                .map(|n| SynapValue::Int(n as i64))
-                .map_err(|e| e.to_string())
+            durable::hdel(
+                state.persistence.as_deref(),
+                &state.hash_store,
+                &key,
+                &fields,
+            )
+            .await
+            .map(|n| SynapValue::Int(n as i64))
+            .map_err(|e| e.to_string())
         }
         "HINCRBY" => {
             let key = arg_str(args, 0)?;
             let field = arg_str(args, 1)?;
             let increment = arg_int(args, 2)?;
-            state
-                .hash_store
-                .hincrby(&key, &field, increment)
-                .map(SynapValue::Int)
-                .map_err(|e| e.to_string())
+            durable::hincrby(
+                state.persistence.as_deref(),
+                &state.hash_store,
+                &key,
+                &field,
+                increment,
+            )
+            .await
+            .map(SynapValue::Int)
+            .map_err(|e| e.to_string())
         }
         "HINCRBYFLOAT" => {
             let key = arg_str(args, 0)?;
             let field = arg_str(args, 1)?;
             let increment = arg_float(args, 2)?;
-            state
-                .hash_store
-                .hincrbyfloat(&key, &field, increment)
-                .map(SynapValue::Float)
-                .map_err(|e| e.to_string())
+            durable::hincrbyfloat(
+                state.persistence.as_deref(),
+                &state.hash_store,
+                &key,
+                &field,
+                increment,
+            )
+            .await
+            .map(SynapValue::Float)
+            .map_err(|e| e.to_string())
         }
         "HGETALL" => {
             let key = arg_str(args, 0)?;
@@ -110,11 +133,16 @@ pub(super) async fn run(
                 .iter()
                 .filter_map(|v| v.as_bytes().map(|b| b.to_vec()))
                 .collect();
-            state
-                .list_store
-                .lpush(&key, values, false)
-                .map(|n| SynapValue::Int(n as i64))
-                .map_err(|e| e.to_string())
+            durable::lpush(
+                state.persistence.as_deref(),
+                &state.list_store,
+                &key,
+                values,
+                false,
+            )
+            .await
+            .map(|n| SynapValue::Int(n as i64))
+            .map_err(|e| e.to_string())
         }
         "RPUSH" => {
             let key = arg_str(args, 0)?;
@@ -122,39 +150,52 @@ pub(super) async fn run(
                 .iter()
                 .filter_map(|v| v.as_bytes().map(|b| b.to_vec()))
                 .collect();
-            state
-                .list_store
-                .rpush(&key, values, false)
-                .map(|n| SynapValue::Int(n as i64))
-                .map_err(|e| e.to_string())
+            durable::rpush(
+                state.persistence.as_deref(),
+                &state.list_store,
+                &key,
+                values,
+                false,
+            )
+            .await
+            .map(|n| SynapValue::Int(n as i64))
+            .map_err(|e| e.to_string())
         }
         "LPOP" => {
             let key = arg_str(args, 0)?;
-            state
-                .list_store
-                .lpop(&key, Some(1))
-                .map(|mut v| {
-                    if v.is_empty() {
-                        SynapValue::Null
-                    } else {
-                        SynapValue::from(v.remove(0))
-                    }
-                })
-                .map_err(|e| e.to_string())
+            durable::lpop(
+                state.persistence.as_deref(),
+                &state.list_store,
+                &key,
+                Some(1),
+            )
+            .await
+            .map(|mut v| {
+                if v.is_empty() {
+                    SynapValue::Null
+                } else {
+                    SynapValue::from(v.remove(0))
+                }
+            })
+            .map_err(|e| e.to_string())
         }
         "RPOP" => {
             let key = arg_str(args, 0)?;
-            state
-                .list_store
-                .rpop(&key, Some(1))
-                .map(|mut v| {
-                    if v.is_empty() {
-                        SynapValue::Null
-                    } else {
-                        SynapValue::from(v.remove(0))
-                    }
-                })
-                .map_err(|e| e.to_string())
+            durable::rpop(
+                state.persistence.as_deref(),
+                &state.list_store,
+                &key,
+                Some(1),
+            )
+            .await
+            .map(|mut v| {
+                if v.is_empty() {
+                    SynapValue::Null
+                } else {
+                    SynapValue::from(v.remove(0))
+                }
+            })
+            .map_err(|e| e.to_string())
         }
         "LRANGE" => {
             let key = arg_str(args, 0)?;
@@ -182,11 +223,15 @@ pub(super) async fn run(
                 .iter()
                 .filter_map(|v| v.as_bytes().map(|b| b.to_vec()))
                 .collect();
-            state
-                .set_store
-                .sadd(&key, members)
-                .map(|n| SynapValue::Int(n as i64))
-                .map_err(|e| e.to_string())
+            durable::sadd(
+                state.persistence.as_deref(),
+                &state.set_store,
+                &key,
+                members,
+            )
+            .await
+            .map(|n| SynapValue::Int(n as i64))
+            .map_err(|e| e.to_string())
         }
         "SMEMBERS" => {
             let key = arg_str(args, 0)?;
@@ -202,11 +247,15 @@ pub(super) async fn run(
                 .iter()
                 .filter_map(|v| v.as_bytes().map(|b| b.to_vec()))
                 .collect();
-            state
-                .set_store
-                .srem(&key, members)
-                .map(|n| SynapValue::Int(n as i64))
-                .map_err(|e| e.to_string())
+            durable::srem(
+                state.persistence.as_deref(),
+                &state.set_store,
+                &key,
+                members,
+            )
+            .await
+            .map(|n| SynapValue::Int(n as i64))
+            .map_err(|e| e.to_string())
         }
         "SISMEMBER" => {
             let key = arg_str(args, 0)?;
@@ -232,7 +281,16 @@ pub(super) async fn run(
             let score = arg_float(args, 1)?;
             let member = arg_bytes(args, 2)?;
             let opts = ZAddOptions::default();
-            let (added, _) = state.sorted_set_store.zadd(&key, member, score, &opts);
+            let (added, _) = durable::zadd(
+                state.persistence.as_deref(),
+                &state.sorted_set_store,
+                &key,
+                member,
+                score,
+                &opts,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
             Ok(SynapValue::Int(added as i64))
         }
         "ZRANGE" => {
@@ -281,9 +339,15 @@ pub(super) async fn run(
                 .iter()
                 .filter_map(|v| v.as_bytes().map(|b| b.to_vec()))
                 .collect();
-            Ok(SynapValue::Int(
-                state.sorted_set_store.zrem(&key, &members) as i64
-            ))
+            let removed = durable::zrem(
+                state.persistence.as_deref(),
+                &state.sorted_set_store,
+                &key,
+                &members,
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+            Ok(SynapValue::Int(removed as i64))
         }
 
         // ── HyperLogLog ───────────────────────────────────────────────────────
@@ -293,11 +357,16 @@ pub(super) async fn run(
                 .iter()
                 .filter_map(|v| v.as_bytes().map(|b| b.to_vec()))
                 .collect();
-            state
-                .hyperloglog_store
-                .pfadd(&key, elements, None)
-                .map(|n| SynapValue::Bool(n > 0))
-                .map_err(|e| e.to_string())
+            durable::pfadd(
+                state.persistence.as_deref(),
+                &state.hyperloglog_store,
+                &key,
+                elements,
+                None,
+            )
+            .await
+            .map(|n| SynapValue::Bool(n > 0))
+            .map_err(|e| e.to_string())
         }
         "PFCOUNT" => {
             let key = arg_str(args, 0)?;
@@ -318,10 +387,15 @@ pub(super) async fn run(
             while i + 1 < args.len() {
                 let field = arg_str(args, i)?;
                 let value = arg_bytes(args, i + 1)?;
-                state
-                    .hash_store
-                    .hset(&key, &field, value)
-                    .map_err(|e| e.to_string())?;
+                durable::hset(
+                    state.persistence.as_deref(),
+                    &state.hash_store,
+                    &key,
+                    &field,
+                    value,
+                )
+                .await
+                .map_err(|e| e.to_string())?;
                 i += 2;
             }
             Ok(SynapValue::Str("OK".into()))
@@ -368,11 +442,15 @@ pub(super) async fn run(
                 .iter()
                 .filter_map(|v| v.as_str().map(|s| s.to_owned()))
                 .collect();
-            state
-                .hyperloglog_store
-                .pfmerge(&dest, sources)
-                .map(|n| SynapValue::Int(n as i64))
-                .map_err(|e| e.to_string())
+            durable::pfmerge(
+                state.persistence.as_deref(),
+                &state.hyperloglog_store,
+                &dest,
+                sources,
+            )
+            .await
+            .map(|n| SynapValue::Int(n as i64))
+            .map_err(|e| e.to_string())
         }
         "HLLSTATS" => {
             let s = state.hyperloglog_store.stats();
@@ -453,7 +531,14 @@ pub(super) async fn run(
         // ── Blocking pops ──────────────────────────────────────────────────────
         "BLPOP" => {
             let (keys, timeout) = parse_block_keys_timeout(args)?;
-            match state.list_store.blpop(keys, timeout).await {
+            match durable::blpop(
+                state.persistence.as_deref(),
+                &state.list_store,
+                keys,
+                timeout,
+            )
+            .await
+            {
                 Ok((key, value)) => Ok(SynapValue::Array(vec![
                     SynapValue::Str(key),
                     SynapValue::from(value),
@@ -463,7 +548,14 @@ pub(super) async fn run(
         }
         "BRPOP" => {
             let (keys, timeout) = parse_block_keys_timeout(args)?;
-            match state.list_store.brpop(keys, timeout).await {
+            match durable::brpop(
+                state.persistence.as_deref(),
+                &state.list_store,
+                keys,
+                timeout,
+            )
+            .await
+            {
                 Ok((key, value)) => Ok(SynapValue::Array(vec![
                     SynapValue::Str(key),
                     SynapValue::from(value),
@@ -475,14 +567,29 @@ pub(super) async fn run(
             let source = arg_str(args, 0)?;
             let dest = arg_str(args, 1)?;
             let timeout = block_timeout(arg_int(args, 2)?)?;
-            match state.list_store.brpoplpush(&source, &dest, timeout).await {
+            match durable::brpoplpush(
+                state.persistence.as_deref(),
+                &state.list_store,
+                &source,
+                &dest,
+                timeout,
+            )
+            .await
+            {
                 Ok(value) => Ok(SynapValue::from(value)),
                 Err(_) => Ok(SynapValue::Null),
             }
         }
         "BZPOPMIN" => {
             let (keys, timeout) = parse_block_keys_timeout(args)?;
-            match state.sorted_set_store.bzpopmin(keys, timeout).await {
+            match durable::bzpopmin(
+                state.persistence.as_deref(),
+                &state.sorted_set_store,
+                keys,
+                timeout,
+            )
+            .await
+            {
                 Ok((key, member, score)) => Ok(SynapValue::Array(vec![
                     SynapValue::Str(key),
                     SynapValue::from(member),
@@ -493,7 +600,14 @@ pub(super) async fn run(
         }
         "BZPOPMAX" => {
             let (keys, timeout) = parse_block_keys_timeout(args)?;
-            match state.sorted_set_store.bzpopmax(keys, timeout).await {
+            match durable::bzpopmax(
+                state.persistence.as_deref(),
+                &state.sorted_set_store,
+                keys,
+                timeout,
+            )
+            .await
+            {
                 Ok((key, member, score)) => Ok(SynapValue::Array(vec![
                     SynapValue::Str(key),
                     SynapValue::from(member),

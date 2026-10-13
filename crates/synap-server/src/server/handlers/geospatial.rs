@@ -1,4 +1,5 @@
 use super::*;
+use crate::persistence::durable;
 
 #[derive(Debug, Serialize)]
 pub struct GeospatialDistResponse {
@@ -111,9 +112,16 @@ pub async fn geospatial_geoadd(
         .map(|loc| (loc.lat, loc.lon, loc.member.into_bytes()))
         .collect();
 
-    let added = state
-        .geospatial_store
-        .geoadd(&key, locations, req.nx, req.xx, req.ch)?;
+    let added = durable::geoadd(
+        state.persistence.as_deref(),
+        &state.geospatial_store,
+        &key,
+        locations,
+        req.nx,
+        req.xx,
+        req.ch,
+    )
+    .await?;
 
     Ok(Json(GeospatialAddResponse { key, added }))
 }
@@ -476,7 +484,16 @@ pub(super) async fn handle_geospatial_geoadd_cmd(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let added = state.geospatial_store.geoadd(key, locations, nx, xx, ch)?;
+    let added = durable::geoadd(
+        state.persistence.as_deref(),
+        &state.geospatial_store,
+        key,
+        locations,
+        nx,
+        xx,
+        ch,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "key": key, "added": added }))
 }

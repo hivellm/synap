@@ -93,6 +93,31 @@ impl PersistenceLayer {
         Ok(())
     }
 
+    /// Record the effect of one write that has already been applied in memory:
+    /// propagate it to replicas and append it to the WAL. This is what the
+    /// shared mutation path ([`super::durable`]) calls for every transport.
+    pub async fn log_operation(&self, operation: Operation) -> super::types::Result<()> {
+        self.record(operation).await
+    }
+
+    /// Record the effects of one command that produced several operations
+    /// (MSET, HMSET, GEOADD, ...): each is propagated to replicas and the set is
+    /// appended to the WAL as one batch.
+    pub async fn log_operations(&self, operations: Vec<Operation>) -> super::types::Result<()> {
+        if operations.is_empty() {
+            return Ok(());
+        }
+        for op in &operations {
+            self.maybe_replicate(op);
+        }
+        if let Some(wal) = &self.wal {
+            let count = operations.len();
+            wal.append_batch(operations).await?;
+            *self.operations_since_snapshot.write() += count;
+        }
+        Ok(())
+    }
+
     /// Log an entire committed transaction as one atomic unit (audit M-010).
     ///
     /// Each [`CommittedWrite`](crate::core::CommittedWrite) is mapped to its
@@ -646,6 +671,15 @@ impl PersistenceLayer {
 pub fn exec_not_durable_message(err: &PersistenceError) -> String {
     format!(
         "transaction applied in memory but could not be logged to the WAL, so the commit is not durable and the effects are not rolled back: {err}"
+    )
+}
+
+/// Error text every transport returns when a single write could not be
+/// recorded. The write is already applied in memory and is not rolled back;
+/// the message says so, because it is not durable.
+pub fn write_not_durable_message(err: &PersistenceError) -> String {
+    format!(
+        "write applied in memory but could not be logged to the WAL, so it is not durable and is not rolled back: {err}"
     )
 }
 

@@ -285,6 +285,8 @@ async fn test_snapshot_roundtrip_all_datatypes() {
                 sorted_set_store: Some(&sorted_set_store),
                 queue_manager: None,
                 stream_manager: None,
+                hyperloglog_store: None,
+                bitmap_store: None,
             },
             99,
         )

@@ -1,4 +1,5 @@
 use super::*;
+use crate::persistence::durable;
 
 // ==================== Set Request/Response Types ====================
 
@@ -94,7 +95,7 @@ pub(super) async fn handle_set_add_cmd(
     }
 
     // No active transaction, execute immediately
-    let added = state.set_store.sadd(key, members)?;
+    let added = durable::sadd(state.persistence.as_deref(), &state.set_store, key, members).await?;
 
     // Update key version for WATCH (optimistic locking)
     state.transaction_manager.update_key_version(key);
@@ -144,7 +145,8 @@ pub(super) async fn handle_set_rem_cmd(
     }
 
     // No active transaction, execute immediately
-    let removed = state.set_store.srem(key, members)?;
+    let removed =
+        durable::srem(state.persistence.as_deref(), &state.set_store, key, members).await?;
 
     // Update key version for WATCH (optimistic locking) if removed
     if removed > 0 {
@@ -232,7 +234,7 @@ pub(super) async fn handle_set_pop_cmd(
         .and_then(|v| v.as_u64())
         .map(|c| c as usize);
 
-    let members = state.set_store.spop(key, count)?;
+    let members = durable::spop(state.persistence.as_deref(), &state.set_store, key, count).await?;
 
     // Update key version for WATCH (optimistic locking) if members were popped
     if !members.is_empty() {
@@ -305,7 +307,14 @@ pub(super) async fn handle_set_move_cmd(
     let member_bytes =
         serde_json::to_vec(member).map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
-    let moved = state.set_store.smove(source, destination, member_bytes)?;
+    let moved = durable::smove(
+        state.persistence.as_deref(),
+        &state.set_store,
+        source,
+        destination,
+        member_bytes,
+    )
+    .await?;
 
     // Update key versions for WATCH (optimistic locking) if moved
     if moved {
@@ -448,7 +457,13 @@ pub async fn set_add(
         .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
         .collect();
 
-    let added = state.set_store.sadd(&scoped_key, members?)?;
+    let added = durable::sadd(
+        state.persistence.as_deref(),
+        &state.set_store,
+        &scoped_key,
+        members?,
+    )
+    .await?;
 
     Ok(Json(SetAddResponse { added, key }))
 }
@@ -478,7 +493,13 @@ pub async fn set_rem(
         .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
         .collect();
 
-    let removed = state.set_store.srem(&scoped_key, members?)?;
+    let removed = durable::srem(
+        state.persistence.as_deref(),
+        &state.set_store,
+        &scoped_key,
+        members?,
+    )
+    .await?;
 
     Ok(Json(json!({ "removed": removed, "key": key })))
 }
@@ -586,7 +607,13 @@ pub async fn set_pop(
     let scoped_key =
         crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
 
-    let members = state.set_store.spop(&scoped_key, count)?;
+    let members = durable::spop(
+        state.persistence.as_deref(),
+        &state.set_store,
+        &scoped_key,
+        count,
+    )
+    .await?;
 
     let json_members: Vec<serde_json::Value> = members
         .into_iter()
@@ -661,9 +688,14 @@ pub async fn set_move(
     let member = serde_json::to_vec(&req.member)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize member: {}", e)))?;
 
-    let moved = state
-        .set_store
-        .smove(&scoped_source, &scoped_destination, member)?;
+    let moved = durable::smove(
+        state.persistence.as_deref(),
+        &state.set_store,
+        &scoped_source,
+        &scoped_destination,
+        member,
+    )
+    .await?;
 
     Ok(Json(
         json!({ "moved": moved, "source": source, "destination": destination }),

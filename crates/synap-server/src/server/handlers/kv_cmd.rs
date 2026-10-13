@@ -1,4 +1,5 @@
 use super::*;
+use crate::persistence::durable;
 
 pub(super) async fn handle_kv_set_cmd(
     state: &AppState,
@@ -49,17 +50,17 @@ pub(super) async fn handle_kv_set_cmd(
     }
 
     // No active transaction, execute immediately
-    state.kv_store.set(key, value_bytes.clone(), ttl).await?;
+    durable::kv_set(
+        state.persistence.as_deref(),
+        &state.kv_store,
+        key,
+        value_bytes,
+        ttl,
+    )
+    .await?;
 
     // Update key version for WATCH (optimistic locking)
     state.transaction_manager.update_key_version(key);
-
-    // Log to WAL
-    if let Some(ref persistence) = state.persistence {
-        let _ = persistence
-            .log_kv_set(key.to_string(), value_bytes, ttl)
-            .await;
-    }
 
     Ok(serde_json::json!({ "success": true }))
 }
@@ -130,16 +131,11 @@ pub(super) async fn handle_kv_del_cmd(
     }
 
     // No active transaction, execute immediately
-    let deleted = state.kv_store.delete(key).await?;
+    let deleted = durable::kv_delete(state.persistence.as_deref(), &state.kv_store, key).await?;
 
     // Update key version for WATCH (optimistic locking) if deleted
     if deleted {
         state.transaction_manager.update_key_version(key);
-    }
-
-    // Log to WAL if deleted
-    if deleted && let Some(ref persistence) = state.persistence {
-        let _ = persistence.log_kv_del(vec![key.to_string()]).await;
     }
 
     Ok(serde_json::json!({ "deleted": deleted }))
@@ -199,17 +195,11 @@ pub(super) async fn handle_kv_incr_cmd(
     }
 
     // No active transaction, execute immediately
-    let value = state.kv_store.incr(key, amount).await?;
+    let value =
+        durable::kv_incr(state.persistence.as_deref(), &state.kv_store, key, amount).await?;
 
     // Update key version for WATCH (optimistic locking)
     state.transaction_manager.update_key_version(key);
-
-    // Log final value to WAL (INCR is a SET operation)
-    if let Some(ref persistence) = state.persistence {
-        let _ = persistence
-            .log_kv_set(key.to_string(), value.to_string().into_bytes(), None)
-            .await;
-    }
 
     Ok(serde_json::json!({ "value": value }))
 }
@@ -253,17 +243,11 @@ pub(super) async fn handle_kv_decr_cmd(
     }
 
     // No active transaction, execute immediately
-    let value = state.kv_store.decr(key, amount).await?;
+    let value =
+        durable::kv_decr(state.persistence.as_deref(), &state.kv_store, key, amount).await?;
 
     // Update key version for WATCH (optimistic locking)
     state.transaction_manager.update_key_version(key);
-
-    // Log final value to WAL (DECR is a SET operation)
-    if let Some(ref persistence) = state.persistence {
-        let _ = persistence
-            .log_kv_set(key.to_string(), value.to_string().into_bytes(), None)
-            .await;
-    }
 
     Ok(serde_json::json!({ "value": value }))
 }
@@ -298,14 +282,7 @@ pub(super) async fn handle_kv_mset_cmd(
         pairs.push((key.to_string(), value_bytes));
     }
 
-    state.kv_store.mset(pairs.clone()).await?;
-
-    // Log each SET to WAL
-    if let Some(ref persistence) = state.persistence {
-        for (key, value) in pairs {
-            let _ = persistence.log_kv_set(key, value, None).await;
-        }
-    }
+    durable::kv_mset(state.persistence.as_deref(), &state.kv_store, pairs).await?;
 
     Ok(serde_json::json!({ "success": true }))
 }
@@ -344,14 +321,7 @@ pub(super) async fn handle_kv_mdel_cmd(
     let keys: Vec<String> = serde_json::from_value(keys_val.clone())
         .map_err(|e| SynapError::InvalidRequest(format!("Invalid keys array: {}", e)))?;
 
-    let count = state.kv_store.mdel(&keys).await?;
-
-    // Log deletions to WAL
-    if count > 0
-        && let Some(ref persistence) = state.persistence
-    {
-        let _ = persistence.log_kv_del(keys).await;
-    }
+    let count = durable::kv_mdel(state.persistence.as_deref(), &state.kv_store, &keys).await?;
 
     Ok(serde_json::json!({ "deleted": count }))
 }
@@ -412,17 +382,18 @@ pub(super) async fn handle_kv_append_cmd(
         .get("value")
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?;
 
-    let value_bytes =
-        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    // Same encoding as `kv.set`: strings as raw UTF-8, everything else as
+    // JSON, so a partial write extends the bytes `kv.set` stored.
+    let value_bytes = super::kv::encode_value_bytes(value)?;
 
-    let length = state.kv_store.append(key, value_bytes).await?;
-
-    // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence.log_kv_set(key.to_string(), vec![], None).await
-    {
-        error!("Failed to log KV APPEND to WAL: {}", e);
-    }
+    // Recorded as the whole resulting value and its expiry (D-08).
+    let length = durable::kv_append(
+        state.persistence.as_deref(),
+        &state.kv_store,
+        key,
+        value_bytes,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "length": length }))
 }
@@ -484,17 +455,19 @@ pub(super) async fn handle_kv_setrange_cmd(
         .get("value")
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?;
 
-    let value_bytes =
-        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    // Same encoding as `kv.set`: strings as raw UTF-8, everything else as
+    // JSON, so a partial write extends the bytes `kv.set` stored.
+    let value_bytes = super::kv::encode_value_bytes(value)?;
 
-    let length = state.kv_store.setrange(key, offset, value_bytes).await?;
-
-    // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence.log_kv_set(key.to_string(), vec![], None).await
-    {
-        error!("Failed to log KV SETRANGE to WAL: {}", e);
-    }
+    // Recorded as the whole resulting value and its expiry (D-08).
+    let length = durable::kv_setrange(
+        state.persistence.as_deref(),
+        &state.kv_store,
+        key,
+        offset,
+        value_bytes,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "length": length }))
 }
@@ -528,19 +501,17 @@ pub(super) async fn handle_kv_getset_cmd(
         .get("value")
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?;
 
-    let value_bytes =
-        serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    // Same encoding as `kv.set`: strings as raw UTF-8, everything else as
+    // JSON, so a partial write extends the bytes `kv.set` stored.
+    let value_bytes = super::kv::encode_value_bytes(value)?;
 
-    let old_value = state.kv_store.getset(key, value_bytes.clone()).await?;
-
-    // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence
-            .log_kv_set(key.to_string(), value_bytes, None)
-            .await
-    {
-        error!("Failed to log KV GETSET to WAL: {}", e);
-    }
+    let old_value = durable::kv_getset(
+        state.persistence.as_deref(),
+        &state.kv_store,
+        key,
+        value_bytes,
+    )
+    .await?;
 
     if let Some(old_bytes) = old_value {
         let old_str = String::from_utf8(old_bytes.clone())
@@ -581,16 +552,8 @@ pub(super) async fn handle_kv_msetnx_cmd(
         .collect();
 
     let kv_pairs = kv_pairs?;
-    let success = state.kv_store.msetnx(kv_pairs.clone()).await?;
-
-    // Log to WAL if all keys were set
-    if success && let Some(ref persistence) = state.persistence {
-        for (key, value_bytes) in kv_pairs {
-            if let Err(e) = persistence.log_kv_set(key, value_bytes, None).await {
-                error!("Failed to log KV MSETNX to WAL: {}", e);
-            }
-        }
-    }
+    let success =
+        durable::kv_msetnx(state.persistence.as_deref(), &state.kv_store, kv_pairs).await?;
 
     Ok(serde_json::json!({ "success": success }))
 }
@@ -652,17 +615,7 @@ pub(super) async fn handle_key_rename_cmd(
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
 
     let manager = create_key_manager(state);
-    manager.rename(source, destination).await?;
-
-    // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence
-            .log_kv_rename(source.to_string(), destination.to_string())
-            .await
-    {
-        error!("Failed to log RENAME to WAL: {}", e);
-        // Don't fail the request, just log the error
-    }
+    durable::key_rename(state.persistence.as_deref(), &manager, source, destination).await?;
 
     Ok(serde_json::json!({
         "success": true,
@@ -688,7 +641,8 @@ pub(super) async fn handle_key_renamenx_cmd(
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
 
     let manager = create_key_manager(state);
-    let success = manager.renamenx(source, destination).await?;
+    let success =
+        durable::key_renamenx(state.persistence.as_deref(), &manager, source, destination).await?;
 
     if !success {
         return Err(SynapError::InvalidRequest(
@@ -726,7 +680,14 @@ pub(super) async fn handle_key_copy_cmd(
         .unwrap_or(false);
 
     let manager = create_key_manager(state);
-    let success = manager.copy(source, destination, replace).await?;
+    let success = durable::key_copy(
+        state.persistence.as_deref(),
+        &manager,
+        source,
+        destination,
+        replace,
+    )
+    .await?;
 
     if !success {
         return Err(SynapError::InvalidRequest(
@@ -770,23 +731,23 @@ pub(super) async fn handle_kv_dbsize_cmd(
 }
 
 pub(super) async fn handle_kv_flushdb_cmd(
-    store: Arc<KVStore>,
+    state: &AppState,
     _request: &Request,
 ) -> Result<serde_json::Value, SynapError> {
-    let count = store.flushdb().await?;
+    let count = durable::kv_flushdb(state.persistence.as_deref(), &state.kv_store).await?;
     Ok(serde_json::json!({ "flushed": count }))
 }
 
 pub(super) async fn handle_kv_flushall_cmd(
-    store: Arc<KVStore>,
+    state: &AppState,
     _request: &Request,
 ) -> Result<serde_json::Value, SynapError> {
-    let count = store.flushall().await?;
+    let count = durable::kv_flushall(state.persistence.as_deref(), &state.kv_store).await?;
     Ok(serde_json::json!({ "flushed": count }))
 }
 
 pub(super) async fn handle_kv_expire_cmd(
-    store: Arc<KVStore>,
+    state: &AppState,
     request: &Request,
 ) -> Result<serde_json::Value, SynapError> {
     let key = request
@@ -801,7 +762,8 @@ pub(super) async fn handle_kv_expire_cmd(
         .and_then(|v| v.as_u64())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'ttl' field".to_string()))?;
 
-    let result = store.expire(key, ttl).await?;
+    let result =
+        durable::kv_expire(state.persistence.as_deref(), &state.kv_store, key, ttl).await?;
     Ok(serde_json::json!({ "result": result }))
 }
 
@@ -820,7 +782,7 @@ pub(super) async fn handle_kv_ttl_cmd(
 }
 
 pub(super) async fn handle_kv_persist_cmd(
-    store: Arc<KVStore>,
+    state: &AppState,
     request: &Request,
 ) -> Result<serde_json::Value, SynapError> {
     let key = request
@@ -829,6 +791,6 @@ pub(super) async fn handle_kv_persist_cmd(
         .and_then(|v| v.as_str())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
 
-    let result = store.persist(key).await?;
+    let result = durable::kv_persist(state.persistence.as_deref(), &state.kv_store, key).await?;
     Ok(serde_json::json!({ "result": result }))
 }

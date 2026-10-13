@@ -46,6 +46,20 @@ impl Expiry {
     }
 }
 
+/// Seconds left until an absolute expiry (Unix ms), rounded up so a key with
+/// a fraction of a second left is not recorded as already expired. `None`
+/// (a persistent key) stays `None`. This is the relative TTL the WAL and the
+/// replication stream carry for a key whose deadline is known.
+pub fn ttl_secs_from_deadline(expires_at_ms: Option<u64>) -> Option<u64> {
+    expires_at_ms.map(|deadline| {
+        let now_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        deadline.saturating_sub(now_ms).div_ceil(1_000)
+    })
+}
+
 /// Options for SET operations (NX / XX / GET / KEEPTTL).
 #[derive(Debug, Clone, Default)]
 pub struct SetOptions {
@@ -66,6 +80,23 @@ pub struct SetResult {
     pub written: bool,
     /// Previous value, populated only when `SetOptions::return_old = true`
     pub old_value: Option<Vec<u8>>,
+    /// Absolute expiry (Unix ms) the key holds after a write, read under the
+    /// shard lock — so `KEEPTTL` reports the deadline it carried forward.
+    /// `None` when the key is persistent or nothing was written.
+    pub expires_at_ms: Option<u64>,
+}
+
+/// Resulting state of a partial string mutation (`APPEND`, `SETRANGE`), read
+/// under the key's shard lock in the same critical section as the write, so
+/// it can be persisted and replicated as the exact value the key now holds.
+#[derive(Debug, Clone)]
+pub struct StringWrite {
+    /// Length of the value after the mutation (the command's reply).
+    pub len: usize,
+    /// The whole resulting value — a refcount bump on the stored buffer.
+    pub value: Arc<[u8]>,
+    /// Absolute expiry (Unix ms) the key still carries, or `None` if persistent.
+    pub expires_at_ms: Option<u64>,
 }
 
 /// Stored value in the KV store with compact metadata.

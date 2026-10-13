@@ -12,6 +12,7 @@ pub async fn script_eval(
         list_store: state.list_store.clone(),
         set_store: state.set_store.clone(),
         sorted_set_store: state.sorted_set_store.clone(),
+        persistence: state.persistence.clone(),
         caller: Arc::new(caller.clone()),
     };
     let args = json_args_to_strings(req.args);
@@ -37,6 +38,7 @@ pub async fn script_evalsha(
         list_store: state.list_store.clone(),
         set_store: state.set_store.clone(),
         sorted_set_store: state.sorted_set_store.clone(),
+        persistence: state.persistence.clone(),
         caller: Arc::new(caller.clone()),
     };
     let args = json_args_to_strings(req.args);
@@ -177,6 +179,7 @@ pub(super) async fn handle_script_eval_cmd(
         list_store: state.list_store.clone(),
         set_store: state.set_store.clone(),
         sorted_set_store: state.sorted_set_store.clone(),
+        persistence: state.persistence.clone(),
         caller: Arc::new(caller.clone()),
     };
 
@@ -213,6 +216,7 @@ pub(super) async fn handle_script_evalsha_cmd(
         list_store: state.list_store.clone(),
         set_store: state.set_store.clone(),
         sorted_set_store: state.sorted_set_store.clone(),
+        persistence: state.persistence.clone(),
         caller: Arc::new(caller.clone()),
     };
 

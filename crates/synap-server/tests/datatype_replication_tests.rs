@@ -84,6 +84,8 @@ async fn create_replica(master_addr: SocketAddr) -> ReplicaStores {
             sorted_set_store: Some(zset.clone()),
             queue_manager: None,
             stream_manager: Some(stream),
+            hyperloglog_store: None,
+            bitmap_store: None,
         },
     )
     .await

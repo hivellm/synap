@@ -264,6 +264,61 @@ pub enum Operation {
         destination: String,
         keys: Vec<String>,
     },
+
+    // New variants go at the end: bincode encodes the variant index, so
+    // appending keeps WAL files and replication streams from older builds
+    // decodable.
+    /// KV EXPIRE (`Some(seconds)`) or PERSIST (`None`) on an existing key.
+    KVExpire { key: String, ttl: Option<u64> },
+
+    /// KV FLUSHDB / FLUSHALL: every KV key is removed.
+    KVFlush,
+
+    /// COPY a key of any type (KV, hash, list, set, sorted set).
+    KeyCopy {
+        source: String,
+        destination: String,
+        replace: bool,
+    },
+
+    /// HyperLogLog PFADD.
+    HllAdd {
+        key: String,
+        elements: Vec<Vec<u8>>,
+        ttl: Option<u64>,
+    },
+
+    /// HyperLogLog PFMERGE.
+    HllMerge {
+        destination: String,
+        sources: Vec<String>,
+    },
+
+    /// Bitmap SETBIT.
+    BitmapSetBit { key: String, offset: u64, value: u8 },
+
+    /// Bitmap BITOP (`operation` is AND, OR, XOR or NOT).
+    BitmapOp {
+        operation: String,
+        destination: String,
+        sources: Vec<String>,
+    },
+
+    /// Bitmap BITFIELD, recorded as the resulting value of every field a
+    /// SET or INCRBY sub-operation wrote.
+    BitmapField {
+        key: String,
+        writes: Vec<BitfieldWrite>,
+    },
+}
+
+/// One field written by a BITFIELD command, as the value it holds afterwards.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BitfieldWrite {
+    pub offset: u64,
+    pub width: u64,
+    pub signed: bool,
+    pub value: i64,
 }
 
 /// Snapshot containing full system state

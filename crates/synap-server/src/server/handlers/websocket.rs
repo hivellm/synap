@@ -104,7 +104,6 @@ pub async fn queue_websocket(
         }
     };
 
-    let client_list_manager = state.client_list_manager.clone();
     let client_addr = addr.to_string();
     let client_id = format!("queue-{}-{}", queue_name, consumer_id);
 
@@ -116,10 +115,10 @@ pub async fn queue_websocket(
     ws.on_upgrade(move |socket| {
         handle_queue_socket(
             socket,
+            state,
             queue_manager,
             queue_name,
             consumer_id,
-            client_list_manager,
             client_id,
             client_addr,
         )
@@ -129,13 +128,14 @@ pub async fn queue_websocket(
 /// Handle Queue WebSocket connection
 pub(super) async fn handle_queue_socket(
     socket: WebSocket,
+    state: AppState,
     queue_manager: Arc<crate::core::QueueManager>,
     queue_name: String,
     consumer_id: String,
-    client_list_manager: Arc<crate::monitoring::ClientListManager>,
     client_id: String,
     client_addr: String,
 ) {
+    let client_list_manager = state.client_list_manager.clone();
     let connected_at = std::time::SystemTime::now();
     let client_info =
         crate::monitoring::ClientInfo::new(client_id.clone(), client_addr, connected_at);
@@ -202,14 +202,14 @@ pub(super) async fn handle_queue_socket(
                             match cmd["command"].as_str() {
                                 Some("ack") => {
                                     if let Some(msg_id) = cmd["message_id"].as_str()
-                                        && let Err(e) = queue_manager.ack(&queue_name, msg_id).await {
+                                        && let Err(e) = crate::persistence::durable::queue_ack(state.persistence.as_deref(), &queue_manager, &queue_name, msg_id).await {
                                             error!("ACK error: {}", e);
                                         }
                                 }
                                 Some("nack") => {
                                     if let Some(msg_id) = cmd["message_id"].as_str() {
                                         let requeue = cmd["requeue"].as_bool().unwrap_or(true);
-                                        if let Err(e) = queue_manager.nack(&queue_name, msg_id, requeue).await {
+                                        if let Err(e) = crate::persistence::durable::queue_nack(state.persistence.as_deref(), &queue_manager, &queue_name, msg_id, requeue).await {
                                             error!("NACK error: {}", e);
                                         }
                                     }

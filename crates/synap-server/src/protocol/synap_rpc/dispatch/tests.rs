@@ -351,7 +351,9 @@ async fn test_bitcount_after_setbit() {
 }
 
 #[tokio::test]
-async fn test_flushall_returns_ok() {
+async fn test_flushall_refused_by_config_is_an_error() {
+    // `allow_flush_commands` defaults to false: the flush is refused, and the
+    // reply says so instead of an "OK" for a flush that never happened.
     let state = make_state();
     dispatch(
         &state,
@@ -359,7 +361,7 @@ async fn test_flushall_returns_ok() {
     )
     .await;
     let resp = dispatch(&state, req(2, "FLUSHALL", vec![])).await;
-    assert_eq!(resp.result, Ok(SynapValue::Str("OK".into())));
+    assert!(matches!(resp.result, Err(ref e) if e.contains("disabled")));
 }
 
 #[tokio::test]

@@ -14,7 +14,7 @@ use std::time::Duration;
 use synap_server::auth::{ApiKeyManager, UserManager};
 use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
 use synap_server::monitoring::{ClientListManager, MonitoringManager};
-use synap_server::persistence::{PersistenceError, PersistenceLayer, recover};
+use synap_server::persistence::{PersistenceError, PersistenceLayer, recover_all};
 use synap_server::replication::NodeRole;
 use synap_server::{
     AppState, ConsumerGroupConfig, ConsumerGroupManager, KVStore, PartitionConfig,
@@ -318,20 +318,35 @@ async fn main() -> Result<()> {
         Option<Arc<SetStore>>,
         Option<Arc<SortedSetStore>>,
         Option<Arc<QueueManager>>,
+        Option<Arc<synap_server::core::HyperLogLogStore>>,
+        Option<Arc<synap_server::core::BitmapStore>>,
         u64,
     );
     let (
         kv_store,
         hash_store_recovered,
         list_store_recovered,
-        _set_store_recovered,
-        _sorted_set_store_recovered,
+        set_store_recovered,
+        sorted_set_store_recovered,
         queue_manager,
+        hyperloglog_store_recovered,
+        bitmap_store_recovered,
         _wal_offset,
     ): RecoveredStores = if config.persistence.enabled {
         info!("Persistence enabled, attempting recovery...");
-        match recover(&config.persistence, kv_config.clone(), queue_config.clone()).await {
-            Ok((kv, hs, ls, ss, zs, qm, offset)) => {
+        match recover_all(&config.persistence, kv_config.clone(), queue_config.clone()).await {
+            Ok(recovered) => {
+                let synap_server::persistence::RecoveredStores {
+                    kv_store: kv,
+                    hash_store: hs,
+                    list_store: ls,
+                    set_store: ss,
+                    sorted_set_store: zs,
+                    queue_manager: qm,
+                    hyperloglog_store,
+                    bitmap_store,
+                    wal_offset: offset,
+                } = recovered;
                 info!("Recovery successful, WAL offset: {}", offset);
                 (
                     Arc::new(
@@ -365,6 +380,8 @@ async fn main() -> Result<()> {
                         )
                     }),
                     qm.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
+                    Some(Arc::new(hyperloglog_store)),
+                    Some(Arc::new(bitmap_store)),
                     offset,
                 )
             }
@@ -400,6 +417,8 @@ async fn main() -> Result<()> {
                     } else {
                         None
                     },
+                    None,
+                    None,
                     0,
                 )
             }
@@ -441,6 +460,8 @@ async fn main() -> Result<()> {
             } else {
                 None
             },
+            None,
+            None,
             0,
         )
     };
@@ -584,16 +605,19 @@ async fn main() -> Result<()> {
         });
     info!("List store initialized");
 
-    // Create set store (always fresh here — wire the shared budget).
-    let set_store = Arc::new(
-        synap_server::core::SetStore::new()
-            .with_global_memory(global_mem.clone())
-            .with_keyspace_notifier(keyspace_notifier.clone()),
-    );
+    // Use the recovered set store. It used to be replaced by a fresh one here,
+    // which threw away every set the WAL had just replayed.
+    let set_store = set_store_recovered.unwrap_or_else(|| {
+        Arc::new(
+            synap_server::core::SetStore::new()
+                .with_global_memory(global_mem.clone())
+                .with_keyspace_notifier(keyspace_notifier.clone()),
+        )
+    });
     info!("Set store initialized");
 
     // Use sorted set store (fresh or recovered)
-    let sorted_set_store = _sorted_set_store_recovered.unwrap_or_else(|| {
+    let sorted_set_store = sorted_set_store_recovered.unwrap_or_else(|| {
         Arc::new(
             synap_server::core::SortedSetStore::new()
                 .with_global_memory(global_mem.clone())
@@ -601,6 +625,16 @@ async fn main() -> Result<()> {
         )
     });
     info!("Sorted set store initialized");
+
+    // HyperLogLog and bitmap stores (recovered from the WAL when persistence
+    // is on). Built before the snapshot task and the replica node so both see
+    // them.
+    use synap_server::core::{BitmapStore, HyperLogLogStore};
+    let hyperloglog_store =
+        hyperloglog_store_recovered.unwrap_or_else(|| Arc::new(HyperLogLogStore::new()));
+    info!("HyperLogLog store initialized");
+    let bitmap_store = bitmap_store_recovered.unwrap_or_else(|| Arc::new(BitmapStore::new()));
+    info!("Bitmap store initialized");
 
     // Periodically recompute collection/broker memory into the shared budget so
     // `maxmemory` reflects all datatypes (audit M-018). KV updates its counter
@@ -644,6 +678,8 @@ async fn main() -> Result<()> {
                 sorted_set_store: Some(sorted_set_store.clone()),
                 queue_manager: queue_manager.clone(),
                 stream_manager: stream_manager.clone(),
+                hyperloglog_store: Some(hyperloglog_store.clone()),
+                bitmap_store: Some(bitmap_store.clone()),
             });
     }
 
@@ -664,6 +700,8 @@ async fn main() -> Result<()> {
                 sorted_set_store: Some(sorted_set_store.clone()),
                 queue_manager: queue_manager.clone(),
                 stream_manager: stream_manager.clone(),
+                hyperloglog_store: Some(hyperloglog_store.clone()),
+                bitmap_store: Some(bitmap_store.clone()),
             },
         )
         .await
@@ -681,16 +719,6 @@ async fn main() -> Result<()> {
             }
         }
     }
-
-    // Create HyperLogLog store
-    use synap_server::core::HyperLogLogStore;
-    let hyperloglog_store = Arc::new(HyperLogLogStore::new());
-    info!("HyperLogLog store initialized");
-
-    // Create Bitmap store
-    use synap_server::core::BitmapStore;
-    let bitmap_store = Arc::new(BitmapStore::new());
-    info!("Bitmap store initialized");
 
     // Create Geospatial store (depends on sorted_set_store)
     use synap_server::core::GeospatialStore;
