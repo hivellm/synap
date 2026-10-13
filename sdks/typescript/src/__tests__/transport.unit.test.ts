@@ -202,6 +202,39 @@ describe('mapCommand', () => {
     it('defaults to the SynapRPC spelling when no transport is given', () => {
       expect(mapCommand('pubsub.list', {})).toEqual({ rawCmd: 'TOPICS', args: [] });
     });
+
+    // RESP3 dispatches SCRIPT with a subcommand; SynapRPC uses dotted names.
+    it('"script.load" → SCRIPT.LOAD on SynapRPC, SCRIPT LOAD on RESP3', () => {
+      expect(mapCommand('script.load', { script: 'return 1' }, 'synaprpc')).toEqual({
+        rawCmd: 'SCRIPT.LOAD',
+        args: ['return 1'],
+      });
+      expect(mapCommand('script.load', { script: 'return 1' }, 'resp3')).toEqual({
+        rawCmd: 'SCRIPT',
+        args: ['LOAD', 'return 1'],
+      });
+    });
+
+    it('"script.exists" → SCRIPT EXISTS on RESP3', () => {
+      expect(mapCommand('script.exists', { hashes: ['a', 'b'] }, 'resp3')).toEqual({
+        rawCmd: 'SCRIPT',
+        args: ['EXISTS', 'a', 'b'],
+      });
+    });
+
+    it('"script.flush" / "script.kill" → SCRIPT FLUSH / KILL on RESP3', () => {
+      expect(mapCommand('script.flush', {}, 'resp3')).toEqual({ rawCmd: 'SCRIPT', args: ['FLUSH'] });
+      expect(mapCommand('script.kill', {}, 'resp3')).toEqual({ rawCmd: 'SCRIPT', args: ['KILL'] });
+    });
+  });
+
+  describe('Queue publish payload', () => {
+    // QueueManager.publish sends bytes as a number array (the HTTP JSON
+    // encoding); the native wires must carry the bytes, not that array's text.
+    it('number-array payload → raw bytes', () => {
+      const result = mapCommand('queue.publish', { queue: 'q', payload: [104, 105] });
+      expect(result?.args[1]).toEqual(new Uint8Array([104, 105]));
+    });
   });
 
   describe('KV commands', () => {
@@ -534,6 +567,89 @@ describe('mapResponse', () => {
     });
   });
 
+  describe('Queue/stream list responses', () => {
+    // listQueues()/listRooms() read the HTTP envelope, so the native reply
+    // must be wrapped the same way or they return undefined.
+    it('"queue.list" array → {queues: [...]}', () => {
+      expect(mapResponse('queue.list', ['q1', 'q2'])).toEqual({ queues: ['q1', 'q2'] });
+    });
+
+    it('"queue.list" null → {queues: []}', () => {
+      expect(mapResponse('queue.list', null)).toEqual({ queues: [] });
+    });
+
+    it('"stream.list" array → {rooms: [...]}', () => {
+      expect(mapResponse('stream.list', ['r1'])).toEqual({ rooms: ['r1'] });
+    });
+
+    it('"stream.list" null → {rooms: []}', () => {
+      expect(mapResponse('stream.list', null)).toEqual({ rooms: [] });
+    });
+  });
+
+  describe('Queue consume responses', () => {
+    // QueueManager.consume reads the HTTP envelope {message} and decodes the
+    // payload as bytes.
+    it('"queue.consume" null → {message: null}', () => {
+      expect(mapResponse('queue.consume', null)).toEqual({ message: null });
+    });
+
+    it('SynapRPC map → {message} with a byte payload', () => {
+      const raw = { id: 'm1', payload: 'hi', priority: 5, retry_count: 0 };
+      expect(mapResponse('queue.consume', raw)).toEqual({
+        message: { id: 'm1', payload: new TextEncoder().encode('hi'), priority: 5, retry_count: 0 },
+      });
+    });
+
+    it('RESP3 [id, payload, priority, retry_count] → {message} with a byte payload', () => {
+      expect(mapResponse('queue.consume', ['m1', 'hi', 5, 0])).toEqual({
+        message: { id: 'm1', payload: new TextEncoder().encode('hi'), priority: 5, retry_count: 0 },
+      });
+    });
+  });
+
+  describe('Queue ack/nack responses', () => {
+    // QueueManager.ack/nack return result.success; the native wires reply OK.
+    it('"queue.ack" OK → {success: true}', () => {
+      expect(mapResponse('queue.ack', 'OK')).toEqual({ success: true });
+    });
+
+    it('"queue.nack" OK → {success: true}', () => {
+      expect(mapResponse('queue.nack', 'OK')).toEqual({ success: true });
+    });
+
+    // RESP3 replies QSTATS as flat [key, value, ...] pairs; SynapRPC as a map.
+    it('"queue.stats" RESP3 pairs → object', () => {
+      expect(mapResponse('queue.stats', ['depth', 0, 'consumed', 1])).toEqual({
+        depth: 0,
+        consumed: 1,
+      });
+    });
+
+    it('"queue.stats" SynapRPC map → unchanged', () => {
+      expect(mapResponse('queue.stats', { depth: 0, consumed: 1 })).toEqual({ depth: 0, consumed: 1 });
+    });
+  });
+
+  describe('Script eval responses', () => {
+    // ScriptManager.eval/evalsha return the HTTP envelope {result, sha1}. The
+    // native wires send only the result, as JSON text, and the sha1 is SHA-1
+    // of the script source.
+    it('"script.eval" → {result decoded from JSON, sha1 of the script}', () => {
+      expect(mapResponse('script.eval', '"synap-ok"', { script: 'return ARGV[1]' })).toEqual({
+        result: 'synap-ok',
+        sha1: '098e0f0d1448c0a81dafe820f66d460eb09263da',
+      });
+    });
+
+    it('"script.evalsha" → {result decoded from JSON, sha1 as sent}', () => {
+      expect(mapResponse('script.evalsha', '[1,"a"]', { sha1: 'abc' })).toEqual({
+        result: [1, 'a'],
+        sha1: 'abc',
+      });
+    });
+  });
+
   describe('Default fallthrough', () => {
     it('unknown command returns raw value', () => {
       expect(mapResponse('unknown.cmd', 'rawval')).toBe('rawval');
@@ -713,6 +829,20 @@ describe('Resp3Transport', () => {
 
     const result = await transport.execute('GET', ['testkey']);
     expect(result).toBe('testvalue');
+  });
+
+  it('sends a Uint8Array argument as its raw bytes', async () => {
+    let received: string[] = [];
+    const { server: s, port } = await buildResp3Server((parts) => {
+      received = parts;
+      return '+OK\r\n';
+    });
+    server = s;
+    transport = new Resp3Transport('127.0.0.1', port, 5000);
+
+    await transport.execute('QPUBLISH', ['q', new TextEncoder().encode('hello')]);
+    // String(Uint8Array) would have sent "104,101,108,108,111".
+    expect(received).toEqual(['QPUBLISH', 'q', 'hello']);
   });
 
   it('receives null (_\\r\\n) → returns null', async () => {

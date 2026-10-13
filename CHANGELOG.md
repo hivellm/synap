@@ -47,14 +47,21 @@ versions stay aligned.
   `ServerConfig` (added in 3.4.0), and that broke `cargo clippy -D warnings`.
   The MCP handler now returns `ServerConfig`, and the manifest requires the
   release that provides it.
-- **`cargo deny check advisories` passes again.** The RustSec database added
-  RUSTSEC-2024-0449 (`unsafe-libyaml` unmaintained) on 2026-10-12, which made
-  the CI lint job fail on every branch. The crate comes in through
-  `serde_yaml` 0.9, itself deprecated, which reads `config.yml`. It is now
-  ignored with that rationale, the same treatment `bincode` gets, until
-  `serde_yaml` is replaced. Six ignore entries whose advisories no longer
-  match anything in the graph were removed, so a regression to one of those
-  versions would fail the check instead of passing silently.
+- **Configuration is parsed by `serde-saphyr` instead of `serde_yaml`.** The
+  RustSec database added RUSTSEC-2024-0449 (`unsafe-libyaml` unmaintained) on
+  2026-10-12, which made `cargo deny check advisories` fail on every branch.
+  It came in through `serde_yaml` 0.9, deprecated since 2024, which parsed
+  `config.yml`. `serde-saphyr` is a maintained, pure-Rust YAML parser, and
+  `unsafe-libyaml` is out of the dependency graph with no ignore entry needed.
+  Every file under `config/` parses to the same value with both crates. Three
+  edge cases differ: booleans now also accept the YAML 1.1 forms
+  `yes`/`no`/`on`/`off`, integers accept `_` separators, and an unquoted `~`
+  or `null` in a text field is rejected instead of becoming the literal string
+  `"~"` or `"null"`. `synap-migrate` declared `serde_yaml` without using it,
+  so the dependency is simply dropped there. Six ignore entries whose
+  advisories no longer match anything in the graph were also removed, so a
+  regression to one of those versions would fail the check instead of passing
+  silently.
 - **`pnpm-lock.yaml` is current again.** It had been stale since before the
   Thunder adoption (no `@hivehub/thunder`, `msgpackr` still on 1.x), so the
   partial edits Dependabot made to it were not worth applying. It is now
@@ -89,14 +96,49 @@ versions stay aligned.
   `ZUNIONSTORE` and `BITOP` already use. An audit of the other multi-key
   commands found no other nested shard locks. Guarded by
   `pfmerge_source_in_destination_shard_completes`.
+- **Every shipped config file loads.** Six of the eight files under
+  `config/` were rejected at startup, all six for
+  `eviction_policy: "lru"`, which has never been a valid name; they now say
+  `"allkeys-lru"`. Five of them had a second problem. The cluster example
+  listed seed nodes by hostname, but seeds must be `IP:port`. The replica
+  example pointed `master_address` at the hostname `master`, also not
+  resolved. The development, production and documented example configs left
+  out the required `queue` and `rate_limit` sections. A new test,
+  `every_shipped_config_loads`, loads each file as a `ServerConfig`. Note that
+  the docker-compose replicas still cannot reach the master: `master_address`
+  takes no hostname and the `SYNAP_MASTER_ADDRESS` variable the compose file
+  sets is not read. That is tracked as `phase14_replica-master-hostname`.
 - **The TypeScript SDK's E2E suite runs again.** `RUN_E2E=true` had failed
   before its first test since 1.0.0, because the harness read `config.yml`
   from the repository root after the file moved to `config/`. Its config
   patches also expected `enabled:` directly under each section header, so
   persistence would have stayed on with the WAL pointed at `/data`. Both are
-  fixed. The suite now runs and fails 9 of 22 tests, including
-  `listQueues()`/`listRooms()` returning `undefined` over SynapRPC and RESP3.
-  Those are tracked as `phase13_ts-e2e-native-parity`.
+  fixed, and all 22 tests pass on HTTP, SynapRPC and RESP3.
+- **The TypeScript SDK's queues, streams and scripts work over SynapRPC and
+  RESP3.** The first E2E run in months failed 9 of 22 tests, and every native
+  failure was a reply the SDK did not translate into the shape its HTTP path
+  returns:
+  - `listQueues()` and `listRooms()` returned `undefined`.
+  - Publishing to a queue stored the text `[104,101,…]` instead of the bytes
+    of the message, because the byte array the manager builds for HTTP JSON
+    was serialised as a string. Over RESP3 even a `Uint8Array` payload
+    arrived as `104,101,…`, because the transport stringified every
+    argument. It now frames arguments as bytes.
+  - `consume()` always returned `null`, `ack()`/`nack()` returned
+    `undefined`, and `stats()` over RESP3 had no fields (the reply is flat
+    `[key, value, …]` pairs).
+  - `script.eval()`/`evalsha()` returned the raw result instead of
+    `{ result, sha1 }`, still JSON-encoded as the server sends it, and
+    `script.load()`/`exists()`/`flush()`/`kill()` over RESP3 were sent as
+    `SCRIPT.LOAD`, which RESP3 rejects; RESP3 takes `SCRIPT LOAD`.
+
+  Each fix has a unit test against the reply shape the server actually sends.
+  The other E2E failures were stale tests: one read `script.exists()` as an
+  envelope, and the unmapped-command checks used `bitmap.setbit`, which the
+  native transports now map. Still unmapped natively, and so raising
+  `UnsupportedCommandError` there: `kv.mset`, `kv.msetnx`, `kv.mdel`,
+  `kv.scan`, `kv.persist`, `kv.flushdb`, `kv.flushall`, `kv.dbsize`,
+  `kv.stats` and `pubsub.stats`.
 - **The Docker image builds again.** `rust-toolchain.toml` pins plain
   `nightly`, so rustup re-syncs whenever a newer nightly is published. With the
   toolchain installed in a layer of its own, that sync renamed files out of a

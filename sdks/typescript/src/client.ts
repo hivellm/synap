@@ -210,7 +210,7 @@ export class SynapClient {
           if (mapped.rawCmd === 'TXQUEUE') {
             return { success: true, queued: true } as T;
           }
-          const result = mapResponse(command, raw) as T;
+          const result = mapResponse(command, raw, payload) as T;
           if (this.debug) {
             console.log('[Synap] Native response:', result);
           }

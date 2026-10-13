@@ -32,7 +32,7 @@ kv_store:
   max_memory_mb: 4096
 
   # Eviction policy when memory limit is reached
-  eviction_policy: "lru"
+  eviction_policy: "allkeys-lru"
 
   # TTL cleanup interval
   ttl_cleanup_interval_ms: 100
@@ -118,11 +118,12 @@ cluster:
 
   # Seed nodes for cluster discovery
   # List at least 2-3 seed nodes for redundancy
+  # Each seed must be an IP:port; hostnames are not resolved.
   # Example for 3-node cluster:
   seeds:
-    - "cluster-node-1.example.com:15502"
-    - "cluster-node-2.example.com:15502"
-    - "cluster-node-3.example.com:15502"
+    - "10.0.0.11:15502"
+    - "10.0.0.12:15502"
+    - "10.0.0.13:15502"
 
   # Cluster communication port (different from HTTP API port)
   port: 15502

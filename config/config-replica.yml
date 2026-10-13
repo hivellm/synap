@@ -20,7 +20,7 @@ server:
 # ============================================================================
 kv_store:
   max_memory_mb: 4096
-  eviction_policy: "lru"
+  eviction_policy: "allkeys-lru"
   ttl_cleanup_interval_ms: 100
   allow_flush_commands: false
 
@@ -84,8 +84,10 @@ replication:
   role: "replica"
 
   # Master node address to sync from (port 15600 = replication, not SynapRPC)
-  # This will be overridden by SYNAP_MASTER_ADDRESS env var in Docker
-  master_address: "master:15600"
+  # Must be an IP:port: hostnames are not resolved, and the
+  # SYNAP_MASTER_ADDRESS variable docker-compose.yml sets is not read yet, so
+  # the compose replicas cannot reach `master` (phase14_replica-master-hostname).
+  master_address: "10.0.0.10:15600"
   
   # Performance tuning
   heartbeat_interval_ms: 1000

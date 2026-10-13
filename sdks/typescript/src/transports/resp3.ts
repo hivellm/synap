@@ -182,7 +182,8 @@ export class Resp3Transport {
    * Enqueue `cmd` for sequential execution.
    *
    * @param cmd  Redis-style command name, e.g. `"SET"`, `"HGET"`.
-   * @param args Command arguments (stringified before sending).
+   * @param args Command arguments: a `Uint8Array` is sent as its raw bytes,
+   *             anything else as its UTF-8 string form.
    * @returns    The raw parsed RESP value (string | number | null | unknown[]).
    */
   execute(cmd: string, args: unknown[]): Promise<unknown> {
@@ -191,14 +192,17 @@ export class Resp3Transport {
         try {
           await this.ensureConnected();
 
-          // Build RESP2 multibulk frame.
-          const parts = [cmd.toUpperCase(), ...args.map(String)];
-          let frame = `*${parts.length}\r\n`;
+          // Build RESP2 multibulk frame. It is assembled as bytes because
+          // String(Uint8Array) would send "104,101,…" instead of the payload.
+          const parts = [cmd.toUpperCase(), ...args].map((p) =>
+            p instanceof Uint8Array ? Buffer.from(p) : Buffer.from(String(p), 'utf8'),
+          );
+          const chunks: Buffer[] = [Buffer.from(`*${parts.length}\r\n`)];
           for (const p of parts) {
-            frame += `$${Buffer.byteLength(p, 'utf8')}\r\n${p}\r\n`;
+            chunks.push(Buffer.from(`$${p.length}\r\n`), p, Buffer.from('\r\n'));
           }
 
-          this.socket!.write(frame);
+          this.socket!.write(Buffer.concat(chunks));
           const result = await this.parseValue();
           resolve(result);
         } catch (err) {

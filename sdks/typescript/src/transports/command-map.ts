@@ -11,6 +11,8 @@
  * receives the same JSON structure regardless of the active transport.
  */
 
+import { createHash } from 'crypto';
+
 // ── mapCommand ─────────────────────────────────────────────────────────────────
 
 /** Result of a successful command mapping. */
@@ -303,6 +305,9 @@ export function mapCommand(
         payloadArg = pl;
       } else if (typeof pl === 'string') {
         payloadArg = pl;
+      } else if (Array.isArray(pl)) {
+        // QueueManager.publish encodes bytes as a number array for HTTP JSON.
+        payloadArg = Uint8Array.from(pl as number[]);
       } else {
         payloadArg = JSON.stringify(pl ?? '');
       }
@@ -396,15 +401,27 @@ export function mapCommand(
       return { rawCmd: 'EVALSHA', args: [s('sha1'), String(keys.length), ...keys, ...args.map(String)] };
     }
 
-    case 'script.load':   return { rawCmd: 'SCRIPT.LOAD',   args: [s('script')] };
+    // RESP3 dispatches SCRIPT with a subcommand; SynapRPC uses dotted names.
+    case 'script.load':
+      return transport === 'resp3'
+        ? { rawCmd: 'SCRIPT', args: ['LOAD', s('script')] }
+        : { rawCmd: 'SCRIPT.LOAD', args: [s('script')] };
 
     case 'script.exists': {
       const hashes = Array.isArray(payload['hashes']) ? (payload['hashes'] as string[]) : [];
-      return { rawCmd: 'SCRIPT.EXISTS', args: [...hashes] };
+      return transport === 'resp3'
+        ? { rawCmd: 'SCRIPT', args: ['EXISTS', ...hashes] }
+        : { rawCmd: 'SCRIPT.EXISTS', args: [...hashes] };
     }
 
-    case 'script.flush': return { rawCmd: 'SCRIPT.FLUSH', args: [] };
-    case 'script.kill':  return { rawCmd: 'SCRIPT.KILL',  args: [] };
+    case 'script.flush':
+      return transport === 'resp3'
+        ? { rawCmd: 'SCRIPT', args: ['FLUSH'] }
+        : { rawCmd: 'SCRIPT.FLUSH', args: [] };
+    case 'script.kill':
+      return transport === 'resp3'
+        ? { rawCmd: 'SCRIPT', args: ['KILL'] }
+        : { rawCmd: 'SCRIPT.KILL', args: [] };
 
     // ── HyperLogLog ───────────────────────────────────────────────────────────
     case 'hyperloglog.pfadd': {
@@ -494,11 +511,16 @@ export function mapCommand(
  *  - RESP3 parser  → JS primitives / arrays
  *  - SynapRPC      → WireValue-decoded (already unwrapped by `fromWireValue`)
  *
- * @param cmd SDK command name (e.g. `"kv.set"`)
- * @param raw Raw parsed response from the wire transport
- * @returns   Normalised JS object/value matching the manager's expected shape
+ * @param cmd     SDK command name (e.g. `"kv.set"`)
+ * @param raw     Raw parsed response from the wire transport
+ * @param payload The command's payload, for replies that echo part of the request
+ * @returns       Normalised JS object/value matching the manager's expected shape
  */
-export function mapResponse(cmd: string, raw: unknown): unknown {
+export function mapResponse(
+  cmd: string,
+  raw: unknown,
+  payload: Record<string, unknown> = {},
+): unknown {
   const asInt = (v: unknown, def = 0): number => {
     if (typeof v === 'number') return Math.trunc(v);
     if (typeof v === 'boolean') return v ? 1 : 0;
@@ -518,6 +540,24 @@ export function mapResponse(cmd: string, raw: unknown): unknown {
       result.push({ member: String(arr[i]), score: asFloat(arr[i + 1]) });
     }
     return result;
+  };
+
+  /** Decode a value the server serialised to JSON text (EVAL/EVALSHA results). */
+  const fromJsonText = (v: unknown): unknown => (typeof v === 'string' ? JSON.parse(v) : v);
+
+  /**
+   * A consumed queue message in the HTTP shape, payload as bytes. SynapRPC
+   * replies with a map; RESP3 positionally: `[id, payload, priority, retry_count]`.
+   */
+  const asQueueMessage = (v: unknown): Record<string, unknown> | null => {
+    if (v == null) return null;
+    const msg: Record<string, unknown> = Array.isArray(v)
+      ? { id: v[0], payload: v[1], priority: v[2], retry_count: v[3] }
+      : { ...(v as Record<string, unknown>) };
+    if (typeof msg['payload'] === 'string') {
+      msg['payload'] = new TextEncoder().encode(msg['payload']);
+    }
+    return msg;
   };
 
   switch (cmd) {
@@ -613,20 +653,28 @@ export function mapResponse(cmd: string, raw: unknown): unknown {
     case 'queue.create':
     case 'queue.delete':
     case 'queue.purge': return {};
-    case 'queue.list':  return Array.isArray(raw) ? raw : raw == null ? [] : [raw];
+    case 'queue.list':  return { queues: Array.isArray(raw) ? raw : raw == null ? [] : [raw] };
     case 'queue.publish': {
       if (raw && typeof raw === 'object' && 'message_id' in (raw as object)) return raw;
       return { message_id: String(raw ?? '') };
     }
-    case 'queue.consume': return raw ?? null;
+    case 'queue.consume': return { message: asQueueMessage(raw) };
     case 'queue.ack':
-    case 'queue.nack':  return {};
-    case 'queue.stats': return raw;
+    case 'queue.nack':  return { success: raw === 'OK' };
+    case 'queue.stats': {
+      // RESP3 replies with flat [key, value, ...] pairs; SynapRPC with a map.
+      if (!Array.isArray(raw)) return raw;
+      const stats: Record<string, unknown> = {};
+      for (let i = 0; i + 1 < raw.length; i += 2) {
+        stats[String(raw[i])] = raw[i + 1];
+      }
+      return stats;
+    }
 
     // ── Stream ────────────────────────────────────────────────────────────────
     case 'stream.create':
     case 'stream.delete': return {};
-    case 'stream.list':   return Array.isArray(raw) ? raw : raw == null ? [] : [raw];
+    case 'stream.list':   return { rooms: Array.isArray(raw) ? raw : raw == null ? [] : [raw] };
     case 'stream.publish': {
       if (raw && typeof raw === 'object' && 'offset' in (raw as object)) return raw;
       return { offset: asInt(raw) };
@@ -657,8 +705,16 @@ export function mapResponse(cmd: string, raw: unknown): unknown {
       return raw;
 
     // ── Scripts ───────────────────────────────────────────────────────────────
+    // The native wires reply with the result alone, as JSON text; the sha1 the
+    // HTTP envelope carries is SHA-1 of the script source, the same digest the
+    // server keys on.
     case 'script.eval':
-    case 'script.evalsha': return raw;
+      return {
+        result: fromJsonText(raw),
+        sha1: createHash('sha1').update(String(payload['script'] ?? '')).digest('hex'),
+      };
+    case 'script.evalsha':
+      return { result: fromJsonText(raw), sha1: String(payload['sha1'] ?? '') };
     case 'script.load': {
       if (raw && typeof raw === 'object' && 'sha1' in (raw as object)) return raw;
       return { sha1: String(raw ?? '') };

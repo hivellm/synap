@@ -8,8 +8,20 @@ server:
 
 kv_store:
   max_memory_mb: 512  # Lower memory for development
-  eviction_policy: "lru"
+  eviction_policy: "allkeys-lru"
   ttl_cleanup_interval_ms: 100
+
+queue:
+  enabled: true
+  max_depth: 100000
+  ack_deadline_secs: 30
+  default_max_retries: 3
+  default_priority: 5
+
+rate_limit:
+  enabled: false
+  requests_per_second: 1000
+  burst_size: 100
 
 logging:
   level: "debug"  # Verbose logging for development
