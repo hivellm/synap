@@ -32,6 +32,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gate-scripts:
+    name: Gate scripts self-test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python -m pip install pyyaml
+
+      - name: Test the coverage gate
+        run: python scripts/ci/test_coverage_gate.py
+
+      - name: Check the CI gate wiring
+        run: python scripts/ci/test_ci_gates.py
+
+      - name: Check the release workflow
+        run: python scripts/release/test-release-workflow.py
+
   server:
     name: Build synap-server (release)
     runs-on: ubuntu-latest
