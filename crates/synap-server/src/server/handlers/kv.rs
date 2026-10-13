@@ -250,7 +250,10 @@ pub async fn kv_delete(
 /// SNAPSHOT endpoint - manually trigger a snapshot
 pub async fn trigger_snapshot(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_permission(&ctx, "admin:*", Action::Admin)?;
+
     debug!("REST SNAPSHOT TRIGGER");
 
     if let Some(ref persistence) = state.persistence {
@@ -971,8 +974,11 @@ pub(crate) fn info_cluster_section(state: &AppState) -> serde_json::Value {
 /// SLOWLOG endpoint - get slow query log
 pub async fn slowlog(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_permission(&ctx, "admin:*", Action::Admin)?;
+
     let count = params.get("count").and_then(|s| s.parse::<usize>().ok());
 
     let entries = state.monitoring.slow_log().get(count).await;
@@ -987,8 +993,11 @@ pub async fn slowlog(
 /// MEMORY USAGE endpoint - get memory usage for a key
 pub async fn memory_usage(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "kv:", &key, Action::Read)?;
+
     let key_manager = KeyManager::new(
         state.kv_store.clone(),
         state.hash_store.clone(),
@@ -1027,9 +1036,12 @@ pub async fn memory_usage(
 /// CLIENT LIST endpoint - get active connections
 pub async fn client_list(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 
     crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_permission(&ctx, "admin:*", Action::Admin)?;
+
     // Block in Hub mode - would expose all users' connections
 
     crate::hub::require_standalone_mode(&hub_ctx)?;

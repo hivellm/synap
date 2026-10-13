@@ -25,6 +25,25 @@ migration notes before upgrading.
   by that key's permissions and must expire no later than it. Unknown actions
   and unparsable `allowed_ips` entries answer 400 instead of silently becoming
   `read` or being dropped (an empty list allows every address).
+- **One authorization policy on every transport** (review findings S-02 and
+  S-05). `POST /api/v1/command` never authorized individual commands, so a
+  read-only user could run `kv.flushall`; RESP3 and SynapRPC only gated a
+  handful of admin commands, so any authenticated user could read and write any
+  key; and 49 REST handlers (sorted sets, geospatial, partitions and consumer
+  groups, scripts, queue ACK/NACK, slow log, client list, snapshots) checked
+  nothing. Every command on REST, the envelope, RESP3, SynapRPC and inside
+  scripts is now authorized against the same `(resource, action)` pairs, named
+  as the REST handlers name them, and a command without a policy is denied; a
+  test walks every dispatcher's command table to keep it that way. Scripts run
+  with their caller's permissions, a refused command aborts its transaction
+  (`EXECABORT`), subscribing to the internal `__watch@`/`__keyspace@`/
+  `__keyevent@` channels (or a wildcard that matches them) needs the matching
+  `kv` permission, and the KV, queue, stream and pub/sub WebSockets are
+  authorized too. With authentication enabled but not required, an
+  unauthenticated RESP3 or SynapRPC connection now holds no permissions, as an
+  anonymous REST request already did. `INFO`, the slow log and the client list
+  are admin-only on every transport. RESP3 reports denials with the Redis
+  `-NOPERM` error code.
 
 ### Fixed
 

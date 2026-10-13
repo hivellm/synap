@@ -746,8 +746,11 @@ pub async fn sortedset_zrem(
 /// GET /sortedset/:key/:member/zscore - Get score of member
 pub async fn sortedset_zscore(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((key, member)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
     debug!("REST ZSCORE key={} member={}", key, member);
 
     let member_bytes = member.as_bytes();
@@ -761,8 +764,11 @@ pub async fn sortedset_zscore(
 /// GET /sortedset/:key/zcard - Get cardinality
 pub async fn sortedset_zcard(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
     debug!("REST ZCARD key={}", key);
 
     let count = state.sorted_set_store.zcard(&key);
@@ -773,9 +779,12 @@ pub async fn sortedset_zcard(
 /// POST /sortedset/:key/zincrby - Increment score
 pub async fn sortedset_zincrby(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ZAddRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Write)?;
+
     let (member, increment) = match req {
         ZAddRequest::Single { member, score, .. } => (member, score),
         ZAddRequest::Multiple { .. } => {
@@ -837,9 +846,12 @@ pub async fn sortedset_zrange(
 /// GET /sortedset/:key/zrevrange - Get reverse range by rank
 pub async fn sortedset_zrevrange(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
     let start: i64 = params
         .get("start")
         .and_then(|s| s.parse().ok())
@@ -868,8 +880,11 @@ pub async fn sortedset_zrevrange(
 /// GET /sortedset/:key/:member/zrank - Get rank of member
 pub async fn sortedset_zrank(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((key, member)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
     debug!("REST ZRANK key={} member={}", key, member);
 
     let member_bytes = member.as_bytes();
@@ -881,8 +896,14 @@ pub async fn sortedset_zrank(
 /// POST /sortedset/zinterstore - Intersection
 pub async fn sortedset_zinterstore(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Json(req): Json<ZInterstoreRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &req.destination, Action::Write)?;
+    for key in &req.keys {
+        require_resource_permission(&ctx, "sortedset:", key, Action::Read)?;
+    }
+
     debug!(
         "REST ZINTERSTORE dest={} keys={:?}",
         req.destination, req.keys
@@ -909,8 +930,14 @@ pub async fn sortedset_zinterstore(
 /// POST /sortedset/zunionstore - Union
 pub async fn sortedset_zunionstore(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Json(req): Json<ZInterstoreRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &req.destination, Action::Write)?;
+    for key in &req.keys {
+        require_resource_permission(&ctx, "sortedset:", key, Action::Read)?;
+    }
+
     debug!(
         "REST ZUNIONSTORE dest={} keys={:?}",
         req.destination, req.keys
@@ -957,8 +984,11 @@ pub async fn sortedset_stats(
 /// GET /sortedset/:key/:member/zrevrank - Get reverse rank of member
 pub async fn sortedset_zrevrank(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((key, member)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
     debug!("REST ZREVRANK key={} member={}", key, member);
 
     let member_bytes = member.as_bytes();
@@ -970,9 +1000,12 @@ pub async fn sortedset_zrevrank(
 /// GET /sortedset/:key/zcount - Count members in score range
 pub async fn sortedset_zcount(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
     let min: f64 = params
         .get("min")
         .and_then(|s| s.parse().ok())
@@ -992,9 +1025,12 @@ pub async fn sortedset_zcount(
 /// POST /sortedset/:key/zmscore - Get multiple scores
 pub async fn sortedset_zmscore(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ZRemRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
     debug!("REST ZMSCORE key={} members={:?}", key, req.members);
 
     let members: Result<Vec<Vec<u8>>, _> = req.members.iter().map(serde_json::to_vec).collect();
@@ -1009,9 +1045,12 @@ pub async fn sortedset_zmscore(
 /// GET /sortedset/:key/zrangebyscore - Get range by score
 pub async fn sortedset_zrangebyscore(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
     let min: f64 = params
         .get("min")
         .and_then(|s| s.parse().ok())
@@ -1040,9 +1079,12 @@ pub async fn sortedset_zrangebyscore(
 /// POST /sortedset/:key/zpopmin - Pop minimum scored members
 pub async fn sortedset_zpopmin(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Write)?;
+
     let count: usize = params
         .get("count")
         .and_then(|s| s.parse().ok())
@@ -1060,9 +1102,12 @@ pub async fn sortedset_zpopmin(
 /// POST /sortedset/:key/zpopmax - Pop maximum scored members
 pub async fn sortedset_zpopmax(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Write)?;
+
     let count: usize = params
         .get("count")
         .and_then(|s| s.parse().ok())
@@ -1080,9 +1125,12 @@ pub async fn sortedset_zpopmax(
 /// POST /sortedset/:key/zremrangebyrank - Remove members by rank range
 pub async fn sortedset_zremrangebyrank(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Delete)?;
+
     let start: i64 = params
         .get("start")
         .and_then(|s| s.parse().ok())
@@ -1105,9 +1153,12 @@ pub async fn sortedset_zremrangebyrank(
 /// POST /sortedset/:key/zremrangebyscore - Remove members by score range
 pub async fn sortedset_zremrangebyscore(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Delete)?;
+
     let min: f64 = params
         .get("min")
         .and_then(|s| s.parse().ok())
@@ -1127,8 +1178,14 @@ pub async fn sortedset_zremrangebyscore(
 /// POST /sortedset/zdiffstore - Difference store
 pub async fn sortedset_zdiffstore(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Json(req): Json<ZInterstoreRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &req.destination, Action::Write)?;
+    for key in &req.keys {
+        require_resource_permission(&ctx, "sortedset:", key, Action::Read)?;
+    }
+
     debug!(
         "REST ZDIFFSTORE dest={} keys={:?}",
         req.destination, req.keys

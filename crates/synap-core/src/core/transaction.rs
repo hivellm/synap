@@ -150,6 +150,9 @@ pub struct Transaction {
     /// Timestamp when transaction started
     #[allow(dead_code)]
     pub started_at: u64,
+    /// Set when a command could not be queued (e.g. it was denied): `EXEC`
+    /// then fails without applying anything, like Redis `EXECABORT`.
+    aborted: Option<String>,
 }
 
 impl Transaction {
@@ -163,6 +166,14 @@ impl Transaction {
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
+            aborted: None,
+        }
+    }
+
+    /// Mark the transaction so `EXEC` refuses to run it. The first reason wins.
+    pub fn abort(&mut self, reason: impl Into<String>) {
+        if self.aborted.is_none() {
+            self.aborted = Some(reason.into());
         }
     }
 
@@ -395,6 +406,13 @@ impl TransactionManager {
                 SynapError::InvalidRequest("No transaction in progress".to_string())
             })?
         };
+
+        if let Some(reason) = &transaction.aborted {
+            debug!("EXEC refused: transaction aborted ({})", reason);
+            return Err(SynapError::InvalidRequest(format!(
+                "EXECABORT Transaction discarded because of a previous error: {reason}"
+            )));
+        }
 
         // Serialize the whole check-and-apply: hold the EXEC lock so no other
         // transaction interleaves and the WATCH check is atomic with execution.
@@ -642,6 +660,19 @@ impl TransactionManager {
             Ok(true)
         } else {
             Ok(false)
+        }
+    }
+
+    /// Abort the open transaction of `client_id`, if any, so its `EXEC` fails
+    /// without applying a single command. Returns whether one was open.
+    pub fn abort(&self, client_id: &str, reason: impl Into<String>) -> bool {
+        let mut transactions = self.transactions.write();
+        match transactions.get_mut(client_id) {
+            Some(transaction) => {
+                transaction.abort(reason);
+                true
+            }
+            None => false,
         }
     }
 
@@ -1043,5 +1074,39 @@ mod tests {
         manager.update_key_version("w");
 
         assert!(manager.exec(cid).await.unwrap().is_none());
+    }
+
+    /// A transaction with a refused command applies nothing at EXEC.
+    #[tokio::test]
+    async fn aborted_transaction_applies_nothing() {
+        let kv_store = Arc::new(KVStore::new(super::super::types::KVConfig::default()));
+        let manager = TransactionManager::new(
+            kv_store.clone(),
+            Arc::new(HashStore::new()),
+            Arc::new(ListStore::new()),
+            Arc::new(SetStore::new()),
+            Arc::new(SortedSetStore::new()),
+        );
+
+        manager.multi("c1".to_string()).unwrap();
+        manager
+            .queue_command_if_transaction(
+                "c1",
+                TransactionCommand::KVSet {
+                    key: "a".to_string(),
+                    value: b"1".to_vec(),
+                    ttl: None,
+                },
+            )
+            .unwrap();
+        assert!(manager.abort("c1", "NOPERM no 'write' permission on 'kv:b'"));
+        assert!(!manager.abort("no-such-client", "irrelevant"));
+
+        let err = manager.exec("c1").await.unwrap_err().to_string();
+        assert!(err.contains("EXECABORT"), "{err}");
+        assert!(err.contains("kv:b"), "{err}");
+        assert_eq!(kv_store.get("a").await.unwrap(), None);
+        // The aborted transaction is gone; a new one can start.
+        manager.multi("c1".to_string()).unwrap();
     }
 }

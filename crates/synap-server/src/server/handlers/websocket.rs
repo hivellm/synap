@@ -12,6 +12,7 @@ use super::*;
 /// semantics.
 pub async fn kv_websocket(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     ws: WebSocketUpgrade,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
@@ -29,9 +30,19 @@ pub async fn kv_websocket(
 
     // Parse keys from query params
     let keys_str = params.get("keys").cloned().unwrap_or_default();
-    let channels: Vec<String> = keys_str
-        .split(',')
-        .filter(|s| !s.is_empty())
+    let keys: Vec<&str> = keys_str.split(',').filter(|s| !s.is_empty()).collect();
+
+    // Watching a key delivers its value: it needs read access to the key.
+    let accesses: Vec<crate::auth::Access> = keys
+        .iter()
+        .map(|key| crate::auth::Access::new(format!("kv:{key}"), Action::Read))
+        .collect();
+    if let Err(e) = crate::auth::require_access(&ctx, &accesses) {
+        return e.into_response();
+    }
+
+    let channels: Vec<String> = keys
+        .iter()
         .map(|key| format!("__watch@0__:{key}"))
         .collect();
 
@@ -67,10 +78,21 @@ pub async fn kv_websocket(
 /// GET /queue/:name/ws/:consumer_id
 pub async fn queue_websocket(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((queue_name, consumer_id)): Path<(String, String)>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> AxumResponse {
+    // The socket consumes (read) and accepts ACK/NACK frames (write).
+    let resource = format!("queue:{queue_name}");
+    let accesses = [
+        crate::auth::Access::new(resource.clone(), Action::Read),
+        crate::auth::Access::new(resource, Action::Write),
+    ];
+    if let Err(e) = crate::auth::require_access(&ctx, &accesses) {
+        return e.into_response();
+    }
+
     let queue_manager = match state.queue_manager.as_ref() {
         Some(qm) => qm.clone(),
         None => {
@@ -234,11 +256,16 @@ pub(super) async fn handle_queue_socket(
 /// GET /stream/:room/ws/:subscriber_id?from_offset=0
 pub async fn stream_websocket(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((room_name, subscriber_id)): Path<(String, String)>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> AxumResponse {
+    if let Err(e) = require_resource_permission(&ctx, "stream:", &room_name, Action::Read) {
+        return e.into_response();
+    }
+
     let stream_manager = match state.stream_manager.as_ref() {
         Some(sm) => sm.clone(),
         None => {
@@ -415,6 +442,7 @@ pub(super) async fn handle_stream_socket(socket: WebSocket, params: StreamSocket
 /// GET /pubsub/ws?topics=topic1,topic2,*.wildcard
 pub async fn pubsub_websocket(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     ws: WebSocketUpgrade,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
@@ -437,6 +465,14 @@ pub async fn pubsub_websocket(
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string())
         .collect();
+
+    let accesses: Vec<crate::auth::Access> = topics
+        .iter()
+        .flat_map(|topic| crate::auth::pubsub_topic_access(topic, Action::Read))
+        .collect();
+    if let Err(e) = crate::auth::require_access(&ctx, &accesses) {
+        return e.into_response();
+    }
 
     if topics.is_empty() {
         return (

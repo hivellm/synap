@@ -83,6 +83,21 @@ pub fn require_resource_permission(
     require_permission(ctx, &resource, action)
 }
 
+/// Require every access in `accesses` — the check REST handlers share with the
+/// envelope and the native protocols, for operations that touch several
+/// resources (e.g. a pub/sub topic that is also an internal key channel).
+pub fn require_access(
+    ctx: &AuthContext,
+    accesses: &[super::Access],
+) -> Result<(), crate::core::SynapError> {
+    if ctx.is_admin {
+        return Ok(());
+    }
+    super::OperationContext::from_auth_context(ctx)
+        .authorize(accesses)
+        .map_err(|denied| crate::core::SynapError::Forbidden(denied.to_string()))
+}
+
 /// Helper function to require authentication
 ///
 /// Returns a SynapError::Unauthorized with 401 Unauthorized status

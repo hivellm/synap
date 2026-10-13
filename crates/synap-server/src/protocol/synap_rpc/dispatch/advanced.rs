@@ -1,4 +1,5 @@
 use super::{AppState, SynapValue, arg_bytes, arg_float, arg_int, arg_str};
+use crate::auth::OperationContext;
 
 /// Serialize a `Vec<GeospatialRadiusResult>` — `(member, dist?, coord?)` — to a
 /// `SynapValue::Array`.  Each element is an Array:
@@ -35,6 +36,7 @@ fn geo_results_to_value(
 
 pub(super) async fn run(
     state: &AppState,
+    caller: &OperationContext,
     command: &str,
     args: &[SynapValue],
 ) -> Result<SynapValue, String> {
@@ -1085,6 +1087,7 @@ pub(super) async fn run(
                 list_store: state.list_store.clone(),
                 set_store: state.set_store.clone(),
                 sorted_set_store: state.sorted_set_store.clone(),
+                caller: std::sync::Arc::new(caller.clone()),
             };
             state
                 .script_manager
@@ -1112,6 +1115,7 @@ pub(super) async fn run(
                 list_store: state.list_store.clone(),
                 set_store: state.set_store.clone(),
                 sorted_set_store: state.sorted_set_store.clone(),
+                caller: std::sync::Arc::new(caller.clone()),
             };
             state
                 .script_manager

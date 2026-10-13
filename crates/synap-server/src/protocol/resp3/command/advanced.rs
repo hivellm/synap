@@ -1,4 +1,5 @@
 use super::{AppState, Resp3Value, arg_bytes, arg_f64, arg_i64, arg_str, arg_u64, err_wrong_args};
+use crate::auth::OperationContext;
 use crate::core::geospatial::{DistanceUnit, GeoQueryOptions, GeoSearchParams};
 use crate::scripting::ScriptExecContext;
 
@@ -840,7 +841,11 @@ pub(super) async fn cmd_unwatch(state: &AppState, args: &[Resp3Value]) -> Resp3V
 // ── Script commands (3.5) ─────────────────────────────────────────────────────
 
 /// `EVAL <script> <numkeys> [key ...] [arg ...]`
-pub(super) async fn cmd_eval(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+pub(super) async fn cmd_eval(
+    state: &AppState,
+    caller: &OperationContext,
+    args: &[Resp3Value],
+) -> Resp3Value {
     if args.len() < 3 {
         return err_wrong_args("EVAL");
     }
@@ -863,6 +868,7 @@ pub(super) async fn cmd_eval(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         list_store: state.list_store.clone(),
         set_store: state.set_store.clone(),
         sorted_set_store: state.sorted_set_store.clone(),
+        caller: std::sync::Arc::new(caller.clone()),
     };
     match state
         .script_manager
@@ -875,7 +881,11 @@ pub(super) async fn cmd_eval(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
 }
 
 /// `EVALSHA <sha> <numkeys> [key ...] [arg ...]`
-pub(super) async fn cmd_evalsha(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+pub(super) async fn cmd_evalsha(
+    state: &AppState,
+    caller: &OperationContext,
+    args: &[Resp3Value],
+) -> Resp3Value {
     if args.len() < 3 {
         return err_wrong_args("EVALSHA");
     }
@@ -898,6 +908,7 @@ pub(super) async fn cmd_evalsha(state: &AppState, args: &[Resp3Value]) -> Resp3V
         list_store: state.list_store.clone(),
         set_store: state.set_store.clone(),
         sorted_set_store: state.sorted_set_store.clone(),
+        caller: std::sync::Arc::new(caller.clone()),
     };
     match state
         .script_manager

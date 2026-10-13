@@ -7,6 +7,12 @@ use crate::server::handlers::AppState;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// These tests exercise command behaviour, not authorization, so they dispatch
+/// as an unrestricted caller (authentication disabled).
+async fn dispatch(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    super::dispatch(state, &crate::auth::OperationContext::unrestricted(), args).await
+}
+
 fn make_state() -> AppState {
     let kv_store = Arc::new(KVStore::new(KVConfig::default()));
     let hash_store = Arc::new(HashStore::new());

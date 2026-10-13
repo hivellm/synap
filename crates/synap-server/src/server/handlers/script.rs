@@ -2,14 +2,17 @@ use super::*;
 
 pub async fn script_eval(
     State(state): State<AppState>,
+    AuthContextExtractor(auth): AuthContextExtractor,
     Json(req): Json<EvalScriptRequest>,
 ) -> Result<Json<EvalScriptResponse>, SynapError> {
+    let caller = crate::auth::OperationContext::from_auth_context(&auth);
     let context = ScriptExecContext {
         kv_store: state.kv_store.clone(),
         hash_store: state.hash_store.clone(),
         list_store: state.list_store.clone(),
         set_store: state.set_store.clone(),
         sorted_set_store: state.sorted_set_store.clone(),
+        caller: Arc::new(caller.clone()),
     };
     let args = json_args_to_strings(req.args);
     let timeout = req.timeout_ms.map(Duration::from_millis);
@@ -24,14 +27,17 @@ pub async fn script_eval(
 
 pub async fn script_evalsha(
     State(state): State<AppState>,
+    AuthContextExtractor(auth): AuthContextExtractor,
     Json(req): Json<EvalShaRequest>,
 ) -> Result<Json<EvalScriptResponse>, SynapError> {
+    let caller = crate::auth::OperationContext::from_auth_context(&auth);
     let context = ScriptExecContext {
         kv_store: state.kv_store.clone(),
         hash_store: state.hash_store.clone(),
         list_store: state.list_store.clone(),
         set_store: state.set_store.clone(),
         sorted_set_store: state.sorted_set_store.clone(),
+        caller: Arc::new(caller.clone()),
     };
     let args = json_args_to_strings(req.args);
     let timeout = req.timeout_ms.map(Duration::from_millis);
@@ -49,25 +55,34 @@ pub async fn script_evalsha(
 
 pub async fn script_load(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Json(req): Json<ScriptLoadRequest>,
 ) -> Result<Json<ScriptLoadResponse>, SynapError> {
+    require_permission(&ctx, "script:*", Action::Write)?;
+
     let sha1 = state.script_manager.load_script(&req.script);
     Ok(Json(ScriptLoadResponse { sha1 }))
 }
 
 pub async fn script_exists(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Json(req): Json<ScriptExistsRequest>,
 ) -> Result<Json<ScriptExistsResponse>, SynapError> {
+    require_permission(&ctx, "script:*", Action::Read)?;
+
     let exists = state.script_manager.script_exists(&req.hashes);
     Ok(Json(ScriptExistsResponse { exists }))
 }
 
 pub async fn script_flush(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 
     crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
 ) -> Result<Json<ScriptFlushResponse>, SynapError> {
+    require_permission(&ctx, "admin:*", Action::Admin)?;
+
     // Block in Hub mode - this would flush ALL users' scripts
 
     crate::hub::require_standalone_mode(&hub_ctx)?;
@@ -78,9 +93,12 @@ pub async fn script_flush(
 
 pub async fn script_kill(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 
     crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
 ) -> Result<Json<ScriptKillResponse>, SynapError> {
+    require_permission(&ctx, "admin:*", Action::Admin)?;
+
     // Block in Hub mode - could kill other users' scripts
 
     crate::hub::require_standalone_mode(&hub_ctx)?;
@@ -136,6 +154,7 @@ fn extract_json_list(
 
 pub(super) async fn handle_script_eval_cmd(
     state: &AppState,
+    caller: &crate::auth::OperationContext,
     request: &Request,
 ) -> Result<serde_json::Value, SynapError> {
     let script = request
@@ -158,6 +177,7 @@ pub(super) async fn handle_script_eval_cmd(
         list_store: state.list_store.clone(),
         set_store: state.set_store.clone(),
         sorted_set_store: state.sorted_set_store.clone(),
+        caller: Arc::new(caller.clone()),
     };
 
     let (result, sha1) = state
@@ -170,6 +190,7 @@ pub(super) async fn handle_script_eval_cmd(
 
 pub(super) async fn handle_script_evalsha_cmd(
     state: &AppState,
+    caller: &crate::auth::OperationContext,
     request: &Request,
 ) -> Result<serde_json::Value, SynapError> {
     let sha1 = request
@@ -192,6 +213,7 @@ pub(super) async fn handle_script_evalsha_cmd(
         list_store: state.list_store.clone(),
         set_store: state.set_store.clone(),
         sorted_set_store: state.sorted_set_store.clone(),
+        caller: Arc::new(caller.clone()),
     };
 
     let result = state

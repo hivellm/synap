@@ -108,6 +108,12 @@ async fn sdk_authenticates_on_the_rpc_port() {
     manager
         .create_user("alice", "s3cret-passphrase", false)
         .expect("user is created");
+    manager
+        .create_role(synap_server::auth::Role::data_manager())
+        .expect("role is created");
+    manager
+        .add_user_role("alice", "data_manager")
+        .expect("role is granted");
 
     let mut state = test_helper::create_test_app_state();
     state.user_manager = Some(Arc::new(manager));

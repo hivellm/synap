@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use synap_server::AppState;
-use synap_server::auth::UserManager;
+use synap_server::auth::{Role, UserManager};
 use synap_server::protocol::synap_rpc::server::spawn_synap_rpc_listener;
 use synap_server::protocol::synap_rpc::synap_config;
 use thunder::client::{Client, ClientConfig};
@@ -37,13 +37,20 @@ async fn start_open() -> (Arc<ListenerHandle>, SocketAddr) {
     start(test_helper::create_test_app_state()).await
 }
 
-/// A deployment that enforces credentials, with one admin user.
+/// A deployment that enforces credentials, with one non-admin user allowed to
+/// read and write data structures (but not to run admin commands).
 async fn start_authenticated() -> (Arc<ListenerHandle>, SocketAddr, String) {
     let manager = UserManager::new();
     let password = "s3cret-passphrase";
     manager
         .create_user("alice", password, false)
         .expect("user is created");
+    manager
+        .create_role(Role::data_manager())
+        .expect("role is created");
+    manager
+        .add_user_role("alice", "data_manager")
+        .expect("role is granted");
 
     let mut state = test_helper::create_test_app_state();
     state.user_manager = Some(Arc::new(manager));

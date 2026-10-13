@@ -399,6 +399,58 @@ acl:
 | `Admin` | Administrative operations | Manage users, configure system |
 | `All` | All actions (wildcard) | Full access |
 
+### One Policy on Every Transport
+
+Since 1.4.0, REST, the `/api/v1/command` envelope, RESP3 and SynapRPC all
+authorize a command against the same `(resource, action)` pairs, so a role
+grants exactly the same access whichever transport a client uses. A request is
+allowed only when the caller holds every pair the command touches.
+
+| Data | Resource | Notes |
+|------|----------|-------|
+| Strings / KV | `kv:<key>` | `KEYS`, `SCAN`, `DBSIZE` and KV stats need `kv:*` read |
+| Hashes | `hash:<key>` | |
+| Lists | `list:<key>` | pops are `write`; `RPOPLPUSH` needs write on both lists |
+| Sets | `set:<key>` | `SREM` is `delete` |
+| Sorted sets | `sortedset:<key>` | geospatial indexes are sorted sets, so `GEO*` use it too |
+| HyperLogLog | `hyperloglog:<key>` | `PFMERGE`: write the destination, read the sources |
+| Bitmaps | `bitmap:<key>` | |
+| Queues | `queue:<name>` | create is `configure`; ACK/NACK are `write`; delete and purge are `delete` |
+| Streams | `stream:<room>` | partitioned topics use `stream:<topic>`, consumer groups `stream:group:<id>` |
+| Pub/Sub | `pubsub:<topic>` | subscribe is `read`, publish is `write` |
+| Scripts | `script:*` | `SCRIPT LOAD` is `write`, `SCRIPT EXISTS` is `read` |
+| Server | `admin:*` | `FLUSHALL`/`FLUSHDB`, `SCRIPT FLUSH`/`KILL`, `CONFIG`, `INFO`, slow log, client list: `admin` |
+
+Rules that follow from it:
+
+- **Every key a command touches is checked.** Multi-key commands check each
+  key; commands with a destination check it for `write` and the sources for
+  `read`.
+- **Scripts run as their caller.** `EVAL`/`EVALSHA` need no permission of their
+  own, but every `redis.call` inside is authorized against the caller, so a
+  script cannot reach a key its caller could not.
+- **Transactions are all-or-nothing.** Each queued command is authorized when
+  it is queued; if one is refused, the transaction is aborted and `EXEC` fails
+  with `EXECABORT` without applying anything. `MULTI`, `EXEC`, `DISCARD` and
+  `WATCH` need no permission.
+- **Internal channels carry key data.** Subscribing to `__watch@0__:<key>` or
+  `__keyspace@0__:<key>` also needs `kv:<key>` read, `__keyevent@0__:*` needs
+  `kv:*` read, and a wildcard subscription that could match one of them
+  (`*`, `#`, `__*`) needs `kv:*` read. Publishing to them needs the matching
+  `write`. `KV.WATCH` and `GET /kv/ws` need read on the watched keys.
+- **Unknown commands are denied.** A command without an access policy is
+  refused while authentication is enabled; a test enforces that every command
+  in every dispatcher has one.
+- **Anonymous means no permissions.** With authentication enabled but
+  `require_auth: false`, a REST request without credentials and a RESP3 or
+  SynapRPC connection that never sent `AUTH` hold no permissions: only
+  connection commands (`PING`, `HELLO`, `QUIT`) succeed.
+- **Authentication disabled means unrestricted**, decided by configuration.
+
+Denials answer `403` on REST, `{"success": false, "error": "Forbidden: NOPERM ..."}`
+on the envelope, and a `-NOPERM ...` error on RESP3 and SynapRPC, naming the
+missing grant (e.g. `NOPERM no 'write' permission on 'kv:a'`).
+
 ---
 
 ## Examples

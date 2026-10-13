@@ -202,6 +202,10 @@ name = "app_state_helper"
 required-features = ["full-tests"]
 
 [[test]]
+name = "authorization_matrix_tests"
+required-features = ["full-tests"]
+
+[[test]]
 name = "auth_audit_tests"
 required-features = ["full-tests"]
 

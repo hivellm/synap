@@ -31,7 +31,9 @@ pub async fn pubsub_subscribe(
 
     // Check permission for each topic
     for topic in &req.topics {
-        if require_permission(&ctx, &format!("pubsub:{}", topic), Action::Read).is_err() {
+        if crate::auth::require_access(&ctx, &crate::auth::pubsub_topic_access(topic, Action::Read))
+            .is_err()
+        {
             return Err(Json(serde_json::json!({
                 "error": format!("Insufficient permissions for topic: {}", topic)
             })));
@@ -87,7 +89,12 @@ pub async fn pubsub_publish(
     debug!("POST /pubsub/{}/publish", topic);
 
     // Check permission
-    if require_permission(&ctx, &format!("pubsub:{}", topic), Action::Write).is_err() {
+    if crate::auth::require_access(
+        &ctx,
+        &crate::auth::pubsub_topic_access(&topic, Action::Write),
+    )
+    .is_err()
+    {
         return Err(Json(serde_json::json!({
             "error": format!("Insufficient permissions for topic: {}", topic)
         })));

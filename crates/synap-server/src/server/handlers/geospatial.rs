@@ -90,9 +90,12 @@ pub struct GeospatialSearchRequest {
 /// POST /geospatial/:key/geoadd - Add geospatial locations
 pub async fn geospatial_geoadd(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<GeospatialAddRequest>,
 ) -> Result<Json<GeospatialAddResponse>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Write)?;
+
     debug!(
         "REST GEOADD key={} locations={} nx={} xx={} ch={}",
         key,
@@ -118,9 +121,12 @@ pub async fn geospatial_geoadd(
 /// GET /geospatial/:key/geodist/:member1/:member2 - Calculate distance
 pub async fn geospatial_geodist(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((key, member1, member2)): Path<(String, String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<GeospatialDistResponse>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
     let unit_str = params
         .get("unit")
         .cloned()
@@ -147,9 +153,12 @@ pub async fn geospatial_geodist(
 /// GET /geospatial/:key/georadius - Query within radius
 pub async fn geospatial_georadius(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<GeospatialRadiusResponse>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
     let center_lat: f64 = params
         .get("lat")
         .and_then(|s| s.parse().ok())
@@ -219,9 +228,12 @@ pub async fn geospatial_georadius(
 /// GET /geospatial/:key/georadiusbymember/:member - Query within radius of member
 pub async fn geospatial_georadiusbymember(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((key, member)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<GeospatialRadiusResponse>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
     let radius: f64 = params
         .get("radius")
         .and_then(|s| s.parse().ok())
@@ -282,9 +294,12 @@ pub async fn geospatial_georadiusbymember(
 /// POST /geospatial/:key/geopos - Get coordinates of members
 pub async fn geospatial_geopos(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<GeospatialPosRequest>,
 ) -> Result<Json<GeospatialPosResponse>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
     debug!("REST GEOPOS key={} members={:?}", key, req.members);
 
     let members: Vec<Vec<u8>> = req.members.into_iter().map(|m| m.into_bytes()).collect();
@@ -310,9 +325,12 @@ pub async fn geospatial_geopos(
 /// POST /geospatial/:key/geohash - Get geohash strings
 pub async fn geospatial_geohash(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<GeospatialPosRequest>,
 ) -> Result<Json<GeospatialHashResponse>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
     debug!("REST GEOHASH key={} members={:?}", key, req.members);
 
     let members: Vec<Vec<u8>> = req.members.into_iter().map(|m| m.into_bytes()).collect();
@@ -325,9 +343,12 @@ pub async fn geospatial_geohash(
 /// POST /geospatial/:key/geosearch - Advanced geospatial search
 pub async fn geospatial_geosearch(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<GeospatialSearchRequest>,
 ) -> Result<Json<GeospatialRadiusResponse>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
     debug!(
         "REST GEOSEARCH key={} from_member={:?} from_lonlat={:?}",
         key, req.from_member, req.from_lonlat
@@ -392,7 +413,10 @@ pub async fn geospatial_geosearch(
 /// GET /geospatial/stats - Retrieve geospatial statistics
 pub async fn geospatial_stats(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<crate::core::GeospatialStats>, SynapError> {
+    require_permission(&ctx, "sortedset:*", Action::Read)?;
+
     debug!("REST GEOSPATIAL STATS");
 
     let stats = state.geospatial_store.stats();

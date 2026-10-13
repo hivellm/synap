@@ -297,6 +297,7 @@ pub fn default_unit() -> String {
 
 pub async fn command_handler(
     State(state): State<AppState>,
+    AuthContextExtractor(auth): AuthContextExtractor,
     Json(request): Json<Request>,
 ) -> Result<Json<Response>, SynapError> {
     debug!(
@@ -304,13 +305,33 @@ pub async fn command_handler(
         request.command, request.request_id
     );
 
-    let response = handle_command(state, request).await?;
+    let ctx = crate::auth::OperationContext::from_auth_context(&auth);
+    let response = handle_command(state, &ctx, request).await?;
     Ok(Json(response))
 }
 
-/// Handle individual commands
-async fn handle_command(state: AppState, request: Request) -> Result<Response, SynapError> {
+/// Handle individual commands. Every command is authorized against `ctx`
+/// before it runs, with the same policy as the native protocols.
+async fn handle_command(
+    state: AppState,
+    ctx: &crate::auth::OperationContext,
+    request: Request,
+) -> Result<Response, SynapError> {
     let request_id = request.request_id.clone();
+
+    if let Err(denied) = ctx.authorize_envelope(&request.command, &request.payload) {
+        // A refused write aimed at an open transaction aborts it, so its EXEC
+        // applies nothing rather than the commands that were allowed.
+        if let Some(client_id) = request.payload.get("client_id").and_then(|v| v.as_str()) {
+            state.transaction_manager.abort(client_id, denied.message());
+        }
+        return Ok(Response {
+            success: false,
+            request_id,
+            payload: None,
+            error: Some(SynapError::Forbidden(denied.to_string()).to_string()),
+        });
+    }
 
     let result = match request.command.as_str() {
         "kv.set" => kv_cmd::handle_kv_set_cmd(&state, &request).await,
@@ -484,8 +505,8 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         }
         "sortedset.zmscore" => sorted_set::handle_sortedset_zmscore_cmd(&state, &request).await,
         "sortedset.stats" => sorted_set::handle_sortedset_stats_cmd(&state, &request).await,
-        "script.eval" => script::handle_script_eval_cmd(&state, &request).await,
-        "script.evalsha" => script::handle_script_evalsha_cmd(&state, &request).await,
+        "script.eval" => script::handle_script_eval_cmd(&state, ctx, &request).await,
+        "script.evalsha" => script::handle_script_evalsha_cmd(&state, ctx, &request).await,
         "script.load" => script::handle_script_load_cmd(&state, &request).await,
         "script.exists" => script::handle_script_exists_cmd(&state, &request).await,
         "script.flush" => script::handle_script_flush_cmd(&state, &request).await,

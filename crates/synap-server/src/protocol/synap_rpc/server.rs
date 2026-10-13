@@ -31,12 +31,12 @@ use thunder::server::{
     ServerInfo, Session, spawn_listener,
 };
 
-use crate::auth::User;
+use crate::auth::OperationContext;
 use crate::core::pubsub::Message as PubSubMessage;
 use crate::metrics;
 use crate::server::handlers::AppState;
 
-use super::dispatch::run_command;
+use super::dispatch::{RpcArgs, run_command};
 use super::{SynapValue, synap_config};
 
 /// Commands slower than this are logged at WARN and counted as slow.
@@ -92,25 +92,45 @@ struct SynapDispatch {
 }
 
 impl Dispatch for SynapDispatch {
-    /// The user record resolved once at `AUTH` and carried on the session, so
-    /// the per-command ACL reads memory instead of re-querying the store — and
-    /// judges the identity captured at authentication rather than whatever the
-    /// store holds later.
-    type Identity = User;
+    /// The caller's authorization context, resolved once at `AUTH` and carried
+    /// on the session, so the per-command check reads memory instead of
+    /// re-querying the store — and judges the identity captured at
+    /// authentication rather than whatever the store holds later.
+    type Identity = Arc<OperationContext>;
 
     async fn dispatch(
         &self,
-        session: &Session<User>,
+        session: &Session<Arc<OperationContext>>,
         command: &str,
         args: Vec<SynapValue>,
     ) -> Result<SynapValue, String> {
-        // Per-command ACL (phase6h): destructive/admin commands require an
-        // admin user when auth is enforced. With auth disabled the port is
-        // trusted. Thunder has already gated un-authenticated sessions.
-        if self.state.require_auth && crate::auth::command_requires_admin(command) {
-            let is_admin = session.with_principal(|p| p.is_some_and(|p| p.identity.is_admin));
-            if !is_admin {
-                return Err("NOPERM this command requires admin privileges".to_string());
+        // Authorize the command for the session's identity with the same
+        // resource/action policy as REST and the envelope; admin-only commands
+        // need an admin. Thunder has already gated un-authenticated sessions
+        // when auth is required; one that never authenticated otherwise runs
+        // as anonymous, holding no permissions (unrestricted only with
+        // authentication disabled).
+        let caller = session
+            .with_principal(|p| p.map(|p| Arc::clone(&p.identity)))
+            .unwrap_or_else(|| {
+                Arc::new(OperationContext::for_user(
+                    self.state.user_manager.as_deref(),
+                    None,
+                ))
+            });
+        if !caller.is_unrestricted() {
+            let upper = command.to_ascii_uppercase();
+            if let Err(denied) = caller.authorize_native(&upper, &RpcArgs(&args)) {
+                // A refused TXQUEUE aborts its transaction so the EXEC applies
+                // nothing.
+                if upper == "TXQUEUE"
+                    && let Some(client_id) = args.first().and_then(SynapValue::as_str)
+                {
+                    self.state
+                        .transaction_manager
+                        .abort(client_id, denied.message());
+                }
+                return Err(denied.to_string());
             }
         }
 
@@ -119,7 +139,7 @@ impl Dispatch for SynapDispatch {
         // on a worker thread that then runs another connection's task — which
         // nests unrelated requests and can make the subscriber clone an
         // already-closed span, panicking the worker.
-        let result = run_command(&self.state, command, args)
+        let result = run_command(&self.state, &caller, command, args)
             .instrument(tracing::debug_span!("rpc.req", cmd = %command))
             .await;
 
@@ -134,7 +154,10 @@ impl Dispatch for SynapDispatch {
         result
     }
 
-    async fn authenticate(&self, creds: Credentials) -> Result<Principal<User>, AuthError> {
+    async fn authenticate(
+        &self,
+        creds: Credentials,
+    ) -> Result<Principal<Arc<OperationContext>>, AuthError> {
         // `AUTH <password>` authenticates the default user; `AUTH <user> <pass>`
         // names one. Thunder parses the frame; the credential store stays ours
         // (SRV-012).
@@ -154,7 +177,10 @@ impl Dispatch for SynapDispatch {
         // returns rides the session from here on.
         manager
             .authenticate(&user, &pass)
-            .map(|u| Principal::with_identity(u.username.clone(), u))
+            .map(|u| {
+                let caller = OperationContext::for_user(Some(manager), Some(&u));
+                Principal::with_identity(u.username.clone(), Arc::new(caller))
+            })
             .map_err(|_| AuthError::InvalidCredentials)
     }
 }
@@ -162,7 +188,7 @@ impl Dispatch for SynapDispatch {
 impl SynapDispatch {
     /// Register this connection's push channel with the pubsub router, so
     /// published messages reach it as Thunder push frames (`id == PUSH_ID`).
-    fn bridge_subscription(&self, session: &Session<User>, response: &SynapValue) {
+    fn bridge_subscription(&self, session: &Session<Arc<OperationContext>>, response: &SynapValue) {
         let Some(subscriber_id) = response
             .map_get("subscriber_id")
             .and_then(SynapValue::as_str)

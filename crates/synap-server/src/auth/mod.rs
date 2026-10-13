@@ -1,3 +1,4 @@
+pub mod access;
 pub mod acl;
 pub mod api_key;
 pub mod audit;
@@ -9,11 +10,15 @@ pub mod permission_checker;
 pub mod permissions;
 pub mod user;
 
+pub use access::{
+    Access, CommandArgs, Denied, OperationContext, classify_envelope, classify_native,
+    pubsub_topic_access,
+};
 pub use acl::{Acl, AclRule, ResourceType};
 pub use api_key::{ApiKey, ApiKeyManager};
 pub use audit::{AuditLogEntry, AuditLogManager, AuthEventType};
 pub use extractor::{
-    AuthContextExtractor, require_admin, require_auth, require_permission,
+    AuthContextExtractor, require_access, require_admin, require_auth, require_permission,
     require_resource_permission,
 };
 pub use mcp_context::{clear_auth_context, get_auth_context, set_auth_context, with_auth_context};

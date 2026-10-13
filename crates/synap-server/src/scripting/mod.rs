@@ -10,6 +10,7 @@ use parking_lot::RwLock;
 use sha1::{Digest, Sha1};
 use tokio::time;
 
+use crate::auth::{CommandArgs, OperationContext};
 use crate::core::{
     HashStore, KVStore, ListStore, ScoredMember, SetStore, SortedSetStore, SynapError, ZAddOptions,
 };
@@ -22,6 +23,31 @@ pub struct ScriptExecContext {
     pub list_store: Arc<ListStore>,
     pub set_store: Arc<SetStore>,
     pub sorted_set_store: Arc<SortedSetStore>,
+    /// Whoever ran the script: every `redis.call` is authorized against it,
+    /// exactly as if the caller had sent the command directly.
+    pub caller: Arc<OperationContext>,
+}
+
+/// `redis.call` arguments as text, converted the way the bridge's own
+/// `lua_value_to_string` reads them, so authorization sees every key it uses.
+struct LuaArgs<'a>(&'a [LuaValue]);
+
+impl CommandArgs for LuaArgs<'_> {
+    fn arg_count(&self) -> usize {
+        self.0.len()
+    }
+    fn arg(&self, index: usize) -> Option<std::borrow::Cow<'_, str>> {
+        match self.0.get(index)? {
+            LuaValue::String(s) => Some(std::borrow::Cow::Owned(
+                String::from_utf8_lossy(s.as_bytes().as_ref()).into_owned(),
+            )),
+            LuaValue::Number(n) => Some(std::borrow::Cow::Owned(n.to_string())),
+            LuaValue::Integer(i) => Some(std::borrow::Cow::Owned(i.to_string())),
+            LuaValue::Boolean(b) => Some(std::borrow::Cow::Borrowed(if *b { "1" } else { "0" })),
+            LuaValue::Nil => Some(std::borrow::Cow::Borrowed("")),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -195,6 +221,11 @@ async fn handle_redis_call(
 ) -> Result<LuaValue, mlua::Error> {
     let normalized = command.to_ascii_lowercase();
     let command_name = command.to_ascii_uppercase();
+
+    context
+        .caller
+        .authorize_native(&command_name, &LuaArgs(&args))
+        .map_err(|denied| mlua::Error::RuntimeError(denied.to_string()))?;
 
     match normalized.as_str() {
         "get" => {
@@ -881,6 +912,7 @@ mod tests {
             list_store: Arc::new(ListStore::new()),
             set_store: Arc::new(SetStore::new()),
             sorted_set_store: Arc::new(SortedSetStore::new()),
+            caller: Arc::new(OperationContext::unrestricted()),
         }
     }
 
@@ -982,6 +1014,43 @@ mod tests {
         assert_eq!(val[1], serde_json::json!(2));
         assert_eq!(val[2], serde_json::json!(1));
         assert_eq!(val[3], serde_json::json!(1));
+    }
+
+    /// A script runs with its caller's permissions: a `redis.call` on a key the
+    /// caller may not write fails and leaves the key untouched.
+    #[tokio::test]
+    async fn redis_call_is_authorized_against_the_caller() {
+        use crate::auth::{Action, Permission, Role, UserManager};
+
+        let users = UserManager::new();
+        users
+            .create_role(Role::custom(
+                "x_writer",
+                vec![Permission::new("kv:x", Action::Write)],
+            ))
+            .unwrap();
+        users.create_user("scripter", "scripter123", false).unwrap();
+        users.add_user_role("scripter", "x_writer").unwrap();
+        let user = users.get_user("scripter").unwrap();
+
+        let mut c = ctx();
+        c.caller = Arc::new(OperationContext::for_user(Some(&users), Some(&user)));
+        let mgr = ScriptManager::new(Duration::from_secs(5));
+        let err = mgr
+            .eval(
+                c.clone(),
+                "redis.call('SET', 'x', '1'); return redis.call('SET', 'y', '2')",
+                vec![],
+                vec![],
+                None,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("NOPERM") && err.contains("kv:y"), "{err}");
+        assert_eq!(c.kv_store.get("x").await.unwrap(), Some(b"1".to_vec()));
+        assert_eq!(c.kv_store.get("y").await.unwrap(), None);
     }
 
     #[tokio::test]

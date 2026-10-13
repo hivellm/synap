@@ -147,11 +147,14 @@ pub async fn queue_consume(
 /// ACK message endpoint
 pub async fn queue_ack(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 
     crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(queue_name): Path<String>,
     Json(req): Json<AckRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "queue:", &queue_name, Action::Write)?;
+
     debug!(
         "REST ACK message: {} in queue: {}",
         req.message_id, queue_name
@@ -187,11 +190,14 @@ pub async fn queue_ack(
 /// NACK message endpoint
 pub async fn queue_nack(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 
     crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(queue_name): Path<String>,
     Json(req): Json<NackRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "queue:", &queue_name, Action::Write)?;
+
     debug!(
         "REST NACK message: {} in queue: {}",
         req.message_id, queue_name

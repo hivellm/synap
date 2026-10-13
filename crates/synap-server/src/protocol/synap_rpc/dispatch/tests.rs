@@ -1,5 +1,4 @@
-use super::super::{Request, SynapValue};
-use super::dispatch;
+use super::super::{Request, Response, SynapValue};
 use crate::core::types::KVConfig;
 use crate::core::{GeospatialStore, HashStore, HyperLogLogStore, KVStore, SortedSetStore};
 use crate::monitoring::{ClientListManager, MonitoringManager};
@@ -7,6 +6,13 @@ use crate::scripting::ScriptManager;
 use crate::server::handlers::AppState;
 use std::sync::Arc;
 use std::time::Duration;
+
+/// These tests exercise command behaviour, not authorization, so they dispatch
+/// as an unrestricted caller (authentication disabled).
+async fn dispatch(state: &AppState, req: Request) -> Response {
+    super::dispatch(state, &crate::auth::OperationContext::unrestricted(), req).await
+}
+
 fn make_state() -> AppState {
     let kv_store = Arc::new(KVStore::new(KVConfig::default()));
     let hash_store = Arc::new(HashStore::new());
