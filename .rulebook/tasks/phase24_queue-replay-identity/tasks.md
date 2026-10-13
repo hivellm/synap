@@ -2,9 +2,9 @@
 - [x] 1.1 Add a queue restore primitive that inserts a message with its original ID, priority, retry counters, delivery count and timestamps — `QueueManager::restore_message` (exact message, publish position, no depth check) plus `dump_state`/`restore_queue` (`QueueState`: config, ready, in-flight in delivery order, dead letters); `QueueMessageRecord` keeps `created_at`, which `QueueMessage` serde drops. Synap has no separate delivery counter: `retry_count` counts redeliveries and is restored
 - [x] 1.2 Use the restore primitive for WAL replay of `QueuePublish`, snapshot restore and replica apply — `apply_operation` restores `QueuePublish`/new `QueuePublishFull`; snapshot v5 stores whole queues (v4/v3/v2 still load); new `QueueCreate`/`QueueDelete`/`QueuePurge` records on every transport via `durable`; ACK-deadline requeues recorded as NACKs
 - [x] 1.3 Apply replayed ACK and NACK by message ID in the ready or pending state, tolerating only not-found and failing recovery on any other error — `replay_ack`/`replay_nack`/`remove_messages` + `tolerate_not_found` in `apply.rs`
-- [ ] 1.4 Test WAL-only and snapshot+WAL recovery after ACK, ID stability of unacknowledged messages, and master/replica ID parity through publish, consume and ACK
+- [x] 1.4 Test WAL-only and snapshot+WAL recovery after ACK, ID stability of unacknowledged messages, and master/replica ID parity through publish, consume and ACK — `tests/queue_replay_identity_tests.rs` (9 tests, `full-tests`): also snapshot-already-dropped ACK, lifecycle restart (WAL-only and snapshot), deadline requeue restart, replica parity through NACK/purge/delete
 
 ## 2. Tail (docs + tests — check or waive with tailWaiver)
-- [ ] 2.1 Update or create documentation covering the implementation
-- [ ] 2.2 Write tests covering the new behavior
+- [x] 2.1 Update or create documentation covering the implementation — `docs/specs/PERSISTENCE.md` (Queue Persistence rewritten: records, replay rules, guarantees), `docs/internals/persistence-snapshot-format.md` (v5), `docs/specs/QUEUE_SYSTEM.md` (replication + Durability and Recovery), `docs/users/queues/QUEUES.md` (Durability Across Restarts)
+- [x] 2.2 Write tests covering the new behavior — core queue unit tests (7), apply/durable/snapshot/types unit tests (7), integration suite (9)
 - [ ] 2.3 Run tests and confirm they pass
