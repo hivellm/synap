@@ -73,6 +73,12 @@ migration notes before upgrading.
   refuses to start in Hub mode while RESP3 or SynapRPC is enabled (both are on
   by default), naming the listener, because neither authenticates tenants.
 
+### Changed
+
+- **A WAL with interior corruption stops startup.** A bad frame followed by
+  valid ones used to end the scan silently and lose the history after it;
+  startup now fails with the byte position so an operator can decide.
+
 ### Performance
 
 - **One credential check per MCP request.** `/mcp` carried its own
@@ -81,6 +87,22 @@ migration notes before upgrading.
 
 ### Fixed
 
+- **The WAL keeps what it acknowledges** (review findings D-01, D-02, D-06).
+  - Periodic fsync mode now syncs on its own interval even when the server is
+    idle, and every group of writes reaches the OS before it is acknowledged;
+    Never mode no longer leaves acknowledged writes in the application buffer.
+  - Graceful shutdown (SIGINT/SIGTERM) stops the HTTP server, then drains and
+    fsyncs the WAL before exiting; `PersistenceLayer::flush` is a real awaited
+    barrier instead of a no-op.
+  - A failed WAL write, flush or fsync fails every acknowledgement in its
+    group and poisons the WAL until restart; `GET /health` answers 503 with
+    `"wal": "poisoned"`. `EXEC` over REST, the envelope, MCP, RESP3 and
+    SynapRPC returns an error saying the commit is not durable when its
+    transaction could not be logged (the in-memory effects are not rolled
+    back).
+  - Startup verifies frame checksums and lengths and truncates a torn tail
+    before appending, so writes made after a crash stay recoverable; a corrupt
+    length can no longer trigger a huge allocation.
 - **Replicas can reach the master by hostname.** `replication.master_address`
   accepted only `IP:port`, so the docker-compose replicas could not point at
   the `master` service. It now takes `host:port` with an IP or a DNS name,

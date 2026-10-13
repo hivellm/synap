@@ -219,13 +219,44 @@ pub struct ScriptKillResponse {
     pub terminated: bool,
 }
 
-/// Health check endpoint
-pub async fn health_check() -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "status": "healthy",
-        "service": "synap",
-        "version": env!("CARGO_PKG_VERSION")
-    }))
+/// Health check endpoint.
+///
+/// Reports the WAL as `ok`, `disabled`, or `poisoned`. A poisoned WAL (a write,
+/// flush or fsync failed) refuses every write until the server restarts, so the
+/// endpoint answers 503 with the failure reason, letting a supervisor restart
+/// the process.
+pub async fn health_check(
+    State(state): State<AppState>,
+) -> (axum::http::StatusCode, Json<serde_json::Value>) {
+    let poisoned = state
+        .persistence
+        .as_ref()
+        .and_then(|layer| layer.wal_poison_reason());
+    if let Some(reason) = poisoned {
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "unhealthy",
+                "service": "synap",
+                "version": env!("CARGO_PKG_VERSION"),
+                "wal": "poisoned",
+                "wal_error": reason
+            })),
+        );
+    }
+    let wal = match &state.persistence {
+        Some(layer) if layer.has_wal() => "ok",
+        _ => "disabled",
+    };
+    (
+        axum::http::StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "healthy",
+            "service": "synap",
+            "version": env!("CARGO_PKG_VERSION"),
+            "wal": wal
+        })),
+    )
 }
 
 // Queue REST API types
@@ -591,6 +622,174 @@ async fn handle_command(
                 payload: None,
                 error: Some(e.to_string()),
             })
+        }
+    }
+}
+
+/// AppState with fresh in-memory stores and no persistence, for unit tests.
+#[cfg(test)]
+pub(crate) fn test_app_state() -> AppState {
+    use crate::core::types::KVConfig;
+    let kv_store = Arc::new(KVStore::new(KVConfig::default()));
+    let hash_store = Arc::new(HashStore::new());
+    let list_store = Arc::new(crate::core::ListStore::new());
+    let set_store = Arc::new(crate::core::SetStore::new());
+    let sorted_set_store = Arc::new(SortedSetStore::new());
+    AppState {
+        monitoring: Arc::new(crate::monitoring::MonitoringManager::new(
+            kv_store.clone(),
+            hash_store.clone(),
+            list_store.clone(),
+            set_store.clone(),
+            sorted_set_store.clone(),
+        )),
+        transaction_manager: Arc::new(TransactionManager::new(
+            kv_store.clone(),
+            hash_store.clone(),
+            list_store.clone(),
+            set_store.clone(),
+            sorted_set_store.clone(),
+        )),
+        hyperloglog_store: Arc::new(HyperLogLogStore::new()),
+        bitmap_store: Arc::new(crate::core::BitmapStore::new()),
+        geospatial_store: Arc::new(GeospatialStore::new(sorted_set_store.clone())),
+        kv_store,
+        hash_store,
+        list_store,
+        set_store,
+        sorted_set_store,
+        queue_manager: None,
+        stream_manager: None,
+        partition_manager: None,
+        consumer_group_manager: None,
+        pubsub_router: None,
+        persistence: None,
+        script_manager: Arc::new(ScriptManager::new(Duration::from_secs(5))),
+        client_list_manager: Arc::new(crate::monitoring::ClientListManager::new()),
+        cluster_topology: None,
+        cluster_migration: None,
+        hub_client: None,
+        user_manager: None,
+        require_auth: false,
+        replication: None,
+    }
+}
+
+#[cfg(test)]
+mod wal_failure_tests {
+    use super::*;
+    use crate::core::TransactionCommand;
+    use crate::persistence::layer::test_support::faulty_layer;
+
+    fn admin() -> AuthContextExtractor {
+        AuthContextExtractor(crate::auth::AuthContext {
+            user_id: None,
+            api_key_id: None,
+            client_ip: std::net::IpAddr::from([127, 0, 0, 1]),
+            permissions: vec![],
+            is_admin: true,
+        })
+    }
+
+    async fn rest_set(state: &AppState, key: &str) -> Result<Json<SetResponse>, SynapError> {
+        let req: SetRequest = serde_json::from_value(json!({"key": key, "value": "v"})).unwrap();
+        kv_set(
+            State(state.clone()),
+            admin(),
+            crate::hub::HubContextExtractor(None),
+            Json(req),
+        )
+        .await
+    }
+
+    /// Queue one SET inside a transaction for `client_id`.
+    fn queue_set(state: &AppState, client_id: &str) {
+        state
+            .transaction_manager
+            .multi(client_id.to_string())
+            .unwrap();
+        state
+            .transaction_manager
+            .queue_command_if_transaction(
+                client_id,
+                TransactionCommand::KVSet {
+                    key: "tx:k".into(),
+                    value: b"v".to_vec(),
+                    ttl: None,
+                },
+            )
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn health_is_ok_with_a_healthy_wal() {
+        let (status, Json(body)) = health_check(State(test_app_state())).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(body["status"], "healthy");
+        assert_eq!(body["wal"], "disabled");
+
+        let mut state = test_app_state();
+        state.persistence = Some(faulty_layer("health_ok").await.0);
+        let (status, Json(body)) = health_check(State(state)).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(body["wal"], "ok");
+    }
+
+    /// Spec "Injected fsync failure": in Always mode a write whose fsync fails
+    /// returns an error, the next write fails too, and /health reports it.
+    #[tokio::test]
+    async fn fsync_failure_fails_writes_and_health() {
+        let mut state = test_app_state();
+        let (layer, faults) = faulty_layer("rest_fsync").await;
+        state.persistence = Some(layer);
+        assert!(rest_set(&state, "before").await.is_ok());
+
+        faults.fail_next_sync();
+        assert!(rest_set(&state, "lost").await.is_err());
+        assert!(rest_set(&state, "next").await.is_err());
+
+        let (status, Json(body)) = health_check(State(state)).await;
+        assert_eq!(status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["status"], "unhealthy");
+        assert_eq!(body["wal"], "poisoned");
+        assert!(body["wal_error"].as_str().unwrap().contains("fsync failed"));
+    }
+
+    #[tokio::test]
+    async fn rest_exec_reports_a_transaction_the_wal_could_not_log() {
+        let mut state = test_app_state();
+        let (layer, faults) = faulty_layer("rest_exec").await;
+        state.persistence = Some(layer);
+        queue_set(&state, "rest_client");
+
+        faults.fail_next_flush();
+        match transaction_exec(State(state)).await {
+            Err(SynapError::InternalError(message)) => {
+                assert!(message.contains("not durable"), "{message}")
+            }
+            Err(other) => panic!("unexpected error {other:?}"),
+            Ok(_) => panic!("EXEC must fail when the WAL rejects it"),
+        }
+    }
+
+    #[tokio::test]
+    async fn envelope_exec_reports_a_transaction_the_wal_could_not_log() {
+        let mut state = test_app_state();
+        let (layer, faults) = faulty_layer("envelope_exec").await;
+        state.persistence = Some(layer);
+        queue_set(&state, "envelope_client");
+
+        faults.fail_next_flush();
+        let request = Request {
+            command: "transaction.exec".into(),
+            request_id: "r1".into(),
+            payload: json!({"client_id": "envelope_client"}),
+        };
+        match admin_cmd::handle_transaction_exec_cmd(state, &request).await {
+            Err(SynapError::InternalError(message)) => {
+                assert!(message.contains("not durable"), "{message}")
+            }
+            other => panic!("EXEC must fail when the WAL rejects it, got {other:?}"),
         }
     }
 }

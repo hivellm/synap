@@ -14,7 +14,7 @@ use std::time::Duration;
 use synap_server::auth::{ApiKeyManager, UserManager};
 use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
 use synap_server::monitoring::{ClientListManager, MonitoringManager};
-use synap_server::persistence::{PersistenceLayer, recover};
+use synap_server::persistence::{PersistenceError, PersistenceLayer, recover};
 use synap_server::replication::NodeRole;
 use synap_server::{
     AppState, ConsumerGroupConfig, ConsumerGroupManager, KVStore, PartitionConfig,
@@ -375,6 +375,12 @@ async fn main() -> Result<()> {
                     offset,
                 )
             }
+            // Interior WAL corruption: starting fresh would hide acknowledged
+            // history and append after the damage. Refuse to start instead.
+            Err(e @ PersistenceError::WALInteriorCorruption { .. }) => {
+                error!("Recovery failed: {}", e);
+                return Err(anyhow::anyhow!("refusing to start: {e}"));
+            }
             Err(e) => {
                 warn!("Recovery failed: {}, starting fresh", e);
                 (
@@ -549,6 +555,10 @@ async fn main() -> Result<()> {
                 // The background snapshot task is started later, once every
                 // store (hash/list/set/sorted-set) has been constructed.
                 Some(Arc::new(layer))
+            }
+            Err(e @ PersistenceError::WALInteriorCorruption { .. }) => {
+                error!("Failed to initialize persistence: {}", e);
+                return Err(anyhow::anyhow!("refusing to start: {e}"));
             }
             Err(e) => {
                 warn!("Failed to initialize persistence: {}", e);
@@ -835,6 +845,9 @@ async fn main() -> Result<()> {
         None
     };
 
+    // Kept for the graceful-shutdown WAL drain after the router owns the state.
+    let shutdown_persistence = persistence.clone();
+
     // Create application state with persistence and streams
     let app_state = AppState {
         kv_store,
@@ -926,9 +939,80 @@ async fn main() -> Result<()> {
     let addr: SocketAddr = config.server_addr().parse()?;
     info!("Listening on http://{}", addr);
 
-    // Start server
+    // Start server. On SIGINT/SIGTERM stop accepting, let in-flight HTTP
+    // requests finish (bounded by SHUTDOWN_DRAIN_TIMEOUT so a long-lived
+    // connection cannot block exit), then drain and fsync the WAL.
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    let signalled = Arc::new(tokio::sync::Notify::new());
+    let server = axum::serve(listener, app)
+        .with_graceful_shutdown({
+            let signalled = Arc::clone(&signalled);
+            async move {
+                shutdown_signal().await;
+                signalled.notify_one();
+            }
+        })
+        .into_future();
+    let served = tokio::select! {
+        result = server => result,
+        _ = async {
+            signalled.notified().await;
+            tokio::time::sleep(SHUTDOWN_DRAIN_TIMEOUT).await;
+        } => {
+            warn!(
+                "HTTP connections still open {:?} after the shutdown signal; closing the WAL anyway",
+                SHUTDOWN_DRAIN_TIMEOUT
+            );
+            Ok(())
+        }
+    };
+
+    // Drain the WAL whatever the HTTP server's outcome.
+    if let Some(layer) = shutdown_persistence {
+        layer.shutdown().await.map_err(|e| {
+            error!("WAL shutdown drain failed: {}", e);
+            anyhow::anyhow!("WAL shutdown drain failed: {e}")
+        })?;
+        info!("WAL flushed and fsynced");
+    }
+    served?;
+    info!("Synap server stopped");
 
     Ok(())
+}
+
+/// How long graceful shutdown waits for in-flight HTTP requests before it
+/// drains the WAL regardless.
+const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Resolve on SIGINT (Ctrl-C) or, on Unix, SIGTERM.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            error!("Cannot listen for Ctrl-C: {}", e);
+            std::future::pending::<()>().await;
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                sigterm.recv().await;
+            }
+            Err(e) => {
+                error!("Cannot listen for SIGTERM: {}", e);
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
+    info!("Shutdown signal received, draining connections and the WAL");
 }

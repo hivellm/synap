@@ -570,13 +570,36 @@ Time: 1-5 seconds
 ### Crash Recovery
 
 ```
-1. Detect incomplete WAL entry
-2. Load latest valid snapshot
-3. Replay WAL up to last valid entry
-4. Discard incomplete entry
-5. Resume operations
+1. Scan the WAL: verify each frame's length (must fit in the file) and CRC32
+2. First invalid frame with no valid frame after it (torn tail):
+   truncate the file to the last valid frame before anything is appended
+3. First invalid frame followed by a valid frame (interior corruption):
+   fail startup with the byte position of the bad frame
+4. Load latest valid snapshot
+5. Replay WAL from the snapshot offset
+6. Resume operations
 Time: 1-10 seconds
 ```
+
+The scanner lives in `persistence/wal_frame.rs` and is shared by the async WAL
+and the recovery WAL. A corrupt length that hides the next frame boundary is
+handled by searching the rest of the file byte by byte for a valid frame.
+
+### WAL Write Failures
+
+A failed write, flush or fsync fails every acknowledgement in its group commit
+and poisons the async WAL writer: every later append fails until restart, and
+`GET /health` answers 503 with `"wal": "poisoned"`. Every EXEC entry point
+returns an error when its transaction could not be logged; the in-memory
+effects are not rolled back.
+
+### Graceful Shutdown
+
+SIGINT/SIGTERM stop the HTTP listener, wait up to 5 seconds for in-flight
+requests, then flush and fsync the WAL and stop its writer, so nothing logged
+afterwards is acknowledged. `PersistenceLayer::flush` is an awaited barrier:
+it returns once every earlier entry reached the OS (and the disk unless
+`fsync_mode` is `never`).
 
 ### Corrupted Snapshot
 

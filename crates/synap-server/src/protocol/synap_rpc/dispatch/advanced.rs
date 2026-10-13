@@ -1017,10 +1017,15 @@ pub(super) async fn run(
                 Ok(None) => Ok(SynapValue::Null),
                 Ok(Some((results, writes))) => {
                     // Persist + replicate the whole transaction atomically (M-010).
+                    // A commit that could not be logged is not durable: report it.
                     if let Some(ref persistence) = state.persistence
                         && let Err(e) = persistence.log_transaction(&writes).await
                     {
                         tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
+                        return Err(format!(
+                            "ERR {}",
+                            crate::persistence::layer::exec_not_durable_message(&e)
+                        ));
                     }
                     Ok(SynapValue::Array(
                         results

@@ -1,5 +1,5 @@
 use super::apply::{StoreArcs, StoreRefs};
-use super::types::{FsyncMode, Operation, PersistenceConfig};
+use super::types::{FsyncMode, Operation, PersistenceConfig, PersistenceError};
 use super::{AsyncWAL, SnapshotManager};
 use crate::core::sorted_set::ZAddOptions;
 use parking_lot::RwLock;
@@ -41,20 +41,31 @@ impl PersistenceLayer {
         replication_master: Option<Arc<crate::replication::MasterNode>>,
     ) -> super::types::Result<Self> {
         let wal = if config.enabled && config.wal.enabled {
-            Some(Arc::new(AsyncWAL::open(config.wal.clone()).await?))
+            Some(AsyncWAL::open(config.wal.clone()).await?)
         } else {
             None
         };
+        Ok(Self::with_wal(config, wal, replication_master))
+    }
+
+    /// Build a layer around an already-open WAL (or none). This is the seam for
+    /// a WAL opened with [`AsyncWAL::open_with_sink`], e.g. to inject flush and
+    /// fsync failures in tests.
+    pub fn with_wal(
+        config: PersistenceConfig,
+        wal: Option<AsyncWAL>,
+        replication_master: Option<Arc<crate::replication::MasterNode>>,
+    ) -> Self {
         let snapshot_mgr = SnapshotManager::new(config.snapshot.clone());
 
-        Ok(Self {
-            wal,
+        Self {
+            wal: wal.map(Arc::new),
             snapshot_mgr: Arc::new(snapshot_mgr),
             config,
             last_snapshot: Arc::new(RwLock::new(Instant::now())),
             operations_since_snapshot: Arc::new(RwLock::new(0)),
             replication_master,
-        })
+        }
     }
 
     /// Propagate an operation to connected replicas when running as master.
@@ -596,10 +607,72 @@ impl PersistenceLayer {
             .await
     }
 
-    /// No explicit flush needed with AsyncWAL (group commit handles it)
+    /// Wait until every operation logged before this call has reached the OS,
+    /// and stable storage too unless the fsync mode is `Never`. Fails when the
+    /// WAL is poisoned. A no-op without a WAL.
     pub async fn flush(&self) -> super::types::Result<()> {
-        // AsyncWAL handles batching and flushing automatically
-        Ok(())
+        match &self.wal {
+            Some(wal) => wal.flush().await,
+            None => Ok(()),
+        }
+    }
+
+    /// Graceful-shutdown drain: flush and fsync every logged operation, then
+    /// stop the WAL writer so nothing logged afterwards is acknowledged.
+    /// A no-op without a WAL.
+    pub async fn shutdown(&self) -> super::types::Result<()> {
+        match &self.wal {
+            Some(wal) => wal.shutdown().await,
+            None => Ok(()),
+        }
+    }
+
+    /// Why the WAL writer is poisoned (a write, flush or fsync failed), or
+    /// `None` while it is healthy or there is no WAL. A poisoned WAL refuses
+    /// every write until the server restarts.
+    pub fn wal_poison_reason(&self) -> Option<String> {
+        self.wal.as_ref().and_then(|wal| wal.poison_reason())
+    }
+
+    /// Whether this layer writes a WAL (persistence and WAL both enabled).
+    pub fn has_wal(&self) -> bool {
+        self.wal.is_some()
+    }
+}
+
+/// Error text every EXEC entry point returns when the committed transaction
+/// could not be logged. The effects are already applied in memory and are not
+/// rolled back; the message says so, because the commit is not durable.
+pub fn exec_not_durable_message(err: &PersistenceError) -> String {
+    format!(
+        "transaction applied in memory but could not be logged to the WAL, so the commit is not durable and the effects are not rolled back: {err}"
+    )
+}
+
+/// Shared test helpers for code that needs a WAL that fails on demand.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use crate::persistence::wal_async::fault::Faults;
+    use std::path::PathBuf;
+
+    /// An Always-mode, WAL-backed layer whose sink fails the next flush or
+    /// fsync when told to through the returned [`Faults`].
+    pub(crate) async fn faulty_layer(name: &str) -> (Arc<PersistenceLayer>, Faults) {
+        let dir = format!("./target/faulty_layer_{name}");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut config = PersistenceConfig::default();
+        config.wal.fsync_mode = FsyncMode::Always;
+        config.wal.path = PathBuf::from(format!("{dir}/wal.log"));
+        config.snapshot.enabled = false;
+        config.snapshot.directory = PathBuf::from(format!("{dir}/snap"));
+        let faults = Faults::default();
+        let wrap = faults.clone();
+        let wal = AsyncWAL::open_with_sink(config.wal.clone(), move |sink| wrap.wrap(sink))
+            .await
+            .unwrap();
+        let layer = PersistenceLayer::with_wal(config, Some(wal), None);
+        (Arc::new(layer), faults)
     }
 }
 
@@ -799,6 +872,28 @@ mod tests {
             .log_transaction(&all_committed_writes())
             .await
             .unwrap();
+    }
+
+    /// A transaction whose WAL flush fails returns an error, poisons the WAL,
+    /// and every later log call fails too.
+    #[tokio::test]
+    async fn log_transaction_fails_when_the_wal_flush_fails() {
+        let (layer, faults) = test_support::faulty_layer("txn_flush_fail").await;
+
+        faults.fail_next_flush();
+        let err = layer
+            .log_transaction(&all_committed_writes())
+            .await
+            .unwrap_err();
+        assert!(exec_not_durable_message(&err).contains("not durable"));
+        assert!(layer.wal_poison_reason().unwrap().contains("flush failed"));
+        assert!(
+            layer
+                .log_kv_set("k".into(), b"v".to_vec(), None)
+                .await
+                .is_err()
+        );
+        assert!(layer.flush().await.is_err());
     }
 
     /// A transaction logged with WAL enabled is recovered as its effects.

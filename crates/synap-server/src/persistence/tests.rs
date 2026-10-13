@@ -410,3 +410,132 @@ async fn test_snapshot_cleanup_old() {
     // Cleanup
     let _ = tokio::fs::remove_dir_all(&snapshot_dir).await;
 }
+
+/// Persistence config rooted at a fresh `./target/<name>` directory.
+fn restart_config(name: &str) -> types::PersistenceConfig {
+    let dir = format!("./target/{name}");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(format!("{dir}/snap")).unwrap();
+    let mut config = types::PersistenceConfig::default();
+    config.wal.fsync_mode = types::FsyncMode::Always;
+    config.wal.path = std::path::PathBuf::from(format!("{dir}/wal.log"));
+    config.snapshot.enabled = false;
+    config.snapshot.directory = std::path::PathBuf::from(format!("{dir}/snap"));
+    config
+}
+
+/// One server lifetime: recover, log one SET through the WAL, shut down.
+async fn run_server_and_set(config: &types::PersistenceConfig, key: &str) -> KVStore {
+    let (kv, ..) = recover(config, KVConfig::default(), QueueConfig::default())
+        .await
+        .unwrap();
+    let layer = PersistenceLayer::new(config.clone()).await.unwrap();
+    layer
+        .log_kv_set(key.to_string(), key.as_bytes().to_vec(), None)
+        .await
+        .unwrap();
+    layer.shutdown().await.unwrap();
+    kv
+}
+
+/// Spec "Torn tail then new writes": for every torn-tail shape, the first
+/// restart truncates the tail and acknowledges a new write; the second restart
+/// recovers every frame before the torn one plus the new write.
+#[tokio::test]
+async fn torn_tail_then_new_writes_survive_two_restarts() {
+    let torn_frame = wal_frame::encode_frame(&types::WALEntry {
+        offset: 99,
+        timestamp: 0,
+        operation: types::Operation::KVSet {
+            key: "torn".into(),
+            value: b"torn".to_vec(),
+            ttl: None,
+        },
+    })
+    .unwrap();
+    let mut huge_length = (1u64 << 60).to_be_bytes().to_vec();
+    huge_length.extend_from_slice(&[0x5A; 64]);
+    let shapes: Vec<(&str, Vec<u8>)> = vec![
+        ("partial_length", torn_frame[..4].to_vec()),
+        ("partial_checksum", torn_frame[..10].to_vec()),
+        (
+            "partial_payload",
+            torn_frame[..torn_frame.len() / 2].to_vec(),
+        ),
+        ("corrupt_huge_length", huge_length),
+    ];
+
+    for (shape, tail) in shapes {
+        let config = restart_config(&format!("restart_torn_{shape}"));
+        run_server_and_set(&config, "first").await;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&config.wal.path)
+            .unwrap();
+        std::io::Write::write_all(&mut file, &tail).unwrap();
+        drop(file);
+
+        // Restart 1: the torn tail is truncated before anything is appended.
+        let kv = run_server_and_set(&config, "second").await;
+        assert_eq!(
+            kv.get("first").await.unwrap(),
+            Some(b"first".to_vec()),
+            "{shape}"
+        );
+
+        // Restart 2: both writes recover and the file is clean.
+        let (kv, ..) = recover(&config, KVConfig::default(), QueueConfig::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            kv.get("first").await.unwrap(),
+            Some(b"first".to_vec()),
+            "{shape}"
+        );
+        assert_eq!(
+            kv.get("second").await.unwrap(),
+            Some(b"second".to_vec()),
+            "{shape}"
+        );
+        assert_eq!(kv.get("torn").await.unwrap(), None, "{shape}");
+        let report = wal_frame::scan(&config.wal.path, |_| {}).unwrap();
+        assert_eq!(report.end, wal_frame::ScanEnd::Clean, "{shape}");
+        assert_eq!(report.valid_frames, 2, "{shape}");
+    }
+}
+
+/// Spec "Interior corruption": a checksum mismatch followed by valid frames
+/// fails recovery and the WAL open with the bad frame's byte position.
+#[tokio::test]
+async fn interior_corruption_fails_startup_with_the_byte_position() {
+    let config = restart_config("restart_interior");
+    {
+        let layer = PersistenceLayer::new(config.clone()).await.unwrap();
+        for key in ["a", "b", "c"] {
+            layer
+                .log_kv_set(key.into(), key.as_bytes().to_vec(), None)
+                .await
+                .unwrap();
+        }
+        layer.shutdown().await.unwrap();
+    }
+    let mut bytes = std::fs::read(&config.wal.path).unwrap();
+    let first_frame_len = 12 + u64::from_be_bytes(bytes[..8].try_into().unwrap()) as usize;
+    bytes[first_frame_len + 14] ^= 0xFF; // inside the second frame's payload
+    std::fs::write(&config.wal.path, &bytes).unwrap();
+
+    let expected = format!("at byte {first_frame_len}");
+    let err = recover(&config, KVConfig::default(), QueueConfig::default())
+        .await
+        .err()
+        .expect("recovery must fail on interior corruption");
+    assert!(
+        matches!(err, types::PersistenceError::WALInteriorCorruption { .. }),
+        "{err}"
+    );
+    assert!(err.to_string().contains(&expected), "{err}");
+    let err = PersistenceLayer::new(config.clone()).await.err().unwrap();
+    assert!(err.to_string().contains(&expected), "{err}");
+    // Nothing was truncated or appended.
+    assert_eq!(std::fs::read(&config.wal.path).unwrap(), bytes);
+}

@@ -1869,3 +1869,35 @@ async fn test_stream_sstats_exposes_room_generation() {
         after.result
     );
 }
+
+/// EXEC over SynapRPC returns an error saying the commit is not durable when
+/// the WAL cannot log the transaction.
+#[tokio::test]
+async fn test_exec_reports_a_transaction_the_wal_could_not_log() {
+    let mut state = make_state();
+    let (layer, faults) = crate::persistence::layer::test_support::faulty_layer("rpc_exec").await;
+    state.persistence = Some(layer);
+    let cid = "wal_fail_rpc";
+    dispatch(&state, req(1, "MULTI", vec![str_arg(cid)])).await;
+    dispatch(
+        &state,
+        req(
+            2,
+            "TXQUEUE",
+            vec![
+                str_arg(cid),
+                str_arg("SET"),
+                str_arg("wal:rk"),
+                bytes_arg(b"v"),
+            ],
+        ),
+    )
+    .await;
+
+    faults.fail_next_flush();
+    let resp = dispatch(&state, req(3, "EXEC", vec![str_arg(cid)])).await;
+    match resp.result {
+        Err(message) => assert!(message.contains("not durable"), "{message}"),
+        Ok(value) => panic!("EXEC must fail when the WAL rejects it, got {value:?}"),
+    }
+}

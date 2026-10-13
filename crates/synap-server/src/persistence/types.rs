@@ -30,6 +30,26 @@ pub enum PersistenceError {
 
     #[error("Recovery failed: {0}")]
     RecoveryFailed(String),
+
+    /// An invalid frame is followed by a valid one, so the damage is not a torn
+    /// tail left by a crash and truncating would discard acknowledged history.
+    #[error(
+        "WAL {path:?} is corrupted at byte {position}: {reason}; a valid frame follows at byte {next_valid}, so this is interior corruption, not a torn tail"
+    )]
+    WALInteriorCorruption {
+        path: PathBuf,
+        position: u64,
+        next_valid: u64,
+        reason: String,
+    },
+
+    /// A WAL write, flush or fsync failed. After a failed fsync the kernel may
+    /// have dropped dirty pages, so the file contents are unknown and every
+    /// later append is refused until the process restarts and rescans the file.
+    #[error(
+        "WAL writer is poisoned ({0}); this write is not durable and every later write fails until the server restarts"
+    )]
+    WALPoisoned(String),
 }
 
 impl From<bincode::error::EncodeError> for PersistenceError {
