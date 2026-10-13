@@ -6,3 +6,8 @@ linker = "gcc"
 
 [build]
 target-dir = "target"
+
+[alias]
+# Full suite, integration tests included: the release gate. Plain `cargo test`
+# runs the unit tests and doctests only.
+test-full = "test --workspace --features synap-server/full-tests,synap-sdk/full-tests"

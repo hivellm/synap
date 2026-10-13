@@ -35,7 +35,10 @@ pin-project = "1.1"
 tokio-tungstenite = { version = "0.30", features = ["native-tls"] }
 
 [features]
-e2e = []
+e2e = ["full-tests"]
+# Build and run the integration tests in tests/; plain `cargo test` runs the
+# unit tests and doctests only. `cargo test-full` turns this on.
+full-tests = []
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -78,3 +81,93 @@ path = "examples/rxjs_style.rs"
 [[example]]
 name = "reactive_pubsub"
 path = "examples/reactive_pubsub.rs"
+
+# Integration tests only build with `full-tests` (see [features]).
+
+[[test]]
+name = "authentication_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "bitmap_mock_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "bitmap_s2s_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "common"
+required-features = ["full-tests"]
+
+[[test]]
+name = "e2e_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "geospatial_mock_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "geospatial_s2s_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "hash_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "hyperloglog_s2s_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "hyperloglog_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "kv_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "list_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "pubsub_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "queue_reactive_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "queue_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "scripting_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "set_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "sorted_set_mock_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "sorted_set_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "stream_reactive_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "stream_test"
+required-features = ["full-tests"]
+
+[[test]]
+name = "transactions_test"
+required-features = ["full-tests"]
