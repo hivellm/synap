@@ -344,7 +344,7 @@ fn upgrade_legacy(path: &Path, report: &ScanReport) -> Result<()> {
 /// Make a create or rename in the directory holding `path` durable.
 /// Directories can only be fsynced on Unix; on Windows, NTFS journals the
 /// metadata change itself.
-fn sync_parent_dir(path: &Path) -> io::Result<()> {
+pub(crate) fn sync_parent_dir(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     if let Some(parent) = path.parent() {
         let dir = if parent.as_os_str().is_empty() {
