@@ -10,15 +10,15 @@
 |--------|------|----------|-------------|
 | ⬚ | phase10_typescript-7-swap | 0/10 | typescript 7 swap |
 
-## phase12
-
-| Status | Task | Progress | Description |
-|--------|------|----------|-------------|
-| ⬚ | phase12_replace-serde-yaml | 0/8 | replace serde yaml |
-
 ## phase13
 
 | Status | Task | Progress | Description |
 |--------|------|----------|-------------|
 | ⬚ | phase13_ts-e2e-native-parity | 0/7 | ts e2e native parity |
+
+## phase14
+
+| Status | Task | Progress | Description |
+|--------|------|----------|-------------|
+| ⬚ | phase14_replica-master-hostname | 0/8 | replica master hostname |
 

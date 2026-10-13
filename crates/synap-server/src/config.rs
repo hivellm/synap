@@ -415,7 +415,7 @@ impl ServerConfig {
     /// Load configuration from YAML file
     pub fn from_file<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
         let content = fs::read_to_string(path)?;
-        let config: ServerConfig = serde_yaml::from_str(&content)?;
+        let config: ServerConfig = serde_saphyr::from_str(&content)?;
         Ok(config)
     }
 
@@ -456,7 +456,7 @@ mod tests {
     fn resp3_enabled_default_is_consistent() {
         // Deserializing with the field omitted must agree with `Default` (M-013:
         // previously serde said false while Default said true).
-        let from_empty: Resp3Config = serde_yaml::from_str("{}").unwrap();
+        let from_empty: Resp3Config = serde_saphyr::from_str("{}").unwrap();
         assert_eq!(from_empty.enabled, Resp3Config::default().enabled);
         assert!(from_empty.enabled);
         assert_eq!(from_empty.host, "127.0.0.1");
@@ -464,7 +464,7 @@ mod tests {
 
     #[test]
     fn synap_rpc_defaults_are_loopback_and_consistent() {
-        let from_empty: SynapRpcConfig = serde_yaml::from_str("{}").unwrap();
+        let from_empty: SynapRpcConfig = serde_saphyr::from_str("{}").unwrap();
         assert_eq!(from_empty.enabled, SynapRpcConfig::default().enabled);
         assert!(from_empty.enabled);
         // M-014: binds to loopback by default, matching RESP3.
@@ -475,12 +475,30 @@ mod tests {
     #[test]
     fn network_limits_default_to_phase6c_values() {
         // Omitted network block → defaults preserve prior behavior (phase6i).
-        let from_empty: NetworkConfig = serde_yaml::from_str("{}").unwrap();
+        let from_empty: NetworkConfig = serde_saphyr::from_str("{}").unwrap();
         assert_eq!(from_empty.idle_timeout_secs, 300);
         assert_eq!(from_empty.max_connections, 10_000);
         // Operator overrides are honored, incl. partial blocks.
-        let partial: NetworkConfig = serde_yaml::from_str("max_connections: 50").unwrap();
+        let partial: NetworkConfig = serde_saphyr::from_str("max_connections: 50").unwrap();
         assert_eq!(partial.max_connections, 50);
         assert_eq!(partial.idle_timeout_secs, 300); // default preserved
+    }
+
+    #[test]
+    fn every_shipped_config_loads() {
+        // Operators start from these files, so each one must keep loading as
+        // the YAML parser underneath changes.
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../config");
+        let mut loaded = 0;
+        for entry in fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|ext| ext == "yml") {
+                if let Err(e) = ServerConfig::from_file(&path) {
+                    panic!("{} no longer loads: {e}", path.display());
+                }
+                loaded += 1;
+            }
+        }
+        assert!(loaded > 0, "no config files found in {}", dir.display());
     }
 }

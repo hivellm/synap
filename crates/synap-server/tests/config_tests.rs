@@ -211,10 +211,10 @@ fn test_config_serialization_roundtrip() {
     let config = ServerConfig::default();
 
     // Serialize to YAML
-    let yaml = serde_yaml::to_string(&config).unwrap();
+    let yaml = serde_saphyr::to_string(&config).unwrap();
 
     // Deserialize back
-    let deserialized: ServerConfig = serde_yaml::from_str(&yaml).unwrap();
+    let deserialized: ServerConfig = serde_saphyr::from_str(&yaml).unwrap();
 
     assert_eq!(deserialized.server.host, config.server.host);
     assert_eq!(deserialized.server.port, config.server.port);

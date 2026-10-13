@@ -25,10 +25,33 @@ kv_store:
   
   # Eviction policy (Redis maxmemory-policy equivalent)
   # Options: lru, lfu, ttl, none
-  eviction_policy: "lru"
+  eviction_policy: "allkeys-lru"
   
   # TTL cleanup frequency
   ttl_cleanup_interval_ms: 100
+
+# ============================================================================
+# QUEUES
+# ============================================================================
+
+queue:
+  enabled: true
+  # Maximum messages held per queue
+  max_depth: 100000
+  # Seconds a consumer has to ACK before the message is redelivered
+  ack_deadline_secs: 30
+  default_max_retries: 3
+  # 0 (lowest) to 9 (highest)
+  default_priority: 5
+
+# ============================================================================
+# RATE LIMITING
+# ============================================================================
+
+rate_limit:
+  enabled: false
+  requests_per_second: 1000
+  burst_size: 100
 
 # ============================================================================
 # LOGGING
