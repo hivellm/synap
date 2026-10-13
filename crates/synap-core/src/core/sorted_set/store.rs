@@ -5,6 +5,7 @@
 //! `ScoredMember`, `ZAddOptions`) live in the parent module; this file holds
 //! the store-level API, its stats and the `Aggregate` mode.
 use super::{ScoredMember, SortedSetValue, ZAddOptions};
+use crate::core::blocking::BlockingKeys;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -34,12 +35,9 @@ pub struct SortedSetStore {
     /// Shared cross-datatype memory budget (audit M-018).
     mem: Option<crate::core::GlobalMemory>,
     mem_bytes: Arc<std::sync::atomic::AtomicI64>,
-    /// Per-key broadcast channels used to wake `BZPOPMIN`/`BZPOPMAX` waiters when
-    /// a member is added to a key (mirrors the list store's blocking-pop notify).
-    notify_tx: Arc<RwLock<HashMap<String, tokio::sync::broadcast::Sender<()>>>>,
-    /// Number of keys with a notify channel — lets `notify_waiters` skip the map
-    /// entirely when no blocking pop has ever registered (the common case).
-    notify_channels: std::sync::atomic::AtomicU64,
+    /// Clients blocked in `BZPOPMIN`/`BZPOPMAX`, queued on every key they wait
+    /// on; writes that add members wake them (same registry as the list store).
+    blocked: BlockingKeys,
     /// Optional keyspace-notification publisher (Redis `notify-keyspace-events`).
     keyspace_notifier: Option<Arc<crate::core::KeyspaceNotifier>>,
 }
@@ -70,40 +68,20 @@ impl SortedSetStore {
             shards: std::array::from_fn(|_| Arc::new(RwLock::new(HashMap::new()))),
             mem: None,
             mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
-            notify_tx: Arc::new(RwLock::new(HashMap::new())),
-            notify_channels: std::sync::atomic::AtomicU64::new(0),
+            blocked: BlockingKeys::new(),
             keyspace_notifier: None,
         }
     }
 
-    /// Wake any `BZPOPMIN`/`BZPOPMAX` waiters blocked on `key`.
-    ///
-    /// Fast path: skip the lock + lookup entirely while no blocking pop has ever
-    /// registered a channel — the common case, so ZADD never touches the map.
-    fn notify_waiters(&self, key: &str) {
-        if self
-            .notify_channels
-            .load(std::sync::atomic::Ordering::Relaxed)
-            == 0
-        {
-            return;
-        }
-        if let Some(tx) = self.notify_tx.read().get(key) {
-            let _ = tx.send(());
-        }
+    /// Whether `key` holds a member a blocking pop could take now.
+    fn has_members(&self, key: &str) -> bool {
+        self.zcard(key) > 0
     }
 
-    /// Get (or lazily create) the broadcast receiver blocked pops wait on.
-    fn get_or_create_channel(&self, key: &str) -> tokio::sync::broadcast::Receiver<()> {
-        let mut notify = self.notify_tx.write();
-        notify
-            .entry(key.to_string())
-            .or_insert_with(|| {
-                self.notify_channels
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                tokio::sync::broadcast::channel(100).0
-            })
-            .subscribe()
+    /// Clients currently queued on `key` by a blocking pop.
+    #[cfg(test)]
+    pub(crate) fn blocked_clients(&self, key: &str) -> usize {
+        self.blocked.queued(key)
     }
 
     /// BZPOPMIN — pop the lowest-scored member from the first non-empty key,
@@ -137,6 +115,11 @@ impl SortedSetStore {
     /// with the popped member, so the caller can record the pop before
     /// releasing it; waiting for a ZADD happens without the guard. The
     /// persistence layer passes its per-key ordering lock here.
+    ///
+    /// The client is queued on all keys at once (see [`crate::core::blocking`])
+    /// before the attempt that precedes each wait, so members added to any key
+    /// wake it and none added between "every key was empty" and "waiting" is
+    /// missed; it pops from the first non-empty key in argument order.
     pub async fn bzpop_guarded<G, F, Fut>(
         &self,
         keys: Vec<String>,
@@ -153,15 +136,17 @@ impl SortedSetStore {
             return Ok(popped);
         }
 
-        let mut receivers: Vec<_> = keys.iter().map(|k| self.get_or_create_channel(k)).collect();
+        // Queue on every key, then retry after each wake. Dropping
+        // `registration` on return (pop, timeout or cancellation) leaves the
+        // queues and hands an unused wake-up to the next client.
+        let has_data = |key: &str| self.has_members(key);
+        let registration = self.blocked.register(&keys, &has_data);
         let wait = async {
             loop {
-                for rx in &mut receivers {
-                    let _ = rx.recv().await;
-                }
                 if let Some(popped) = self.try_zpop_any(&keys, min, &mut lock).await {
                     return popped;
                 }
+                registration.woken().await;
             }
         };
 
@@ -282,8 +267,8 @@ impl SortedSetStore {
             let zset = map.entry(key.to_string()).or_default();
             zset.zadd(member, score, opts)
         };
-        // A member is now available — wake any blocked BZPOPMIN/BZPOPMAX waiter.
-        self.notify_waiters(key);
+        // A member is now available — wake the oldest blocked BZPOPMIN/BZPOPMAX.
+        self.blocked.wake(key, 1);
         self.notify_keyspace("zadd", key);
         result
     }
@@ -321,10 +306,15 @@ impl SortedSetStore {
 
     /// Increment score
     pub fn zincrby(&self, key: &str, member: Vec<u8>, increment: f64) -> f64 {
-        let shard = self.get_or_create(key);
-        let mut map = shard.write();
-        let zset = map.entry(key.to_string()).or_default();
-        zset.zincrby(member, increment)
+        let score = {
+            let shard = self.get_or_create(key);
+            let mut map = shard.write();
+            let zset = map.entry(key.to_string()).or_default();
+            zset.zincrby(member, increment)
+        };
+        // The key holds at least this member now.
+        self.blocked.wake(key, 1);
+        score
     }
 
     /// Get range by rank
@@ -499,6 +489,8 @@ impl SortedSetStore {
         }
 
         dest_map.insert(destination.to_string(), dest_zset);
+        drop(dest_map);
+        self.blocked.wake(destination, count);
         count
     }
 
@@ -557,6 +549,8 @@ impl SortedSetStore {
         }
 
         dest_map.insert(destination.to_string(), dest_zset);
+        drop(dest_map);
+        self.blocked.wake(destination, count);
         count
     }
 
@@ -610,6 +604,8 @@ impl SortedSetStore {
         }
 
         dest_map.insert(destination.to_string(), dest_zset);
+        drop(dest_map);
+        self.blocked.wake(destination, count);
         count
     }
 

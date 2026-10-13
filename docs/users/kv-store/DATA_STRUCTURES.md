@@ -143,6 +143,28 @@ curl http://localhost:15500/list/tasks/llen
 curl http://localhost:15500/list/tasks/lindex/0
 ```
 
+### BLPOP / BRPOP / BRPOPLPUSH - Blocking Pops
+
+Native transports only (RESP3 on port 6379, SynapRPC); there is no REST route.
+The last argument is the timeout in whole seconds; `0` blocks until data
+arrives.
+
+```bash
+redis-cli -p 6379 BLPOP urgent normal 30   # -> ["normal", "task7"] or nil
+redis-cli -p 6379 BRPOPLPUSH tasks processing 0
+```
+
+- A client blocked on several keys wakes as soon as **any** of them receives
+  data, and pops from the first key, in argument order, that holds an element.
+- Clients blocked on the same key are served in the order they blocked. A
+  client that arrives while the key already holds data pops at once, even if
+  an earlier client was just woken for that element; the earlier client then
+  keeps its place in the queue.
+- No data before the timeout: the reply is nil.
+- BRPOPLPUSH waits on its source key only.
+- With persistence enabled, the pop is written to the WAL and replicated like
+  LPOP/RPOP; the client does not hold any lock while it waits.
+
 ## Set
 
 Unordered unique collections (Redis SADD, SREM, SINTER, etc.).
@@ -249,6 +271,19 @@ curl http://localhost:15500/sortedset/leaderboard/zcard
 
 ```bash
 curl "http://localhost:15500/sortedset/leaderboard/zcount?min=100&max=200"
+```
+
+### BZPOPMIN / BZPOPMAX - Blocking Pops
+
+Native transports only (RESP3, SynapRPC). Same rules as
+[BLPOP/BRPOP](#blpop--brpop--brpoplpush---blocking-pops): wake on any listed
+key, pop from the first non-empty key in argument order, first-blocked
+first-served per key, nil on timeout, `0` blocks until data arrives. ZADD,
+ZINCRBY, GEOADD and ZINTERSTORE/ZUNIONSTORE/ZDIFFSTORE into a listed key all
+wake blocked clients.
+
+```bash
+redis-cli -p 6379 BZPOPMIN jobs:high jobs:low 30   # -> ["jobs:low", "job9", "4"]
 ```
 
 ### ZINTER - Intersection

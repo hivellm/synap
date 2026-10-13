@@ -625,7 +625,9 @@ The same stripes order writes to one key: their records reach the WAL and
 the replication stream in the order memory applied them, so replaying
 resulting-value records (APPEND, INCR, SETRANGE) ends on the value the key
 held. Blocking pops hold the stripes only while they pop, not while they
-wait.
+wait: a blocked client is queued on every key it waits on
+(`synap-core` `core/blocking.rs`) and takes the stripes again for each pop
+attempt after a push wakes it.
 
 Writers pause while the snapshot copies the stores (measured: ~58 ms for
 160,000 KV keys plus 10,000 ten-field hashes in a release build; KV values
