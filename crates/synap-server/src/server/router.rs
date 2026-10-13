@@ -43,6 +43,7 @@ pub fn create_router(
     let auth_state = auth_handlers::AuthState {
         user_manager: user_manager.clone(),
         api_key_manager: api_key_manager.clone(),
+        auth_enabled,
     };
 
     // Create authentication middleware

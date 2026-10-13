@@ -30,7 +30,7 @@ When the user requests a key with `write` on `kv:*`
 Then the server answers 403
 
 #### Scenario: Narrower grant accepted
-Given a user granted `write` on `kv:orders:*`
+Given a user granted `read` and `write` on `kv:orders:*`
 When the user requests a key with `read` on `kv:orders:eu:*`
 Then the key is created
 And a request authenticated with it can read `kv:orders:eu:1` and cannot write it

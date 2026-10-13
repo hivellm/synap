@@ -629,3 +629,194 @@ async fn test_anonymous_access_when_auth_enabled_but_not_required() {
         status
     );
 }
+
+// ==================== API Key Delegation Boundaries ====================
+
+/// POST /auth/keys with the given credentials; returns the status and body.
+async fn create_key_as(
+    base_url: &str,
+    authorization: Option<String>,
+    body: serde_json::Value,
+) -> (StatusCode, serde_json::Value) {
+    let mut request = Client::new()
+        .post(format!("{}/auth/keys", base_url))
+        .json(&body);
+    if let Some(value) = authorization {
+        request = request.header("Authorization", value);
+    }
+    let response = request.send().await.unwrap();
+    let status = response.status();
+    let body = response.json().await.unwrap_or(serde_json::Value::Null);
+    (status, body)
+}
+
+#[tokio::test]
+async fn test_api_key_creation_requires_authentication() {
+    let (base_url, _, api_key_manager) = spawn_test_server_with_auth(true, false).await;
+    let before = api_key_manager.list().len();
+
+    let (status, _) = create_key_as(
+        &base_url,
+        None,
+        json!({"name": "anon", "permissions": [{"resource": "kv:*", "action": "read"}]}),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert_eq!(api_key_manager.list().len(), before);
+}
+
+#[tokio::test]
+async fn test_readonly_user_cannot_mint_wildcard_key() {
+    let (base_url, _, api_key_manager) = spawn_test_server_with_auth(true, false).await;
+    let before = api_key_manager.list().len();
+
+    let (status, _) = create_key_as(
+        &base_url,
+        Some(basic_auth_header("readonly", "read12345")),
+        json!({"name": "escalate", "permissions": [{"resource": "*", "action": "all"}]}),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(api_key_manager.list().len(), before);
+}
+
+#[tokio::test]
+async fn test_scoped_user_delegates_only_within_its_grant() {
+    let (base_url, user_manager, _) = spawn_test_server_with_auth(true, false).await;
+    user_manager
+        .create_role(synap_server::auth::Role::custom(
+            "orders_rw",
+            vec![
+                Permission::new("kv:orders:*", Action::Read),
+                Permission::new("kv:orders:*", Action::Write),
+            ],
+        ))
+        .unwrap();
+    user_manager
+        .create_user("orders", "orders123", false)
+        .unwrap();
+    user_manager.add_user_role("orders", "orders_rw").unwrap();
+
+    // Widening the pattern is refused.
+    let (status, _) = create_key_as(
+        &base_url,
+        Some(basic_auth_header("orders", "orders123")),
+        json!({"name": "wide", "permissions": [{"resource": "kv:*", "action": "write"}]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+
+    // A narrower grant is accepted and behaves exactly as granted.
+    let (status, body) = create_key_as(
+        &base_url,
+        Some(basic_auth_header("orders", "orders123")),
+        json!({"name": "eu-reader", "permissions": [{"resource": "kv:orders:eu:*", "action": "read"}]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let secret = body["key"]["key"].as_str().unwrap().to_string();
+
+    let client = Client::new();
+    client
+        .post(format!("{}/kv/set", base_url))
+        .header("Authorization", basic_auth_header("root", "root12345"))
+        .json(&json!({"key": "orders:eu:1", "value": "v1"}))
+        .send()
+        .await
+        .unwrap();
+
+    let read = client
+        .get(format!("{}/kv/get/orders:eu:1", base_url))
+        .header("Authorization", bearer_token_header(&secret))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(read.status(), StatusCode::OK);
+
+    let write = client
+        .post(format!("{}/kv/set", base_url))
+        .header("Authorization", bearer_token_header(&secret))
+        .json(&json!({"key": "orders:eu:1", "value": "overwritten"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(write.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn test_restricted_key_cannot_mint_broader_successor() {
+    let (base_url, _, api_key_manager) = spawn_test_server_with_auth(true, false).await;
+    let issuer = api_key_manager
+        .create_temporary(
+            "temp-reader",
+            Some("readonly".to_string()),
+            vec![Permission::new("kv:*", Action::Read)],
+            vec![],
+            3600,
+        )
+        .unwrap();
+    let as_issuer = || Some(bearer_token_header(&issuer.key));
+
+    let (status, _) = create_key_as(
+        &base_url,
+        as_issuer(),
+        json!({"name": "w", "expires_in_seconds": 60,
+               "permissions": [{"resource": "kv:*", "action": "write"}]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "broader action");
+
+    let (status, _) = create_key_as(
+        &base_url,
+        as_issuer(),
+        json!({"name": "forever", "permissions": [{"resource": "kv:*", "action": "read"}]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "outlives the issuer");
+
+    let (status, _) = create_key_as(
+        &base_url,
+        as_issuer(),
+        json!({"name": "too-long", "expires_in_seconds": 7200,
+               "permissions": [{"resource": "kv:*", "action": "read"}]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "expires after the issuer");
+
+    let (status, body) = create_key_as(
+        &base_url,
+        as_issuer(),
+        json!({"name": "short", "expires_in_seconds": 60,
+               "permissions": [{"resource": "kv:*", "action": "read"}]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+#[tokio::test]
+async fn test_api_key_request_validation_is_strict() {
+    let (base_url, _, api_key_manager) = spawn_test_server_with_auth(true, false).await;
+    let before = api_key_manager.list().len();
+
+    let (status, body) = create_key_as(
+        &base_url,
+        Some(basic_auth_header("admin", "admin123")),
+        json!({"name": "typo", "permissions": [{"resource": "kv:*", "action": "wrte"}]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.to_string().contains("wrte"), "{body}");
+
+    let (status, body) = create_key_as(
+        &base_url,
+        Some(basic_auth_header("admin", "admin123")),
+        json!({"name": "bad-ip", "allowed_ips": ["10.0.0.300"]}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body.to_string().contains("10.0.0.300"), "{body}");
+
+    assert_eq!(api_key_manager.list().len(), before);
+}

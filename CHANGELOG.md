@@ -13,6 +13,19 @@ every transport, writes that survive restarts and reach replicas, and client
 tooling that tells the truth. 1.4.0 reads data written by 1.3.x; see the
 migration notes before upgrading.
 
+### Security
+
+- **An API key can no longer carry more than its issuer holds** (review
+  finding S-01). `POST /auth/keys` stored whatever permissions the caller
+  asked for, so a read-only user could mint a `*`/`all` key and use it to write
+  and delete. Every requested grant must now be covered by one permission the
+  issuer holds (action included, pattern contained); admins may grant
+  anything. With authentication enabled, anonymous issuance answers 401 even
+  when `require_auth` is off. A key minted with a temporary API key is bounded
+  by that key's permissions and must expire no later than it. Unknown actions
+  and unparsable `allowed_ips` entries answer 400 instead of silently becoming
+  `read` or being dropped (an empty list allows every address).
+
 ### Fixed
 
 - **Replicas can reach the master by hostname.** `replication.master_address`

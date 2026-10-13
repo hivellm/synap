@@ -121,6 +121,38 @@ tracing::info!("API Key: {}", api_key.key);
 - **Usage Tracking** (count + last used timestamp)
 - **Enable/Disable** without deletion
 
+#### Issuing Keys over REST (`POST /auth/keys`)
+
+A key can never carry more authority than the identity that creates it:
+
+- **Authenticated issuer.** With authentication enabled, an anonymous request
+  is rejected with `401`, even when `require_auth` is `false`.
+- **Bounded delegation.** Every requested grant must be covered by one
+  permission the issuer holds: the held action must include the requested one
+  (`all` ⊇ everything; `configure` ⊇ `configure`, `read`, `write`), and every
+  resource the requested pattern can match must be matched by the held
+  pattern. `kv:orders:*` covers `kv:orders:eu:*` and `kv:orders:1`, but not
+  `kv:*`. Admin users may grant anything. A grant that is only covered by the
+  union of several held permissions is refused; ask for one grant per held
+  permission instead. Violations answer `403`.
+- **Keys issued by keys.** A request authenticated with an API key is bounded
+  by that key's permissions, and when that key expires, the new key must set
+  `expires_in_seconds` and expire no later than it.
+- **Strict validation.** An unknown action (anything other than `read`,
+  `write`, `delete`, `configure`, `admin`, `all`), an empty resource, or an
+  unparsable `allowed_ips` entry answers `400`. An empty `allowed_ips` list
+  allows every address, so a typo is never silently dropped.
+
+A rejected request stores nothing.
+
+```bash
+curl -X POST http://localhost:15500/auth/keys \
+  -u orders:secret \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"eu-reader","expires_in_seconds":86400,
+       "permissions":[{"resource":"kv:orders:eu:*","action":"read"}]}'
+```
+
 #### Verify API Keys
 
 ```rust
