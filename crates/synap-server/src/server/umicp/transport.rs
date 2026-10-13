@@ -15,6 +15,20 @@ use super::{SynapDiscoveryService, UmicpState};
 pub async fn umicp_handler(State(state): State<UmicpState>, request: Request) -> Response {
     info!("🔌 UMICP request received");
 
+    // The router's auth layer attaches the caller's identity to every request
+    // (an admin context when authentication is disabled); without one the
+    // request is refused rather than run unrestricted.
+    let caller = match request.extensions().get::<crate::auth::AuthContext>() {
+        Some(auth) => crate::auth::OperationContext::from_auth_context(auth),
+        None => {
+            return (
+                StatusCode::FORBIDDEN,
+                r#"{"error":"NOPERM the request carries no identity"}"#,
+            )
+                .into_response();
+        }
+    };
+
     // Read body
     let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => bytes,
@@ -69,7 +83,7 @@ pub async fn umicp_handler(State(state): State<UmicpState>, request: Request) ->
     );
 
     // Process request
-    let response_envelope = super::handlers::handle_umicp_request(state, envelope).await;
+    let response_envelope = super::handlers::handle_umicp_request(state, envelope, &caller).await;
 
     match response_envelope {
         Ok(response) => match response.serialize() {

@@ -70,7 +70,12 @@ async fn test_mcp_kv_get() {
     let request = CallToolRequestParams::new("synap_kv_get")
         .with_arguments(json!({"key": "test_key"}).as_object().cloned().unwrap());
 
-    let result = handle_mcp_tool(request, state).await;
+    let result = handle_mcp_tool(
+        request,
+        state,
+        &synap_server::auth::OperationContext::unrestricted(),
+    )
+    .await;
     assert!(result.is_ok());
 }
 
@@ -137,7 +142,12 @@ async fn test_mcp_kv_set() {
         .unwrap(),
     );
 
-    let result = handle_mcp_tool(request, state.clone()).await;
+    let result = handle_mcp_tool(
+        request,
+        state.clone(),
+        &synap_server::auth::OperationContext::unrestricted(),
+    )
+    .await;
     assert!(result.is_ok());
 
     // Verify it was set (use state.kv_store since state owns it)
@@ -208,7 +218,12 @@ async fn test_mcp_kv_delete() {
     let request = CallToolRequestParams::new("synap_kv_delete")
         .with_arguments(json!({"key": "to_del"}).as_object().cloned().unwrap());
 
-    let result = handle_mcp_tool(request, state.clone()).await;
+    let result = handle_mcp_tool(
+        request,
+        state.clone(),
+        &synap_server::auth::OperationContext::unrestricted(),
+    )
+    .await;
     assert!(result.is_ok());
 
     // Verify deleted (kv_store was moved into state, use clone)
@@ -289,6 +304,11 @@ async fn test_mcp_queue_publish() {
         .unwrap(),
     );
 
-    let result = handle_mcp_tool(request, state).await;
+    let result = handle_mcp_tool(
+        request,
+        state,
+        &synap_server::auth::OperationContext::unrestricted(),
+    )
+    .await;
     assert!(result.is_ok());
 }

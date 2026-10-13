@@ -44,6 +44,22 @@ migration notes before upgrading.
   anonymous REST request already did. `INFO`, the slow log and the client list
   are admin-only on every transport. RESP3 reports denials with the Redis
   `-NOPERM` error code.
+- **MCP and UMICP tools run with their caller's permissions** (review finding
+  S-04). MCP read the caller from a thread-local that rmcp's own session tasks
+  never saw, and a missing identity allowed the call, so in authenticated
+  mode tool permissions were effectively not enforced; UMICP never passed the
+  identity at all. Each tool call now takes the identity of its own HTTP
+  request from the parts rmcp hands the handler (UMICP from its request) and
+  is authorized with the policy of the matching `/api/v1/command` command, so
+  all 24 tools are checked (11 were before). A call without an identity is
+  refused in authenticated mode, and a legacy MCP session can no longer be
+  used under credentials other than those that initialized it (`403`).
+
+### Performance
+
+- **One credential check per MCP request.** `/mcp` carried its own
+  authentication layer inside the main router's, so every MCP request with a
+  password paid bcrypt twice; the duplicate layer is gone.
 
 ### Fixed
 

@@ -330,6 +330,10 @@ name = "mcp_auth_integration_tests"
 required-features = ["full-tests"]
 
 [[test]]
+name = "mcp_identity_tests"
+required-features = ["full-tests"]
+
+[[test]]
 name = "mcp_tests"
 required-features = ["full-tests"]
 
