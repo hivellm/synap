@@ -1,11 +1,10 @@
-use super::config::ReplicationConfig;
+use super::config::{MasterAddress, ReplicationConfig};
 use super::types::{
     ReplicationCommand, ReplicationError, ReplicationOperation, ReplicationResult, ReplicationStats,
 };
 use crate::core::{
     HashStore, KVStore, ListStore, QueueManager, SetStore, SortedSetStore, StreamManager,
 };
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -98,6 +97,7 @@ impl ReplicaNode {
         let master_addr = self
             .config
             .master_address
+            .clone()
             .expect("replica is only started with a configured master_address");
         let reconnect_delay = Duration::from_millis(self.config.reconnect_delay_ms);
 
@@ -109,7 +109,7 @@ impl ReplicaNode {
         loop {
             info!("[REPLICA] Connecting to master at {}", master_addr);
 
-            match self.connect_and_sync(master_addr).await {
+            match self.connect_and_sync(&master_addr).await {
                 Ok(_) => {
                     info!("[REPLICA] Replication connection closed normally");
                 }
@@ -132,11 +132,14 @@ impl ReplicaNode {
     }
 
     /// Connect to master and start synchronization
-    async fn connect_and_sync(&self, master_addr: SocketAddr) -> ReplicationResult<()> {
+    async fn connect_and_sync(&self, master_addr: &MasterAddress) -> ReplicationResult<()> {
         info!("[REPLICA] TCP connecting to {}...", master_addr);
 
-        // Connect to master
-        let mut stream = TcpStream::connect(master_addr).await.map_err(|e| {
+        // Connect to master. Passing the unresolved host makes the connector
+        // look the name up on every attempt and try each address it returns,
+        // so a service whose IP changed is found again on reconnect.
+        let target = (master_addr.host(), master_addr.port());
+        let mut stream = TcpStream::connect(target).await.map_err(|e| {
             info!("[REPLICA] TCP connection failed: {}", e);
             ReplicationError::ConnectionFailed(e.to_string())
         })?;

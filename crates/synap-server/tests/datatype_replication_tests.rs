@@ -63,7 +63,7 @@ async fn create_replica(master_addr: SocketAddr) -> ReplicaStores {
     let config = ReplicationConfig {
         enabled: true,
         role: NodeRole::Replica,
-        master_address: Some(master_addr),
+        master_address: Some(master_addr.into()),
         auto_reconnect: true,
         reconnect_delay_ms: 100,
         ..Default::default()

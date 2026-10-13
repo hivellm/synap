@@ -180,7 +180,7 @@ async fn committed_transaction_reaches_replica() {
     let replica_cfg = ReplicationConfig {
         enabled: true,
         role: NodeRole::Replica,
-        master_address: Some(addr),
+        master_address: Some(addr.into()),
         auto_reconnect: true,
         reconnect_delay_ms: 100,
         ..Default::default()

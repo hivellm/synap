@@ -43,7 +43,7 @@ struct Args {
     #[arg(long, value_parser = ["master", "replica", "standalone"])]
     role: Option<String>,
 
-    /// Master address for replica nodes (e.g., "127.0.0.1:5500")
+    /// Master address for replica nodes, as host:port (e.g., "master:15600")
     #[arg(long)]
     master_address: Option<String>,
 
@@ -167,6 +167,18 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Override the replica's master address (docker-compose sets it per
+    // replica service). A malformed value stops startup instead of leaving the
+    // replica without a master.
+    config
+        .replication
+        .apply_master_address_override(
+            std::env::var(synap_server::replication::MASTER_ADDRESS_ENV)
+                .ok()
+                .as_deref(),
+        )
+        .map_err(anyhow::Error::msg)?;
+
     // Configure replication from CLI args
     if let Some(role_str) = &args.role {
         config.replication.enabled = role_str != "standalone";
@@ -177,7 +189,11 @@ async fn main() -> Result<()> {
         };
 
         if let Some(master_addr) = &args.master_address {
-            config.replication.master_address = master_addr.parse().ok();
+            config.replication.master_address = Some(
+                master_addr
+                    .parse()
+                    .map_err(|e| anyhow::anyhow!("--master-address: {e}"))?,
+            );
         }
 
         if let Some(replica_listen) = &args.replica_listen {

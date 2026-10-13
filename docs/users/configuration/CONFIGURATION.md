@@ -110,7 +110,9 @@ logging:
 
 - **enabled**: Enable replication (default: `false`)
 - **role**: `master` or `replica`
-- **master_address**: Master address (for replicas)
+- **master_address**: Master address (for replicas), as `host:port` with an IP
+  or a DNS name (resolved on every connection attempt); overridden by
+  `SYNAP_MASTER_ADDRESS`
 - **replica_listen_address**: Replication port (for masters)
 
 ### Authentication Configuration

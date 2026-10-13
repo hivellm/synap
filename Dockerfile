@@ -101,6 +101,12 @@ COPY crates/synap-cli/src ./crates/synap-cli/src
 COPY crates/synap-migrate/src ./crates/synap-migrate/src
 COPY sdks/rust/src ./sdks/rust/src
 
+# The manifests declare every integration test as a [[test]] target gated on
+# the `full-tests` feature, and cargo refuses to parse a manifest whose target
+# file is missing — even for `--bins`. The tests are never built here.
+COPY crates/synap-server/tests ./crates/synap-server/tests
+COPY sdks/rust/tests ./sdks/rust/tests
+
 # Remove benchmark declarations from Cargo.toml for Docker build
 # (benchmarks are not needed for production image)
 RUN sed -i '/^# Configure benchmarks to use Criterion/,/^$/d' crates/synap-server/Cargo.toml && \

@@ -188,3 +188,57 @@ async fn test_config_validation() {
     bad_replica.role = NodeRole::Replica;
     assert!(bad_replica.validate().is_err());
 }
+
+/// A replica configured with a hostname (not an IP) resolves it when it
+/// connects and completes its initial sync — the docker-compose case, where
+/// `master_address` is the service name `master`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn replica_connects_to_master_by_hostname() {
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+
+    let mut master_config = ReplicationConfig::default();
+    master_config.enabled = true;
+    master_config.role = NodeRole::Master;
+    master_config.replica_listen_address = Some(format!("127.0.0.1:{port}").parse().unwrap());
+    let master_kv = Arc::new(KVStore::new(KVConfig::default()));
+    master_kv
+        .set("seeded", b"before-sync".to_vec(), None)
+        .await
+        .unwrap();
+    let _master = MasterNode::new(master_config, Arc::clone(&master_kv), None)
+        .await
+        .unwrap();
+
+    let replica_config = ReplicationConfig {
+        enabled: true,
+        role: NodeRole::Replica,
+        master_address: Some(format!("localhost:{port}").parse().unwrap()),
+        auto_reconnect: true,
+        reconnect_delay_ms: 100,
+        ..Default::default()
+    };
+    let replica_kv = Arc::new(KVStore::new(KVConfig::default()));
+    let replica = ReplicaNode::new(
+        replica_config,
+        crate::persistence::StoreArcs::kv_only(Arc::clone(&replica_kv)),
+    )
+    .await
+    .unwrap();
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        if replica_kv.get("seeded").await.unwrap() == Some(b"before-sync".to_vec()) {
+            break;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "replica never synced from localhost:{port}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(replica.is_connected());
+}

@@ -141,7 +141,11 @@ replication:
   enabled: true
   role: master  # master | replica | standalone
   
-  # Master address (for replicas)
+  # Master address (for replicas): host:port, where host is an IP
+  # (IPv6 as [addr]) or a DNS name. A name is resolved again on every
+  # connection attempt, so a docker-compose or Kubernetes service name keeps
+  # working when the master's IP changes. A malformed value fails config load.
+  # The SYNAP_MASTER_ADDRESS environment variable overrides this value.
   master_address: "127.0.0.1:15501"
   
   # Replica listen address (for masters)

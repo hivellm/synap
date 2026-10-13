@@ -5,7 +5,36 @@ All notable changes to Synap will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.0] - 2026-10-13
+
+A hardening release built from the 2026-10-12 next-release review
+(`docs/analysis/next-release-review-2026-10-12/`): authorization that holds on
+every transport, writes that survive restarts and reach replicas, and client
+tooling that tells the truth. 1.4.0 reads data written by 1.3.x; see the
+migration notes before upgrading.
+
+### Fixed
+
+- **Replicas can reach the master by hostname.** `replication.master_address`
+  accepted only `IP:port`, so the docker-compose replicas could not point at
+  the `master` service. It now takes `host:port` with an IP or a DNS name,
+  resolves the name on every connection attempt (a container's IP can change),
+  and still rejects a malformed value at config load with an error naming
+  `replication.master_address`. `SYNAP_MASTER_ADDRESS`, which the compose file
+  already set on each replica, is now read as an override, and
+  `--master-address` fails loudly on a malformed value instead of silently
+  leaving the replica without a master. `config/config-replica.yml` points at
+  `master:15600` again.
+- **docker-compose health checks work on the scratch image.** They called
+  `wget`, which the `FROM scratch` runtime image does not contain, so the
+  master never turned healthy and the replicas, which wait for it, never
+  started. They now run `synap-server --health-check`, as the image's own
+  `HEALTHCHECK` does.
+- **The Docker image builds again.** 1.3.2 declared every integration test as a
+  `[[test]]` target gated on `full-tests`, but the Dockerfile did not copy the
+  `tests/` directories, and cargo refuses to parse a manifest whose test file
+  is missing, even for `cargo build --bins`. The builder stage now copies them;
+  they are never compiled into the image.
 
 ## [1.3.2] - 2026-10-13
 
