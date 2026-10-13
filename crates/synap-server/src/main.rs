@@ -878,6 +878,13 @@ async fn main() -> Result<()> {
         None
     };
 
+    // What `admin.config` reports: the configuration after every override,
+    // secrets redacted once here so the shared state never carries them.
+    let redacted_config = config.redacted().map_err(|e| {
+        error!("Cannot serialize the configuration for admin.config: {}", e);
+        anyhow::anyhow!("cannot serialize the configuration: {e}")
+    })?;
+
     // Kept for the graceful-shutdown WAL drain after the router owns the state.
     let shutdown_persistence = persistence.clone();
 
@@ -912,6 +919,7 @@ async fn main() -> Result<()> {
         },
         require_auth: config.auth.enabled && config.auth.require_auth,
         replication: replication_handle,
+        server_config: Some(Arc::new(redacted_config)),
     };
 
     // Initialize Prometheus metrics

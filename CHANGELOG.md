@@ -120,8 +120,29 @@ migration notes before upgrading.
   authentication layer inside the main router's, so every MCP request with a
   password paid bcrypt twice; the duplicate layer is gone.
 
+### Added
+
+- **`admin.config` command.** Admin-only command on `/api/v1/command` that
+  returns the server's effective configuration (every file, environment and
+  command-line override applied) as JSON and YAML, with passwords, API keys,
+  the Hub service key and any other secret-named field replaced by
+  `[redacted]`. Refused in Hub mode.
+- **GUI tests.** `npm test` in `gui/` runs Vitest contract tests of the API
+  client and a smoke test of the structure inspector against a real
+  `synap-server`.
+
 ### Fixed
 
+- **The GUI shows the server's real state** (review findings E-02, E-03). The
+  Configuration view displayed a built-in sample as the server's configuration
+  (its loader called a command the server never had) and its Save never
+  reached the server; it now loads the real configuration through
+  `admin.config`, read-only with copy and download, and shows load or
+  permission errors instead of sample data. The Data Structures inspector
+  called `kv.type`/`kv.memory` and REST routes that do not exist, so it cleared
+  itself for every structure; it now uses `key.type`, `memory.usage` and the
+  envelope structure commands, shows type and memory, and reports missing or
+  mismatched keys.
 - **Configured rate limits are enforced** (review finding S-06, breaking for
   deployments with `rate_limit.enabled: true`, which was logged as enabled but
   never installed). Each client gets a token bucket (`burst_size`, refilled at

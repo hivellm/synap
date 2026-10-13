@@ -108,6 +108,7 @@ async fn spawn_test_server_with_auth(
         user_manager: None,
         require_auth: false,
         replication: None,
+        server_config: None,
     };
 
     let router = create_router(

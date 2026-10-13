@@ -54,6 +54,17 @@
         </button>
       </div>
 
+      <div v-if="currentKey && !loading && (keyInfo || inspectError)" class="text-sm">
+        <p v-if="keyInfo" class="text-text-secondary">
+          <span class="font-mono text-text-primary">{{ currentKey }}</span>
+          &middot; type <strong class="text-text-primary">{{ keyInfo.type }}</strong>
+          &middot; memory <strong class="text-text-primary">{{ keyInfo.memory }}</strong>
+        </p>
+        <p v-if="inspectError" class="text-error">
+          <i class="fas fa-exclamation-circle mr-1"></i>{{ inspectError }}
+        </p>
+      </div>
+
       <!-- Hash Inspector -->
       <div v-if="activeTab === 'hash'" class="bg-bg-card border border-border rounded-xl p-6">
         <h3 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
@@ -90,7 +101,7 @@
               <tbody>
                 <tr v-for="(value, field) in hashData" :key="field" class="border-b border-border hover:bg-bg-hover">
                   <td class="py-2 px-3 font-mono text-text-primary">{{ field }}</td>
-                  <td class="py-2 px-3 font-mono text-text-secondary max-w-md truncate">{{ value }}</td>
+                  <td class="py-2 px-3 font-mono text-text-secondary max-w-md truncate">{{ formatValue(value) }}</td>
                   <td class="py-2 px-3 text-right">
                     <button @click="deleteHashField(String(field))" class="text-error hover:text-error/80">
                       <i class="fas fa-trash"></i>
@@ -103,7 +114,7 @@
         </div>
 
         <div v-else class="text-center py-8 text-text-muted">
-          Key not found or is not a hash
+          No data to show for this key
         </div>
       </div>
 
@@ -144,7 +155,7 @@
             >
               <div class="flex items-center gap-3">
                 <span class="text-text-muted text-sm w-8">{{ index }}</span>
-                <span class="font-mono text-text-primary">{{ item }}</span>
+                <span class="font-mono text-text-primary">{{ formatValue(item) }}</span>
               </div>
               <button @click="removeListItem(index)" class="text-error hover:text-error/80">
                 <i class="fas fa-trash"></i>
@@ -154,7 +165,7 @@
         </div>
 
         <div v-else class="text-center py-8 text-text-muted">
-          Key not found or is not a list
+          No data to show for this key
         </div>
       </div>
 
@@ -185,10 +196,10 @@
           <div class="flex flex-wrap gap-2 max-h-96 overflow-y-auto">
             <div
               v-for="member in setData"
-              :key="member"
+              :key="formatValue(member)"
               class="flex items-center gap-2 px-3 py-1.5 bg-bg-tertiary rounded-lg"
             >
-              <span class="font-mono text-text-primary">{{ member }}</span>
+              <span class="font-mono text-text-primary">{{ formatValue(member) }}</span>
               <button @click="removeSetMember(member)" class="text-error hover:text-error/80">
                 <i class="fas fa-times text-xs"></i>
               </button>
@@ -197,7 +208,7 @@
         </div>
 
         <div v-else class="text-center py-8 text-text-muted">
-          Key not found or is not a set
+          No data to show for this key
         </div>
       </div>
 
@@ -252,7 +263,7 @@
         </div>
 
         <div v-else class="text-center py-8 text-text-muted">
-          Key not found or is not a sorted set
+          No data to show for this key
         </div>
       </div>
     </div>
@@ -262,243 +273,221 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue';
 import { useApi } from '@/composables/useApi';
+import type { ApiResponse, KeyTypeName, ScoredMember } from '@/services/api';
 
 const { apiClient, isConnected } = useApi();
 
-interface ZSetMember {
-  member: string;
-  score: number;
-}
+type TabId = 'hash' | 'list' | 'set' | 'zset';
 
-const tabs = [
+const tabs: { id: TabId; label: string; icon: string }[] = [
   { id: 'hash', label: 'Hash', icon: 'fas fa-hashtag' },
   { id: 'list', label: 'List', icon: 'fas fa-list' },
   { id: 'set', label: 'Set', icon: 'fas fa-layer-group' },
   { id: 'zset', label: 'Sorted Set', icon: 'fas fa-sort-amount-down' },
 ];
 
-const activeTab = ref('hash');
+/** What `key.type` calls each tab's structure. */
+const TAB_KEY_TYPES: Record<TabId, KeyTypeName> = {
+  hash: 'hash',
+  list: 'list',
+  set: 'set',
+  zset: 'zset',
+};
+
+const activeTab = ref<TabId>('hash');
 const searchKey = ref('');
 const currentKey = ref('');
 const loading = ref(false);
+const inspectError = ref('');
+const keyInfo = ref<{ type: KeyTypeName; memory: string } | null>(null);
 
 // Data for each structure type
-const hashData = ref<Record<string, string> | null>(null);
-const listData = ref<string[] | null>(null);
-const setData = ref<string[] | null>(null);
-const zsetData = ref<ZSetMember[] | null>(null);
+const hashData = ref<Record<string, unknown> | null>(null);
+const listData = ref<unknown[] | null>(null);
+const setData = ref<unknown[] | null>(null);
+const zsetData = ref<ScoredMember[] | null>(null);
 
 // Clear data when switching tabs
 watch(activeTab, () => {
   currentKey.value = '';
-  hashData.value = null;
-  listData.value = null;
-  setData.value = null;
-  zsetData.value = null;
+  keyInfo.value = null;
+  inspectError.value = '';
+  clearAllData();
 });
 
-async function inspectKey() {
-  if (!apiClient.value || !searchKey.value) return;
+/**
+ * Inspect `searchKey`: its type through `key.type`, its memory through
+ * `memory.usage`, then the contents of the structure the active tab shows.
+ */
+async function inspectKey(): Promise<void> {
+  const client = apiClient.value;
+  if (!client || !searchKey.value) return;
 
-  currentKey.value = searchKey.value;
+  const key = searchKey.value;
+  currentKey.value = key;
   loading.value = true;
+  inspectError.value = '';
+  keyInfo.value = null;
+  clearAllData();
 
   try {
-    // First, get the key type
-    const typeResponse = await apiClient.value.keyType(searchKey.value);
-    if (!typeResponse.success) {
-      clearAllData();
+    const typeResponse = await client.keyType(key);
+    if (!typeResponse.success || !typeResponse.data) {
+      inspectError.value = typeResponse.error || `Could not read the type of "${key}"`;
+      return;
+    }
+    const keyType = typeResponse.data;
+    if (keyType === 'none') {
+      inspectError.value = `Key "${key}" does not exist`;
       return;
     }
 
-    const keyType = typeResponse.data;
-
-    // Fetch data based on type and active tab
-    if (activeTab.value === 'hash' && keyType === 'hash') {
-      await fetchHashData();
-    } else if (activeTab.value === 'list' && keyType === 'list') {
-      await fetchListData();
-    } else if (activeTab.value === 'set' && keyType === 'set') {
-      await fetchSetData();
-    } else if (activeTab.value === 'zset' && keyType === 'zset') {
-      await fetchZSetData();
-    } else {
-      clearAllData();
+    const memory = await client.memoryUsage(key);
+    keyInfo.value = {
+      type: keyType,
+      memory: memory.success && memory.data ? memory.data.human : 'unavailable',
+    };
+    if (!memory.success) {
+      inspectError.value = memory.error || `Could not read the memory usage of "${key}"`;
     }
+
+    const wanted = TAB_KEY_TYPES[activeTab.value];
+    if (keyType !== wanted) {
+      inspectError.value = `Key "${key}" is a ${keyType}, not a ${wanted}`;
+      return;
+    }
+    await fetchActiveData();
   } catch (error) {
-    console.error('Failed to inspect key:', error);
-    clearAllData();
+    inspectError.value = error instanceof Error ? error.message : String(error);
   } finally {
     loading.value = false;
   }
 }
 
-function clearAllData() {
+function clearAllData(): void {
   hashData.value = null;
   listData.value = null;
   setData.value = null;
   zsetData.value = null;
 }
 
-async function fetchHashData() {
-  if (!apiClient.value) return;
-  try {
-    const response = await apiClient.value.request({
-      method: 'GET',
-      url: `/hash/${encodeURIComponent(currentKey.value)}/getall`,
-    });
-    if (response.success) {
-      hashData.value = response.data;
-    }
-  } catch (error) {
-    console.error('Failed to fetch hash data:', error);
+/** Store `response.data` through `assign`, or surface the server's error. */
+function apply<T>(response: ApiResponse<T>, assign: (data: T) => void): void {
+  if (response.success && response.data !== undefined) {
+    assign(response.data);
+  } else {
+    inspectError.value = response.error || 'The server returned no data';
   }
 }
 
-async function fetchListData() {
-  if (!apiClient.value) return;
-  try {
-    const response = await apiClient.value.request({
-      method: 'POST',
-      url: `/list/${encodeURIComponent(currentKey.value)}/range`,
-      data: { start: 0, stop: -1 },
-    });
-    if (response.success) {
-      listData.value = response.data;
-    }
-  } catch (error) {
-    console.error('Failed to fetch list data:', error);
+async function fetchActiveData(): Promise<void> {
+  switch (activeTab.value) {
+    case 'hash':
+      return fetchHashData();
+    case 'list':
+      return fetchListData();
+    case 'set':
+      return fetchSetData();
+    case 'zset':
+      return fetchZSetData();
   }
 }
 
-async function fetchSetData() {
+async function fetchHashData(): Promise<void> {
   if (!apiClient.value) return;
-  try {
-    const response = await apiClient.value.request({
-      method: 'GET',
-      url: `/set/${encodeURIComponent(currentKey.value)}/members`,
-    });
-    if (response.success) {
-      setData.value = response.data;
-    }
-  } catch (error) {
-    console.error('Failed to fetch set data:', error);
-  }
+  apply(await apiClient.value.hashGetAll(currentKey.value), (data) => (hashData.value = data));
 }
 
-async function fetchZSetData() {
+async function fetchListData(): Promise<void> {
   if (!apiClient.value) return;
-  try {
-    const response = await apiClient.value.request({
-      method: 'POST',
-      url: `/sortedset/${encodeURIComponent(currentKey.value)}/range`,
-      data: { start: 0, stop: -1, with_scores: true },
-    });
-    if (response.success) {
-      zsetData.value = response.data;
-    }
-  } catch (error) {
-    console.error('Failed to fetch sorted set data:', error);
+  apply(await apiClient.value.listRange(currentKey.value), (data) => (listData.value = data));
+}
+
+async function fetchSetData(): Promise<void> {
+  if (!apiClient.value) return;
+  apply(await apiClient.value.setMembers(currentKey.value), (data) => (setData.value = data));
+}
+
+async function fetchZSetData(): Promise<void> {
+  if (!apiClient.value) return;
+  apply(await apiClient.value.zsetRange(currentKey.value), (data) => (zsetData.value = data));
+}
+
+/** Run a write, then reload the structure; a refused write is shown, not swallowed. */
+async function mutate(write: Promise<ApiResponse<boolean>>, reload: () => Promise<void>): Promise<void> {
+  const response = await write;
+  if (!response.success) {
+    inspectError.value = response.error || 'The server refused the change';
+    return;
   }
+  inspectError.value = '';
+  await reload();
+}
+
+function formatValue(value: unknown): string {
+  return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
 // Hash operations
-function addHashField() {
+function addHashField(): void {
   const field = prompt('Enter field name:');
   const value = prompt('Enter value:');
   if (field && value && apiClient.value) {
-    apiClient.value.request({
-      method: 'POST',
-      url: `/hash/${encodeURIComponent(currentKey.value)}/set`,
-      data: { field, value },
-    }).then(() => fetchHashData());
+    mutate(apiClient.value.hashSet(currentKey.value, field, value), fetchHashData);
   }
 }
 
-function deleteHashField(field: string) {
+function deleteHashField(field: string): void {
   if (confirm(`Delete field "${field}"?`) && apiClient.value) {
-    // OpenAPI: POST /hash/{key}/del with { fields: [field] }
-    apiClient.value.request({
-      method: 'POST',
-      url: `/hash/${encodeURIComponent(currentKey.value)}/del`,
-      data: { fields: [field] },
-    }).then(() => fetchHashData());
+    mutate(apiClient.value.hashDelete(currentKey.value, field), fetchHashData);
   }
 }
 
 // List operations
-function pushToList(side: 'left' | 'right') {
+function pushToList(side: 'left' | 'right'): void {
   const value = prompt('Enter value to push:');
   if (value && apiClient.value) {
-    const endpoint = side === 'left' ? 'lpush' : 'rpush';
-    // OpenAPI: POST /list/{key}/lpush or /list/{key}/rpush with { values: [value] }
-    apiClient.value.request({
-      method: 'POST',
-      url: `/list/${encodeURIComponent(currentKey.value)}/${endpoint}`,
-      data: { values: [value] },
-    }).then(() => fetchListData());
+    mutate(apiClient.value.listPush(currentKey.value, side, value), fetchListData);
   }
 }
 
-function removeListItem(index: number) {
+function removeListItem(index: number): void {
   if (confirm(`Remove item at index ${index}?`) && apiClient.value && listData.value) {
-    const value = listData.value[index];
-    // OpenAPI: POST /list/{key}/lrem with { count: 1, value }
-    apiClient.value.request({
-      method: 'POST',
-      url: `/list/${encodeURIComponent(currentKey.value)}/lrem`,
-      data: { count: 1, value },
-    }).then(() => fetchListData());
+    mutate(apiClient.value.listRemove(currentKey.value, listData.value[index]), fetchListData);
   }
 }
 
 // Set operations
-function addSetMember() {
+function addSetMember(): void {
   const member = prompt('Enter member to add:');
   if (member && apiClient.value) {
-    // OpenAPI: POST /set/{key}/sadd with { members: [member] }
-    apiClient.value.request({
-      method: 'POST',
-      url: `/set/${encodeURIComponent(currentKey.value)}/sadd`,
-      data: { members: [member] },
-    }).then(() => fetchSetData());
+    mutate(apiClient.value.setAdd(currentKey.value, member), fetchSetData);
   }
 }
 
-function removeSetMember(member: string) {
-  if (confirm(`Remove member "${member}"?`) && apiClient.value) {
-    // OpenAPI: POST /set/{key}/srem with { members: [member] }
-    apiClient.value.request({
-      method: 'POST',
-      url: `/set/${encodeURIComponent(currentKey.value)}/srem`,
-      data: { members: [member] },
-    }).then(() => fetchSetData());
+function removeSetMember(member: unknown): void {
+  if (confirm(`Remove member "${formatValue(member)}"?`) && apiClient.value) {
+    mutate(apiClient.value.setRemove(currentKey.value, member), fetchSetData);
   }
 }
 
 // Sorted Set operations
-function addZSetMember() {
+function addZSetMember(): void {
   const member = prompt('Enter member:');
   const scoreStr = prompt('Enter score:');
   if (member && scoreStr && apiClient.value) {
     const score = parseFloat(scoreStr);
-    // OpenAPI: POST /sortedset/{key}/zadd with { members: [{ member, score }] }
-    apiClient.value.request({
-      method: 'POST',
-      url: `/sortedset/${encodeURIComponent(currentKey.value)}/zadd`,
-      data: { members: [{ member, score }] },
-    }).then(() => fetchZSetData());
+    if (Number.isNaN(score)) {
+      inspectError.value = `"${scoreStr}" is not a number`;
+      return;
+    }
+    mutate(apiClient.value.zsetAdd(currentKey.value, member, score), fetchZSetData);
   }
 }
 
-function removeZSetMember(member: string) {
+function removeZSetMember(member: string): void {
   if (confirm(`Remove member "${member}"?`) && apiClient.value) {
-    // OpenAPI: POST /sortedset/{key}/zrem with { members: [member] }
-    apiClient.value.request({
-      method: 'POST',
-      url: `/sortedset/${encodeURIComponent(currentKey.value)}/zrem`,
-      data: { members: [member] },
-    }).then(() => fetchZSetData());
+    mutate(apiClient.value.zsetRemove(currentKey.value, member), fetchZSetData);
   }
 }
 </script>

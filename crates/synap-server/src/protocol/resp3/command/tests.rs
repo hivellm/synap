@@ -64,6 +64,7 @@ fn make_state() -> AppState {
         user_manager: None,
         require_auth: false,
         replication: None,
+        server_config: None,
     }
 }
 
