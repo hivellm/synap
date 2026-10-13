@@ -1,0 +1,19 @@
+{
+  "id": "forward-malformed-counter-amounts-as-json-text-so-the-server-validates-every-transport",
+  "type": "pattern",
+  "title": "Forward malformed counter amounts as JSON text so the server validates every transport",
+  "category": "sdk",
+  "description": "SDK native maps send INCRBY/DECRBY whenever an amount is present: integers as integers, anything else as its JSON text, so the server applies the same integer check HTTP does and refuses malformed amounts without mutation on every transport. Also verify the typed module sends the field the HTTP envelope reads (C#/PHP sent `delta`, Python sent `kv.incrby`).",
+  "example": "match payload.get(\"amount\") { None | Some(Value::Null) => INCR, Some(a) => INCRBY(a.as_i64().map(Int).unwrap_or(Str(a.to_string()))) }",
+  "whenToUse": "Mapping an optional numeric argument that HTTP validates server-side onto native protocol commands.",
+  "whenNotToUse": "Fields where the native protocol has no server-side validation; validate in the SDK instead.",
+  "createdAt": "2026-10-13T07:00:00.000Z",
+  "tags": [
+    "phase26",
+    "counters",
+    "incrby",
+    "transport-parity",
+    "command-map"
+  ],
+  "source": "manual"
+}

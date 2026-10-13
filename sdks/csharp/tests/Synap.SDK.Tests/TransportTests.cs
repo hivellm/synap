@@ -245,14 +245,59 @@ public sealed class TransportTests
     }
 
     [Fact]
-    public void MapCommand_KvIncrWithDelta_ReturnsIncrByCommand()
+    public void MapCommand_KvIncrWithAmount_ReturnsIncrByCommand()
     {
-        var payload = new Dictionary<string, object?> { ["key"] = "foo", ["delta"] = 5L };
+        var payload = new Dictionary<string, object?> { ["key"] = "foo", ["amount"] = 5L };
         var result = CommandMapper.MapCommand("kv.incr", payload);
         Assert.True(result.HasValue);
         Assert.Equal("INCRBY", result!.Value.Command);
         Assert.Equal("foo", result.Value.Args[0]);
         Assert.Equal(5L, result.Value.Args[1]);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-7)]
+    [InlineData(10)]
+    public void MapCommand_KvIncrAndDecrWithIntAmount_MapToIncrByAndDecrBy(int amount)
+    {
+        var incr = CommandMapper.MapCommand(
+            "kv.incr", new Dictionary<string, object?> { ["key"] = "c", ["amount"] = amount });
+        Assert.Equal("INCRBY", incr!.Value.Command);
+        Assert.Equal(new object?[] { "c", (long)amount }, incr.Value.Args);
+
+        var decr = CommandMapper.MapCommand(
+            "kv.decr", new Dictionary<string, object?> { ["key"] = "c", ["amount"] = amount });
+        Assert.Equal("DECRBY", decr!.Value.Command);
+        Assert.Equal(new object?[] { "c", (long)amount }, decr.Value.Args);
+    }
+
+    [Fact]
+    public void MapCommand_KvIncrWithoutAmount_StaysIncr()
+    {
+        var incr = CommandMapper.MapCommand(
+            "kv.incr", new Dictionary<string, object?> { ["key"] = "c" });
+        Assert.Equal("INCR", incr!.Value.Command);
+        Assert.Equal(new object?[] { "c" }, incr.Value.Args);
+
+        var decr = CommandMapper.MapCommand(
+            "kv.decr", new Dictionary<string, object?> { ["key"] = "c", ["amount"] = null });
+        Assert.Equal("DECR", decr!.Value.Command);
+        Assert.Equal(new object?[] { "c" }, decr.Value.Args);
+    }
+
+    [Fact]
+    public void MapCommand_KvIncrWithNonIntegerAmount_SendsJsonText()
+    {
+        // The server refuses these as it does over HTTP, instead of the SDK
+        // coercing them into a number one transport would apply.
+        var text = CommandMapper.MapCommand(
+            "kv.incr", new Dictionary<string, object?> { ["key"] = "c", ["amount"] = "10" });
+        Assert.Equal("\"10\"", text!.Value.Args[1]);
+
+        var fraction = CommandMapper.MapCommand(
+            "kv.incr", new Dictionary<string, object?> { ["key"] = "c", ["amount"] = 1.5 });
+        Assert.Equal("1.5", fraction!.Value.Args[1]);
     }
 
     [Fact]

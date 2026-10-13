@@ -205,21 +205,53 @@ persistence:
 Synap automatically recovers on startup:
 
 1. Load latest snapshot
-2. Verify every WAL frame (length and CRC32 checksum) and repair a torn tail
+2. Check the WAL format version, verify every WAL frame (length and CRC32
+   checksum) and repair a torn tail
 3. Replay WAL from snapshot offset
 4. Server ready
 
+### WAL File Format and Versions
+
+Since 1.4.0 a WAL file starts with a 12-byte header: the magic bytes
+`SYNAPWAL` followed by the format version (`u32`, big-endian). 1.4.0 writes
+format version 2, which adds this header and the single-record MULTI/EXEC
+transaction (a committed transaction is one frame under one checksum, so a
+crash recovers all of it or none of it; see
+[Transactions](../../features/transactions.md#durability--replication-audit-m-010-phase6k)).
+
+- **New WAL**: created with the version 2 header.
+- **WAL written by 1.3.x** (no header, frames from byte 0, read as format
+  version 1): replayed as before. Before the first append, the server upgrades
+  it in place: it writes the header and the unchanged frames to
+  `synap.wal.upgrade` next to it, fsyncs that file and renames it over the WAL,
+  so a crash during the upgrade leaves either the untouched 1.3.x file or the
+  complete upgraded one. The upgrade is logged at `INFO` with the frame count.
+- **WAL from a newer format version**: the server **refuses to start** with an
+  error naming both versions, for example
+  `WAL "./data/wal/synap.wal" uses format version 3, but this server reads WAL
+  format versions up to 2`. Run a release that supports that version.
+- **Damaged header** (magic present, version 0 or 1): the server refuses to
+  start. A header cut short by a crash while the file was being created holds
+  no data and is rewritten.
+
+**No downgrade.** A 1.3.x binary cannot read a WAL written or upgraded by
+1.4.0: it would misread the header as a frame and replay nothing. Stop the
+server and copy the WAL and snapshot directories before upgrading to 1.4.0, and
+restore that copy if you need to go back to 1.3.x (writes made under 1.4.0 are
+lost in that case).
+
 ### Torn Tails and Corruption
 
-Each WAL frame is `length (u64) | CRC32 (u32) | payload`. On startup the WAL
-is scanned before anything is appended, and the first invalid frame (short
-header, length past the end of the file, checksum mismatch, or undecodable
-payload) is classified:
+Each WAL frame (after the file header) is `length (u64) | CRC32 (u32) |
+payload`. On startup the WAL is scanned before anything is appended, and the
+first invalid frame (short header, length past the end of the file, checksum
+mismatch, or undecodable payload) is classified:
 
 - **Torn tail**: no complete, valid frame follows it. This is what a crash in
   the middle of an append leaves. The file is truncated to the end of the last
   valid frame (logged as a warning with the byte counts) and startup
-  continues, so new writes never land after garbage.
+  continues, so new writes never land after garbage. A MULTI/EXEC transaction
+  is one frame, so a torn transaction is discarded whole.
 - **Interior corruption**: a valid frame follows it. Truncating would discard
   acknowledged history, so the server **refuses to start** with an error such
   as `WAL "./data/wal/synap.wal" is corrupted at byte 4096: checksum mismatch

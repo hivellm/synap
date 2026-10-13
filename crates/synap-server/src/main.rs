@@ -14,7 +14,7 @@ use std::time::Duration;
 use synap_server::auth::{ApiKeyManager, UserManager};
 use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
 use synap_server::monitoring::{ClientListManager, MonitoringManager};
-use synap_server::persistence::{PersistenceError, PersistenceLayer, recover_all};
+use synap_server::persistence::{PersistenceLayer, recover_all};
 use synap_server::replication::NodeRole;
 use synap_server::{
     AppState, ConsumerGroupConfig, ConsumerGroupManager, KVStore, PartitionConfig,
@@ -244,6 +244,17 @@ async fn main() -> Result<()> {
         config.logging.format, config.logging.level
     );
 
+    // Hub mode isolates tenants only on transports that authenticate a Hub
+    // access key: refuse to start with a listener that would bypass it.
+    if let Err(e) = config.validate_hub_listeners() {
+        error!("{}", e);
+        return Err(anyhow::Error::msg(e));
+    }
+    if let Err(e) = config.rate_limit.validate() {
+        error!("{}", e);
+        return Err(anyhow::Error::msg(e));
+    }
+
     // Recover from persistence or create fresh
     let kv_config = config.to_kv_config();
     let queue_config = config.to_queue_config();
@@ -385,9 +396,10 @@ async fn main() -> Result<()> {
                     offset,
                 )
             }
-            // Interior WAL corruption: starting fresh would hide acknowledged
-            // history and append after the damage. Refuse to start instead.
-            Err(e @ PersistenceError::WALInteriorCorruption { .. }) => {
+            // Interior WAL corruption, a damaged header or a WAL written by a
+            // newer format: starting fresh would hide acknowledged history and
+            // append after it. Refuse to start instead.
+            Err(e) if e.refuses_startup() => {
                 error!("Recovery failed: {}", e);
                 return Err(anyhow::anyhow!("refusing to start: {e}"));
             }
@@ -570,7 +582,7 @@ async fn main() -> Result<()> {
                 // store (hash/list/set/sorted-set) has been constructed.
                 Some(Arc::new(layer))
             }
-            Err(e @ PersistenceError::WALInteriorCorruption { .. }) => {
+            Err(e) if e.refuses_startup() => {
                 error!("Failed to initialize persistence: {}", e);
                 return Err(anyhow::anyhow!("refusing to start: {e}"));
             }
@@ -938,7 +950,8 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Create router with rate limiting and authentication
+    // Create router with rate limiting and authentication. The router logs
+    // whether rate limiting is enforced, since it is what installs the limiter.
     let app = create_router(
         app_state,
         config.rate_limit.clone(),
@@ -949,13 +962,6 @@ async fn main() -> Result<()> {
         config.auth.require_auth,
     );
 
-    if config.rate_limit.enabled {
-        info!(
-            "Rate limiting enabled: {} req/s (burst: {})",
-            config.rate_limit.requests_per_second, config.rate_limit.burst_size
-        );
-    }
-
     // Bind server
     let addr: SocketAddr = config.server_addr().parse()?;
     info!("Listening on http://{}", addr);
@@ -965,15 +971,21 @@ async fn main() -> Result<()> {
     // connection cannot block exit), then drain and fsync the WAL.
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let signalled = Arc::new(tokio::sync::Notify::new());
-    let server = axum::serve(listener, app)
-        .with_graceful_shutdown({
-            let signalled = Arc::clone(&signalled);
-            async move {
-                shutdown_signal().await;
-                signalled.notify_one();
-            }
-        })
-        .into_future();
+    // Connection info gives every request its TCP peer address: the rate
+    // limiter keys clients by it, authentication records it as the client IP,
+    // and the WebSocket handlers extract it.
+    let server = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown({
+        let signalled = Arc::clone(&signalled);
+        async move {
+            shutdown_signal().await;
+            signalled.notify_one();
+        }
+    })
+    .into_future();
     let served = tokio::select! {
         result = server => result,
         _ = async {

@@ -164,9 +164,13 @@ pub async fn kv_incr(log: Log<'_>, kv: &KVStore, key: &str, amount: i64) -> Resu
     Ok(value)
 }
 
-/// DECRBY, with the same arithmetic as [`KVStore::decr`].
+/// DECRBY, with the same arithmetic as [`KVStore::decr`]: an amount whose
+/// negation overflows (`i64::MIN`) is rejected before anything changes.
 pub async fn kv_decr(log: Log<'_>, kv: &KVStore, key: &str, amount: i64) -> Result<i64> {
-    kv_incr(log, kv, key, -amount).await
+    let delta = amount
+        .checked_neg()
+        .ok_or_else(|| SynapError::InvalidValue("Integer overflow on INCR/DECR".to_string()))?;
+    kv_incr(log, kv, key, delta).await
 }
 
 /// MSET: every pair becomes a persistent key.

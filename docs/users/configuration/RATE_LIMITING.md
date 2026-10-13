@@ -9,40 +9,47 @@ tags: [configuration, rate-limiting, security, dos-protection]
 
 # Rate Limiting Configuration
 
-Configure rate limiting to protect Synap against DoS attacks and excessive API usage.
+Configure per-client rate limiting for the HTTP server (port 15500): REST,
+`/api/v1/command`, MCP (`/mcp`), UMICP (`/umicp`) and the WebSocket upgrades.
+The RESP3 and SynapRPC listeners are not covered; they have their own
+connection limits under `network`.
 
 ## Overview
 
-Synap implements **token bucket rate limiting** with:
+When `rate_limit.enabled` is `true`, Synap enforces a **token bucket per
+client**:
 
-- **Per-IP rate limiting** - Each IP address has its own rate limit
-- **Configurable requests per second** - Set maximum request rate
-- **Burst capacity** - Allow temporary spikes above rate limit
-- **Automatic cleanup** - Old entries are cleaned up periodically
+- Each bucket holds up to `burst_size` tokens and refills at
+  `requests_per_second`. Every request spends one token.
+- A request that finds its bucket empty is answered **429 Too Many Requests**
+  with a `Retry-After` header.
+- The limit applies **before authentication**, so password checks (bcrypt) and
+  API key checks are bounded too, whether they succeed or fail.
+- `/health` and `/metrics` are **exempt**, so liveness probes and Prometheus
+  scrapers are never throttled into reporting an outage.
+
+With `enabled: false` (the default) no request is rate limited.
 
 ## Configuration
 
-### Enable Rate Limiting
-
 ```yaml
 rate_limit:
-  # Enable rate limiting (token bucket algorithm)
   enabled: true
-  
-  # Maximum requests per second per IP
+  # Sustained requests per second per client (refill rate)
   requests_per_second: 1000
-  
-  # Burst size (maximum tokens in bucket)
+  # Requests a client may send at once (bucket capacity)
   burst_size: 100
 ```
 
-### Configuration Options
-
 | Option | Default | Description |
 |--------|---------|-------------|
-| `enabled` | `false` | Enable/disable rate limiting |
-| `requests_per_second` | `1000` | Maximum requests per second per IP |
-| `burst_size` | `100` | Maximum tokens in bucket (allows spikes) |
+| `enabled` | `false` | Install the limiter |
+| `requests_per_second` | `1000` | Tokens added to each bucket per second |
+| `burst_size` | `100` | Bucket capacity: the most requests a client can send at once |
+
+With `enabled: true`, both `requests_per_second` and `burst_size` must be at
+least 1; the server refuses to start otherwise, since such a limiter would
+reject every request or never let a limited client back in.
 
 ### Recommended Settings
 
@@ -62,206 +69,131 @@ rate_limit:
   burst_size: 20000
 ```
 
-**High-Traffic Production:**
+## How Clients Are Identified
+
+Every request is checked against up to two buckets, and is served only if
+each has a token:
+
+1. **Peer address, before authentication.** The bucket of the TCP peer IP
+   address. Forwarding headers such as `X-Forwarded-For` are ignored, because
+   the client writes them. This is the check that bounds authentication
+   attempts.
+2. **Principal, after authentication.** A request that authenticated also
+   spends a token from its principal's bucket: the user for Basic auth or a
+   user-owned API key, the key itself for a key without a user, and the tenant
+   (`hub:<uuid>`) in Hub mode. One principal is therefore bounded across every
+   address it connects from. Anonymous requests have no principal bucket.
+
+Both buckets use the same `requests_per_second` and `burst_size`.
+
+**Behind a reverse proxy or load balancer**, every client reaches Synap from
+the proxy's address and shares one peer bucket. Either rate limit at the proxy
+and leave `rate_limit.enabled: false`, or size `burst_size` and
+`requests_per_second` for the combined traffic of the proxy.
+
+Buckets that have refilled to capacity carry no state and are pruned once
+there are more than 10,000, so memory stays bounded as client addresses churn.
+
+## Example
+
 ```yaml
 rate_limit:
   enabled: true
-  requests_per_second: 5000
-  burst_size: 10000
+  requests_per_second: 10
+  burst_size: 5
 ```
 
-## How It Works
+- A client sending 20 requests at once gets 5 answered and 15 refused with 429.
+- A new token arrives every 100 ms, so after the burst the client can sustain
+  10 requests per second.
+- Another client is unaffected: its bucket is its own.
 
-### Token Bucket Algorithm
-
-1. **Token Refill**: Tokens are refilled at `requests_per_second` rate
-2. **Token Consumption**: Each request consumes 1 token
-3. **Burst Handling**: Up to `burst_size` tokens can accumulate
-4. **Rate Limit Exceeded**: Returns `429 Too Many Requests` when no tokens available
-
-### Example
-
-```yaml
-rate_limit:
-  requests_per_second: 100
-  burst_size: 200
-```
-
-**Behavior:**
-- Normal rate: 100 requests/second
-- Burst: Can handle up to 200 requests in quick succession
-- After burst: Must wait for tokens to refill
-
-## Response Codes
-
-### Rate Limit Exceeded
-
-When rate limit is exceeded:
+## Rate Limit Response
 
 **HTTP Status:** `429 Too Many Requests`
 
-**Response:**
+**Headers:** `Retry-After: <seconds>`, the whole number of seconds (at least 1)
+until the bucket holds a token again.
+
+**Body:**
 ```json
 {
-  "success": false,
-  "error": {
-    "type": "RateLimitExceeded",
-    "message": "Rate limit exceeded. Please try again later.",
-    "status_code": 429
-  }
+  "error": "Rate limit exceeded; retry after 1 s",
+  "code": 429
 }
 ```
 
-## Monitoring
+## Startup Log
 
-### Check Rate Limit Status
+The server logs what it actually installed:
 
-Rate limiting is tracked per IP. Monitor with:
-
-```bash
-# Check server logs
-tail -f /var/log/synap/synap.log | grep "Rate limit"
-
-# Check metrics (if Prometheus enabled)
-curl http://localhost:15500/metrics | grep rate_limit
+```text
+Rate limiting enforced: 1000 req/s, burst 100, per client address before authentication and per authenticated principal (/health and /metrics exempt)
 ```
+
+or, with `enabled: false`:
+
+```text
+Rate limiting disabled: requests are not rate limited
+```
+
+Refused requests are logged at `debug` level only, so a client hammering the
+limit cannot flood the log.
 
 ## Best Practices
 
-### 1. Set Appropriate Limits
+### Size the Burst for Real Clients
 
-**Too Low:**
-- Legitimate users get rate limited
-- Poor user experience
+`burst_size` is what a client can send at once (page loads, batch jobs,
+reconnect storms); `requests_per_second` is what it can sustain. A burst of
+about twice the per-second rate absorbs normal spikes.
 
-**Too High:**
-- Doesn't protect against attacks
-- Wastes resources
+### Honor Retry-After
 
-**Recommended:**
-- Start with conservative limits
-- Monitor and adjust based on traffic patterns
-- Use different limits for different endpoints if needed
+Clients should wait the `Retry-After` seconds before retrying a 429 rather
+than retrying immediately, which only spends the next token as soon as it
+arrives:
 
-### 2. Handle Rate Limit Errors
-
-**Client-Side:**
 ```python
 import time
-from synap import SynapClient
+import requests
 
-client = SynapClient("http://localhost:15500")
-
-def make_request_with_retry():
-    max_retries = 3
-    retry_delay = 1
-    
-    for attempt in range(max_retries):
-        try:
-            return client.kv.get("key")
-        except RateLimitError:
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay * (attempt + 1))
-            else:
-                raise
+def get_with_retry(url, attempts=3):
+    for _ in range(attempts):
+        response = requests.get(url)
+        if response.status_code != 429:
+            return response
+        time.sleep(int(response.headers.get("Retry-After", "1")))
+    return response
 ```
 
-**Server-Side:**
-```python
-from fastapi import HTTPException
+### Per-Endpoint Limits
 
-try:
-    result = synap_client.kv.get(key)
-except RateLimitError:
-    raise HTTPException(
-        status_code=429,
-        detail="Rate limit exceeded. Please try again later."
-    )
-```
+The limit is the same for every route. For per-endpoint limits, use a reverse
+proxy:
 
-### 3. Use Burst Size Wisely
-
-**Small Burst:**
-- Stricter rate limiting
-- Better protection
-- May reject legitimate bursts
-
-**Large Burst:**
-- More lenient
-- Better user experience
-- Less protection
-
-**Recommended:** `burst_size = 2 * requests_per_second`
-
-### 4. Monitor and Adjust
-
-**Monitor:**
-- Rate limit hit frequency
-- IP addresses hitting limits
-- Traffic patterns
-
-**Adjust:**
-- Increase limits for legitimate traffic
-- Decrease limits for abusive traffic
-- Consider per-endpoint limits
-
-## Advanced Configuration
-
-### Per-Endpoint Rate Limiting
-
-Currently, rate limiting is global. For per-endpoint limits, use a reverse proxy:
-
-**Nginx Example:**
 ```nginx
-# Different limits for different endpoints
 location /kv/ {
     limit_req zone=kv_limit burst=50;
     proxy_pass http://synap:15500;
 }
-
-location /queue/ {
-    limit_req zone=queue_limit burst=20;
-    proxy_pass http://synap:15500;
-}
 ```
-
-### Rate Limiting with Authentication
-
-Rate limiting works with authentication:
-
-- **Authenticated users**: Rate limited by IP
-- **API keys**: Can have different limits (future feature)
-- **Admin users**: Can bypass rate limits (future feature)
 
 ## Troubleshooting
 
-### Rate Limits Too Strict
+### Legitimate Clients Get 429
 
-**Problem:** Legitimate users getting rate limited.
+1. Increase `requests_per_second` and/or `burst_size`.
+2. If Synap sits behind a proxy, all clients share the proxy's address; see
+   [How Clients Are Identified](#how-clients-are-identified).
 
-**Solution:**
-1. Increase `requests_per_second`
-2. Increase `burst_size`
-3. Check if traffic is legitimate or abusive
+### Rate Limiting Not Applied
 
-### Rate Limits Not Working
-
-**Problem:** Rate limiting enabled but not blocking requests.
-
-**Solution:**
-1. Verify `enabled: true` in config
-2. Check server logs for rate limit messages
-3. Verify middleware is properly configured
-4. Restart server after config changes
-
-### High Memory Usage
-
-**Problem:** Rate limiter using too much memory.
-
-**Solution:**
-1. Automatic cleanup runs every 5 minutes
-2. Old entries (>5 minutes inactive) are removed
-3. For high-traffic, consider reducing cleanup interval
+1. Check the startup log: it says `Rate limiting enforced` only when the
+   limiter is installed.
+2. Verify `rate_limit.enabled: true` and restart the server; the setting is
+   read at startup.
+3. `/health` and `/metrics` are never limited, by design.
 
 ## Related Topics
 

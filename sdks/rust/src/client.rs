@@ -456,8 +456,16 @@ impl SynapClient {
         let response = self.http_client.post(url).json(&body).send().await?;
 
         if !response.status().is_success() {
+            let status = response.status();
             let error_text = response.text().await.unwrap_or_default();
-            return Err(SynapError::ServerError(error_text));
+            // A 401 from the auth layer has no body; without the status the
+            // caller would only see an empty "Server error: ".
+            let message = if error_text.is_empty() {
+                format!("HTTP {status}")
+            } else {
+                error_text
+            };
+            return Err(SynapError::ServerError(message));
         }
 
         let result: Value = response.json().await?;

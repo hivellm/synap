@@ -1,0 +1,19 @@
+{
+  "id": "scoped-tracing-capture-misses-events-with-one-dispatcher",
+  "type": "anti-pattern",
+  "title": "Scoped tracing capture misses events while only one dispatcher is registered",
+  "category": "testing",
+  "description": "A log-capturing test using tracing::subscriber::with_default passed alone and captured nothing when the other tests in the binary ran in parallel. In tracing-core 0.1.36, while at most one dispatcher is registered, Dispatchers::rebuilder() takes the JustOne path and asks only the registering thread's default; another test thread without a subscriber that reaches the same callsite first caches interest `never`, so the event is skipped on every thread. Keep a second dispatcher alive while capturing (has_just_one becomes false) so interest is computed across every registered dispatcher.",
+  "example": "let capture = tracing::Dispatch::new(fmt().with_writer(logs.clone()).finish());\nlet _second = tracing::Dispatch::new(tracing_subscriber::registry());\ntracing::dispatcher::with_default(&capture, || build_the_thing());",
+  "whenToUse": "Tests that assert on log output through a scoped subscriber in a binary whose other tests emit through the same callsites.",
+  "whenNotToUse": "A test binary with a global subscriber, or a capturing test that runs alone.",
+  "createdAt": "2026-10-13T12:00:00.000Z",
+  "tags": [
+    "tracing",
+    "testing",
+    "logs",
+    "parallel-tests",
+    "phase19"
+  ],
+  "source": "manual"
+}

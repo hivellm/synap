@@ -126,6 +126,25 @@ logging:
 - **level**: Log level - `trace`, `debug`, `info`, `warn`, `error`
 - **format**: Log format - `json` or `text`
 
+### Rate Limiting Configuration
+
+- **enabled**: Enforce per-client rate limits on the HTTP server (default: `false`)
+- **requests_per_second**: Tokens refilled per second in each client's bucket (default: `1000`)
+- **burst_size**: Bucket capacity, the most requests a client can send at once (default: `100`)
+
+Clients are keyed by TCP peer address before authentication (so credential
+checks are bounded) and by authenticated principal after it. A limited request
+answers `429` with `Retry-After`; `/health` and `/metrics` are exempt. See
+[Rate Limiting](./RATE_LIMITING.md).
+
+### MCP and UMICP Configuration
+
+- **enable_*_tools**: Which tool families MCP and UMICP expose
+- **umicp_max_body_bytes**: Largest `POST /umicp` body the server reads
+  (default: `16777216`, 16 MiB). A larger body answers `413 Payload Too Large`:
+  a `Content-Length` above the limit is refused before the body is read, and a
+  chunked body stops being read once it passes the limit.
+
 ## Environment Variables
 
 ```bash
@@ -138,6 +157,7 @@ synap-server
 ## Related Topics
 
 - [Server Configuration](./SERVER.md) - Network and server settings
+- [Rate Limiting](./RATE_LIMITING.md) - Per-client request limits
 - [Logging Configuration](./LOGGING.md) - Log configuration
 - [Persistence Configuration](./PERSISTENCE.md) - WAL and snapshots
 - [Replication Configuration](./REPLICATION.md) - Master-replica setup

@@ -2,8 +2,11 @@ use super::auth_handlers;
 use super::handlers::{self, AppState};
 use super::mcp_server::SynapMcpService;
 use crate::auth::{ApiKeyManager, AuthMiddleware, UserManager};
+use crate::core::SynapError;
+use crate::hub::{HubClient, HubUserContext, extract_access_key};
 use axum::{
-    Router,
+    Json, Router,
+    response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
 use std::sync::Arc;
@@ -12,7 +15,7 @@ use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Create the Axum router with all endpoints
 /// Paths that must answer without credentials.
@@ -20,8 +23,98 @@ use tracing::debug;
 /// A liveness probe that requires authentication is not a liveness probe: the
 /// container HEALTHCHECK, Kubernetes, and any load balancer all probe
 /// unauthenticated. `/metrics` is the same contract — a scraper is not a user.
-fn is_public_path(path: &str) -> bool {
+/// The rate limiter exempts them for the same reason.
+pub(crate) fn is_public_path(path: &str) -> bool {
     matches!(path, "/health" | "/metrics")
+}
+
+/// Whether a Hub tenant may call `path`. An allow-list of the routes whose
+/// handlers confine every resource they touch to the caller's tenant (or
+/// filter what they list by it); a route added later is refused in Hub mode
+/// until it is reviewed for scoping. Everything else answers 403 there:
+/// keyspace-wide statistics, server introspection (`/info`, `/slowlog`,
+/// `/clients`, `/memory`), `/snapshot`, scripts, the REST transaction (one id
+/// shared by every caller), partitioned topics and consumer groups, cluster
+/// management and local user and key management.
+fn is_tenant_route(path: &str) -> bool {
+    let segments: Vec<&str> = path.strip_prefix('/').unwrap_or(path).split('/').collect();
+    match segments.as_slice() {
+        // Confined per command or tool call.
+        ["api", "v1", "command"] | ["mcp"] | ["umicp"] | ["umicp", "discover"] => true,
+        ["hub", "quota"] => true,
+        [
+            "hash" | "set" | "sortedset" | "list" | "hyperloglog" | "bitmap" | "geospatial"
+            | "pubsub",
+            "stats",
+        ] => false,
+        ["kv", "ws" | "set" | "msetnx"] | ["kv", "get" | "del", _] => true,
+        [
+            "kv",
+            _,
+            "append" | "getrange" | "setrange" | "strlen" | "getset",
+        ] => true,
+        ["key", "randomkey"] | ["key", _, "type" | "exists" | "rename" | "renamenx" | "copy"] => {
+            true
+        }
+        [
+            "hash" | "set" | "sortedset" | "list" | "hyperloglog" | "bitmap" | "geospatial"
+            | "stream" | "queue" | "pubsub",
+            _,
+            ..,
+        ] => true,
+        _ => false,
+    }
+}
+
+/// Hub mode's authentication layer, installed instead of local
+/// authentication. Every route but `/health` and `/metrics` needs a valid Hub
+/// access key (`x-hub-access-key`, or `Authorization: Bearer`): without one, or
+/// with one the Hub rejects, the answer is 401, and local credentials are not
+/// accepted. Only tenant routes ([`is_tenant_route`]) answer; the rest are 403.
+/// The request then runs as the key's tenant: a [`HubUserContext`] that scopes
+/// its resources and the tenant's `AuthContext` that authorizes them.
+async fn hub_gate(
+    hub: &HubClient,
+    mut req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let client_ip = AuthMiddleware::get_client_ip(&req);
+    if is_public_path(req.uri().path()) {
+        req.extensions_mut()
+            .insert(crate::auth::AuthContext::anonymous(client_ip));
+        return next.run(req).await;
+    }
+
+    let Some(access_key) = extract_access_key(req.headers()) else {
+        return SynapError::Unauthorized("Hub mode: a Hub access key is required".to_string())
+            .into_response();
+    };
+    let (user_id, plan) = match hub.validate_access_key(&access_key).await {
+        Ok(owner) => owner,
+        Err(SynapError::Unauthorized(reason)) => {
+            debug!("Hub access key refused: {}", reason);
+            return SynapError::Unauthorized("Invalid or expired Hub access key".to_string())
+                .into_response();
+        }
+        Err(e) => {
+            warn!("Hub access key could not be validated: {}", e);
+            return (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": e.to_string(), "code": 503 })),
+            )
+                .into_response();
+        }
+    };
+
+    if !is_tenant_route(req.uri().path()) {
+        return SynapError::Forbidden(format!("{} is not available in Hub mode", req.uri().path()))
+            .into_response();
+    }
+
+    let tenant = HubUserContext::new(user_id, plan, access_key);
+    req.extensions_mut().insert(tenant.auth_context(client_ip));
+    req.extensions_mut().insert(tenant);
+    next.run(req).await
 }
 
 pub fn create_router(
@@ -56,6 +149,9 @@ pub fn create_router(
     } else {
         None
     };
+
+    // Hub mode authenticates with Hub access keys instead of local credentials.
+    let hub_client = state.hub_client.clone();
 
     // Create MCP router (stateless)
     let state_arc = Arc::new(state.clone());
@@ -448,8 +544,34 @@ pub fn create_router(
         .merge(auth_router) // Authentication endpoints
         .merge(api_router); // Main API endpoints
 
-    // Apply authentication middleware (always apply, but behavior depends on auth_enabled)
-    if let Some(auth) = auth_middleware {
+    // Rate limiting (`server::rate_limit`): the principal layer goes on first
+    // so it runs inside authentication, where the principal is known; the
+    // peer-address layer goes on after it so it runs before authentication.
+    let rate_limiter = rate_limit_config.enabled.then(|| {
+        Arc::new(super::rate_limit::RateLimiter::new(
+            rate_limit_config.clone(),
+        ))
+    });
+    if let Some(limiter) = &rate_limiter {
+        let limiter = Arc::clone(limiter);
+        router = router.layer(axum::middleware::from_fn(
+            move |req: axum::extract::Request, next: axum::middleware::Next| {
+                let limiter = Arc::clone(&limiter);
+                async move { super::rate_limit::limit_by_principal(limiter, req, next).await }
+            },
+        ));
+    }
+
+    // Apply authentication middleware: Hub authentication in Hub mode, local
+    // authentication otherwise (its behavior depends on auth_enabled).
+    if let Some(hub) = hub_client {
+        router = router.layer(axum::middleware::from_fn(
+            move |req: axum::extract::Request, next: axum::middleware::Next| {
+                let hub = Arc::clone(&hub);
+                async move { hub_gate(&hub, req, next).await }
+            },
+        ));
+    } else if let Some(auth) = auth_middleware {
         let auth_clone = auth.clone();
         router = router.layer(axum::middleware::from_fn(
             move |mut req: axum::extract::Request, next: axum::middleware::Next| {
@@ -538,27 +660,29 @@ pub fn create_router(
         ));
     }
 
-    router = router
-        .layer(CompressionLayer::new()) // Gzip compression for responses
-        .layer(TraceLayer::new_for_http())
-        .layer(cors);
-
-    // NOTE: Rate limiting implementation available but disabled by default
-    // The rate_limit::RateLimiter is fully implemented with token bucket algorithm
-    // To enable, set rate_limit.enabled = true in config.yml
-    // Implementation details in src/server/rate_limit.rs
-
-    if rate_limit_config.enabled {
-        tracing::warn!(
-            "Rate limiting configured ({} req/s, burst: {}) but not active - requires middleware integration",
+    // Outside authentication: limited clients are refused before their
+    // credentials are checked.
+    if let Some(limiter) = rate_limiter {
+        router = router.layer(axum::middleware::from_fn(
+            move |req: axum::extract::Request, next: axum::middleware::Next| {
+                let limiter = Arc::clone(&limiter);
+                async move { super::rate_limit::limit_by_peer(limiter, req, next).await }
+            },
+        ));
+        tracing::info!(
+            "Rate limiting enforced: {} req/s, burst {}, per client address before \
+             authentication and per authenticated principal (/health and /metrics exempt)",
             rate_limit_config.requests_per_second,
             rate_limit_config.burst_size
         );
     } else {
-        tracing::info!("Rate limiting disabled (default)");
+        tracing::info!("Rate limiting disabled: requests are not rate limited");
     }
 
     router
+        .layer(CompressionLayer::new()) // Gzip compression for responses
+        .layer(TraceLayer::new_for_http())
+        .layer(cors)
 }
 
 /// The credentials behind an MCP request: the authenticated user and, when it
@@ -737,4 +861,81 @@ fn create_umicp_router(state: Arc<AppState>, mcp_config: crate::config::McpConfi
         .route("/umicp", post(transport::umicp_handler))
         .route("/umicp/discover", get(transport::umicp_discover_handler))
         .with_state(umicp_state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hub_mode_allows_tenant_routes_only() {
+        for path in [
+            "/api/v1/command",
+            "/mcp",
+            "/umicp",
+            "/umicp/discover",
+            "/hub/quota",
+            "/kv/set",
+            "/kv/get/config",
+            "/kv/del/config",
+            "/kv/ws",
+            "/kv/config/append",
+            "/kv/msetnx",
+            "/key/config/rename",
+            "/key/randomkey",
+            "/hash/h/set",
+            "/hash/h/field",
+            "/set/a/move/b",
+            "/set/inter",
+            "/sortedset/z/zadd",
+            "/sortedset/zunionstore",
+            "/list/l/rpoplpush/m",
+            "/hyperloglog/h/pfmerge",
+            "/bitmap/d/bitop",
+            "/geospatial/g/geoadd",
+            "/stream/room",
+            "/stream/room/ws/sub",
+            "/stream/list",
+            "/queue/jobs",
+            "/queue/jobs/stats",
+            "/queue/jobs/ws/c1",
+            "/queue/list",
+            "/pubsub/ws",
+            "/pubsub/news/publish",
+            "/pubsub/topics",
+        ] {
+            assert!(is_tenant_route(path), "{path} should be a tenant route");
+        }
+        for path in [
+            "/kv/stats",
+            "/hash/stats",
+            "/set/stats",
+            "/sortedset/stats",
+            "/list/stats",
+            "/hyperloglog/stats",
+            "/bitmap/stats",
+            "/geospatial/stats",
+            "/pubsub/stats",
+            "/info",
+            "/slowlog",
+            "/clients",
+            "/memory/config/usage",
+            "/snapshot",
+            "/transaction/multi",
+            "/transaction/exec",
+            "/script/eval",
+            "/script/flush",
+            "/topics",
+            "/topics/t/publish",
+            "/consumer-groups/g/join",
+            "/cluster/info",
+            "/cluster/nodes",
+            "/auth/login",
+            "/auth/users",
+            "/health/extra",
+            "/",
+        ] {
+            assert!(!is_tenant_route(path), "{path} must be refused in Hub mode");
+        }
+    }
 }

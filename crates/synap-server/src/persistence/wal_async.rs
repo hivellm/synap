@@ -62,14 +62,6 @@ enum WriteRequest {
         operation: Operation,
         response_tx: oneshot::Sender<Result<u64>>,
     },
-    /// A group of operations that MUST be written contiguously and confirmed as a
-    /// unit — used to log a MULTI/EXEC transaction atomically (audit M-010). The
-    /// writer emits every op back-to-back within one drain, so no other write
-    /// interleaves between them, and confirms once with all assigned offsets.
-    Batch {
-        operations: Vec<Operation>,
-        response_tx: oneshot::Sender<Result<Vec<u64>>>,
-    },
     /// Barrier: every earlier entry reaches the OS (and stable storage when
     /// `sync` is set) before the response is sent.
     Flush {
@@ -109,8 +101,11 @@ impl AsyncWAL {
     ///
     /// Before the file is opened for append it is scanned: every frame's length
     /// and checksum are verified, a torn tail is truncated to the last valid
-    /// frame, and interior corruption fails with
-    /// [`PersistenceError::WALInteriorCorruption`].
+    /// frame, interior corruption fails with
+    /// [`PersistenceError::WALInteriorCorruption`], and a header declaring a
+    /// newer format fails with [`PersistenceError::WALUnsupportedVersion`]. A
+    /// new file gets the current format header and a 1.3.x (headerless) file
+    /// is upgraded in place (see [`wal_frame::prepare`]).
     pub async fn open_with_sink<S, F>(config: WALConfig, wrap: F) -> Result<Self>
     where
         S: WalSink,
@@ -121,7 +116,7 @@ impl AsyncWAL {
             tokio::fs::create_dir_all(parent).await?;
         }
 
-        let report = wal_frame::repair_async(config.path.clone()).await?;
+        let report = wal_frame::prepare_async(config.path.clone()).await?;
         let next_offset = report.next_offset();
 
         // Open or create file (append mode), now ending on a frame boundary
@@ -192,23 +187,21 @@ impl AsyncWAL {
         .await
     }
 
-    /// Append a group of operations as one atomic unit (audit M-010).
+    /// Append a committed transaction as ONE record (audit M-010, phase22).
     ///
-    /// All operations are written contiguously by the background writer and a
-    /// single confirmation is returned once they are durably recorded (subject to
-    /// the configured fsync mode), so a MULTI/EXEC is logged as a unit rather than
-    /// as interleavable single appends. Returns the assigned offsets in order. An
-    /// empty batch is a no-op.
-    pub async fn append_batch(&self, operations: Vec<Operation>) -> Result<Vec<u64>> {
+    /// The operations are wrapped in [`Operation::Transaction`] and written as
+    /// a single frame under a single checksum, with a single offset. A crash
+    /// mid-write leaves a torn frame that the next startup discards whole, so
+    /// recovery sees every operation of the transaction or none of them. The
+    /// confirmation follows the configured fsync mode, like [`Self::append`].
+    /// Returns `None` for an empty transaction, which writes nothing.
+    pub async fn append_transaction(&self, operations: Vec<Operation>) -> Result<Option<u64>> {
         if operations.is_empty() {
-            return Ok(Vec::new());
+            return Ok(None);
         }
-        self.check_poison()?;
-        self.request(|response_tx| WriteRequest::Batch {
-            operations,
-            response_tx,
-        })
-        .await
+        self.append(Operation::Transaction { operations })
+            .await
+            .map(Some)
     }
 
     /// Wait until every entry appended before this call has reached the OS,
@@ -256,23 +249,19 @@ fn broken_pipe(message: &str) -> PersistenceError {
 }
 
 /// One acknowledgement waiting for its group to reach the OS (and disk).
-enum Pending {
-    Single(oneshot::Sender<Result<u64>>, u64),
-    Batch(oneshot::Sender<Result<Vec<u64>>>, Vec<u64>),
+struct Pending {
+    response_tx: oneshot::Sender<Result<u64>>,
+    offset: u64,
 }
 
 impl Pending {
-    /// Send the group's outcome: the assigned offsets, or the poison reason.
+    /// Send the group's outcome: the assigned offset, or the poison reason.
     fn complete(self, outcome: &std::result::Result<(), String>) {
-        let failure = |reason: &String| PersistenceError::WALPoisoned(reason.clone());
-        match self {
-            Pending::Single(tx, offset) => {
-                let _ = tx.send(outcome.as_ref().map(|()| offset).map_err(failure));
-            }
-            Pending::Batch(tx, offsets) => {
-                let _ = tx.send(outcome.as_ref().map(|()| offsets).map_err(failure));
-            }
-        }
+        let result = outcome
+            .as_ref()
+            .map(|()| self.offset)
+            .map_err(|reason| PersistenceError::WALPoisoned(reason.clone()));
+        let _ = self.response_tx.send(result);
     }
 }
 
@@ -354,17 +343,11 @@ impl<S: WalSink> Writer<S> {
                 WriteRequest::Single {
                     operation,
                     response_tx,
-                } => match self.write_entries(vec![operation]).await {
-                    Ok(offsets) => pending.push(Pending::Single(response_tx, offsets[0])),
-                    Err(e) => {
-                        let _ = response_tx.send(Err(e));
-                    }
-                },
-                WriteRequest::Batch {
-                    operations,
-                    response_tx,
-                } => match self.write_entries(operations).await {
-                    Ok(offsets) => pending.push(Pending::Batch(response_tx, offsets)),
+                } => match self.write_entry(operation).await {
+                    Ok(offset) => pending.push(Pending {
+                        response_tx,
+                        offset,
+                    }),
                     Err(e) => {
                         let _ = response_tx.send(Err(e));
                     }
@@ -392,11 +375,11 @@ impl<S: WalSink> Writer<S> {
         Flow::Continue
     }
 
-    /// Encode `operations` as frames and write them back-to-back.
+    /// Encode `operation` as one frame and write it.
     ///
-    /// Every frame is encoded before any byte is written, so a serialization
+    /// The frame is encoded before any byte is written, so a serialization
     /// error writes nothing. A sink error poisons the writer.
-    async fn write_entries(&mut self, operations: Vec<Operation>) -> Result<Vec<u64>> {
+    async fn write_entry(&mut self, operation: Operation) -> Result<u64> {
         if let Some(reason) = self.poison.get() {
             return Err(PersistenceError::WALPoisoned(reason.clone()));
         }
@@ -405,27 +388,19 @@ impl<S: WalSink> Writer<S> {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        let mut offsets = Vec::with_capacity(operations.len());
-        let mut frames = Vec::with_capacity(operations.len());
-        for operation in operations {
-            let offset = self.current_offset.fetch_add(1, Ordering::SeqCst);
-            let entry = WALEntry {
-                offset,
-                timestamp,
-                operation,
-            };
-            frames.push(wal_frame::encode_frame(&entry)?);
-            offsets.push(offset);
-        }
+        let offset = self.current_offset.fetch_add(1, Ordering::SeqCst);
+        let frame = wal_frame::encode_frame(&WALEntry {
+            offset,
+            timestamp,
+            operation,
+        })?;
 
-        for frame in &frames {
-            if let Err(e) = self.sink.write_all(frame).await {
-                let reason = self.poison_with(format!("write failed: {e}"));
-                return Err(PersistenceError::WALPoisoned(reason));
-            }
+        if let Err(e) = self.sink.write_all(&frame).await {
+            let reason = self.poison_with(format!("write failed: {e}"));
+            return Err(PersistenceError::WALPoisoned(reason));
         }
         self.unsynced = true;
-        Ok(offsets)
+        Ok(offset)
     }
 
     /// Hand buffered bytes to the OS and fsync when `force_sync` is set or the
@@ -605,10 +580,10 @@ mod tests {
         entries
     }
 
-    /// `append_batch` writes every op contiguously and returns their offsets; a
-    /// later replay sees exactly those entries (audit M-010 transaction WAL unit).
+    /// `append_transaction` writes the whole transaction as ONE record with one
+    /// offset; a later replay sees it whole (audit M-010, phase22).
     #[tokio::test]
-    async fn append_batch_writes_all_and_replays() {
+    async fn append_transaction_writes_one_record_and_replays() {
         let dir = "./target/wal_batch_test";
         let _ = std::fs::remove_dir_all(dir);
         std::fs::create_dir_all(dir).unwrap();
@@ -616,8 +591,8 @@ mod tests {
 
         let wal = AsyncWAL::open(config.clone()).await.unwrap();
 
-        // Empty batch is a no-op.
-        assert!(wal.append_batch(vec![]).await.unwrap().is_empty());
+        // An empty transaction writes nothing.
+        assert_eq!(wal.append_transaction(vec![]).await.unwrap(), None);
 
         let ops = vec![
             Operation::KVSet {
@@ -634,13 +609,9 @@ mod tests {
                 keys: vec!["a".into()],
             },
         ];
-        let offsets = wal.append_batch(ops).await.unwrap();
-        assert_eq!(offsets.len(), 3);
-        // Offsets are contiguous and ascending.
-        assert_eq!(offsets[1], offsets[0] + 1);
-        assert_eq!(offsets[2], offsets[1] + 1);
+        let offset = wal.append_transaction(ops).await.unwrap().unwrap();
 
-        // A single append after the batch continues the offset sequence.
+        // A single append after the transaction takes the next offset.
         let single = wal
             .append(Operation::KVSet {
                 key: "c".into(),
@@ -649,10 +620,20 @@ mod tests {
             })
             .await
             .unwrap();
-        assert_eq!(single, offsets[2] + 1);
+        assert_eq!(single, offset + 1);
 
         let entries = wal.replay(&config.path, 0).await.unwrap();
-        assert_eq!(entries.len(), 4);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].offset, offset);
+        match &entries[0].operation {
+            Operation::Transaction { operations } => {
+                assert_eq!(operations.len(), 3);
+                assert!(matches!(&operations[0], Operation::KVSet { key, .. } if key == "a"));
+                assert!(matches!(&operations[1], Operation::KVSet { key, .. } if key == "b"));
+                assert!(matches!(&operations[2], Operation::KVDel { keys } if keys == &["a"]));
+            }
+            other => panic!("expected one transaction record, got {other:?}"),
+        }
 
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -685,12 +666,12 @@ mod tests {
                 .await
                 .unwrap();
             let o2 = wal
-                .append_batch(vec![Operation::KVDel {
+                .append_transaction(vec![Operation::KVDel {
                     keys: vec!["k".into()],
                 }])
                 .await
                 .unwrap();
-            assert_eq!(o2, vec![o1 + 1]);
+            assert_eq!(o2, Some(o1 + 1));
             // Every group reaches the OS before it is acknowledged, in both modes.
             assert_eq!(entries_on_disk(&config).len(), 2);
             let _ = std::fs::remove_dir_all(&dir);
@@ -779,15 +760,15 @@ mod tests {
         assert!(wal.shutdown().await.is_err());
     }
 
-    /// A failed flush fails a transaction batch and poisons the writer.
+    /// A failed flush fails a transaction record and poisons the writer.
     #[tokio::test]
-    async fn injected_flush_failure_fails_a_batch() {
+    async fn injected_flush_failure_fails_a_transaction() {
         let config = fresh_config("flush_fail", FsyncMode::Always, 1000);
         let (wal, faults) = open_faulty(&config).await;
 
         faults.fail_next_flush();
         let err = wal
-            .append_batch(vec![set("t1"), set("t2")])
+            .append_transaction(vec![set("t1"), set("t2")])
             .await
             .unwrap_err();
         assert!(matches!(err, PersistenceError::WALPoisoned(_)), "{err}");

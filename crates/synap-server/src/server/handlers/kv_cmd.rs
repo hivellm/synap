@@ -156,6 +156,25 @@ pub(super) async fn handle_kv_exists_cmd(
     Ok(serde_json::json!({ "exists": exists }))
 }
 
+/// The `amount` of `kv.incr` / `kv.decr`: 1 when absent or `null`, otherwise
+/// it must be a 64-bit integer.
+///
+/// A malformed amount used to count as 1, so the counter moved by a value the
+/// caller never asked for; the native protocols refuse it, and so does HTTP.
+fn counter_amount(request: &Request) -> Result<i64, SynapError> {
+    match request.payload.get("amount") {
+        None | Some(serde_json::Value::Null) => Ok(1),
+        Some(amount) => amount.as_i64().ok_or_else(|| {
+            SynapError::InvalidRequest(format!("'amount' must be a 64-bit integer, got {amount}"))
+        }),
+    }
+}
+
+/// The error a counter change that leaves the 64-bit range reports.
+fn counter_overflow() -> SynapError {
+    SynapError::InvalidValue("Integer overflow on INCR/DECR".to_string())
+}
+
 pub(super) async fn handle_kv_incr_cmd(
     state: &AppState,
     request: &Request,
@@ -166,11 +185,7 @@ pub(super) async fn handle_kv_incr_cmd(
         .and_then(|v| v.as_str())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
 
-    let amount = request
-        .payload
-        .get("amount")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(1);
+    let amount = counter_amount(request)?;
 
     // Check if there's an active transaction for this client_id
     let client_id = request
@@ -214,11 +229,7 @@ pub(super) async fn handle_kv_decr_cmd(
         .and_then(|v| v.as_str())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'key' field".to_string()))?;
 
-    let amount = request
-        .payload
-        .get("amount")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(1);
+    let amount = counter_amount(request)?;
 
     // Check if there's an active transaction for this client_id
     let client_id = request
@@ -232,7 +243,7 @@ pub(super) async fn handle_kv_decr_cmd(
             client_id,
             crate::core::transaction::TransactionCommand::KVIncr {
                 key: key.to_string(),
-                delta: -amount, // DECR is INCR with negative delta
+                delta: amount.checked_neg().ok_or_else(counter_overflow)?, // DECR is INCR with negative delta
             },
         )?;
 

@@ -54,6 +54,65 @@ migration notes before upgrading.
   all 24 tools are checked (11 were before). A call without an identity is
   refused in authenticated mode, and a legacy MCP session can no longer be
   used under credentials other than those that initialized it (`403`).
+- **Hub mode isolates tenants, and fails closed** (review finding S-03). The
+  production router never installed Hub authentication, so tenants with
+  different access keys read and wrote the same unscoped keys. With
+  `hub.enabled: true`, Hub authentication now replaces local authentication on
+  every route except `/health` and `/metrics`: a missing or rejected key answers
+  401 and local users and API keys are no longer accepted. Each tenant runs
+  with data-type permissions only and its names are scoped to `user_<id>:` on
+  REST (sorted sets, geospatial and queue stats included), `/api/v1/command`,
+  MCP, UMICP and the KV-watch, pub/sub, queue and stream WebSockets; envelope,
+  MCP and UMICP commands that cannot be confined to one tenant (keyspace-wide,
+  admin, scripting, transactions without a `client_id`) are refused, and
+  routes that are not tenant-isolated (stats, `/info`, `/slowlog`, `/clients`,
+  `/memory`, `/snapshot`, `/script/*`, REST `/transaction/*`, partitioned topics,
+  consumer groups, `/cluster/*`, `/auth/*`) answer 403. HiveHub cannot validate
+  access keys yet (hivellm/synap#230), so until it can every keyed Hub request
+  answers 503 and the server logs a startup warning. **Breaking:** the server
+  refuses to start in Hub mode while RESP3 or SynapRPC is enabled (both are on
+  by default), naming the listener, because neither authenticates tenants.
+
+- **Transactions are crash-atomic** (review finding D-03). A committed
+  MULTI/EXEC is written to the WAL as one record under one checksum, so a crash
+  at any byte recovers all of its effects or none (a crash between two
+  operations used to recover a prefix), and replication ships it as one unit at
+  one offset: a replica whose connection drops mid-transaction applies none of
+  it and receives it whole on resync. A replica still applies the operations of
+  a transaction one after another, so a reader there can observe it half-applied.
+- **Counter amounts behave the same on every transport** (review finding
+  E-04). The SDK native maps (Rust, TypeScript, Python, C#, PHP, Go) send
+  `INCRBY`/`DECRBY` when `kv.incr`/`kv.decr` carries an `amount` and keep
+  `INCR`/`DECR` without one, so `INCR count 10` adds 10 over HTTP, SynapRPC
+  and RESP3 alike. The C# and PHP SDKs sent the step as `delta` and the Python
+  SDK as `kv.incrby`, which the HTTP API never read (so they always added 1);
+  all send `amount` now. The HTTP API refuses a malformed `amount` instead of
+  treating it as 1, and decrementing by `i64::MIN` fails as an overflow instead
+  of wrapping into an increment.
+- **The Rust SDK's RESP3 transport times out requests**, not only connects, so
+  a server that accepts a connection and never answers no longer hangs the
+  client; an empty-body HTTP error now names its status code.
+
+### Changed
+
+- **`synap-cli PING` reports failures** (review finding E-05, breaking for
+  scripts). It uses a real protocol ping and exits 1 with the reason on stderr
+  when the connection is refused, times out or the credentials are rejected; it
+  used to print "Server unreachable" and exit 0. A malformed INCR/DECR amount
+  is refused before anything is sent, and errors go to stderr. New flags:
+  `--user`, `--password`, `--timeout`. The `/api/v1/command` endpoint gains a
+  `ping` command, which requires credentials when authentication is on.
+- **The WAL has a versioned header** (`SYNAPWAL` + format version 2). WALs
+  written by 1.3.x replay as before and are upgraded in place on first start
+  (temporary file, fsync, rename). Startup refuses a WAL of a newer format,
+  naming both versions, or one with a damaged header, instead of starting with
+  empty data. **Breaking (downgrade):** 1.3.x cannot read a WAL written or
+  upgraded by 1.4.0 — back up the WAL and snapshot directories before
+  upgrading — and replicas must be upgraded before the master, since a 1.3.x
+  replica cannot decode the new transaction record.
+- **A WAL with interior corruption stops startup.** A bad frame followed by
+  valid ones used to end the scan silently and lose the history after it;
+  startup now fails with the byte position so an operator can decide.
 
 ### Performance
 
@@ -63,6 +122,39 @@ migration notes before upgrading.
 
 ### Fixed
 
+- **Configured rate limits are enforced** (review finding S-06, breaking for
+  deployments with `rate_limit.enabled: true`, which was logged as enabled but
+  never installed). Each client gets a token bucket (`burst_size`, refilled at
+  `requests_per_second`), keyed by TCP peer address before authentication —
+  so password and API-key checks are bounded — and by authenticated principal
+  (user, API key or Hub tenant) after it. A limited request answers `429` with
+  `Retry-After`; `/health` and `/metrics` are exempt. The startup log says
+  whether limiting is enforced, and an enabled limiter with a zero rate or burst
+  refuses to start.
+- **UMICP request bodies are bounded** (review finding S-07): `POST /umicp`
+  reads at most `mcp.umicp_max_body_bytes` (default 16 MiB) and answers `413`
+  above it, refusing an oversized `Content-Length` before reading and stopping
+  a chunked body at the limit.
+- **The HTTP server passes the real client address to handlers.** It was not
+  served with connection info, so authentication saw every client as
+  127.0.0.1 and the WebSocket handlers, which read the client address, could
+  not extract it.
+- **The WAL keeps what it acknowledges** (review findings D-01, D-02, D-06).
+  - Periodic fsync mode now syncs on its own interval even when the server is
+    idle, and every group of writes reaches the OS before it is acknowledged;
+    Never mode no longer leaves acknowledged writes in the application buffer.
+  - Graceful shutdown (SIGINT/SIGTERM) stops the HTTP server, then drains and
+    fsyncs the WAL before exiting; `PersistenceLayer::flush` is a real awaited
+    barrier instead of a no-op.
+  - A failed WAL write, flush or fsync fails every acknowledgement in its
+    group and poisons the WAL until restart; `GET /health` answers 503 with
+    `"wal": "poisoned"`. `EXEC` over REST, the envelope, MCP, RESP3 and
+    SynapRPC returns an error saying the commit is not durable when its
+    transaction could not be logged (the in-memory effects are not rolled
+    back).
+  - Startup verifies frame checksums and lengths and truncates a torn tail
+    before appending, so writes made after a crash stay recoverable; a corrupt
+    length can no longer trigger a huge allocation.
 - **Replicas can reach the master by hostname.** `replication.master_address`
   accepted only `IP:port`, so the docker-compose replicas could not point at
   the `master` service. It now takes `host:port` with an IP or a DNS name,

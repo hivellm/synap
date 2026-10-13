@@ -90,10 +90,18 @@ synap-cli -h 192.168.1.100 -p 15500 GET mykey
 
 ```
 Options:
-  -h, --host <HOST>      Server host [default: 127.0.0.1]
-  -p, --port <PORT>      Server port [default: 15500]
-  --help                 Print help message
+  -u, --url <URL>              http://, synap:// (SynapRPC) or resp3:// URL
+  -H, --host <HOST>            Server host [default: 127.0.0.1]
+  -p, --port <PORT>            Server port [default: 15500]
+      --transport <TRANSPORT>  Transport for host/port: http, rpc, resp3 [default: http]
+      --user <USER>            Username (HTTP Basic auth, SynapRPC handshake)
+      --password <PASSWORD>    Password for --user
+      --timeout <TIMEOUT>      Connection and request timeout, in seconds [default: 30]
+  -h, --help                   Print help message
 ```
+
+`--user`/`--password` are refused with a `resp3://` URL: the RESP3 transport
+does not send credentials, and ignoring them would run unauthenticated.
 
 ---
 
@@ -203,6 +211,11 @@ INCR views 5
 ```
 
 **Returns**: `(integer) N` - new value after increment
+
+The amount must be a 64-bit integer; zero and negative amounts apply as given,
+the same over HTTP, SynapRPC and RESP3. A malformed amount (`INCR views ten`)
+is refused before anything is sent and the CLI exits non-zero. A change past
+the 64-bit range fails and leaves the counter unchanged.
 
 ---
 
@@ -410,7 +423,13 @@ FLUSHALL
 PING
 ```
 
-**Returns**: `PONG` if server is healthy
+**Returns**: `PONG` if the server answered.
+
+`PING` uses the protocol's own ping — `PING` on SynapRPC and RESP3, the `ping`
+command of the HTTP envelope, which (unlike `/health`) requires accepted
+credentials when authentication is on. In command mode it exits `0` only when
+the server answered; a refused connection, a timeout (`--timeout`) or rejected
+credentials exits `1` with the reason on stderr.
 
 ---
 
@@ -503,7 +522,9 @@ synap-cli DBSIZE
 ```bash
 #!/bin/bash
 
-if synap-cli PING | grep -q "PONG"; then
+# PING exits non-zero when the server is down, does not answer within the
+# timeout, or rejects the credentials; the reason is printed on stderr.
+if synap-cli --timeout 5 PING >/dev/null; then
     echo "Synap server is healthy"
     exit 0
 else
@@ -610,8 +631,8 @@ synap-server
 **Error**: Wrong host/port
 
 ```bash
-# Verify server address
-synap-cli -h 127.0.0.1 -p 15500 PING
+# Verify server address (exits non-zero, reason on stderr, if unreachable)
+synap-cli -H 127.0.0.1 -p 15500 PING
 ```
 
 ### Command Errors

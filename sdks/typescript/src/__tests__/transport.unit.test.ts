@@ -263,6 +263,28 @@ describe('mapCommand', () => {
       expect(result).toEqual({ rawCmd: 'DEL', args: ['foo'] });
     });
 
+    it('"kv.incr" / "kv.decr" without an amount stay INCR / DECR', () => {
+      expect(mapCommand('kv.incr', { key: 'c' })).toEqual({ rawCmd: 'INCR', args: ['c'] });
+      expect(mapCommand('kv.decr', { key: 'c', amount: null })).toEqual({ rawCmd: 'DECR', args: ['c'] });
+    });
+
+    it('"kv.incr" / "kv.decr" with an amount → INCRBY / DECRBY [key, amount]', () => {
+      expect(mapCommand('kv.incr', { key: 'c', amount: 10 })).toEqual({ rawCmd: 'INCRBY', args: ['c', '10'] });
+      expect(mapCommand('kv.incr', { key: 'c', amount: 0 })).toEqual({ rawCmd: 'INCRBY', args: ['c', '0'] });
+      expect(mapCommand('kv.incr', { key: 'c', amount: -7 })).toEqual({ rawCmd: 'INCRBY', args: ['c', '-7'] });
+      expect(mapCommand('kv.decr', { key: 'c', amount: 4 })).toEqual({ rawCmd: 'DECRBY', args: ['c', '4'] });
+    });
+
+    it('"kv.incr" forwards a non-integer amount as JSON text so the server refuses it', () => {
+      expect(mapCommand('kv.incr', { key: 'c', amount: '10' })).toEqual({ rawCmd: 'INCRBY', args: ['c', '"10"'] });
+      expect(mapCommand('kv.incr', { key: 'c', amount: 1.5 })).toEqual({ rawCmd: 'INCRBY', args: ['c', '1.5'] });
+    });
+
+    it('"kv.incr" with an amount inside a transaction queues INCRBY', () => {
+      const result = mapCommand('kv.incr', { key: 'c', amount: 3, client_id: 'tx1' });
+      expect(result).toEqual({ rawCmd: 'TXQUEUE', args: ['tx1', 'INCRBY', 'c', '3'] });
+    });
+
     it('write with client_id wraps into TXQUEUE (ADR 005)', () => {
       const result = mapCommand('kv.set', { key: 'foo', value: 'bar', client_id: 'tx1' });
       expect(result).toEqual({ rawCmd: 'TXQUEUE', args: ['tx1', 'SET', 'foo', 'bar'] });

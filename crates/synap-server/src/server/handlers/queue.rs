@@ -224,6 +224,7 @@ pub async fn queue_nack(
 pub async fn queue_stats(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(queue_name): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     debug!("REST QUEUE STATS: {}", queue_name);
@@ -236,7 +237,13 @@ pub async fn queue_stats(
         .as_ref()
         .ok_or_else(|| SynapError::InvalidRequest("Queue system disabled".to_string()))?;
 
-    let stats = queue_manager.stats(&queue_name).await?;
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_name = crate::hub::MultiTenant::scope_queue_name(
+        hub_ctx.as_ref().map(|c| c.user_id()),
+        &queue_name,
+    );
+
+    let stats = queue_manager.stats(&scoped_name).await?;
 
     Ok(Json(serde_json::to_value(stats).map_err(|e| {
         SynapError::SerializationError(e.to_string())

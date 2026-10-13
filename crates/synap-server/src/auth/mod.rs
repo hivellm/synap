@@ -11,7 +11,7 @@ pub mod user;
 
 pub use access::{
     Access, CommandArgs, Denied, OperationContext, classify_envelope, classify_native,
-    pubsub_topic_access,
+    pubsub_topic_access, scope_envelope,
 };
 pub use acl::{Acl, AclRule, ResourceType};
 pub use api_key::{ApiKey, ApiKeyManager};

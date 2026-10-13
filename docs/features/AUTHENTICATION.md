@@ -560,16 +560,24 @@ Synap can integrate with **HiveHub.Cloud** for multi-tenant SaaS authentication 
 - Full control over security
 - Suitable for self-hosted deployments
 
-#### 2. **Hub Mode** (SaaS)
-- HiveHub.Cloud access key authentication
-- Multi-tenant resource isolation
-- Plan-based quotas and rate limits
-- Managed user accounts via Hub
+#### 2. **Hub Mode** (SaaS, `hub.enabled: true`)
+- Every data request is authenticated with a HiveHub.Cloud access key
+- Each tenant is confined to its own namespace on every transport
+- Local users and local API keys are not accepted: there is no hybrid mode
+- Plan-based quotas and restrictions
 
-#### 3. **Hybrid Mode**
-- Hub authentication primary
-- Local authentication fallback
-- Best of both worlds for migration
+### Current Status: Access-Key Validation Is Unavailable
+
+hivehub-internal-sdk 1.0.0 has no endpoint that validates an access-key secret
+(it can generate, list, fetch by id and revoke keys only), so Synap cannot tell
+which tenant a key belongs to. Hub mode therefore **fails closed**: every request
+that needs a key answers **503** with an error naming
+[hivellm/synap#230](https://github.com/hivellm/synap/issues/230), and the server
+logs a warning at startup. `/health` and `/metrics` keep answering. Accepting a
+key it cannot check would let any caller pick a tenant, so Synap refuses
+instead. Validation sits behind the `AccessKeyValidator` trait
+(`hub/client.rs`); when the SDK gains the endpoint, only the production
+implementation changes, and the policy below applies unchanged.
 
 ### Hub Access Keys
 
@@ -586,32 +594,96 @@ curl -H "X-Hub-Access-Key: sk_live_..." \
   https://synap.example.com/queue/list
 ```
 
-**Key Features**:
-- 256-bit cryptographic security
-- 60-second validation cache
-- Plan-based permissions (Free/Pro/Enterprise)
-- Automatic user context propagation
-- Key rotation support
+`X-Hub-Access-Key` wins when both are sent. A validated key is cached for
+`hub.cache_ttl` seconds (default 60); a rejected key is never cached, so a
+revoked key stops working within one cache period.
 
 ### Configuration
 
 ```yaml
-# Enable Hub integration
 hub:
   enabled: true
-  service_api_key: "${HIVEHUB_SERVICE_API_KEY}"
-  base_url: "https://api.hivehub.cloud"
+  api_url: "https://api.hivehub.cloud"
+  service_api_key: ""            # set SYNAP_HUB_SERVICE_API_KEY instead
+  cache_ttl: 60                  # seconds a validated key is cached (10-300)
+  usage_report_interval: 300     # seconds between usage reports (>= 60)
+  timeout: 30                    # Hub API timeout in seconds (5-120)
 
-  # Access key validation
-  access_key:
-    cache_ttl_seconds: 60
-    cache_max_entries: 10000
-
-  # Authentication
-  auth:
-    require_hub_auth: true
-    allow_local_auth_fallback: false  # true for hybrid mode
+# Required in Hub mode: these listeners have no tenant authentication.
+resp3:
+  enabled: false
+synap_rpc:
+  enabled: false
 ```
+
+Environment overrides: `SYNAP_HUB_ENABLED`, `SYNAP_HUB_API_URL`,
+`SYNAP_HUB_SERVICE_API_KEY`, `SYNAP_HUB_CACHE_TTL`,
+`SYNAP_HUB_USAGE_REPORT_INTERVAL`, `SYNAP_HUB_TIMEOUT`.
+
+### Hub Mode Policy
+
+**Credentials.** In Hub mode the router installs Hub authentication *instead of*
+local authentication. Every route except `/health` and `/metrics` needs a Hub
+access key:
+
+| Request | Answer |
+|---------|--------|
+| No `X-Hub-Access-Key` / `Authorization: Bearer` header | 401 |
+| Key the Hub rejects (unknown, revoked, expired) | 401 |
+| Local credentials only (Basic auth, a local API key) | 401 |
+| Key that could not be checked (see the status above) | 503 |
+| Valid key, route not in the tenant allow-list | 403 |
+
+**Tenant identity.** A request with a valid key runs as `hub:<user id>`: never an
+admin, with full access to `kv`, `hash`, `list`, `set`, `sortedset`,
+`hyperloglog`, `bitmap`, `queue`, `stream` and `pubsub` resources and no
+`admin`, `script` or cluster grants. Every existing authorization check applies
+to it; the tenant's namespace is enforced by scoping, below.
+
+**Tenant routes (allow-list).** Only routes whose handlers confine every
+resource to the caller's tenant answer in Hub mode; a route added later is
+refused until it is reviewed for scoping.
+
+| Allowed | Refused with 403 ("`<path>` is not available in Hub mode") |
+|---------|----------------------------------------------------------|
+| `/api/v1/command`, `/mcp`, `/umicp`, `/umicp/discover`, `/hub/quota` | `/kv/stats` and every other `/<type>/stats` |
+| `/kv/set`, `/kv/get/{key}`, `/kv/del/{key}`, `/kv/{key}/...`, `/kv/msetnx`, `/kv/ws` | `/info`, `/slowlog`, `/clients`, `/memory/{key}/usage` |
+| `/key/{key}/...`, `/key/randomkey` (picks among the tenant's keys) | `/snapshot`, `/script/*` |
+| `/hash/*`, `/set/*`, `/sortedset/*`, `/list/*`, `/hyperloglog/*`, `/bitmap/*`, `/geospatial/*` | `/transaction/*` (one transaction id shared by every REST caller; use the envelope's `transaction.*` with a `client_id`) |
+| `/stream/*`, `/queue/*` (`/stream/list`, `/queue/list` list the tenant's own) | `/topics/*`, `/consumer-groups/*` (partitioned topics have no tenant scoping) |
+| `/pubsub/*` except `/pubsub/stats` (`/pubsub/topics` lists the tenant's own) | `/cluster/*`, `/auth/*` (local users and keys) |
+
+**Envelope, MCP and UMICP.** After authorization and before the command runs,
+the resource fields of the `/api/v1/command` payload (and of MCP and UMICP tool
+arguments, which use the same names) are rewritten into the tenant's namespace:
+`key`, `keys`, `source`, `destination`, `sources`, `source_keys`,
+`pairs[].key`, `queue`, `name`, `room`, `topic`, `topics`, and the transaction
+`client_id`, so two tenants' transactions never meet. A command is refused with
+`NOPERM '<command>' is not available in Hub mode` when it cannot be confined:
+
+- keyspace-wide or server-wide commands (`kv.keys`, `kv.scan`, `kv.dbsize`,
+  `key.randomkey`, every `*.stats`, `queue.list`, `stream.list`,
+  `pubsub.topics`); admin commands (`info`, `kv.flushall`, `script.flush`, ...)
+  are already refused because a tenant holds no admin grant;
+- `script.eval` and `script.evalsha`, which run commands their payload does not
+  name;
+- transaction commands without a string `client_id` (the envelope uses the
+  request's `request_id`, as it does outside Hub mode; MCP transaction tools
+  must pass one);
+- a resource name given as anything but a string.
+
+**WebSockets.** `/kv/ws` watches `__watch@0__:user_<id>:<key>`, `/pubsub/ws`
+subscribes to the tenant's topics (patterns too, so `*` and `#` match only the
+tenant's own topics), and `/queue/{name}/ws/...` and `/stream/{room}/ws/...` use
+the tenant's queue and room. Frames carry the scoped names.
+
+**Fail closed.** Scoping never falls back to a raw name: a Hub-mode request that
+reaches a scoped surface without a tenant is refused.
+
+**Native listeners.** RESP3 and SynapRPC authenticate local users only, so the
+server refuses to start in Hub mode while either is enabled, and the error names
+the listener (`resp3.enabled`, `synap_rpc.enabled`). Both default to `true`, so
+a Hub deployment must disable them explicitly.
 
 ### Plan-Based Restrictions
 
@@ -637,35 +709,32 @@ User ID:       550e8400-e29b-41d4-a716-446655440000
 Scoped Name:   user_550e8400e29b41d4a716446655440000:my-queue
 ```
 
-**Automatic Scoping**:
-- ✅ Queues: `user_{user_id}:{queue_name}`
-- ✅ Streams: `user_{user_id}:{stream_name}`
-- ✅ KV Keys: `user_{user_id}:{key}`
-- ✅ Pub/Sub Topics: `user_{user_id}:{topic}`
-- ✅ All data structures (Hash, List, Set, etc.)
+**Automatic Scoping** (REST, envelope, MCP, UMICP and WebSockets):
+- ✅ KV keys, including key management (rename, copy, type)
+- ✅ Hashes, lists, sets, sorted sets, geospatial indexes, HyperLogLogs, bitmaps
+  (source and destination keys of the multi-key commands too)
+- ✅ Queues and streams
+- ✅ Pub/Sub topics and KV watch channels
+- ✅ Transaction ids (`client_id`)
 
 ### Authentication Flow (Hub Mode)
 
 ```
 1. Client sends request with access key
-   └─> Header: Authorization: Bearer sk_live_...
+   └─> Header: X-Hub-Access-Key or Authorization: Bearer sk_live_...
 
-2. Hub Auth Middleware
-   ├─> Extract access key from headers
-   ├─> Check validation cache (60s TTL)
-   │   ├─> CACHE HIT: Use cached user context
-   │   └─> CACHE MISS: Validate via Hub API
-   ├─> Create HubUserContext (user_id, plan)
-   └─> Insert into request extensions
+2. Hub authentication layer (replaces local authentication)
+   ├─> /health, /metrics: pass through
+   ├─> Extract access key (missing -> 401)
+   ├─> Check validation cache (hub.cache_ttl)
+   │   ├─> CACHE HIT: use the cached tenant
+   │   └─> CACHE MISS: validate (rejected -> 401, unavailable -> 503)
+   ├─> Route allow-list (not a tenant route -> 403)
+   └─> Insert HubUserContext and the tenant's AuthContext
 
-3. Rate Limit Middleware
-   └─> Apply Plan-based rate limits
-
-4. Quota Middleware
-   └─> Check storage/operation quotas
-
-5. Handler Execution
-   └─> Apply multi-tenant scoping
+3. Handler execution
+   ├─> Authorize against the tenant's AuthContext
+   └─> Scope every resource name by the tenant
 ```
 
 ### Security Differences
@@ -677,28 +746,36 @@ Scoped Name:   user_550e8400e29b41d4a716446655440000:my-queue
 - Full access to dangerous commands (FLUSHALL, etc.)
 
 **Hub Mode**:
-- HiveHub.Cloud manages users
-- Access keys validated via Hub API
-- Automatic Plan-based quotas and rate limits
-- Dangerous commands blocked (FLUSHALL, SCRIPT FLUSH, etc.)
-- Multi-tenant isolation enforced
+- HiveHub.Cloud manages users; local credentials are not accepted
+- Access keys validated through the Hub (currently unavailable: every key is
+  refused, see above)
+- Admin, scripting, cluster, snapshot and server-introspection routes refused
+- RESP3 and SynapRPC listeners must be disabled
+- Multi-tenant isolation enforced on every HTTP transport
 
 ### Error Responses
 
-**401 Unauthorized**: Invalid or missing access key
+**401 Unauthorized**: missing or rejected access key
 ```json
 {
-  "error": "Unauthorized",
-  "message": "Invalid or missing access key"
+  "error": "Unauthorized: Hub mode: a Hub access key is required",
+  "code": 401
 }
 ```
 
-**403 Forbidden**: Valid key but operation not allowed for plan
+**403 Forbidden**: valid key, route not available to tenants
 ```json
 {
-  "error": "Forbidden",
-  "message": "TTL of 86400s exceeds Free plan limit of 3600s",
-  "plan": "Free"
+  "error": "Forbidden: /info is not available in Hub mode",
+  "code": 403
+}
+```
+
+**503 Service Unavailable**: the key could not be checked
+```json
+{
+  "error": "Internal server error: Hub access-key validation is unavailable: the HiveHub SDK has no endpoint that validates an access-key secret (hivellm/synap#230)",
+  "code": 503
 }
 ```
 
@@ -714,25 +791,14 @@ Scoped Name:   user_550e8400e29b41d4a716446655440000:my-queue
 
 ### Migration: Standalone → Hub Mode
 
-**Step 1**: Configure Hub integration
-```yaml
-hub:
-  enabled: true
-  service_api_key: "${HIVEHUB_SERVICE_API_KEY}"
-  auth:
-    allow_local_auth_fallback: true  # Enable hybrid mode
-```
+There is no hybrid mode: once `hub.enabled` is true, local credentials stop
+working on every route.
 
-**Step 2**: Gradually migrate clients to access keys
-- Existing clients: Continue using local API keys
-- New clients: Use Hub access keys
-
-**Step 3**: Disable local auth fallback when ready
-```yaml
-hub:
-  auth:
-    allow_local_auth_fallback: false  # Hub-only mode
-```
+1. Disable the native listeners (`resp3.enabled: false`,
+   `synap_rpc.enabled: false`); clients move to the HTTP transports.
+2. Enable Hub integration and issue a Hub access key to every client.
+3. Data written in standalone mode keeps its raw names, which no tenant can
+   reach; copy what a tenant needs under its own key.
 
 ### Best Practices (Hub Mode)
 

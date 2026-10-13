@@ -44,6 +44,8 @@ crc32fast = "1.4"
 compact_str.workspace = true
 rmcp = { version = "3.5.1", features = ["server", "transport-streamable-http-server"] }
 hyper = "1.7"
+# Bounded request body reads (UMICP body limit)
+http-body-util = "0.1"
 hyper-util = { version = "0.1", features = ["tokio", "server", "server-auto"] }
 mlua = { version = "0.12.0", features = ["lua54", "async", "send", "serialize", "vendored"] }
 sha1 = "0.11"
@@ -334,6 +336,10 @@ name = "mcp_identity_tests"
 required-features = ["full-tests"]
 
 [[test]]
+name = "hub_tenant_isolation_tests"
+required-features = ["full-tests"]
+
+[[test]]
 name = "mcp_tests"
 required-features = ["full-tests"]
 
@@ -362,6 +368,10 @@ name = "replication_integration"
 required-features = ["full-tests"]
 
 [[test]]
+name = "request_limits_tests"
+required-features = ["full-tests"]
+
+[[test]]
 name = "s2s_pubsub_tests"
 required-features = ["full-tests"]
 
@@ -379,6 +389,10 @@ required-features = ["full-tests"]
 
 [[test]]
 name = "sdk_rpc_e2e_tests"
+required-features = ["full-tests"]
+
+[[test]]
+name = "counter_amount_parity_tests"
 required-features = ["full-tests"]
 
 [[test]]
@@ -415,6 +429,10 @@ required-features = ["full-tests"]
 
 [[test]]
 name = "transaction_durability_tests"
+required-features = ["full-tests"]
+
+[[test]]
+name = "transaction_atomicity_tests"
 required-features = ["full-tests"]
 
 [[test]]

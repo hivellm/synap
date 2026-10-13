@@ -35,4 +35,16 @@ openssl = { version = "0.10", features = ["vendored"], optional = true }
 # Required when cross-compiling (e.g. aarch64-unknown-linux-gnu on an
 # x86_64 runner, where no target-arch libssl-dev exists).
 vendored-openssl = ["dep:openssl"]
+# Integration tests in tests/ (they start a real server in-process).
+full-tests = []
+
+[dev-dependencies]
+synap-server = { path = "../synap-server" }
+thunder-rpc = { workspace = true, features = ["server"] }
+axum.workspace = true
+
+# Integration tests only build with `full-tests` (see [features]).
+[[test]]
+name = "cli_exit_status_tests"
+required-features = ["full-tests"]
 
