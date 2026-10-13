@@ -212,6 +212,38 @@ replication:
   reconnect_delay_ms: 5000  # Wait 5 seconds before reconnect
 ```
 
+## Full Sync
+
+A replica that has nothing from its master (first start, restart), or whose
+offset is no longer in, or is beyond, the master's replication log (1M
+operations), receives a full sync: an image of every datatype — KV keys with
+their expiry, hashes, lists, sets, sorted sets and geo sets, HyperLogLogs,
+bitmaps, queues and stream events — paired exactly with a replication offset.
+The replica then applies the records after that offset.
+
+- **No setting is needed.** The master builds the image on demand, from
+  memory; it does not need persistence enabled.
+- **Writes pause briefly.** The master copies its stores under the same write
+  barrier a snapshot uses (an in-memory copy, no disk I/O), so writes on the
+  master wait for that copy; serializing and sending happen afterwards.
+- **The replica replaces its data.** It checks the image completely, then
+  clears every datatype the image covers and loads it. Reads served by the
+  replica during the load can see a partially loaded dataset; route reads
+  away from a replica that is resyncing a large dataset if that matters.
+- **Memory.** The master holds the copy and its serialized form while it is
+  sent, and the replica holds the received image while it loads: plan for
+  roughly twice the dataset size of headroom on both during a full sync. A
+  replica whose `maxmemory` is smaller than the dataset fails the load and
+  retries.
+
+### Upgrading
+
+Upgrade **replicas before the master**. A 1.4.0 replica accepts the 1.3.x
+full sync (KV and streams only) from a master that is not upgraded yet; a
+1.3.x replica cannot decode the 1.4.0 full sync and keeps reconnecting. A
+replica refuses a full-sync format version it does not know, with an error
+naming both versions, and keeps its data.
+
 ## Best Practices
 
 ### Network Configuration
@@ -282,6 +314,8 @@ docker logs synap-master
 - Check network connectivity
 - Verify master address
 - Check firewall rules
+- If the replica log shows `Rejected full sync: the master sent full-sync
+  image version N`, the replica is older than the master: upgrade it
 
 ## Related Topics
 

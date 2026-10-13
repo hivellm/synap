@@ -60,6 +60,16 @@ impl SortedSetStore {
         out
     }
 
+    /// Remove every sorted set (geo sets included), e.g. before a replica
+    /// loads a full-sync image. Blocked poppers keep waiting; the memory
+    /// contribution is recomputed.
+    pub fn clear(&self) {
+        for shard in self.shards.iter() {
+            shard.write().clear();
+        }
+        self.refresh_memory();
+    }
+
     /// Create a new sorted set store
     pub fn new() -> Self {
         Self {

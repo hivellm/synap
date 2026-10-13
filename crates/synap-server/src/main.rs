@@ -521,17 +521,82 @@ async fn main() -> Result<()> {
         Some(pubsub_router_inner)
     };
 
+    // Use recovered hash store (fallback shares the cross-datatype budget too).
+    let hash_store: Arc<synap_server::core::HashStore> =
+        hash_store_recovered.unwrap_or_else(|| {
+            Arc::new(
+                synap_server::core::HashStore::new()
+                    .with_global_memory(global_mem.clone())
+                    .with_keyspace_notifier(keyspace_notifier.clone()),
+            )
+        });
+    info!("Hash store initialized");
+
+    // Use recovered list store
+    let list_store: Arc<synap_server::core::ListStore> =
+        list_store_recovered.unwrap_or_else(|| {
+            Arc::new(
+                synap_server::core::ListStore::new()
+                    .with_global_memory(global_mem.clone())
+                    .with_keyspace_notifier(keyspace_notifier.clone()),
+            )
+        });
+    info!("List store initialized");
+
+    // Use the recovered set store. It used to be replaced by a fresh one here,
+    // which threw away every set the WAL had just replayed.
+    let set_store = set_store_recovered.unwrap_or_else(|| {
+        Arc::new(
+            synap_server::core::SetStore::new()
+                .with_global_memory(global_mem.clone())
+                .with_keyspace_notifier(keyspace_notifier.clone()),
+        )
+    });
+    info!("Set store initialized");
+
+    // Use sorted set store (fresh or recovered)
+    let sorted_set_store = sorted_set_store_recovered.unwrap_or_else(|| {
+        Arc::new(
+            synap_server::core::SortedSetStore::new()
+                .with_global_memory(global_mem.clone())
+                .with_keyspace_notifier(keyspace_notifier.clone()),
+        )
+    });
+    info!("Sorted set store initialized");
+
+    // HyperLogLog and bitmap stores (recovered from the WAL when persistence
+    // is on). Built before the snapshot task and the replica node so both see
+    // them.
+    use synap_server::core::{BitmapStore, HyperLogLogStore};
+    let hyperloglog_store =
+        hyperloglog_store_recovered.unwrap_or_else(|| Arc::new(HyperLogLogStore::new()));
+    info!("HyperLogLog store initialized");
+    let bitmap_store = bitmap_store_recovered.unwrap_or_else(|| Arc::new(BitmapStore::new()));
+    info!("Bitmap store initialized");
+
     // Start the replication node (self-runs on construction). The master is
     // handed to the persistence layer so every logged write is propagated to
     // replicas; the replica keeps itself alive via its own background loop.
+    // The master is built after every datatype store exists, so its full
+    // sync ships all of them from the first replica on (phase31), and the
+    // persistence layer below shares its write-order lock.
     let replication_master = if config.replication.enabled {
         use synap_server::replication::MasterNode;
         match config.replication.role {
             NodeRole::Master if config.replication.replica_listen_address.is_some() => {
-                match MasterNode::new(
+                match MasterNode::with_stores(
                     config.replication.clone(),
-                    kv_store.clone(),
-                    stream_manager.clone(),
+                    synap_server::persistence::StoreArcs {
+                        kv_store: kv_store.clone(),
+                        hash_store: Some(hash_store.clone()),
+                        list_store: Some(list_store.clone()),
+                        set_store: Some(set_store.clone()),
+                        sorted_set_store: Some(sorted_set_store.clone()),
+                        queue_manager: queue_manager.clone(),
+                        stream_manager: stream_manager.clone(),
+                        hyperloglog_store: Some(hyperloglog_store.clone()),
+                        bitmap_store: Some(bitmap_store.clone()),
+                    },
                 )
                 .await
                 {
@@ -594,59 +659,6 @@ async fn main() -> Result<()> {
     } else {
         None
     };
-
-    // Use recovered hash store (fallback shares the cross-datatype budget too).
-    let hash_store: Arc<synap_server::core::HashStore> =
-        hash_store_recovered.unwrap_or_else(|| {
-            Arc::new(
-                synap_server::core::HashStore::new()
-                    .with_global_memory(global_mem.clone())
-                    .with_keyspace_notifier(keyspace_notifier.clone()),
-            )
-        });
-    info!("Hash store initialized");
-
-    // Use recovered list store
-    let list_store: Arc<synap_server::core::ListStore> =
-        list_store_recovered.unwrap_or_else(|| {
-            Arc::new(
-                synap_server::core::ListStore::new()
-                    .with_global_memory(global_mem.clone())
-                    .with_keyspace_notifier(keyspace_notifier.clone()),
-            )
-        });
-    info!("List store initialized");
-
-    // Use the recovered set store. It used to be replaced by a fresh one here,
-    // which threw away every set the WAL had just replayed.
-    let set_store = set_store_recovered.unwrap_or_else(|| {
-        Arc::new(
-            synap_server::core::SetStore::new()
-                .with_global_memory(global_mem.clone())
-                .with_keyspace_notifier(keyspace_notifier.clone()),
-        )
-    });
-    info!("Set store initialized");
-
-    // Use sorted set store (fresh or recovered)
-    let sorted_set_store = sorted_set_store_recovered.unwrap_or_else(|| {
-        Arc::new(
-            synap_server::core::SortedSetStore::new()
-                .with_global_memory(global_mem.clone())
-                .with_keyspace_notifier(keyspace_notifier.clone()),
-        )
-    });
-    info!("Sorted set store initialized");
-
-    // HyperLogLog and bitmap stores (recovered from the WAL when persistence
-    // is on). Built before the snapshot task and the replica node so both see
-    // them.
-    use synap_server::core::{BitmapStore, HyperLogLogStore};
-    let hyperloglog_store =
-        hyperloglog_store_recovered.unwrap_or_else(|| Arc::new(HyperLogLogStore::new()));
-    info!("HyperLogLog store initialized");
-    let bitmap_store = bitmap_store_recovered.unwrap_or_else(|| Arc::new(BitmapStore::new()));
-    info!("Bitmap store initialized");
 
     // Periodically recompute collection/broker memory into the shared budget so
     // `maxmemory` reflects all datatypes (audit M-018). KV updates its counter

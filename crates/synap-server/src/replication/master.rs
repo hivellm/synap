@@ -5,8 +5,10 @@ use super::types::{
     ReplicationStats,
 };
 use crate::core::{KVStore, StreamManager};
+use crate::persistence::order::WriteOrder;
 use crate::persistence::types::Operation;
-use parking_lot::RwLock;
+use crate::persistence::{SnapshotImage, StoreArcs};
+use parking_lot::{Mutex, RwLock};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -14,7 +16,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -30,8 +32,9 @@ pub struct MasterNode {
     #[allow(dead_code)]
     config: ReplicationConfig,
     replication_log: Arc<ReplicationLog>,
-    #[allow(dead_code)]
-    stream_manager: Option<Arc<StreamManager>>,
+
+    /// Stores, write barrier and test pause the full sync reads from.
+    full_sync: Arc<FullSyncSource>,
 
     /// Connected replicas
     replicas: Arc<RwLock<HashMap<String, ReplicaConnection>>>,
@@ -52,6 +55,24 @@ struct ReplicaConnection {
     sender: mpsc::UnboundedSender<ReplicationCommand>,
 }
 
+/// What a full sync reads (phase31): every replicated datatype store and the
+/// write barrier shared with the persistence layer.
+struct FullSyncSource {
+    stores: StoreArcs,
+    /// Per-key ordering stripes. The persistence layer built with this master
+    /// uses the same lock ([`MasterNode::write_order`]), so holding every
+    /// stripe means no write is between being applied and being replicated.
+    order: Arc<WriteOrder>,
+    /// Test seam set by [`MasterNode::pause_next_full_sync`].
+    pause: Mutex<Option<FullSyncPause>>,
+}
+
+/// Pause of the next full sync while it holds the write barrier.
+struct FullSyncPause {
+    reached: oneshot::Sender<u64>,
+    release: oneshot::Receiver<()>,
+}
+
 enum ReplicationMessage {
     Operation {
         operation: Operation,
@@ -62,11 +83,27 @@ enum ReplicationMessage {
 }
 
 impl MasterNode {
-    /// Create a new master node
+    /// Create a master node whose full sync ships KV and, when given, streams.
+    /// Use [`with_stores`](Self::with_stores) to ship every datatype.
     pub async fn new(
         config: ReplicationConfig,
         kv_store: Arc<KVStore>,
         stream_manager: Option<Arc<StreamManager>>,
+    ) -> ReplicationResult<Self> {
+        Self::with_stores(
+            config,
+            StoreArcs {
+                stream_manager,
+                ..StoreArcs::kv_only(kv_store)
+            },
+        )
+        .await
+    }
+
+    /// Create a master node whose full sync ships every store in `stores`.
+    pub async fn with_stores(
+        config: ReplicationConfig,
+        stores: StoreArcs,
     ) -> ReplicationResult<Self> {
         if !config.is_master() {
             return Err(ReplicationError::NotMaster);
@@ -74,8 +111,13 @@ impl MasterNode {
 
         info!(
             "Initializing master node with stream support: {}",
-            stream_manager.is_some()
+            stores.stream_manager.is_some()
         );
+        let full_sync = Arc::new(FullSyncSource {
+            stores,
+            order: Arc::new(WriteOrder::new()),
+            pause: Mutex::new(None),
+        });
 
         // Create replication log (1M operations buffer, like Redis)
         let replication_log = Arc::new(ReplicationLog::new(1_000_000));
@@ -89,15 +131,12 @@ impl MasterNode {
             .expect("master node is only started with a configured replica_listen_address");
         let replicas_clone = Arc::clone(&replicas);
         let log_clone = Arc::clone(&replication_log);
-        let kv_clone = Arc::clone(&kv_store);
-        let stream_clone = stream_manager.clone();
 
         tokio::spawn(Self::listen_for_replicas(
             listen_addr,
             replicas_clone,
             log_clone,
-            kv_clone,
-            stream_clone,
+            Arc::clone(&full_sync),
         ));
 
         // Spawn heartbeat task
@@ -120,7 +159,7 @@ impl MasterNode {
         Ok(Self {
             config,
             replication_log,
-            stream_manager,
+            full_sync,
             replicas,
             replication_tx,
             total_bytes,
@@ -132,8 +171,7 @@ impl MasterNode {
         listen_addr: SocketAddr,
         replicas: Arc<RwLock<HashMap<String, ReplicaConnection>>>,
         replication_log: Arc<ReplicationLog>,
-        kv_store: Arc<KVStore>,
-        stream_manager: Option<Arc<StreamManager>>,
+        full_sync: Arc<FullSyncSource>,
     ) {
         let listener = match TcpListener::bind(listen_addr).await {
             Ok(l) => l,
@@ -152,16 +190,13 @@ impl MasterNode {
 
                     let replicas_clone = Arc::clone(&replicas);
                     let log_clone = Arc::clone(&replication_log);
-                    let kv_clone = Arc::clone(&kv_store);
-                    let stream_clone = stream_manager.clone();
 
                     tokio::spawn(Self::handle_replica(
                         stream,
                         addr,
                         replicas_clone,
                         log_clone,
-                        kv_clone,
-                        stream_clone,
+                        Arc::clone(&full_sync),
                     ));
                 }
                 Err(e) => {
@@ -177,8 +212,7 @@ impl MasterNode {
         addr: SocketAddr,
         replicas: Arc<RwLock<HashMap<String, ReplicaConnection>>>,
         replication_log: Arc<ReplicationLog>,
-        kv_store: Arc<KVStore>,
-        stream_manager: Option<Arc<StreamManager>>,
+        full_sync: Arc<FullSyncSource>,
     ) {
         let replica_id = Uuid::new_v4().to_string();
         info!(
@@ -218,10 +252,15 @@ impl MasterNode {
         let current_offset = replication_log.current_offset();
 
         // Full sync needed if:
-        // 1. Requested offset is older than what we have in log
-        // 2. This is a fresh connection (requested 0, replication log empty) - use snapshot
-        let needs_full_sync =
-            requested_offset < oldest_offset || (requested_offset == 0 && current_offset == 0);
+        // 1. The replica has nothing from this master (requested 0). The log
+        //    only holds writes made since this master started, not the data
+        //    it recovered at boot, so replaying it from 0 is not enough.
+        // 2. Requested offset is older than what we have in log
+        // 3. Requested offset is beyond the log: the replica followed an
+        //    earlier run of this master (its log restarted at 0).
+        let needs_full_sync = requested_offset == 0
+            || requested_offset < oldest_offset
+            || requested_offset > current_offset;
 
         debug!(
             oldest_offset = oldest_offset,
@@ -255,13 +294,7 @@ impl MasterNode {
 
         let sync_result = if needs_full_sync {
             info!(replica_id = %replica_id, "Performing full sync for replica");
-            Self::send_full_sync(
-                &mut stream,
-                &kv_store,
-                stream_manager.as_ref().map(|s| s.as_ref()),
-                &replication_log,
-            )
-            .await
+            Self::send_full_sync(&mut stream, &full_sync, &replication_log).await
         } else {
             info!(replica_id = %replica_id, "Performing partial sync for replica");
             Self::send_partial_sync(&mut stream, requested_offset, &replication_log).await
@@ -289,37 +322,58 @@ impl MasterNode {
         info!("Replica {} disconnected", replica_id);
     }
 
-    /// Send full sync (snapshot) to replica
+    /// Send a full sync: every datatype as of one replication offset.
+    ///
+    /// The stores are copied under the write barrier (see
+    /// [`capture_full_sync`](Self::capture_full_sync)); stream events, which
+    /// are not part of the replication log, and serialization happen after
+    /// it is released.
     async fn send_full_sync(
         stream: &mut TcpStream,
-        kv_store: &KVStore,
-        stream_manager: Option<&StreamManager>,
+        source: &FullSyncSource,
         replication_log: &ReplicationLog,
     ) -> ReplicationResult<()> {
-        let current_offset = replication_log.current_offset();
-
-        // Create snapshot with stream support
-        let snapshot_data =
-            super::sync::create_snapshot_with_streams(kv_store, stream_manager, current_offset)
-                .await
-                .map_err(ReplicationError::SerializationError)?;
-
-        info!(
-            "Created snapshot: {} bytes for full sync (streams: {})",
-            snapshot_data.len(),
-            stream_manager.is_some()
-        );
-
-        let cmd = ReplicationCommand::FullSync {
-            snapshot_data,
-            offset: current_offset,
+        let (image, offset) = Self::capture_full_sync(source, replication_log).await?;
+        let streams = match &source.stores.stream_manager {
+            Some(sm) => sm.get_all_events().await,
+            None => HashMap::new(),
         };
+        let data = super::sync::FullSyncData::from_image(image, streams);
+        let summary = data.summary();
+        let cmd = super::sync::encode_full_sync(&data, offset)?;
+        drop(data);
 
-        // Send with length prefix
+        info!("Full sync at offset {}: {}", offset, summary);
         Self::send_command(stream, &cmd).await?;
 
-        debug!("Full sync sent, offset: {}", current_offset);
+        debug!("Full sync sent, offset: {}", offset);
         Ok(())
+    }
+
+    /// Copy every replicated store and read the replication offset while
+    /// holding every write-order stripe.
+    ///
+    /// Writers hold their keys' stripes from applying a write until its
+    /// record is in the replication log, so under the barrier every write is
+    /// either applied and logged below the offset (in the image) or not
+    /// applied yet (logged at or after the offset and streamed). The replica
+    /// skips streamed records below the offset, so each write takes effect
+    /// exactly once.
+    async fn capture_full_sync(
+        source: &FullSyncSource,
+        replication_log: &ReplicationLog,
+    ) -> ReplicationResult<(SnapshotImage, u64)> {
+        let pause = source.pause.lock().take();
+        let _barrier = source.order.lock_all().await;
+        let offset = replication_log.current_offset();
+        if let Some(pause) = pause {
+            let _ = pause.reached.send(offset);
+            let _ = pause.release.await;
+        }
+        let image = SnapshotImage::capture(source.stores.as_refs())
+            .await
+            .map_err(|e| ReplicationError::FullSync(format!("capturing the image: {e}")))?;
+        Ok((image, offset))
     }
 
     /// Send command with length prefix
@@ -444,16 +498,37 @@ impl MasterNode {
         self.replication_log.current_offset()
     }
 
+    /// The per-key write-order lock the full sync uses as its barrier. A
+    /// persistence layer that replicates through this master must order its
+    /// writes with this same lock (`PersistenceLayer::with_wal` does).
+    pub fn write_order(&self) -> Arc<WriteOrder> {
+        Arc::clone(&self.full_sync.order)
+    }
+
+    /// Test seam: the next full sync, once it holds the write barrier and
+    /// has read its replication offset, sends that offset on the returned
+    /// receiver and waits for the returned sender (or its drop) before it
+    /// copies the stores. Writers issued meanwhile wait for the barrier.
+    pub fn pause_next_full_sync(&self) -> (oneshot::Receiver<u64>, oneshot::Sender<()>) {
+        let (reached_tx, reached_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        *self.full_sync.pause.lock() = Some(FullSyncPause {
+            reached: reached_tx,
+            release: release_rx,
+        });
+        (reached_rx, release_tx)
+    }
+
     /// Replicate an operation to all replicas
     pub fn replicate(&self, operation: Operation) -> u64 {
-        let offset = self.replication_log.append(operation.clone());
-
-        // Send to replication task with offset
-        let _ = self
-            .replication_tx
-            .send(ReplicationMessage::Operation { operation, offset });
-
-        offset
+        // Queue for fan-out inside the log's critical section, so replicas
+        // receive records in offset order.
+        self.replication_log.append_with(operation, |record| {
+            let _ = self.replication_tx.send(ReplicationMessage::Operation {
+                operation: record.operation.clone(),
+                offset: record.offset,
+            });
+        })
     }
 
     /// Get list of connected replicas

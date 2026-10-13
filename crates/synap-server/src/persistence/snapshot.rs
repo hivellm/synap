@@ -26,15 +26,18 @@ const SNAPSHOT_MAGIC_V2: &[u8; 8] = b"SYNAP002";
 /// bump per key; the collections are cloned. Streams are not part of the
 /// image: they are not in the WAL, so they need no barrier and are read when
 /// the file is written.
+///
+/// The replication full sync captures the same image under the same barrier
+/// (phase31) and reads its fields to build the replica's image.
 pub struct SnapshotImage {
-    kv: Vec<(String, Arc<[u8]>, Option<u64>)>,
-    queues: HashMap<String, Vec<QueueMessage>>,
-    hashes: HashMap<String, HashMap<String, Vec<u8>>>,
-    lists: HashMap<String, ListValue>,
-    sets: HashMap<String, SetValue>,
-    sorted_sets: HashMap<String, Vec<(Vec<u8>, f64)>>,
-    hyperloglogs: HashMap<String, HyperLogLogValue>,
-    bitmaps: HashMap<String, BitmapValue>,
+    pub(crate) kv: Vec<(String, Arc<[u8]>, Option<u64>)>,
+    pub(crate) queues: HashMap<String, Vec<QueueMessage>>,
+    pub(crate) hashes: HashMap<String, HashMap<String, Vec<u8>>>,
+    pub(crate) lists: HashMap<String, ListValue>,
+    pub(crate) sets: HashMap<String, SetValue>,
+    pub(crate) sorted_sets: HashMap<String, Vec<(Vec<u8>, f64)>>,
+    pub(crate) hyperloglogs: HashMap<String, HyperLogLogValue>,
+    pub(crate) bitmaps: HashMap<String, BitmapValue>,
 }
 
 impl SnapshotImage {

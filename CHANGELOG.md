@@ -122,6 +122,23 @@ migration notes before upgrading.
   one offset: a replica whose connection drops mid-transaction applies none of
   it and receives it whole on resync. A replica still applies the operations of
   a transaction one after another, so a reader there can observe it half-applied.
+- **Replica full sync carries every datatype, exactly.** A new or resyncing
+  replica received only KV keys and stream events; it now receives hashes,
+  lists, sets, sorted sets (geo), HyperLogLogs, bitmaps and queues too, with KV
+  keys keeping their absolute expiry. The master captures the image under the
+  same write barrier as snapshots, paired with its replication offset, so
+  writes made during a full sync apply once on the replica (they could apply
+  twice or be lost). The replica verifies the whole image (version, CRC32)
+  before clearing and loading, so keys deleted on the master while it was away
+  are gone; a failed load forces a full sync on reconnect. A full sync is sent
+  whenever the replica lacks usable history: offset 0, an offset older than
+  the log, or one beyond the master's offset (a fresh replica connecting after
+  the master's first write used to get a partial sync and miss everything
+  recovered at boot). Records now reach replicas in offset order: concurrent
+  writers to different keys could queue offset N+1 before N, and the replica
+  dropped N. **Breaking (mixed versions):** the full sync uses a new versioned
+  command a 1.3.x replica cannot decode, so upgrade replicas before the
+  master; 1.4.0 replicas still accept a 1.3.x master's full sync.
 - **Counter amounts behave the same on every transport** (review finding
   E-04). The SDK native maps (Rust, TypeScript, Python, C#, PHP, Go) send
   `INCRBY`/`DECRBY` when `kv.incr`/`kv.decr` carries an `amount` and keep
