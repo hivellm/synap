@@ -33,6 +33,9 @@ pub struct PersistenceLayer {
     /// the stores. With a replication master it is the master's lock, so the
     /// full sync uses the same barrier (phase31).
     order: Arc<WriteOrder>,
+    /// Serializes snapshots, so a later snapshot always has a later (or
+    /// equal) cutoff and a higher file sequence number.
+    snapshot_serial: tokio::sync::Mutex<()>,
 }
 
 /// A record handed to replication and to the WAL writer queue, not yet
@@ -134,6 +137,20 @@ impl PersistenceLayer {
             operations_since_snapshot: Arc::new(RwLock::new(0)),
             replication_master,
             order,
+            snapshot_serial: tokio::sync::Mutex::new(()),
+        }
+    }
+
+    /// Make the next WAL record get offset `next_offset` or a later one.
+    ///
+    /// Call it at startup with [`RecoveredStores::wal_offset`](super::RecoveredStores::wal_offset),
+    /// before any write: when the WAL lost records a snapshot holds (power
+    /// loss right after a snapshot taken by an earlier release), new records
+    /// would otherwise reuse offsets below the snapshot's cutoff and the next
+    /// recovery from that snapshot would skip them. A no-op without a WAL.
+    pub fn continue_wal_at(&self, next_offset: u64) {
+        if let Some(wal) = &self.wal {
+            wal.continue_at(next_offset);
         }
     }
 
@@ -557,6 +574,11 @@ impl PersistenceLayer {
     /// is either in the image (queued before the mark, offset below the
     /// cutoff, not replayed) or after the cutoff (not in the image, replayed),
     /// never both. Without a WAL the cutoff is 0.
+    ///
+    /// Before the file is published the WAL is fsynced up to the cutoff,
+    /// whatever its fsync mode, and the file itself is written to a temporary
+    /// name, fsynced and renamed (see [`SnapshotManager::write_image`]).
+    /// Snapshots run one at a time.
     pub async fn snapshot(&self, stores: StoreRefs<'_>) -> super::types::Result<PathBuf> {
         self.snapshot_with_pause(stores, std::future::ready(()))
             .await
@@ -571,6 +593,7 @@ impl PersistenceLayer {
         stores: StoreRefs<'_>,
         at_cutoff: impl Future<Output = ()>,
     ) -> super::types::Result<PathBuf> {
+        let _serial = self.snapshot_serial.lock().await;
         let started = Instant::now();
         let (image, mark) = {
             let _barrier = self.order.lock_all().await;
@@ -585,6 +608,14 @@ impl PersistenceLayer {
             Some(mark) => mark.offset().await?,
             None => 0,
         };
+        // The WAL must durably hold every record below the cutoff before a
+        // snapshot that skips them exists: otherwise a power loss could keep
+        // the snapshot but drop those records, and the WAL would hand their
+        // offsets out again to writes the next recovery from this snapshot
+        // skips.
+        if let Some(wal) = &self.wal {
+            wal.sync().await?;
+        }
         let path = self
             .snapshot_mgr
             .write_image(image, stores.stream_manager, wal_offset)
@@ -1152,5 +1183,64 @@ mod tests {
         assert_eq!(hash.unwrap().hget("th", "f").unwrap(), Some(b"hv".to_vec()));
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Layer over a Never-mode WAL whose fsyncs are counted.
+    async fn never_mode_layer(
+        name: &str,
+    ) -> (
+        PersistenceLayer,
+        crate::persistence::wal_async::fault::Faults,
+    ) {
+        let dir = format!("./target/layer_{name}");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut config = PersistenceConfig::default();
+        config.wal.fsync_mode = FsyncMode::Never;
+        config.wal.path = PathBuf::from(format!("{dir}/wal.log"));
+        config.snapshot.directory = PathBuf::from(format!("{dir}/snap"));
+        let faults = crate::persistence::wal_async::fault::Faults::default();
+        let wrap = faults.clone();
+        let wal = AsyncWAL::open_with_sink(config.wal.clone(), move |sink| wrap.wrap(sink))
+            .await
+            .unwrap();
+        (PersistenceLayer::with_wal(config, Some(wal), None), faults)
+    }
+
+    /// A snapshot fsyncs the WAL up to its cutoff before it is published,
+    /// even when the WAL itself never fsyncs.
+    #[tokio::test]
+    async fn snapshot_fsyncs_the_wal_before_publishing_in_never_mode() {
+        let (layer, faults) = never_mode_layer("snapshot_wal_sync").await;
+        let kv = crate::core::KVStore::new(KVConfig::default());
+        layer
+            .log_kv_set("k".into(), b"v".to_vec(), None)
+            .await
+            .unwrap();
+        assert_eq!(faults.syncs(), 0, "Never mode does not fsync writes");
+
+        layer.snapshot(StoreRefs::kv_only(&kv)).await.unwrap();
+        assert_eq!(faults.syncs(), 1, "the snapshot fsynced the WAL");
+    }
+
+    /// The WAL continues at the offset recovery hands over, never below it,
+    /// and never moves backwards.
+    #[tokio::test]
+    async fn continue_wal_at_raises_the_next_offset_only() {
+        let (layer, _faults) = never_mode_layer("continue_wal_at").await;
+        layer.continue_wal_at(100);
+        layer.continue_wal_at(5);
+        layer
+            .log_kv_set("k".into(), b"v".to_vec(), None)
+            .await
+            .unwrap();
+        layer.shutdown().await.unwrap();
+
+        let mut offsets = Vec::new();
+        crate::persistence::wal_frame::scan(
+            &PathBuf::from("./target/layer_continue_wal_at/wal.log"),
+            |entry| offsets.push(entry.offset),
+        )
+        .unwrap();
+        assert_eq!(offsets, vec![100]);
     }
 }

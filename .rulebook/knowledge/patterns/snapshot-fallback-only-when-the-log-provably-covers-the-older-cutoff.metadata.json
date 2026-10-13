@@ -1,0 +1,20 @@
+{
+  "id": "snapshot-fallback-only-when-the-log-provably-covers-the-older-cutoff",
+  "type": "pattern",
+  "title": "Snapshot fallback only when the log provably covers the older cutoff; publish via temp + fsync + rename",
+  "category": "persistence",
+  "description": "Write snapshots to <final>.tmp, fsync, rename, fsync the directory; retention after that, never the file just written. Name files by a sequence (max + 1 under a lock, snapshots serialized), not by the clock. On recovery skip a damaged newest snapshot only when the WAL provably holds every record from the older cutoff (enabled, starts at or before it, no break after it, non-empty if the snapshot followed records); otherwise refuse startup naming the files. Fsync the WAL up to the cutoff before publishing and raise the WAL's next offset to the loaded cutoff after recovery. Bound lengths by remaining file bytes when decoding.",
+  "example": "see snapshot-fallback-only-when-the-log-provably-covers-the-older-cutoff.md",
+  "whenToUse": "Any snapshot + write-ahead-log durability scheme, or any file replaced periodically that recovery depends on.",
+  "whenNotToUse": "Append-only logs (use the torn-tail vs interior-corruption scan instead).",
+  "createdAt": "2026-10-13T18:00:00.000Z",
+  "tags": [
+    "persistence",
+    "snapshot",
+    "wal",
+    "fsync",
+    "crash-safety",
+    "phase32"
+  ],
+  "source": "manual"
+}

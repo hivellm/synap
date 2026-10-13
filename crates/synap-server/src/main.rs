@@ -342,7 +342,7 @@ async fn main() -> Result<()> {
         queue_manager,
         hyperloglog_store_recovered,
         bitmap_store_recovered,
-        _wal_offset,
+        recovered_wal_offset,
     ): RecoveredStores = if config.persistence.enabled {
         info!("Persistence enabled, attempting recovery...");
         match recover_all(&config.persistence, kv_config.clone(), queue_config.clone()).await {
@@ -643,6 +643,9 @@ async fn main() -> Result<()> {
         {
             Ok(layer) => {
                 info!("Persistence layer initialized (WAL + Snapshots)");
+                // New WAL records continue after everything recovery saw,
+                // never below the loaded snapshot's cutoff.
+                layer.continue_wal_at(recovered_wal_offset);
                 // The background snapshot task is started later, once every
                 // store (hash/list/set/sorted-set) has been constructed.
                 Some(Arc::new(layer))

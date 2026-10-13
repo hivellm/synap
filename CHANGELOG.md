@@ -252,6 +252,29 @@ migration notes before upgrading.
   - Startup verifies frame checksums and lengths and truncates a torn tail
     before appending, so writes made after a crash stay recoverable; a corrupt
     length can no longer trigger a huge allocation.
+- **Snapshots are crash-safe and never cost acknowledged data.**
+  - A damaged newest snapshot (truncated or corrupt) made recovery fail and the
+    server start with empty stores, keep appending to the old WAL, and on the
+    next snapshot let retention delete the older valid ones, losing every write
+    acknowledged before the crash. Recovery now falls back to an older snapshot
+    only when the WAL provably still covers it (from its cutoff on, with no
+    gaps), and otherwise refuses to start with an error naming the damaged
+    files.
+  - Snapshots are written to a temporary file, fsynced, renamed and the
+    directory fsynced (Unix; NTFS renames are atomic), so a crash mid-snapshot
+    no longer leaves a truncated newest file. Files are named
+    `snapshot-v4-<sequence>.bin` and loaded in sequence order, so two snapshots
+    in the same second no longer overwrite each other; old timestamp names
+    still load, as older. Every length read from a snapshot is bounded by the
+    file size.
+  - Each snapshot fsyncs the WAL up to its cutoff before it is published, and
+    after a restart new WAL records continue at or above the loaded snapshot's
+    cutoff, so a power loss right after a snapshot no longer makes later writes
+    invisible to the next recovery.
+  - Retention runs only once the new snapshot is durable, never removes the
+    snapshot just written (`max_snapshots: 0` keeps one) and logs failed
+    removals as warnings. Restore snapshots and WAL together (see
+    `docs/users/operations/BACKUP.md`).
 - **Replicas can reach the master by hostname.** `replication.master_address`
   accepted only `IP:port`, so the docker-compose replicas could not point at
   the `master` service. It now takes `host:port` with an IP or a DNS name,
