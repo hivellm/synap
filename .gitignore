@@ -76,19 +76,19 @@ SHA256SUMS
 .claude/settings.local.json
 **/settings.local.json
 
-# Rulebook - ignore runtime data, keep specs and tasks
-/.rulebook/*
-!/.rulebook/specs/
-!/.rulebook/archive/
-!/.rulebook/decisions/
-!/.rulebook/knowledge/
-!/.rulebook/learnings/
-!/.rulebook/tasks/
-!/.rulebook/tasks/**/*.md
-!/.rulebook/rulebook.json
 
 CLAUDE.local.md
 .rulebook/backup/
 .rulebook/handoff/_pending.md
 .rulebook/handoff/.urgent
 .rulebook/telemetry/
+
+# Rulebook - ignore runtime data, keep specs, tasks and project memory
+/.rulebook/*
+!/.rulebook/specs/
+!/.rulebook/tasks/
+!/.rulebook/archive/
+!/.rulebook/decisions/
+!/.rulebook/knowledge/
+!/.rulebook/learnings/
+!/.rulebook/rulebook.json
