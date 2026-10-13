@@ -94,6 +94,11 @@ pub struct AppState {
     /// Live replication role handle, so INFO/metrics report real status. `None`
     /// when replication is disabled (phase6j item 1.4).
     pub replication: Option<crate::replication::ReplicationHandle>,
+    /// The effective configuration with its secrets redacted
+    /// ([`crate::config::ServerConfig::redacted`]), reported by the admin-only
+    /// `admin.config` command. `None` when the embedder supplies no
+    /// configuration (most tests); the command then reports an error.
+    pub server_config: Option<Arc<serde_json::Value>>,
 }
 
 // Request/Response types for REST API
@@ -452,6 +457,7 @@ async fn handle_command(
         "slowlog.reset" => admin_cmd::handle_slowlog_reset_cmd(state.clone(), &request).await,
         "memory.usage" => admin_cmd::handle_memory_usage_cmd(state.clone(), &request).await,
         "client.list" => admin_cmd::handle_client_list_cmd(state.clone(), &request).await,
+        "admin.config" => admin_cmd::handle_admin_config_cmd(&state, &request).await,
         // Transaction commands
         "transaction.multi" => {
             admin_cmd::handle_transaction_multi_cmd(state.clone(), &request).await
@@ -672,6 +678,97 @@ pub(crate) fn test_app_state() -> AppState {
         user_manager: None,
         require_auth: false,
         replication: None,
+        server_config: None,
+    }
+}
+
+#[cfg(test)]
+mod admin_config_tests {
+    use super::*;
+    use crate::auth::{AuthContext, OperationContext, Permission};
+
+    fn caller(is_admin: bool, permissions: Vec<Permission>) -> OperationContext {
+        OperationContext::from_auth_context(&AuthContext {
+            user_id: Some(if is_admin { "admin" } else { "reader" }.to_string()),
+            api_key_id: None,
+            client_ip: std::net::IpAddr::from([127, 0, 0, 1]),
+            permissions,
+            is_admin,
+        })
+    }
+
+    fn config_request() -> Request {
+        serde_json::from_value(json!({
+            "command": "admin.config",
+            "request_id": "cfg-1",
+            "payload": {}
+        }))
+        .unwrap()
+    }
+
+    fn state_with_secrets() -> AppState {
+        let mut config = crate::config::ServerConfig::default();
+        config.auth.enabled = true;
+        config.auth.root.password = "root-pass-7f3a".to_string();
+        config.hub.service_api_key = "hub-key-91c2".to_string();
+        let mut state = test_app_state();
+        state.server_config = Some(Arc::new(config.redacted().unwrap()));
+        state
+    }
+
+    /// Spec "Admin views configuration": the effective configuration, every
+    /// secret redacted in both the object and the YAML.
+    #[tokio::test]
+    async fn admin_gets_the_redacted_configuration() {
+        let response = handle_command(
+            state_with_secrets(),
+            &caller(true, vec![]),
+            config_request(),
+        )
+        .await
+        .unwrap();
+        assert!(response.success, "{:?}", response.error);
+        let payload = response.payload.unwrap();
+        assert_eq!(payload["config"]["server"]["port"], 15500);
+        assert_eq!(
+            payload["config"]["auth"]["root"]["password"],
+            crate::config::REDACTED
+        );
+        assert_eq!(
+            payload["config"]["hub"]["service_api_key"],
+            crate::config::REDACTED
+        );
+        let yaml = payload["yaml"].as_str().unwrap();
+        assert!(yaml.contains("port: 15500"), "{yaml}");
+        let text = payload.to_string();
+        assert!(!text.contains("root-pass-7f3a") && !text.contains("hub-key-91c2"));
+    }
+
+    /// Spec "Non-admin request": a read-only user is denied, and nothing of the
+    /// configuration comes back.
+    #[tokio::test]
+    async fn read_only_user_is_denied() {
+        let reader = caller(false, vec![Permission::new("*", crate::auth::Action::Read)]);
+        let response = handle_command(state_with_secrets(), &reader, config_request())
+            .await
+            .unwrap();
+        assert!(!response.success);
+        assert!(response.payload.is_none());
+        let error = response.error.unwrap();
+        assert!(
+            error.contains("NOPERM") && error.contains("admin:*"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_snapshot_is_an_error_not_a_default() {
+        let response = handle_command(test_app_state(), &caller(true, vec![]), config_request())
+            .await
+            .unwrap();
+        assert!(!response.success);
+        assert!(response.payload.is_none());
+        assert!(response.error.unwrap().contains("no configuration"));
     }
 }
 

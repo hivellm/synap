@@ -17,7 +17,7 @@ GUI Dashboard for Synap Server - Built with Electron, Vue.js 3, and TypeScript.
 - 📡 **Stream Viewer** - Monitor event streams and partitions
 - 📢 **Pub/Sub Dashboard** - Topic management and subscriptions
 - 🔄 **Replication Monitor** - Topology visualization and lag tracking
-- ⚙️ **Configuration Editor** - YAML editor with live preview
+- ⚙️ **Configuration Viewer** - The server's effective configuration, secrets redacted, with copy and download as YAML
 - 📝 **Log Viewer** - Real-time log streaming with filters
 - 🎨 **Dark Theme** - Modern dark UI inspired by professional tools
 
@@ -94,6 +94,12 @@ Inspect Redis-compatible data structures:
 - **Set**: Manage set members
 - **Sorted Set**: View ranked members with scores
 
+Inspecting a key shows its type (`key.type`) and memory usage
+(`memory.usage`) before its contents. A key that does not exist, or that holds
+a different structure than the selected tab, is reported as such. Every read
+and write goes through the server's `/api/v1/command` envelope, so key names
+with `/`, spaces, `?`, `#`, `%` or non-ASCII characters work unchanged.
+
 ### Queues
 
 Monitor message queues:
@@ -124,10 +130,19 @@ Monitor replication topology:
 
 ### Configuration
 
-Edit server configuration:
-- YAML-based editor
-- Live preview panel
-- Configuration history with rollback
+Shows the configuration the server is running with: the config file plus every
+environment and command-line override. It comes from the admin-only
+`admin.config` command, so the connection's API key needs admin permission
+(`admin:*`). Passwords, API keys, the Hub service key and any other secret
+value appear as `[redacted]`.
+
+- Read-only YAML of the effective configuration, plus a per-section view
+- **Copy YAML** and **Download YAML**
+- A failed or denied load shows the server's error and no configuration
+
+The view cannot change settings: most of them only take effect at startup, and
+a remote write would be a privileged attack surface. Edit the server's config
+file and restart it instead.
 
 ### Logs
 
@@ -165,6 +180,26 @@ gui/
 ├── dist-electron/    # Built main process (generated)
 └── release/          # Packaged apps (generated)
 ```
+
+## Testing
+
+```bash
+# Build the server the tests run against (from the repository root)
+cargo build -p synap-server --bin synap-server
+
+# From gui/
+npm test
+```
+
+`npm test` runs Vitest. `tests/contract/` checks the API client
+(`src/services/api.ts`) against a real server: the configuration command,
+key type, memory usage, missing keys, permission errors and encoded key names.
+`tests/smoke/` creates a hash, list, set and sorted set through the server and
+inspects each one in the mounted Data Structures view. Each test file starts
+its own `synap-server` on a free port with authentication required and a
+temporary data directory (`tests/support/server.ts`). The binary is
+`SYNAP_SERVER_BIN` when set, otherwise the newest `target/debug` or
+`target/release` build.
 
 ## Configuration
 

@@ -79,6 +79,7 @@ async fn spawn_test_server_with_mcp_auth(
         user_manager: None,
         require_auth: false,
         replication: None,
+        server_config: None,
     };
 
     // Create user manager and API key manager
@@ -325,6 +326,7 @@ async fn test_mcp_permission_check_read_only() {
         user_manager: None,
         require_auth: false,
         replication: None,
+        server_config: None,
     });
 
     // Set a value first
@@ -421,6 +423,7 @@ async fn test_mcp_permission_check_write_allowed() {
         user_manager: None,
         require_auth: false,
         replication: None,
+        server_config: None,
     });
 
     // Create write-enabled auth context
@@ -502,6 +505,7 @@ async fn test_mcp_admin_bypass_permissions() {
         user_manager: None,
         require_auth: false,
         replication: None,
+        server_config: None,
     });
 
     // Create admin auth context (no specific permissions needed)
