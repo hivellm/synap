@@ -7,4 +7,4 @@
 ## 2. Tail (docs + tests — check or waive with tailWaiver)
 - [x] 2.1 Update or create documentation covering the implementation — `docs/specs/PERSISTENCE.md` (Queue Persistence rewritten: records, replay rules, guarantees), `docs/internals/persistence-snapshot-format.md` (v5), `docs/specs/QUEUE_SYSTEM.md` (replication + Durability and Recovery), `docs/users/queues/QUEUES.md` (Durability Across Restarts)
 - [x] 2.2 Write tests covering the new behavior — core queue unit tests (7), apply/durable/snapshot/types unit tests (7), integration suite (9)
-- [ ] 2.3 Run tests and confirm they pass
+- [x] 2.3 Run tests and confirm they pass — fmt, clippy -D warnings (workspace, all targets, full-tests), lib tests (synap-core 453, synap-server 539), queue_replay_identity_tests 9, snapshot_consistency 8, transport_write_parity 5, integration_persistence_e2e 4, kv_replication 16, datatype_replication 4, replication_integration 11, websocket_queue_tests 4 (s2s-tests; 0 under full-tests alone), plus integration/hub/error/status/mcp/synap_rpc/transaction_durability/authorization suites
