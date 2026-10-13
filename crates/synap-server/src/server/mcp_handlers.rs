@@ -1,3 +1,4 @@
+use crate::persistence::durable;
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock, ErrorData};
 use serde_json::json;
 use std::sync::Arc;
@@ -196,20 +197,15 @@ async fn handle_kv_set(
 
     let value_bytes = value_str.as_bytes().to_vec();
 
-    state
-        .kv_store
-        .set(key, value_bytes.clone(), ttl)
-        .await
-        .map_err(|e| ErrorData::internal_error(format!("Set failed: {}", e), None))?;
-
-    // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence
-            .log_kv_set(key.to_string(), value_bytes, ttl)
-            .await
-    {
-        tracing::error!("Failed to log KV SET to WAL (MCP): {}", e);
-    }
+    durable::kv_set(
+        state.persistence.as_deref(),
+        &state.kv_store,
+        key,
+        value_bytes,
+        ttl,
+    )
+    .await
+    .map_err(|e| ErrorData::internal_error(format!("Set failed: {}", e), None))?;
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"success": true}).to_string(),
@@ -230,19 +226,9 @@ async fn handle_kv_delete(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
 
-    let deleted = state
-        .kv_store
-        .delete(key)
+    let deleted = durable::kv_delete(state.persistence.as_deref(), &state.kv_store, key)
         .await
         .map_err(|e| ErrorData::internal_error(format!("Delete failed: {}", e), None))?;
-
-    // Log to WAL if deleted
-    if deleted
-        && let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence.log_kv_del(vec![key.to_string()]).await
-    {
-        tracing::error!("Failed to log KV DELETE to WAL (MCP): {}", e);
-    }
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"deleted": deleted}).to_string(),
@@ -272,20 +258,15 @@ async fn handle_kv_append(
 
     let value_bytes = value_str.as_bytes().to_vec();
 
-    let length = state
-        .kv_store
-        .append(key, value_bytes.clone())
-        .await
-        .map_err(|e| ErrorData::internal_error(format!("APPEND failed: {}", e), None))?;
-
-    // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence
-            .log_kv_set(key.to_string(), value_bytes, None)
-            .await
-    {
-        tracing::error!("Failed to log KV APPEND to WAL (MCP): {}", e);
-    }
+    // Recorded as the whole resulting value and its expiry, not the operand.
+    let length = durable::kv_append(
+        state.persistence.as_deref(),
+        &state.kv_store,
+        key,
+        value_bytes,
+    )
+    .await
+    .map_err(|e| ErrorData::internal_error(format!("APPEND failed: {}", e), None))?;
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"length": length, "key": key}).to_string(),
@@ -447,8 +428,7 @@ async fn handle_key_rename(
         state.sorted_set_store.clone(),
     );
 
-    manager
-        .rename(source, destination)
+    durable::key_rename(state.persistence.as_deref(), &manager, source, destination)
         .await
         .map_err(|e| ErrorData::internal_error(format!("RENAME failed: {}", e), None))?;
 
@@ -485,10 +465,15 @@ async fn handle_hash_set(
     let value_bytes = serde_json::to_vec(value)
         .map_err(|e| ErrorData::internal_error(format!("Serialization failed: {}", e), None))?;
 
-    let created = state
-        .hash_store
-        .hset(key, field, value_bytes)
-        .map_err(|e| ErrorData::internal_error(format!("HSET failed: {}", e), None))?;
+    let created = durable::hset(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        key,
+        field,
+        value_bytes,
+    )
+    .await
+    .map_err(|e| ErrorData::internal_error(format!("HSET failed: {}", e), None))?;
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"created": created, "key": key, "field": field}).to_string(),
@@ -601,9 +586,23 @@ async fn handle_list_push(
         .collect::<Result<Vec<_>, _>>()?;
 
     let length = if direction == "left" {
-        state.list_store.lpush(key, values, only_if_exists)
+        durable::lpush(
+            state.persistence.as_deref(),
+            &state.list_store,
+            key,
+            values,
+            only_if_exists,
+        )
+        .await
     } else {
-        state.list_store.rpush(key, values, only_if_exists)
+        durable::rpush(
+            state.persistence.as_deref(),
+            &state.list_store,
+            key,
+            values,
+            only_if_exists,
+        )
+        .await
     }
     .map_err(|e| ErrorData::internal_error(format!("Push failed: {}", e), None))?;
 
@@ -637,9 +636,9 @@ async fn handle_list_pop(
         .map(|c| c as usize);
 
     let values = if direction == "left" {
-        state.list_store.lpop(key, count)
+        durable::lpop(state.persistence.as_deref(), &state.list_store, key, count).await
     } else {
-        state.list_store.rpop(key, count)
+        durable::rpop(state.persistence.as_deref(), &state.list_store, key, count).await
     }
     .map_err(|e| ErrorData::internal_error(format!("Pop failed: {}", e), None))?;
 
@@ -724,10 +723,17 @@ async fn handle_queue_publish(
         .and_then(|v| v.as_u64())
         .map(|p| p as u8);
 
-    let message_id = queue_manager
-        .publish(queue, message.as_bytes().to_vec(), priority, None)
-        .await
-        .map_err(|e| ErrorData::internal_error(format!("Publish failed: {}", e), None))?;
+    let message_id = durable::queue_publish(
+        state.persistence.as_deref(),
+        queue_manager,
+        queue,
+        message.as_bytes().to_vec(),
+        priority,
+        None,
+    )
+    .await
+    .map(|message| message.id)
+    .map_err(|e| ErrorData::internal_error(format!("Publish failed: {}", e), None))?;
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"message_id": message_id}).to_string(),
@@ -759,10 +765,14 @@ async fn handle_set_add(
         .map(|v| serde_json::to_vec(v).unwrap_or_default())
         .collect();
 
-    let added = state
-        .set_store
-        .sadd(key, member_bytes)
-        .map_err(|e| ErrorData::internal_error(format!("SADD failed: {}", e), None))?;
+    let added = durable::sadd(
+        state.persistence.as_deref(),
+        &state.set_store,
+        key,
+        member_bytes,
+    )
+    .await
+    .map_err(|e| ErrorData::internal_error(format!("SADD failed: {}", e), None))?;
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"added": added, "key": key}).to_string(),
@@ -863,7 +873,16 @@ async fn handle_sortedset_zadd(
     let member_bytes = member.as_bytes().to_vec();
     let opts = crate::core::ZAddOptions::default();
 
-    let (added, _) = state.sorted_set_store.zadd(key, member_bytes, score, &opts);
+    let (added, _) = durable::zadd(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        member_bytes,
+        score,
+        &opts,
+    )
+    .await
+    .map_err(|e| ErrorData::internal_error(format!("ZADD failed: {}", e), None))?;
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"added": added > 0, "key": key, "member": member, "score": score}).to_string(),

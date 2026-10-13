@@ -531,15 +531,17 @@ impl TransactionManager {
                     serde_json::json!({"deleted": deleted})
                 }
                 TransactionCommand::KVIncr { key, delta } => {
-                    // `incr_unlocked` handles a negative delta (DECR) too.
-                    let value = self.kv_store.incr_unlocked(key, *delta).await?;
+                    // `incr_unlocked_with_expiry` handles a negative delta (DECR) too.
+                    let (value, expires_at_ms) =
+                        self.kv_store.incr_unlocked_with_expiry(key, *delta).await?;
                     // INCR has no persistence Operation of its own; log the
-                    // resulting value as a SET, exactly as the non-transactional
-                    // INCR handler does, so replay/replication is deterministic.
+                    // resulting value and the expiry the counter still carries
+                    // as a SET, exactly as the non-transactional INCR does, so
+                    // replay/replication is deterministic and keeps the TTL.
                     writes.push(CommittedWrite::KvSet {
                         key: key.clone(),
                         value: value.to_string().into_bytes(),
-                        ttl: None,
+                        ttl: crate::core::types::ttl_secs_from_deadline(expires_at_ms),
                     });
                     serde_json::json!({"value": value})
                 }

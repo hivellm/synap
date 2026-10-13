@@ -1,4 +1,5 @@
 use super::*;
+use crate::persistence::durable;
 
 // ==================== Bitmap Request/Response Types ====================
 
@@ -96,9 +97,14 @@ pub async fn bitmap_setbit(
     let scoped_key =
         crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
 
-    let old_value = state
-        .bitmap_store
-        .setbit(&scoped_key, req.offset, req.value)?;
+    let old_value = durable::setbit(
+        state.persistence.as_deref(),
+        &state.bitmap_store,
+        &scoped_key,
+        req.offset,
+        req.value,
+    )
+    .await?;
 
     Ok(Json(BitmapSetBitResponse { key, old_value }))
 }
@@ -220,9 +226,14 @@ pub async fn bitmap_bitop(
         .collect();
 
     let operation = req.operation.parse::<crate::core::BitmapOperation>()?;
-    let length = state
-        .bitmap_store
-        .bitop(operation, &scoped_destination, &scoped_sources)?;
+    let length = durable::bitop(
+        state.persistence.as_deref(),
+        &state.bitmap_store,
+        operation,
+        &scoped_destination,
+        &scoped_sources,
+    )
+    .await?;
 
     Ok(Json(BitmapOpResponse {
         destination,
@@ -301,7 +312,13 @@ pub async fn bitmap_bitfield(
         operations.push(core_op);
     }
 
-    let results = state.bitmap_store.bitfield(&scoped_key, &operations)?;
+    let results = durable::bitfield(
+        state.persistence.as_deref(),
+        &state.bitmap_store,
+        &scoped_key,
+        &operations,
+    )
+    .await?;
     let values: Vec<i64> = results.iter().map(|r| r.value).collect();
 
     Ok(Json(BitmapFieldResponse {
@@ -351,7 +368,14 @@ pub(super) async fn handle_bitmap_setbit_cmd(
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'value' field".to_string()))?
         as u8;
 
-    let old_value = state.bitmap_store.setbit(key, offset, value)?;
+    let old_value = durable::setbit(
+        state.persistence.as_deref(),
+        &state.bitmap_store,
+        key,
+        offset,
+        value,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "key": key, "offset": offset, "old_value": old_value }))
 }
@@ -467,9 +491,14 @@ pub(super) async fn handle_bitmap_bitop_cmd(
         .collect::<Result<Vec<_>, _>>()?;
 
     let operation = operation_str.parse::<crate::core::BitmapOperation>()?;
-    let length = state
-        .bitmap_store
-        .bitop(operation, destination, &source_keys)?;
+    let length = durable::bitop(
+        state.persistence.as_deref(),
+        &state.bitmap_store,
+        operation,
+        destination,
+        &source_keys,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "destination": destination, "length": length }))
 }
@@ -571,7 +600,13 @@ pub(super) async fn handle_bitmap_bitfield_cmd(
         operations.push(core_op);
     }
 
-    let results = state.bitmap_store.bitfield(key, &operations)?;
+    let results = durable::bitfield(
+        state.persistence.as_deref(),
+        &state.bitmap_store,
+        key,
+        &operations,
+    )
+    .await?;
     let values: Vec<i64> = results.iter().map(|r| r.value).collect();
 
     Ok(serde_json::json!({ "key": key, "results": values }))

@@ -1,4 +1,5 @@
 use super::*;
+use crate::persistence::durable;
 
 // ==================== Queue REST Endpoints ====================
 
@@ -77,21 +78,17 @@ pub async fn queue_publish(
         &queue_name,
     );
 
-    let message = queue_manager
-        .publish_with_message(&scoped_name, req.payload, req.priority, req.max_retries)
-        .await?;
+    let message = durable::queue_publish(
+        state.persistence.as_deref(),
+        queue_manager,
+        &scoped_name,
+        req.payload,
+        req.priority,
+        req.max_retries,
+    )
+    .await?;
 
     let message_id = message.id.clone();
-
-    // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence
-            .log_queue_publish(scoped_name.clone(), message)
-            .await
-    {
-        error!("Failed to log queue publish to WAL: {}", e);
-        // Don't fail the request, just log the error
-    }
 
     Ok(Json(PublishResponse { message_id }))
 }
@@ -172,17 +169,13 @@ pub async fn queue_ack(
         &queue_name,
     );
 
-    queue_manager.ack(&scoped_name, &req.message_id).await?;
-
-    // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence
-            .log_queue_ack(scoped_name.clone(), req.message_id.clone())
-            .await
-    {
-        error!("Failed to log queue ACK to WAL: {}", e);
-        // Don't fail the request, just log the error
-    }
+    durable::queue_ack(
+        state.persistence.as_deref(),
+        queue_manager,
+        &scoped_name,
+        &req.message_id,
+    )
+    .await?;
 
     Ok(Json(serde_json::json!({ "success": true })))
 }
@@ -215,19 +208,14 @@ pub async fn queue_nack(
         &queue_name,
     );
 
-    queue_manager
-        .nack(&scoped_name, &req.message_id, req.requeue)
-        .await?;
-
-    // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence
-            .log_queue_nack(scoped_name.clone(), req.message_id.clone(), req.requeue)
-            .await
-    {
-        error!("Failed to log queue NACK to WAL: {}", e);
-        // Don't fail the request, just log the error
-    }
+    durable::queue_nack(
+        state.persistence.as_deref(),
+        queue_manager,
+        &scoped_name,
+        &req.message_id,
+        req.requeue,
+    )
+    .await?;
 
     Ok(Json(serde_json::json!({ "success": true })))
 }
@@ -476,21 +464,17 @@ pub(super) async fn handle_queue_publish_cmd(
     // Note: headers are ignored for now - not supported by the queue manager
     // let headers = request.payload.get("headers")...
 
-    let message = queue_manager
-        .publish_with_message(queue, payload_bytes, priority, max_retries)
-        .await?;
+    let message = durable::queue_publish(
+        state.persistence.as_deref(),
+        queue_manager,
+        queue,
+        payload_bytes,
+        priority,
+        max_retries,
+    )
+    .await?;
 
     let message_id = message.id.clone();
-
-    // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence
-            .log_queue_publish(queue.to_string(), message)
-            .await
-    {
-        error!("Failed to log queue publish to WAL: {}", e);
-        // Don't fail the request, just log the error
-    }
 
     Ok(serde_json::json!({ "message_id": message_id }))
 }
@@ -555,17 +539,13 @@ pub(super) async fn handle_queue_ack_cmd(
         .and_then(|v| v.as_str())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'message_id' field".to_string()))?;
 
-    queue_manager.ack(queue, message_id).await?;
-
-    // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence
-            .log_queue_ack(queue.to_string(), message_id.to_string())
-            .await
-    {
-        error!("Failed to log queue ACK to WAL: {}", e);
-        // Don't fail the request, just log the error
-    }
+    durable::queue_ack(
+        state.persistence.as_deref(),
+        queue_manager,
+        queue,
+        message_id,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "success": true }))
 }
@@ -597,17 +577,14 @@ pub(super) async fn handle_queue_nack_cmd(
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    queue_manager.nack(queue, message_id, requeue).await?;
-
-    // Log to WAL if persistence is enabled
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence
-            .log_queue_nack(queue.to_string(), message_id.to_string(), requeue)
-            .await
-    {
-        error!("Failed to log queue NACK to WAL: {}", e);
-        // Don't fail the request, just log the error
-    }
+    durable::queue_nack(
+        state.persistence.as_deref(),
+        queue_manager,
+        queue,
+        message_id,
+        requeue,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "success": true }))
 }

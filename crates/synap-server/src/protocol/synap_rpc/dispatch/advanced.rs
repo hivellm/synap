@@ -1,5 +1,6 @@
 use super::{AppState, SynapValue, arg_bytes, arg_float, arg_int, arg_str};
 use crate::auth::OperationContext;
+use crate::persistence::durable;
 
 /// Serialize a `Vec<GeospatialRadiusResult>` — `(member, dist?, coord?)` — to a
 /// `SynapValue::Array`.  Each element is an Array:
@@ -85,11 +86,18 @@ pub(super) async fn run(
                 locations.push((lat, lon, member));
                 pos += 3;
             }
-            state
-                .geospatial_store
-                .geoadd(&key, locations, nx, xx, ch)
-                .map(|n| SynapValue::Int(n as i64))
-                .map_err(|e| e.to_string())
+            durable::geoadd(
+                state.persistence.as_deref(),
+                &state.geospatial_store,
+                &key,
+                locations,
+                nx,
+                xx,
+                ch,
+            )
+            .await
+            .map(|n| SynapValue::Int(n as i64))
+            .map_err(|e| e.to_string())
         }
         "GEOPOS" => {
             // GEOPOS key member [member ...]
@@ -438,10 +446,17 @@ pub(super) async fn run(
                 .queue_manager
                 .as_deref()
                 .ok_or_else(|| "ERR queue subsystem not enabled".to_string())?;
-            qm.publish(&name, payload, priority, max_retries)
-                .await
-                .map(SynapValue::Str)
-                .map_err(|e| e.to_string())
+            durable::queue_publish(
+                state.persistence.as_deref(),
+                qm,
+                &name,
+                payload,
+                priority,
+                max_retries,
+            )
+            .await
+            .map(|message| SynapValue::Str(message.id))
+            .map_err(|e| e.to_string())
         }
         "QCONSUME" => {
             // QCONSUME queue consumer_id
@@ -483,7 +498,7 @@ pub(super) async fn run(
                 .queue_manager
                 .as_deref()
                 .ok_or_else(|| "ERR queue subsystem not enabled".to_string())?;
-            qm.ack(&name, &message_id)
+            durable::queue_ack(state.persistence.as_deref(), qm, &name, &message_id)
                 .await
                 .map(|()| SynapValue::Str("OK".into()))
                 .map_err(|e| e.to_string())
@@ -504,10 +519,16 @@ pub(super) async fn run(
                 .queue_manager
                 .as_deref()
                 .ok_or_else(|| "ERR queue subsystem not enabled".to_string())?;
-            qm.nack(&name, &message_id, requeue)
-                .await
-                .map(|()| SynapValue::Str("OK".into()))
-                .map_err(|e| e.to_string())
+            durable::queue_nack(
+                state.persistence.as_deref(),
+                qm,
+                &name,
+                &message_id,
+                requeue,
+            )
+            .await
+            .map(|()| SynapValue::Str("OK".into()))
+            .map_err(|e| e.to_string())
         }
         "QSTATS" => {
             let name = arg_str(args, 0)?;
@@ -1094,6 +1115,7 @@ pub(super) async fn run(
                 list_store: state.list_store.clone(),
                 set_store: state.set_store.clone(),
                 sorted_set_store: state.sorted_set_store.clone(),
+                persistence: state.persistence.clone(),
                 caller: std::sync::Arc::new(caller.clone()),
             };
             state
@@ -1122,6 +1144,7 @@ pub(super) async fn run(
                 list_store: state.list_store.clone(),
                 set_store: state.set_store.clone(),
                 sorted_set_store: state.sorted_set_store.clone(),
+                persistence: state.persistence.clone(),
                 caller: std::sync::Arc::new(caller.clone()),
             };
             state

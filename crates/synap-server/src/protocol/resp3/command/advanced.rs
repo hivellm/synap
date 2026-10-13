@@ -1,6 +1,7 @@
 use super::{AppState, Resp3Value, arg_bytes, arg_f64, arg_i64, arg_str, arg_u64, err_wrong_args};
 use crate::auth::OperationContext;
 use crate::core::geospatial::{DistanceUnit, GeoQueryOptions, GeoSearchParams};
+use crate::persistence::durable;
 use crate::scripting::ScriptExecContext;
 
 // ── Queue commands (3.1) ──────────────────────────────────────────────────────
@@ -83,8 +84,17 @@ pub(super) async fn cmd_qpublish(state: &AppState, args: &[Resp3Value]) -> Resp3
         Some(qm) => qm,
         None => return Resp3Value::Error("ERR queue subsystem not enabled".into()),
     };
-    match qm.publish(&name, payload, priority, None).await {
-        Ok(id) => Resp3Value::BulkString(id.into_bytes()),
+    match durable::queue_publish(
+        state.persistence.as_deref(),
+        qm,
+        &name,
+        payload,
+        priority,
+        None,
+    )
+    .await
+    {
+        Ok(message) => Resp3Value::BulkString(message.id.into_bytes()),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
 }
@@ -130,7 +140,7 @@ pub(super) async fn cmd_qack(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         Some(qm) => qm,
         None => return Resp3Value::Error("ERR queue subsystem not enabled".into()),
     };
-    match qm.ack(&name, &msg_id).await {
+    match durable::queue_ack(state.persistence.as_deref(), qm, &name, &msg_id).await {
         Ok(()) => Resp3Value::SimpleString("OK".into()),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -161,7 +171,7 @@ pub(super) async fn cmd_qnack(state: &AppState, args: &[Resp3Value]) -> Resp3Val
         Some(qm) => qm,
         None => return Resp3Value::Error("ERR queue subsystem not enabled".into()),
     };
-    match qm.nack(&name, &msg_id, requeue).await {
+    match durable::queue_nack(state.persistence.as_deref(), qm, &name, &msg_id, requeue).await {
         Ok(()) => Resp3Value::SimpleString("OK".into()),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -876,6 +886,7 @@ pub(super) async fn cmd_eval(
         list_store: state.list_store.clone(),
         set_store: state.set_store.clone(),
         sorted_set_store: state.sorted_set_store.clone(),
+        persistence: state.persistence.clone(),
         caller: std::sync::Arc::new(caller.clone()),
     };
     match state
@@ -916,6 +927,7 @@ pub(super) async fn cmd_evalsha(
         list_store: state.list_store.clone(),
         set_store: state.set_store.clone(),
         sorted_set_store: state.sorted_set_store.clone(),
+        persistence: state.persistence.clone(),
         caller: std::sync::Arc::new(caller.clone()),
     };
     match state
@@ -1066,7 +1078,17 @@ pub(super) async fn cmd_geoadd(state: &AppState, args: &[Resp3Value]) -> Resp3Va
         locations.push((lat, lon, member));
         pos += 3;
     }
-    match state.geospatial_store.geoadd(&key, locations, nx, xx, ch) {
+    match durable::geoadd(
+        state.persistence.as_deref(),
+        &state.geospatial_store,
+        &key,
+        locations,
+        nx,
+        xx,
+        ch,
+    )
+    .await
+    {
         Ok(added) => Resp3Value::Integer(added as i64),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }

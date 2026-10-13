@@ -19,6 +19,16 @@ Synap supports master-replica replication:
 - **High Availability**: Automatic failover
 - **Read Scaling**: Distribute reads across replicas
 
+Every write the master accepts is sent to replicas, whichever transport
+carried it (REST, the command envelope, RESP3, SynapRPC, MCP/UMICP and
+`redis.call` in scripts), with the same record the WAL gets. Replication does
+not need persistence: a master with `persistence.enabled: false` still
+replicates. Strings, hashes, lists, sets, sorted sets (and geospatial data,
+which is stored in sorted sets), HyperLogLog and bitmaps are replicated;
+`RENAME` and `COPY` move or copy a key of any of the keyed types. If the
+record cannot be written to the WAL the command fails, but the replicas have
+already received it.
+
 ## Master Configuration
 
 ### Basic Master Setup

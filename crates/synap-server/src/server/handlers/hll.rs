@@ -1,4 +1,5 @@
 use super::*;
+use crate::persistence::durable;
 
 // ==================== HyperLogLog Command Handlers ====================
 
@@ -58,7 +59,14 @@ pub(super) async fn handle_hyperloglog_pfadd_cmd(
 
     let ttl_secs = request.payload.get("ttl_secs").and_then(|v| v.as_u64());
 
-    let added = state.hyperloglog_store.pfadd(key, elements, ttl_secs)?;
+    let added = durable::pfadd(
+        state.persistence.as_deref(),
+        &state.hyperloglog_store,
+        key,
+        elements,
+        ttl_secs,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "key": key, "added": added }))
 }
@@ -107,7 +115,13 @@ pub(super) async fn handle_hyperloglog_pfmerge_cmd(
         ));
     }
 
-    let count = state.hyperloglog_store.pfmerge(destination, sources)?;
+    let count = durable::pfmerge(
+        state.persistence.as_deref(),
+        &state.hyperloglog_store,
+        destination,
+        sources,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "destination": destination, "count": count }))
 }
@@ -163,9 +177,14 @@ pub async fn hyperloglog_pfadd(
         .map(|element| element.into_bytes())
         .collect();
 
-    let added = state
-        .hyperloglog_store
-        .pfadd(&scoped_key, elements, req.ttl_secs)?;
+    let added = durable::pfadd(
+        state.persistence.as_deref(),
+        &state.hyperloglog_store,
+        &scoped_key,
+        elements,
+        req.ttl_secs,
+    )
+    .await?;
 
     Ok(Json(HyperLogLogAddResponse { key, added }))
 }
@@ -233,9 +252,13 @@ pub async fn hyperloglog_pfmerge(
         })
         .collect();
 
-    let count = state
-        .hyperloglog_store
-        .pfmerge(&scoped_destination, scoped_sources)?;
+    let count = durable::pfmerge(
+        state.persistence.as_deref(),
+        &state.hyperloglog_store,
+        &scoped_destination,
+        scoped_sources,
+    )
+    .await?;
 
     Ok(Json(HyperLogLogMergeResponse { destination, count }))
 }

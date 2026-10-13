@@ -1,4 +1,5 @@
 use super::*;
+use crate::persistence::durable;
 
 // ==================== List Command Handlers ====================
 
@@ -44,7 +45,14 @@ pub(super) async fn handle_list_lpush_cmd(
     }
 
     // No active transaction, execute immediately
-    let length = state.list_store.lpush(key, values, false)?;
+    let length = durable::lpush(
+        state.persistence.as_deref(),
+        &state.list_store,
+        key,
+        values,
+        false,
+    )
+    .await?;
 
     // Update key version for WATCH (optimistic locking)
     state.transaction_manager.update_key_version(key);
@@ -71,7 +79,14 @@ pub(super) async fn handle_list_lpushx_cmd(
         .map(|v| serde_json::to_vec(v).map_err(|e| SynapError::SerializationError(e.to_string())))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let length = state.list_store.lpush(key, values, true)?;
+    let length = durable::lpush(
+        state.persistence.as_deref(),
+        &state.list_store,
+        key,
+        values,
+        true,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "length": length, "key": key }))
 }
@@ -118,7 +133,14 @@ pub(super) async fn handle_list_rpush_cmd(
     }
 
     // No active transaction, execute immediately
-    let length = state.list_store.rpush(key, values, false)?;
+    let length = durable::rpush(
+        state.persistence.as_deref(),
+        &state.list_store,
+        key,
+        values,
+        false,
+    )
+    .await?;
 
     // Update key version for WATCH (optimistic locking)
     state.transaction_manager.update_key_version(key);
@@ -145,7 +167,14 @@ pub(super) async fn handle_list_rpushx_cmd(
         .map(|v| serde_json::to_vec(v).map_err(|e| SynapError::SerializationError(e.to_string())))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let length = state.list_store.rpush(key, values, true)?;
+    let length = durable::rpush(
+        state.persistence.as_deref(),
+        &state.list_store,
+        key,
+        values,
+        true,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "length": length, "key": key }))
 }
@@ -189,7 +218,7 @@ pub(super) async fn handle_list_lpop_cmd(
     }
 
     // No active transaction, execute immediately
-    let values = state.list_store.lpop(key, count)?;
+    let values = durable::lpop(state.persistence.as_deref(), &state.list_store, key, count).await?;
 
     // Update key version for WATCH (optimistic locking) if values were popped
     if !values.is_empty() {
@@ -247,7 +276,7 @@ pub(super) async fn handle_list_rpop_cmd(
     }
 
     // No active transaction, execute immediately
-    let values = state.list_store.rpop(key, count)?;
+    let values = durable::rpop(state.persistence.as_deref(), &state.list_store, key, count).await?;
 
     // Update key version for WATCH (optimistic locking) if values were popped
     if !values.is_empty() {
@@ -367,7 +396,14 @@ pub(super) async fn handle_list_lset_cmd(
     let value_bytes =
         serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
-    state.list_store.lset(key, index, value_bytes)?;
+    durable::lset(
+        state.persistence.as_deref(),
+        &state.list_store,
+        key,
+        index,
+        value_bytes,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "success": true, "key": key, "index": index }))
 }
@@ -394,7 +430,14 @@ pub(super) async fn handle_list_ltrim_cmd(
         .and_then(|v| v.as_i64())
         .unwrap_or(-1);
 
-    state.list_store.ltrim(key, start, stop)?;
+    durable::ltrim(
+        state.persistence.as_deref(),
+        &state.list_store,
+        key,
+        start,
+        stop,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "success": true, "key": key }))
 }
@@ -423,7 +466,14 @@ pub(super) async fn handle_list_lrem_cmd(
     let value_bytes =
         serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
-    let removed = state.list_store.lrem(key, count, value_bytes)?;
+    let removed = durable::lrem(
+        state.persistence.as_deref(),
+        &state.list_store,
+        key,
+        count,
+        value_bytes,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "removed": removed, "key": key }))
 }
@@ -460,9 +510,15 @@ pub(super) async fn handle_list_linsert_cmd(
     let value_bytes =
         serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
-    let length = state
-        .list_store
-        .linsert(key, before, pivot_bytes, value_bytes)?;
+    let length = durable::linsert(
+        state.persistence.as_deref(),
+        &state.list_store,
+        key,
+        before,
+        pivot_bytes,
+        value_bytes,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "length": length, "key": key }))
 }
@@ -506,7 +562,13 @@ pub(super) async fn handle_list_rpoplpush_cmd(
         .and_then(|v| v.as_str())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'destination' field".to_string()))?;
 
-    let value = state.list_store.rpoplpush(source, destination)?;
+    let value = durable::rpoplpush(
+        state.persistence.as_deref(),
+        &state.list_store,
+        source,
+        destination,
+    )
+    .await?;
 
     let json_value: serde_json::Value = serde_json::from_slice(&value)
         .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&value).to_string()));
@@ -673,7 +735,14 @@ pub async fn list_lpush(
         .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
         .collect();
 
-    let length = state.list_store.lpush(&scoped_key, values?, false)?;
+    let length = durable::lpush(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &scoped_key,
+        values?,
+        false,
+    )
+    .await?;
 
     Ok(Json(ListPushResponse { length, key }))
 }
@@ -703,7 +772,14 @@ pub async fn list_lpushx(
         .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
         .collect();
 
-    let length = state.list_store.lpush(&scoped_key, values?, true)?;
+    let length = durable::lpush(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &scoped_key,
+        values?,
+        true,
+    )
+    .await?;
 
     Ok(Json(ListPushResponse { length, key }))
 }
@@ -733,7 +809,14 @@ pub async fn list_rpush(
         .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
         .collect();
 
-    let length = state.list_store.rpush(&scoped_key, values?, false)?;
+    let length = durable::rpush(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &scoped_key,
+        values?,
+        false,
+    )
+    .await?;
 
     Ok(Json(ListPushResponse { length, key }))
 }
@@ -763,7 +846,14 @@ pub async fn list_rpushx(
         .map(|v| serde_json::to_vec(&v).map_err(|e| SynapError::InvalidValue(e.to_string())))
         .collect();
 
-    let length = state.list_store.rpush(&scoped_key, values?, true)?;
+    let length = durable::rpush(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &scoped_key,
+        values?,
+        true,
+    )
+    .await?;
 
     Ok(Json(ListPushResponse { length, key }))
 }
@@ -788,7 +878,13 @@ pub async fn list_lpop(
     let scoped_key =
         crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
 
-    let values = state.list_store.lpop(&scoped_key, Some(count))?;
+    let values = durable::lpop(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &scoped_key,
+        Some(count),
+    )
+    .await?;
 
     let json_values: Result<Vec<serde_json::Value>, _> = values
         .into_iter()
@@ -826,7 +922,13 @@ pub async fn list_rpop(
     let scoped_key =
         crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
 
-    let values = state.list_store.rpop(&scoped_key, Some(count))?;
+    let values = durable::rpop(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &scoped_key,
+        Some(count),
+    )
+    .await?;
 
     let json_values: Vec<serde_json::Value> = values
         .into_iter()
@@ -961,7 +1063,14 @@ pub async fn list_set(
     let value = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize value: {}", e)))?;
 
-    state.list_store.lset(&scoped_key, req.index, value)?;
+    durable::lset(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &scoped_key,
+        req.index,
+        value,
+    )
+    .await?;
 
     Ok(Json(
         json!({ "success": true, "key": key, "index": req.index }),
@@ -996,7 +1105,14 @@ pub async fn list_trim(
 
     debug!("REST LTRIM key={} start={} stop={}", key, start, stop);
 
-    state.list_store.ltrim(&scoped_key, start, stop)?;
+    durable::ltrim(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &scoped_key,
+        start,
+        stop,
+    )
+    .await?;
 
     Ok(Json(json!({ "success": true, "key": key })))
 }
@@ -1023,7 +1139,14 @@ pub async fn list_rem(
     let value = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize value: {}", e)))?;
 
-    let removed = state.list_store.lrem(&scoped_key, req.count, value)?;
+    let removed = durable::lrem(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &scoped_key,
+        req.count,
+        value,
+    )
+    .await?;
 
     Ok(Json(json!({ "removed": removed, "key": key })))
 }
@@ -1053,9 +1176,15 @@ pub async fn list_insert(
     let value = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize value: {}", e)))?;
 
-    let length = state
-        .list_store
-        .linsert(&scoped_key, req.before, pivot, value)?;
+    let length = durable::linsert(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &scoped_key,
+        req.before,
+        pivot,
+        value,
+    )
+    .await?;
 
     Ok(Json(json!({ "length": length, "key": key })))
 }
@@ -1085,9 +1214,13 @@ pub async fn list_rpoplpush(
     let scoped_destination =
         crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &destination);
 
-    let value = state
-        .list_store
-        .rpoplpush(&scoped_source, &scoped_destination)?;
+    let value = durable::rpoplpush(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &scoped_source,
+        &scoped_destination,
+    )
+    .await?;
 
     let json_value: serde_json::Value = serde_json::from_slice(&value)
         .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(&value).to_string()));

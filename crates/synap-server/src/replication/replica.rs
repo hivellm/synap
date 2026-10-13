@@ -32,6 +32,8 @@ pub struct ReplicaNode {
     set_store: Option<Arc<SetStore>>,
     sorted_set_store: Option<Arc<SortedSetStore>>,
     queue_manager: Option<Arc<QueueManager>>,
+    hyperloglog_store: Option<Arc<crate::core::HyperLogLogStore>>,
+    bitmap_store: Option<Arc<crate::core::BitmapStore>>,
 
     /// Current offset (last applied operation)
     current_offset: Arc<AtomicU64>,
@@ -73,6 +75,8 @@ impl ReplicaNode {
             set_store: stores.set_store,
             sorted_set_store: stores.sorted_set_store,
             queue_manager: stores.queue_manager,
+            hyperloglog_store: stores.hyperloglog_store,
+            bitmap_store: stores.bitmap_store,
             current_offset: Arc::new(AtomicU64::new(0)),
             master_offset: Arc::new(AtomicU64::new(0)),
             last_heartbeat: Arc::new(AtomicU64::new(0)),
@@ -329,6 +333,8 @@ impl ReplicaNode {
                 sorted_set_store: self.sorted_set_store.as_deref(),
                 queue_manager: self.queue_manager.as_deref(),
                 stream_manager: self.stream_manager.as_deref(),
+                hyperloglog_store: self.hyperloglog_store.as_deref(),
+                bitmap_store: self.bitmap_store.as_deref(),
             },
         )
         .await

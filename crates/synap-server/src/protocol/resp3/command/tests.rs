@@ -327,11 +327,15 @@ async fn test_bitcount_after_setbit() {
 }
 
 #[tokio::test]
-async fn test_flushall_returns_ok() {
+async fn test_flushall_refused_by_config_is_an_error() {
+    // `allow_flush_commands` defaults to false: the flush is refused, and the
+    // reply says so instead of an "OK" for a flush that never happened.
     let state = make_state();
     dispatch(&state, &args(&["SET", "flush_k", "v"])).await;
     let result = dispatch(&state, &args(&["FLUSHALL"])).await;
-    assert_eq!(result, Resp3Value::SimpleString("OK".into()));
+    assert!(matches!(result, Resp3Value::Error(ref e) if e.contains("disabled")));
+    let still_there = dispatch(&state, &args(&["GET", "flush_k"])).await;
+    assert!(matches!(still_there, Resp3Value::BulkShared(_)));
 }
 
 #[tokio::test]

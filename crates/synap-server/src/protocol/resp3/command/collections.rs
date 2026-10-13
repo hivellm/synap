@@ -1,5 +1,6 @@
 use super::{AppState, Resp3Value, arg_bytes, arg_f64, arg_i64, arg_str, arg_u64, err_wrong_args};
 use crate::core::sorted_set::ZAddOptions;
+use crate::persistence::durable;
 
 // ── Hash commands ─────────────────────────────────────────────────────────────
 
@@ -22,7 +23,15 @@ pub(super) async fn cmd_hset(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
             Some(v) => v,
             None => return err_wrong_args("HSET"),
         };
-        match state.hash_store.hset(&key, &field, value) {
+        match durable::hset(
+            state.persistence.as_deref(),
+            &state.hash_store,
+            &key,
+            &field,
+            value,
+        )
+        .await
+        {
             Ok(is_new) => {
                 if is_new {
                     added += 1;
@@ -63,7 +72,14 @@ pub(super) async fn cmd_hdel(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         None => return err_wrong_args("HDEL"),
     };
     let fields: Vec<String> = (2..args.len()).filter_map(|i| arg_str(args, i)).collect();
-    match state.hash_store.hdel(&key, &fields) {
+    match durable::hdel(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        &key,
+        &fields,
+    )
+    .await
+    {
         Ok(n) => Resp3Value::Integer(n as i64),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -85,7 +101,15 @@ pub(super) async fn cmd_hincrby(state: &AppState, args: &[Resp3Value]) -> Resp3V
         Some(i) => i,
         None => return Resp3Value::Error("ERR value is not an integer or out of range".into()),
     };
-    match state.hash_store.hincrby(&key, &field, increment) {
+    match durable::hincrby(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        &key,
+        &field,
+        increment,
+    )
+    .await
+    {
         Ok(v) => Resp3Value::Integer(v),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -107,7 +131,15 @@ pub(super) async fn cmd_hincrbyfloat(state: &AppState, args: &[Resp3Value]) -> R
         Some(i) => i,
         None => return Resp3Value::Error("ERR value is not a valid float".into()),
     };
-    match state.hash_store.hincrbyfloat(&key, &field, increment) {
+    match durable::hincrbyfloat(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        &key,
+        &field,
+        increment,
+    )
+    .await
+    {
         // Redis replies with the new value as a bulk string
         Ok(v) => Resp3Value::BulkString(v.to_string().into_bytes()),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
@@ -205,7 +237,15 @@ pub(super) async fn cmd_lpush(state: &AppState, args: &[Resp3Value]) -> Resp3Val
         None => return err_wrong_args("LPUSH"),
     };
     let values: Vec<Vec<u8>> = (2..args.len()).filter_map(|i| arg_bytes(args, i)).collect();
-    match state.list_store.lpush(&key, values, false) {
+    match durable::lpush(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &key,
+        values,
+        false,
+    )
+    .await
+    {
         Ok(len) => Resp3Value::Integer(len as i64),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -220,7 +260,15 @@ pub(super) async fn cmd_rpush(state: &AppState, args: &[Resp3Value]) -> Resp3Val
         None => return err_wrong_args("RPUSH"),
     };
     let values: Vec<Vec<u8>> = (2..args.len()).filter_map(|i| arg_bytes(args, i)).collect();
-    match state.list_store.rpush(&key, values, false) {
+    match durable::rpush(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &key,
+        values,
+        false,
+    )
+    .await
+    {
         Ok(len) => Resp3Value::Integer(len as i64),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -234,7 +282,14 @@ pub(super) async fn cmd_lpop(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         Some(k) => k,
         None => return err_wrong_args("LPOP"),
     };
-    match state.list_store.lpop(&key, Some(1)) {
+    match durable::lpop(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &key,
+        Some(1),
+    )
+    .await
+    {
         Ok(mut v) if !v.is_empty() => Resp3Value::BulkString(v.remove(0)),
         Ok(_) => Resp3Value::Null,
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
@@ -249,7 +304,14 @@ pub(super) async fn cmd_rpop(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         Some(k) => k,
         None => return err_wrong_args("RPOP"),
     };
-    match state.list_store.rpop(&key, Some(1)) {
+    match durable::rpop(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &key,
+        Some(1),
+    )
+    .await
+    {
         Ok(mut v) if !v.is_empty() => Resp3Value::BulkString(v.remove(0)),
         Ok(_) => Resp3Value::Null,
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
@@ -303,7 +365,14 @@ pub(super) async fn cmd_sadd(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         None => return err_wrong_args("SADD"),
     };
     let members: Vec<Vec<u8>> = (2..args.len()).filter_map(|i| arg_bytes(args, i)).collect();
-    match state.set_store.sadd(&key, members) {
+    match durable::sadd(
+        state.persistence.as_deref(),
+        &state.set_store,
+        &key,
+        members,
+    )
+    .await
+    {
         Ok(added) => Resp3Value::Integer(added as i64),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -332,7 +401,14 @@ pub(super) async fn cmd_srem(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         None => return err_wrong_args("SREM"),
     };
     let members: Vec<Vec<u8>> = (2..args.len()).filter_map(|i| arg_bytes(args, i)).collect();
-    match state.set_store.srem(&key, members) {
+    match durable::srem(
+        state.persistence.as_deref(),
+        &state.set_store,
+        &key,
+        members,
+    )
+    .await
+    {
         Ok(removed) => Resp3Value::Integer(removed as i64),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -389,8 +465,19 @@ pub(super) async fn cmd_zadd(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         None => return err_wrong_args("ZADD"),
     };
     let opts = ZAddOptions::default();
-    let (added, _) = state.sorted_set_store.zadd(&key, member, score, &opts);
-    Resp3Value::Integer(added as i64)
+    match durable::zadd(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &key,
+        member,
+        score,
+        &opts,
+    )
+    .await
+    {
+        Ok((added, _)) => Resp3Value::Integer(added as i64),
+        Err(e) => Resp3Value::Error(format!("ERR {e}")),
+    }
 }
 
 pub(super) async fn cmd_zrange(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
@@ -472,8 +559,17 @@ pub(super) async fn cmd_zrem(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         None => return err_wrong_args("ZREM"),
     };
     let members: Vec<Vec<u8>> = (2..args.len()).filter_map(|i| arg_bytes(args, i)).collect();
-    let removed = state.sorted_set_store.zrem(&key, &members);
-    Resp3Value::Integer(removed as i64)
+    match durable::zrem(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &key,
+        &members,
+    )
+    .await
+    {
+        Ok(removed) => Resp3Value::Integer(removed as i64),
+        Err(e) => Resp3Value::Error(format!("ERR {e}")),
+    }
 }
 
 // ── HyperLogLog ───────────────────────────────────────────────────────────────
@@ -487,7 +583,15 @@ pub(super) async fn cmd_pfadd(state: &AppState, args: &[Resp3Value]) -> Resp3Val
         None => return err_wrong_args("PFADD"),
     };
     let elements: Vec<Vec<u8>> = (2..args.len()).filter_map(|i| arg_bytes(args, i)).collect();
-    match state.hyperloglog_store.pfadd(&key, elements, None) {
+    match durable::pfadd(
+        state.persistence.as_deref(),
+        &state.hyperloglog_store,
+        &key,
+        elements,
+        None,
+    )
+    .await
+    {
         Ok(n) => Resp3Value::Integer(if n > 0 { 1 } else { 0 }),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -549,7 +653,15 @@ pub(super) async fn cmd_setbit(state: &AppState, args: &[Resp3Value]) -> Resp3Va
         Some(v) => v as u8 & 1,
         None => return Resp3Value::Error("ERR bit is not an integer or out of range".into()),
     };
-    match state.bitmap_store.setbit(&key, offset, bit) {
+    match durable::setbit(
+        state.persistence.as_deref(),
+        &state.bitmap_store,
+        &key,
+        offset,
+        bit,
+    )
+    .await
+    {
         Ok(prev) => Resp3Value::Integer(prev as i64),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -587,7 +699,14 @@ pub(super) async fn cmd_pfmerge(state: &AppState, args: &[Resp3Value]) -> Resp3V
         None => return Resp3Value::Error("ERR dest key must be a string".into()),
     };
     let sources: Vec<String> = (2..args.len()).filter_map(|i| arg_str(args, i)).collect();
-    match state.hyperloglog_store.pfmerge(&dest, sources) {
+    match durable::pfmerge(
+        state.persistence.as_deref(),
+        &state.hyperloglog_store,
+        &dest,
+        sources,
+    )
+    .await
+    {
         Ok(_) => Resp3Value::SimpleString("OK".into()),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -782,7 +901,14 @@ pub(super) async fn cmd_blpop(state: &AppState, args: &[Resp3Value]) -> Resp3Val
         Some(x) => x,
         None => return err_wrong_args("BLPOP"),
     };
-    match state.list_store.blpop(keys, timeout).await {
+    match durable::blpop(
+        state.persistence.as_deref(),
+        &state.list_store,
+        keys,
+        timeout,
+    )
+    .await
+    {
         Ok((key, value)) => Resp3Value::Array(vec![
             Resp3Value::BulkString(key.into_bytes()),
             Resp3Value::BulkString(value),
@@ -797,7 +923,14 @@ pub(super) async fn cmd_brpop(state: &AppState, args: &[Resp3Value]) -> Resp3Val
         Some(x) => x,
         None => return err_wrong_args("BRPOP"),
     };
-    match state.list_store.brpop(keys, timeout).await {
+    match durable::brpop(
+        state.persistence.as_deref(),
+        &state.list_store,
+        keys,
+        timeout,
+    )
+    .await
+    {
         Ok((key, value)) => Resp3Value::Array(vec![
             Resp3Value::BulkString(key.into_bytes()),
             Resp3Value::BulkString(value),
@@ -813,7 +946,14 @@ pub(super) async fn cmd_bzpopmin(state: &AppState, args: &[Resp3Value]) -> Resp3
         Some(x) => x,
         None => return err_wrong_args("BZPOPMIN"),
     };
-    match state.sorted_set_store.bzpopmin(keys, timeout).await {
+    match durable::bzpopmin(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        keys,
+        timeout,
+    )
+    .await
+    {
         Ok((key, member, score)) => Resp3Value::Array(vec![
             Resp3Value::BulkString(key.into_bytes()),
             Resp3Value::BulkString(member),
@@ -829,7 +969,14 @@ pub(super) async fn cmd_bzpopmax(state: &AppState, args: &[Resp3Value]) -> Resp3
         Some(x) => x,
         None => return err_wrong_args("BZPOPMAX"),
     };
-    match state.sorted_set_store.bzpopmax(keys, timeout).await {
+    match durable::bzpopmax(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        keys,
+        timeout,
+    )
+    .await
+    {
         Ok((key, member, score)) => Resp3Value::Array(vec![
             Resp3Value::BulkString(key.into_bytes()),
             Resp3Value::BulkString(member),
@@ -862,7 +1009,15 @@ pub(super) async fn cmd_brpoplpush(state: &AppState, args: &[Resp3Value]) -> Res
     } else {
         Some(timeout_secs as u64)
     };
-    match state.list_store.brpoplpush(&source, &dest, timeout).await {
+    match durable::brpoplpush(
+        state.persistence.as_deref(),
+        &state.list_store,
+        &source,
+        &dest,
+        timeout,
+    )
+    .await
+    {
         Ok(value) => Resp3Value::BulkString(value),
         Err(_) => Resp3Value::Null,
     }

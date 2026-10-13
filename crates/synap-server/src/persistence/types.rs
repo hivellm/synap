@@ -301,10 +301,64 @@ pub enum Operation {
     /// whole; replication ships it as one command. Recovery and replicas apply
     /// every operation in it, in order. It never nests another `Transaction`.
     ///
-    /// This variant MUST stay last: bincode encodes the variant index, so
-    /// appending keeps every earlier variant's encoding (and 1.3.x WALs)
-    /// readable. Only WAL format version 2 and later contain it.
+    /// bincode encodes the variant index, so this variant keeps its position
+    /// and every later variant is appended after it: earlier encodings (and
+    /// 1.3.x WALs) stay readable. Only WAL format version 2 and later contain it.
     Transaction { operations: Vec<Operation> },
+
+    // phase21 variants, appended after `Transaction` so every earlier index
+    // (1.3.x and phase22 WALs, replication streams) keeps decoding.
+    /// KV EXPIRE (`Some(seconds)`) or PERSIST (`None`) on an existing key.
+    KVExpire { key: String, ttl: Option<u64> },
+
+    /// KV FLUSHDB / FLUSHALL: every KV key is removed.
+    KVFlush,
+
+    /// COPY a key of any type (KV, hash, list, set, sorted set).
+    KeyCopy {
+        source: String,
+        destination: String,
+        replace: bool,
+    },
+
+    /// HyperLogLog PFADD.
+    HllAdd {
+        key: String,
+        elements: Vec<Vec<u8>>,
+        ttl: Option<u64>,
+    },
+
+    /// HyperLogLog PFMERGE.
+    HllMerge {
+        destination: String,
+        sources: Vec<String>,
+    },
+
+    /// Bitmap SETBIT.
+    BitmapSetBit { key: String, offset: u64, value: u8 },
+
+    /// Bitmap BITOP (`operation` is AND, OR, XOR or NOT).
+    BitmapOp {
+        operation: String,
+        destination: String,
+        sources: Vec<String>,
+    },
+
+    /// Bitmap BITFIELD, recorded as the resulting value of every field a
+    /// SET or INCRBY sub-operation wrote.
+    BitmapField {
+        key: String,
+        writes: Vec<BitfieldWrite>,
+    },
+}
+
+/// One field written by a BITFIELD command, as the value it holds afterwards.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BitfieldWrite {
+    pub offset: u64,
+    pub width: u64,
+    pub signed: bool,
+    pub value: i64,
 }
 
 /// Snapshot containing full system state

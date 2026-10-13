@@ -19,7 +19,8 @@
 
 use crate::core::sorted_set::{SortedSetStore, ZAddOptions};
 use crate::core::{
-    Aggregate, HashStore, KVStore, ListStore, QueueManager, SetStore, StreamManager, SynapError,
+    Aggregate, BitfieldOperation, BitmapOperation, BitmapStore, HashStore, HyperLogLogStore,
+    KVStore, ListStore, QueueManager, SetStore, StreamManager, SynapError,
 };
 use crate::persistence::types::Operation;
 
@@ -38,6 +39,8 @@ pub struct StoreRefs<'a> {
     pub sorted_set_store: Option<&'a SortedSetStore>,
     pub queue_manager: Option<&'a QueueManager>,
     pub stream_manager: Option<&'a StreamManager>,
+    pub hyperloglog_store: Option<&'a HyperLogLogStore>,
+    pub bitmap_store: Option<&'a BitmapStore>,
 }
 
 impl<'a> StoreRefs<'a> {
@@ -51,6 +54,8 @@ impl<'a> StoreRefs<'a> {
             sorted_set_store: None,
             queue_manager: None,
             stream_manager: None,
+            hyperloglog_store: None,
+            bitmap_store: None,
         }
     }
 }
@@ -66,6 +71,8 @@ pub struct StoreArcs {
     pub sorted_set_store: Option<std::sync::Arc<SortedSetStore>>,
     pub queue_manager: Option<std::sync::Arc<QueueManager>>,
     pub stream_manager: Option<std::sync::Arc<StreamManager>>,
+    pub hyperloglog_store: Option<std::sync::Arc<HyperLogLogStore>>,
+    pub bitmap_store: Option<std::sync::Arc<BitmapStore>>,
 }
 
 impl StoreArcs {
@@ -79,6 +86,8 @@ impl StoreArcs {
             sorted_set_store: None,
             queue_manager: None,
             stream_manager: None,
+            hyperloglog_store: None,
+            bitmap_store: None,
         }
     }
 
@@ -92,6 +101,8 @@ impl StoreArcs {
             sorted_set_store: self.sorted_set_store.as_deref(),
             queue_manager: self.queue_manager.as_deref(),
             stream_manager: self.stream_manager.as_deref(),
+            hyperloglog_store: self.hyperloglog_store.as_deref(),
+            bitmap_store: self.bitmap_store.as_deref(),
         }
     }
 }
@@ -149,6 +160,8 @@ async fn apply_single(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapE
         sorted_set_store,
         queue_manager,
         stream_manager,
+        hyperloglog_store,
+        bitmap_store,
     } = stores;
     match op {
         // ── KV ──────────────────────────────────────────────────────────────
@@ -164,11 +177,27 @@ async fn apply_single(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapE
             source,
             destination,
         } => {
-            if let Some(data) = kv_store.get(&source).await? {
-                let ttl = kv_store.ttl(&source).await?;
-                kv_store.set(destination, data, ttl).await?;
-                kv_store.delete(&source).await?;
+            transfer_key(stores, &source, &destination, true).await?;
+        }
+        Operation::KeyCopy {
+            source,
+            destination,
+            replace,
+        } => {
+            if replace || !key_exists(stores, &destination).await? {
+                transfer_key(stores, &source, &destination, false).await?;
             }
+        }
+        Operation::KVExpire { key, ttl } => match ttl {
+            Some(secs) => {
+                kv_store.expire(&key, secs).await?;
+            }
+            None => {
+                kv_store.persist(&key).await?;
+            }
+        },
+        Operation::KVFlush => {
+            kv_store.clear().await;
         }
 
         // ── Queue ───────────────────────────────────────────────────────────
@@ -410,9 +439,166 @@ async fn apply_single(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapE
             }
         }
 
+        // ── HyperLogLog ─────────────────────────────────────────────────────
+        Operation::HllAdd { key, elements, ttl } => {
+            if let Some(h) = hyperloglog_store {
+                h.pfadd(&key, elements, ttl)?;
+            }
+        }
+        Operation::HllMerge {
+            destination,
+            sources,
+        } => {
+            if let Some(h) = hyperloglog_store {
+                h.pfmerge(&destination, sources)?;
+            }
+        }
+
+        // ── Bitmap ──────────────────────────────────────────────────────────
+        Operation::BitmapSetBit { key, offset, value } => {
+            if let Some(b) = bitmap_store {
+                b.setbit(&key, offset as usize, value)?;
+            }
+        }
+        Operation::BitmapOp {
+            operation,
+            destination,
+            sources,
+        } => {
+            if let Some(b) = bitmap_store {
+                let op: BitmapOperation = operation.parse()?;
+                b.bitop(op, &destination, &sources)?;
+            }
+        }
+        Operation::BitmapField { key, writes } => {
+            if let Some(b) = bitmap_store {
+                let ops: Vec<BitfieldOperation> = writes
+                    .into_iter()
+                    .map(|w| BitfieldOperation::Set {
+                        offset: w.offset as usize,
+                        width: w.width as usize,
+                        signed: w.signed,
+                        value: w.value,
+                    })
+                    .collect();
+                b.bitfield(&key, &ops)?;
+            }
+        }
+
         // Only reachable through a nested record, which `apply_transaction`
         // rejects up front.
         Operation::Transaction { .. } => return Err(nested_transaction_error()),
+    }
+    Ok(())
+}
+
+/// Whether `key` holds a value in any keyed store present in `stores`.
+async fn key_exists(stores: StoreRefs<'_>, key: &str) -> Result<bool, SynapError> {
+    if stores.kv_store.exists(key).await? {
+        return Ok(true);
+    }
+    Ok(stores
+        .hash_store
+        .is_some_and(|h| h.hlen(key).unwrap_or(0) > 0)
+        || stores
+            .list_store
+            .is_some_and(|l| l.llen(key).unwrap_or(0) > 0)
+        || stores
+            .set_store
+            .is_some_and(|s| s.scard(key).unwrap_or(0) > 0)
+        || stores.sorted_set_store.is_some_and(|z| z.zcard(key) > 0))
+}
+
+/// Remove `key` from every keyed store present in `stores`.
+async fn delete_everywhere(stores: StoreRefs<'_>, key: &str) -> Result<(), SynapError> {
+    stores.kv_store.delete(key).await?;
+    if let Some(h) = stores.hash_store {
+        let fields = h.hkeys(key).unwrap_or_default();
+        if !fields.is_empty() {
+            h.hdel(key, &fields)?;
+        }
+    }
+    if let Some(l) = stores.list_store {
+        l.delete(key)?;
+    }
+    if let Some(s) = stores.set_store {
+        s.delete(key)?;
+    }
+    if let Some(z) = stores.sorted_set_store {
+        z.delete(key);
+    }
+    Ok(())
+}
+
+/// Replay a RENAME (`remove_source`) or COPY of `source` onto `destination`,
+/// in whichever store holds `source`, the way `KeyManager` performed it: the
+/// destination is replaced, KV keep their remaining TTL. A missing source is
+/// a no-op, as it was when the operation was recorded after a failed lookup.
+async fn transfer_key(
+    stores: StoreRefs<'_>,
+    source: &str,
+    destination: &str,
+    remove_source: bool,
+) -> Result<(), SynapError> {
+    if source == destination || !key_exists(stores, source).await? {
+        return Ok(());
+    }
+    let kv = stores.kv_store;
+    if let Some(data) = kv.get(source).await? {
+        let ttl = kv.ttl(source).await?;
+        delete_everywhere(stores, destination).await?;
+        kv.set(destination, data, ttl).await?;
+        if remove_source {
+            kv.delete(source).await?;
+        }
+        return Ok(());
+    }
+    if let Some(h) = stores.hash_store
+        && let Ok(fields) = h.hgetall(source)
+        && !fields.is_empty()
+    {
+        delete_everywhere(stores, destination).await?;
+        h.hmset(destination, fields)?;
+        if remove_source {
+            let names = h.hkeys(source)?;
+            h.hdel(source, &names)?;
+        }
+        return Ok(());
+    }
+    if let Some(l) = stores.list_store
+        && let Ok(values) = l.lrange(source, 0, -1)
+        && !values.is_empty()
+    {
+        delete_everywhere(stores, destination).await?;
+        l.rpush(destination, values, false)?;
+        if remove_source {
+            l.delete(source)?;
+        }
+        return Ok(());
+    }
+    if let Some(s) = stores.set_store
+        && let Ok(members) = s.smembers(source)
+        && !members.is_empty()
+    {
+        delete_everywhere(stores, destination).await?;
+        s.sadd(destination, members)?;
+        if remove_source {
+            s.delete(source)?;
+        }
+        return Ok(());
+    }
+    if let Some(z) = stores.sorted_set_store {
+        let members = z.zrange(source, 0, -1, true);
+        if !members.is_empty() {
+            delete_everywhere(stores, destination).await?;
+            let opts = ZAddOptions::default();
+            for m in members {
+                z.zadd(destination, m.member, m.score, &opts);
+            }
+            if remove_source {
+                z.delete(source);
+            }
+        }
     }
     Ok(())
 }
@@ -440,6 +626,8 @@ mod tests {
         zset: SortedSetStore,
         queue: QueueManager,
         stream: StreamManager,
+        hll: HyperLogLogStore,
+        bitmap: BitmapStore,
     }
 
     fn stores() -> Stores {
@@ -451,6 +639,8 @@ mod tests {
             zset: SortedSetStore::new(),
             queue: QueueManager::new(QueueConfig::default()),
             stream: StreamManager::new(StreamConfig::default()),
+            hll: HyperLogLogStore::new(),
+            bitmap: BitmapStore::new(),
         }
     }
 
@@ -466,6 +656,8 @@ mod tests {
                 sorted_set_store: Some(&s.zset),
                 queue_manager: Some(&s.queue),
                 stream_manager: Some(&s.stream),
+                hyperloglog_store: Some(&s.hll),
+                bitmap_store: Some(&s.bitmap),
             },
         )
         .await
@@ -851,6 +1043,8 @@ mod tests {
                 sorted_set_store: None,
                 queue_manager: None,
                 stream_manager: None,
+                hyperloglog_store: None,
+                bitmap_store: None,
             },
         )
         .await
@@ -914,6 +1108,139 @@ mod tests {
                 .contains("cannot contain another transaction")
         );
         assert_eq!(s.kv.get("outer").await.unwrap(), None);
+    }
+
+    /// The phase21 variants (expiry, flush, copy, HyperLogLog, bitmap) and the
+    /// cross-type RENAME replay to the state the command produced.
+    #[tokio::test]
+    async fn applies_phase21_operations() {
+        let s = stores();
+        apply(
+            &s,
+            Operation::KVSet {
+                key: "k".into(),
+                value: b"v".to_vec(),
+                ttl: None,
+            },
+        )
+        .await;
+        apply(
+            &s,
+            Operation::KVExpire {
+                key: "k".into(),
+                ttl: Some(100),
+            },
+        )
+        .await;
+        assert!(matches!(s.kv.ttl("k").await, Ok(Some(t)) if t > 0));
+        apply(
+            &s,
+            Operation::KVExpire {
+                key: "k".into(),
+                ttl: None,
+            },
+        )
+        .await;
+        assert_eq!(s.kv.ttl("k").await.unwrap(), None);
+
+        // COPY and RENAME of a hash, across stores.
+        s.hash.hset("h", "f", b"1".to_vec()).unwrap();
+        apply(
+            &s,
+            Operation::KeyCopy {
+                source: "h".into(),
+                destination: "h2".into(),
+                replace: false,
+            },
+        )
+        .await;
+        assert_eq!(s.hash.hget("h2", "f").unwrap(), Some(b"1".to_vec()));
+        apply(
+            &s,
+            Operation::KVRename {
+                source: "h".into(),
+                destination: "h3".into(),
+            },
+        )
+        .await;
+        assert_eq!(s.hash.hget("h3", "f").unwrap(), Some(b"1".to_vec()));
+        assert_eq!(s.hash.hlen("h").unwrap_or(0), 0);
+
+        apply(
+            &s,
+            Operation::HllAdd {
+                key: "p1".into(),
+                elements: vec![b"a".to_vec(), b"b".to_vec()],
+                ttl: None,
+            },
+        )
+        .await;
+        apply(
+            &s,
+            Operation::HllAdd {
+                key: "p2".into(),
+                elements: vec![b"c".to_vec()],
+                ttl: None,
+            },
+        )
+        .await;
+        apply(
+            &s,
+            Operation::HllMerge {
+                destination: "pd".into(),
+                sources: vec!["p1".into(), "p2".into()],
+            },
+        )
+        .await;
+        assert_eq!(s.hll.pfcount("pd").unwrap(), 3);
+
+        apply(
+            &s,
+            Operation::BitmapSetBit {
+                key: "b1".into(),
+                offset: 3,
+                value: 1,
+            },
+        )
+        .await;
+        apply(
+            &s,
+            Operation::BitmapOp {
+                operation: "OR".into(),
+                destination: "bd".into(),
+                sources: vec!["b1".into()],
+            },
+        )
+        .await;
+        apply(
+            &s,
+            Operation::BitmapField {
+                key: "bf".into(),
+                writes: vec![crate::persistence::types::BitfieldWrite {
+                    offset: 0,
+                    width: 8,
+                    signed: false,
+                    value: 200,
+                }],
+            },
+        )
+        .await;
+        assert_eq!(s.bitmap.getbit("bd", 3).unwrap(), 1);
+        let read = s
+            .bitmap
+            .bitfield(
+                "bf",
+                &[BitfieldOperation::Get {
+                    offset: 0,
+                    width: 8,
+                    signed: false,
+                }],
+            )
+            .unwrap();
+        assert_eq!(read[0].value, 200);
+
+        apply(&s, Operation::KVFlush).await;
+        assert_eq!(s.kv.get("k").await.unwrap(), None);
     }
 
     #[test]

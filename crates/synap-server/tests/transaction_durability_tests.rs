@@ -201,6 +201,8 @@ async fn committed_transaction_reaches_replica() {
             sorted_set_store: Some(Arc::clone(&r_zset)),
             queue_manager: None,
             stream_manager: Some(Arc::clone(&r_stream)),
+            hyperloglog_store: None,
+            bitmap_store: None,
         },
     )
     .await

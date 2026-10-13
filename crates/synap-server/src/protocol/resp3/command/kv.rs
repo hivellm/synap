@@ -1,4 +1,5 @@
 use super::{AppState, Resp3Value, arg_bytes, arg_i64, arg_str, arg_u64, err_wrong_args};
+use crate::persistence::durable;
 
 // ── KV commands ───────────────────────────────────────────────────────────────
 
@@ -44,7 +45,15 @@ pub(super) async fn cmd_set(state: &AppState, args: &[Resp3Value]) -> Resp3Value
         }
     }
 
-    match state.kv_store.set(key, value, ttl).await {
+    match durable::kv_set(
+        state.persistence.as_deref(),
+        &state.kv_store,
+        key,
+        value,
+        ttl,
+    )
+    .await
+    {
         Ok(()) => Resp3Value::SimpleString("OK".into()),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -75,7 +84,7 @@ pub(super) async fn cmd_del(state: &AppState, args: &[Resp3Value]) -> Resp3Value
     let mut deleted = 0i64;
     for i in 1..args.len() {
         if let Some(key) = arg_str(args, i) {
-            match state.kv_store.delete(&key).await {
+            match durable::kv_delete(state.persistence.as_deref(), &state.kv_store, &key).await {
                 Ok(true) => deleted += 1,
                 Ok(false) => {}
                 Err(e) => return Resp3Value::Error(format!("ERR {e}")),
@@ -112,7 +121,7 @@ pub(super) async fn cmd_expire(state: &AppState, args: &[Resp3Value]) -> Resp3Va
         Some(s) => s,
         None => return Resp3Value::Error("ERR value is not an integer".into()),
     };
-    match state.kv_store.expire(&key, secs).await {
+    match durable::kv_expire(state.persistence.as_deref(), &state.kv_store, &key, secs).await {
         Ok(true) => Resp3Value::Integer(1),
         Ok(false) => Resp3Value::Integer(0),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
@@ -142,7 +151,7 @@ pub(super) async fn cmd_persist(state: &AppState, args: &[Resp3Value]) -> Resp3V
         Some(k) => k,
         None => return err_wrong_args("PERSIST"),
     };
-    match state.kv_store.persist(&key).await {
+    match durable::kv_persist(state.persistence.as_deref(), &state.kv_store, &key).await {
         Ok(true) => Resp3Value::Integer(1),
         Ok(false) => Resp3Value::Integer(0),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
@@ -157,7 +166,7 @@ pub(super) async fn cmd_incr(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         Some(k) => k,
         None => return err_wrong_args("INCR"),
     };
-    match state.kv_store.incr(&key, 1).await {
+    match durable::kv_incr(state.persistence.as_deref(), &state.kv_store, &key, 1).await {
         Ok(v) => Resp3Value::Integer(v),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -175,7 +184,7 @@ pub(super) async fn cmd_incrby(state: &AppState, args: &[Resp3Value]) -> Resp3Va
         Some(n) => n,
         None => return Resp3Value::Error("ERR value is not an integer".into()),
     };
-    match state.kv_store.incr(&key, by).await {
+    match durable::kv_incr(state.persistence.as_deref(), &state.kv_store, &key, by).await {
         Ok(v) => Resp3Value::Integer(v),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -189,7 +198,7 @@ pub(super) async fn cmd_decr(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         Some(k) => k,
         None => return err_wrong_args("DECR"),
     };
-    match state.kv_store.decr(&key, 1).await {
+    match durable::kv_decr(state.persistence.as_deref(), &state.kv_store, &key, 1).await {
         Ok(v) => Resp3Value::Integer(v),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -207,7 +216,7 @@ pub(super) async fn cmd_decrby(state: &AppState, args: &[Resp3Value]) -> Resp3Va
         Some(n) => n,
         None => return Resp3Value::Error("ERR value is not an integer".into()),
     };
-    match state.kv_store.decr(&key, by).await {
+    match durable::kv_decr(state.persistence.as_deref(), &state.kv_store, &key, by).await {
         Ok(v) => Resp3Value::Integer(v),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -231,7 +240,7 @@ pub(super) async fn cmd_mset(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         pairs.push((k, v));
         i += 2;
     }
-    match state.kv_store.mset(pairs).await {
+    match durable::kv_mset(state.persistence.as_deref(), &state.kv_store, pairs).await {
         Ok(()) => Resp3Value::SimpleString("OK".into()),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -302,8 +311,12 @@ pub(super) async fn cmd_scan(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
 // ── Misc ──────────────────────────────────────────────────────────────────────
 
 pub(super) async fn cmd_flushall(state: &AppState) -> Resp3Value {
-    let _ = state.kv_store.flushall().await;
-    Resp3Value::SimpleString("OK".into())
+    // A refused flush (`allow_flush_commands: false`) or one that could not be
+    // logged is an error, not an "OK" for a flush that did not happen durably.
+    match durable::kv_flushall(state.persistence.as_deref(), &state.kv_store).await {
+        Ok(_) => Resp3Value::SimpleString("OK".into()),
+        Err(e) => Resp3Value::Error(format!("ERR {e}")),
+    }
 }
 
 // ── KV stats (3.8) ────────────────────────────────────────────────────────────
@@ -342,7 +355,7 @@ pub(super) async fn cmd_append(state: &AppState, args: &[Resp3Value]) -> Resp3Va
         Some(v) => v,
         None => return Resp3Value::Error("ERR value required".into()),
     };
-    match state.kv_store.append(&key, value).await {
+    match durable::kv_append(state.persistence.as_deref(), &state.kv_store, &key, value).await {
         Ok(len) => Resp3Value::Integer(len as i64),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -386,7 +399,15 @@ pub(super) async fn cmd_setrange(state: &AppState, args: &[Resp3Value]) -> Resp3
         Some(v) => v,
         None => return Resp3Value::Error("ERR value required".into()),
     };
-    match state.kv_store.setrange(&key, offset, value).await {
+    match durable::kv_setrange(
+        state.persistence.as_deref(),
+        &state.kv_store,
+        &key,
+        offset,
+        value,
+    )
+    .await
+    {
         Ok(len) => Resp3Value::Integer(len as i64),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -418,7 +439,7 @@ pub(super) async fn cmd_getset(state: &AppState, args: &[Resp3Value]) -> Resp3Va
         Some(v) => v,
         None => return Resp3Value::Error("ERR value required".into()),
     };
-    match state.kv_store.getset(&key, value).await {
+    match durable::kv_getset(state.persistence.as_deref(), &state.kv_store, &key, value).await {
         Ok(Some(old)) => Resp3Value::BulkString(old),
         Ok(None) => Resp3Value::Null,
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
@@ -436,7 +457,7 @@ pub(super) async fn cmd_msetnx(state: &AppState, args: &[Resp3Value]) -> Resp3Va
             Some((key, val))
         })
         .collect();
-    match state.kv_store.msetnx(pairs).await {
+    match durable::kv_msetnx(state.persistence.as_deref(), &state.kv_store, pairs).await {
         Ok(true) => Resp3Value::Integer(1),
         Ok(false) => Resp3Value::Integer(0),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),

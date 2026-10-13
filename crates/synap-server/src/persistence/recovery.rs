@@ -8,9 +8,27 @@ use crate::core::queue::QueueManager;
 use crate::core::set::SetStore;
 use crate::core::sorted_set::{SortedSetStore, ZAddOptions};
 use crate::core::types::KVConfig;
+use crate::core::{BitmapStore, HyperLogLogStore};
 use tracing::info;
 
-/// Recover system state from persistence
+/// Every store rebuilt by [`recover_all`], plus the WAL offset replay ended at.
+pub struct RecoveredStores {
+    pub kv_store: KVStore,
+    pub hash_store: Option<HashStore>,
+    pub list_store: Option<ListStore>,
+    pub set_store: Option<SetStore>,
+    pub sorted_set_store: Option<SortedSetStore>,
+    pub queue_manager: Option<QueueManager>,
+    pub hyperloglog_store: HyperLogLogStore,
+    pub bitmap_store: BitmapStore,
+    pub wal_offset: u64,
+}
+
+/// Recover system state from persistence.
+///
+/// Returns the KV, collection and queue stores as a tuple; use
+/// [`recover_all`] to also get the HyperLogLog and bitmap stores the WAL
+/// replay rebuilt.
 pub async fn recover(
     config: &PersistenceConfig,
     kv_config: KVConfig,
@@ -24,17 +42,40 @@ pub async fn recover(
     Option<QueueManager>,
     u64,
 )> {
+    let r = recover_all(config, kv_config, queue_config).await?;
+    Ok((
+        r.kv_store,
+        r.hash_store,
+        r.list_store,
+        r.set_store,
+        r.sorted_set_store,
+        r.queue_manager,
+        r.wal_offset,
+    ))
+}
+
+/// Recover every store from the latest snapshot plus the WAL written after it.
+///
+/// HyperLogLog and bitmap data have no snapshot section yet (the v3 format
+/// predates their WAL records), so they are rebuilt from the WAL alone.
+pub async fn recover_all(
+    config: &PersistenceConfig,
+    kv_config: KVConfig,
+    queue_config: QueueConfig,
+) -> Result<RecoveredStores> {
     if !config.enabled {
         info!("Persistence disabled, starting with fresh state");
-        return Ok((
-            KVStore::new(kv_config),
-            Some(HashStore::new()),
-            Some(ListStore::new()),
-            Some(SetStore::new()),
-            Some(SortedSetStore::new()),
-            Some(QueueManager::new(queue_config)),
-            0,
-        ));
+        return Ok(RecoveredStores {
+            kv_store: KVStore::new(kv_config),
+            hash_store: Some(HashStore::new()),
+            list_store: Some(ListStore::new()),
+            set_store: Some(SetStore::new()),
+            sorted_set_store: Some(SortedSetStore::new()),
+            queue_manager: Some(QueueManager::new(queue_config)),
+            hyperloglog_store: HyperLogLogStore::new(),
+            bitmap_store: BitmapStore::new(),
+            wal_offset: 0,
+        });
     }
 
     info!("Starting recovery process...");
@@ -136,6 +177,8 @@ pub async fn recover(
     info!("Replaying WAL from offset {}...", last_offset);
     let entries = wal.replay(last_offset).await?;
     let mut replayed = 0;
+    let hyperloglog_store = HyperLogLogStore::new();
+    let bitmap_store = BitmapStore::new();
 
     for entry in entries {
         crate::persistence::apply::apply_operation(
@@ -148,6 +191,8 @@ pub async fn recover(
                 sorted_set_store: sorted_set_store.as_ref(),
                 queue_manager: queue_manager.as_ref(),
                 stream_manager: None, // WAL recovery skips streams (StreamPersistence owns them)
+                hyperloglog_store: Some(&hyperloglog_store),
+                bitmap_store: Some(&bitmap_store),
             },
         )
         .await?;
@@ -158,15 +203,17 @@ pub async fn recover(
 
     let final_offset = last_offset + replayed;
 
-    Ok((
+    Ok(RecoveredStores {
         kv_store,
         hash_store,
         list_store,
         set_store,
         sorted_set_store,
         queue_manager,
-        final_offset,
-    ))
+        hyperloglog_store,
+        bitmap_store,
+        wal_offset: final_offset,
+    })
 }
 
 /// Test recovery without actually loading data (validation only)

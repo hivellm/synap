@@ -17,6 +17,33 @@ Synap provides two persistence mechanisms:
 - **WAL (Write-Ahead Log)**: Logs all writes for recovery
 - **Snapshots**: Periodic full state snapshots
 
+### Every transport is logged and replicated
+
+A write is recorded in the WAL, and sent to replicas, whichever transport
+carried it: REST, the `/api/v1/command` envelope, RESP3, SynapRPC, MCP (and
+UMICP, which goes through MCP) and `redis.call` inside scripts. All of them
+call one shared mutation path (`persistence::durable`), so the same command
+produces the same log record on every transport. Before 1.4.0 only REST and
+the envelope logged, and only for some datatypes: RESP3, SynapRPC, scripts and
+the REST/envelope hash, list, set, sorted-set, HyperLogLog, bitmap and
+geospatial endpoints were neither durable nor replicated.
+
+Commands whose result depends on the current value are logged as the value
+they leave behind, the way transactions are: `INCR`/`DECR` as the resulting
+number, `APPEND`/`SETRANGE` as the whole resulting value, `HINCRBY` and
+`ZINCRBY` as the resulting field value or score, `SPOP`/`ZPOPMIN`/`ZPOPMAX`
+and the blocking pops as the members actually removed. A key's remaining
+expiry is logged with the value, so `APPEND` to a key with a TTL keeps the
+TTL after a restart. `GEOADD` is logged as the sorted-set scores it wrote.
+Writes that change nothing (an `NX` SET on an existing key, an `SREM` of a
+missing member) are not logged.
+
+HyperLogLog and bitmap data are rebuilt from the WAL only: the snapshot format
+has no section for them yet, so after a snapshot their state before the
+snapshot is not restored. Queue publish/ack/nack are logged on every
+transport; queue create/delete/purge and streams are not part of the WAL
+(streams have their own persistence).
+
 ## Basic Configuration
 
 ### Enable Persistence
@@ -119,14 +146,20 @@ A poisoned WAL is reported:
   check restarts the server. A healthy server reports `"wal": "ok"` (or
   `"disabled"` without a WAL) with HTTP 200.
 
-How the failure reaches clients depends on the write path. With
-`fsync_mode: always` a single `SET` is logged before it is applied, so it fails
-and nothing changes in memory. A transaction (`EXEC`) is applied in memory
-first, so it returns an error saying the commit is not durable and its effects
-are not rolled back (see [Transactions](../../features/transactions.md#when-the-commit-cannot-be-logged)).
-In `periodic` and `never` mode a single write is applied in memory before it
-is logged and a WAL error is only logged, so that client still sees success:
-monitor `/health` to catch a poisoned WAL.
+A write that cannot be logged fails, in every fsync mode and on every
+transport. Writes are applied in memory first and logged second, so the
+effect is already in memory and is not rolled back; the error says so:
+
+```text
+write applied in memory but could not be logged to the WAL, so it is not durable and is not rolled back: ...
+```
+
+REST and the envelope return it as HTTP 500, RESP3 as `-ERR ...`, SynapRPC as
+an error response and MCP as a tool error. A transaction (`EXEC`) behaves the
+same way with its own wording (see
+[Transactions](../../features/transactions.md#when-the-commit-cannot-be-logged)).
+Treat either error as "applied in memory, not durable", and monitor `/health`
+to catch a poisoned WAL.
 
 ### WAL Size Limits
 

@@ -39,6 +39,7 @@ impl SnapshotManager {
             sorted_set_store,
             queue_manager,
             stream_manager,
+            ..
         } = stores;
         // Create directory if it doesn't exist
         tokio::fs::create_dir_all(&self.config.directory).await?;

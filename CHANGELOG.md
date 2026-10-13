@@ -73,6 +73,25 @@ migration notes before upgrading.
   refuses to start in Hub mode while RESP3 or SynapRPC is enabled (both are on
   by default), naming the listener, because neither authenticates tenants.
 
+- **Every acknowledged write is persisted and replicated, on every transport**
+  (finding N-01, found while turning the review into tasks, and review finding
+  D-08). Writes over RESP3, SynapRPC, scripts (`redis.call`), MCP, the
+  WebSocket queue ACK/NACK and most REST and envelope data-type endpoints
+  (hashes, lists, sets, sorted sets, geospatial, HyperLogLog, bitmaps) were
+  applied in memory but never written to the WAL or sent to replicas, so they
+  vanished on restart and never reached a replica. Every transport now goes
+  through one mutation path that applies a write and records its effect; a
+  write that cannot be recorded fails, in every fsync mode, with an error
+  saying it is applied in memory but not durable. Derived writes are recorded
+  as their result: APPEND/SETRANGE (which logged an empty value) record the
+  exact resulting bytes and remaining TTL read under the key's shard lock,
+  INCR/HINCRBY/ZINCRBY their resulting values, pops the members removed.
+  HyperLogLog and bitmap writes gain WAL records and replication; RENAME
+  replays for every key type; COPY, EXPIRE/PERSIST and FLUSH are logged.
+  Recovery no longer discards the recovered set store, and REST SET logs its
+  real TTL. RESP3/SynapRPC FLUSHALL report a disabled flush as an error instead
+  of replying OK, and envelope `kv.append`/`kv.setrange`/`kv.getset` store
+  strings as raw UTF-8 like `kv.set`.
 - **Transactions are crash-atomic** (review finding D-03). A committed
   MULTI/EXEC is written to the WAL as one record under one checksum, so a crash
   at any byte recovers all of its effects or none (a crash between two
