@@ -44,7 +44,13 @@ pub async fn queue_create(
         None
     };
 
-    queue_manager.create_queue(&scoped_name, config).await?;
+    durable::queue_create(
+        state.persistence.as_deref(),
+        queue_manager,
+        &scoped_name,
+        config,
+    )
+    .await?;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -308,7 +314,8 @@ pub async fn queue_purge(
         &queue_name,
     );
 
-    let count = queue_manager.purge(&scoped_name).await?;
+    let count =
+        durable::queue_purge(state.persistence.as_deref(), queue_manager, &scoped_name).await?;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -341,7 +348,8 @@ pub async fn queue_delete(
         &queue_name,
     );
 
-    let deleted = queue_manager.delete_queue(&scoped_name).await?;
+    let deleted =
+        durable::queue_delete(state.persistence.as_deref(), queue_manager, &scoped_name).await?;
 
     Ok(Json(serde_json::json!({
         "success": true,
@@ -401,7 +409,7 @@ pub(super) async fn handle_queue_create_cmd(
         }
     });
 
-    queue_manager.create_queue(name, config).await?;
+    durable::queue_create(state.persistence.as_deref(), queue_manager, name, config).await?;
     Ok(serde_json::json!({ "success": true }))
 }
 
@@ -421,7 +429,7 @@ pub(super) async fn handle_queue_delete_cmd(
         .and_then(|v| v.as_str())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'queue' or 'name' field".to_string()))?;
 
-    let deleted = queue_manager.delete_queue(name).await?;
+    let deleted = durable::queue_delete(state.persistence.as_deref(), queue_manager, name).await?;
     Ok(serde_json::json!({ "deleted": deleted }))
 }
 
@@ -636,6 +644,6 @@ pub(super) async fn handle_queue_purge_cmd(
         .and_then(|v| v.as_str())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'queue' field".to_string()))?;
 
-    let count = queue_manager.purge(queue).await?;
+    let count = durable::queue_purge(state.persistence.as_deref(), queue_manager, queue).await?;
     Ok(serde_json::json!({ "purged": count }))
 }

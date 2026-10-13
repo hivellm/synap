@@ -1,6 +1,8 @@
 use super::apply::StoreRefs;
-use super::types::{PersistenceError, Result, Snapshot, SnapshotConfig, StreamEvent};
-use crate::core::queue::QueueMessage;
+use super::types::{
+    PersistenceError, QueueImage, QueueMessageRecord, Result, Snapshot, SnapshotConfig, StreamEvent,
+};
+use crate::core::queue::{QueueConfig, QueueMessage, QueueState};
 use crate::core::{BitmapValue, HyperLogLogValue, ListValue, SetValue, StreamManager};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -12,10 +14,14 @@ use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tracing::{debug, info, warn};
 
-/// v2 = kv + queue + stream. v3 adds hash/list/set/sorted-set. v4 (current)
-/// adds each KV key's absolute expiry and the HyperLogLog and bitmap sections.
-const SNAPSHOT_VERSION: u8 = 4;
-const SNAPSHOT_MAGIC: &[u8; 8] = b"SYNAP004";
+/// v2 = kv + queue + stream. v3 adds hash/list/set/sorted-set. v4 adds each
+/// KV key's absolute expiry and the HyperLogLog and bitmap sections. v5
+/// (current) stores every queue whole: its configuration and its ready,
+/// in-flight and dead-lettered messages with their full metadata (creation
+/// time included); v2-v4 stored the ready messages only, without it.
+const SNAPSHOT_VERSION: u8 = 5;
+const SNAPSHOT_MAGIC: &[u8; 8] = b"SYNAP005";
+const SNAPSHOT_MAGIC_V4: &[u8; 8] = b"SYNAP004";
 const SNAPSHOT_MAGIC_V3: &[u8; 8] = b"SYNAP003";
 const SNAPSHOT_MAGIC_V2: &[u8; 8] = b"SYNAP002";
 
@@ -28,7 +34,7 @@ const SNAPSHOT_MAGIC_V2: &[u8; 8] = b"SYNAP002";
 /// the file is written.
 pub struct SnapshotImage {
     kv: Vec<(String, Arc<[u8]>, Option<u64>)>,
-    queues: HashMap<String, Vec<QueueMessage>>,
+    queues: HashMap<String, QueueState>,
     hashes: HashMap<String, HashMap<String, Vec<u8>>>,
     lists: HashMap<String, ListValue>,
     sets: HashMap<String, SetValue>,
@@ -42,10 +48,10 @@ impl SnapshotImage {
     pub async fn capture(stores: StoreRefs<'_>) -> Result<Self> {
         Ok(Self {
             kv: stores.kv_store.dump_with_expiry().await?,
-            queues: match stores.queue_manager {
-                Some(qm) => qm.dump().await?,
-                None => HashMap::new(),
-            },
+            queues: stores
+                .queue_manager
+                .map(|qm| qm.dump_state())
+                .unwrap_or_default(),
             hashes: stores.hash_store.map(|s| s.dump()).unwrap_or_default(),
             lists: stores.list_store.map(|s| s.dump()).unwrap_or_default(),
             sets: stores.set_store.map(|s| s.dump()).unwrap_or_default(),
@@ -85,7 +91,7 @@ impl SnapshotManager {
             .await
     }
 
-    /// Serialize `image` (plus the current stream events) as a v4 snapshot
+    /// Serialize `image` (plus the current stream events) as a v5 snapshot
     /// whose WAL replay starts at `wal_offset`, fsync it and prune old files.
     pub async fn write_image(
         &self,
@@ -162,39 +168,20 @@ impl SnapshotManager {
             checksum.update(&expiry.to_le_bytes());
         }
 
+        // Queue section (v5): per queue its name, its configuration and its
+        // ready, in-flight and dead-lettered messages, each message one
+        // length-prefixed `QueueMessageRecord`.
         let queue_count = queues.len() as u64;
         writer.write_u64(queue_count).await?;
         checksum.update(&queue_count.to_le_bytes());
 
         debug!("Streaming {} queue entries", queue_count);
 
-        for (queue_name, messages) in queues {
-            // Write queue name
-            let name_bytes = queue_name.as_bytes();
-            let name_len = name_bytes.len() as u32;
-
-            writer.write_u32(name_len).await?;
-            checksum.update(&name_len.to_le_bytes());
-
-            writer.write_all(name_bytes).await?;
-            checksum.update(name_bytes);
-
-            // Write messages count
-            let msg_count = messages.len() as u64;
-            writer.write_u64(msg_count).await?;
-            checksum.update(&msg_count.to_le_bytes());
-
-            // Serialize each message
-            for message in messages {
-                let msg_data = bincode::serde::encode_to_vec(&message, bincode::config::legacy())
-                    .map_err(std::io::Error::other)?;
-                let msg_len = msg_data.len() as u32;
-
-                writer.write_u32(msg_len).await?;
-                checksum.update(&msg_len.to_le_bytes());
-
-                writer.write_all(&msg_data).await?;
-                checksum.update(&msg_data);
+        for (queue_name, state) in queues {
+            write_blob(&mut writer, &mut checksum, queue_name.as_bytes()).await?;
+            write_bincode(&mut writer, &mut checksum, &state.config).await?;
+            for messages in [&state.ready, &state.in_flight, &state.dead_letter] {
+                write_message_list(&mut writer, &mut checksum, messages).await?;
             }
         }
 
@@ -313,10 +300,13 @@ impl SnapshotManager {
         reader.read_exact(&mut magic).await?;
         checksum.update(&magic);
 
-        // The magic names the format: v4 (current), v3 (no KV expiry, no
-        // HyperLogLog/bitmap sections) or v2 (no collection sections either).
+        // The magic names the format: v5 (current), v4 (queues hold their
+        // ready messages only), v3 (no KV expiry, no HyperLogLog/bitmap
+        // sections) or v2 (no collection sections either).
         let expected_version: u8 = if &magic == SNAPSHOT_MAGIC {
             SNAPSHOT_VERSION
+        } else if &magic == SNAPSHOT_MAGIC_V4 {
+            4
         } else if &magic == SNAPSHOT_MAGIC_V3 {
             3
         } else if &magic == SNAPSHOT_MAGIC_V2 {
@@ -336,6 +326,7 @@ impl SnapshotManager {
         }
         let has_collections = version >= 3;
         let has_expiry_and_hll_bitmap = version >= 4;
+        let has_full_queues = version >= 5;
 
         // Read metadata
         let timestamp = reader.read_u64().await?;
@@ -381,32 +372,35 @@ impl SnapshotManager {
         let mut queue_data = HashMap::new();
 
         for _ in 0..queue_count {
-            let queue_len = reader.read_u32().await?;
-            checksum.update(&queue_len.to_le_bytes());
-            let mut queue_bytes = vec![0u8; queue_len as usize];
-            reader.read_exact(&mut queue_bytes).await?;
-            checksum.update(&queue_bytes);
+            let queue_bytes = read_blob(&mut reader, &mut checksum).await?;
             let queue_name = String::from_utf8(queue_bytes)
                 .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
 
-            let msg_count = reader.read_u64().await?;
-            checksum.update(&msg_count.to_le_bytes());
-            let mut messages = Vec::new();
+            let image = if has_full_queues {
+                let config: QueueConfig = read_bincode(&mut reader, &mut checksum).await?;
+                QueueImage {
+                    config: Some(config),
+                    ready: read_message_list(&mut reader, &mut checksum).await?,
+                    in_flight: read_message_list(&mut reader, &mut checksum).await?,
+                    dead_letter: read_message_list(&mut reader, &mut checksum).await?,
+                }
+            } else {
+                // v2-v4: the ready messages in `QueueMessage`'s own encoding,
+                // which has no creation time (it decodes as "now").
+                let msg_count = reader.read_u64().await?;
+                checksum.update(&msg_count.to_le_bytes());
+                let mut ready = Vec::new();
+                for _ in 0..msg_count {
+                    let message: QueueMessage = read_bincode(&mut reader, &mut checksum).await?;
+                    ready.push(QueueMessageRecord::from(&message));
+                }
+                QueueImage {
+                    ready,
+                    ..QueueImage::default()
+                }
+            };
 
-            for _ in 0..msg_count {
-                let msg_len = reader.read_u32().await?;
-                checksum.update(&msg_len.to_le_bytes());
-                let mut msg_bytes = vec![0u8; msg_len as usize];
-                reader.read_exact(&mut msg_bytes).await?;
-                checksum.update(&msg_bytes);
-
-                let (message, _): (QueueMessage, _) =
-                    bincode::serde::decode_from_slice(&msg_bytes, bincode::config::legacy())
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-                messages.push(message);
-            }
-
-            queue_data.insert(queue_name, messages);
+            queue_data.insert(queue_name, image);
         }
 
         // Read Stream data (always present in the v2 format, count may be 0)
@@ -578,6 +572,92 @@ pub struct SnapshotStats {
     pub count: usize,
     pub total_size_bytes: u64,
     pub latest: Option<PathBuf>,
+}
+
+/// Write `bytes` prefixed with their length (u32), feeding the checksum the
+/// same bytes [`read_blob`] accumulates.
+async fn write_blob<W>(writer: &mut W, checksum: &mut CRC64, bytes: &[u8]) -> std::io::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    let len = bytes.len() as u32;
+    writer.write_u32(len).await?;
+    checksum.update(&len.to_le_bytes());
+    writer.write_all(bytes).await?;
+    checksum.update(bytes);
+    Ok(())
+}
+
+/// Read a blob written by [`write_blob`].
+async fn read_blob<R>(reader: &mut R, checksum: &mut CRC64) -> std::io::Result<Vec<u8>>
+where
+    R: AsyncReadExt + Unpin,
+{
+    let len = reader.read_u32().await?;
+    checksum.update(&len.to_le_bytes());
+    let mut bytes = vec![0u8; len as usize];
+    reader.read_exact(&mut bytes).await?;
+    checksum.update(&bytes);
+    Ok(bytes)
+}
+
+/// Write `value` bincode-encoded as one blob.
+async fn write_bincode<W, V>(writer: &mut W, checksum: &mut CRC64, value: &V) -> std::io::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+    V: Serialize,
+{
+    let data = bincode::serde::encode_to_vec(value, bincode::config::legacy())
+        .map_err(std::io::Error::other)?;
+    write_blob(writer, checksum, &data).await
+}
+
+/// Read a value written by [`write_bincode`].
+async fn read_bincode<R, V>(reader: &mut R, checksum: &mut CRC64) -> std::io::Result<V>
+where
+    R: AsyncReadExt + Unpin,
+    V: DeserializeOwned,
+{
+    let data = read_blob(reader, checksum).await?;
+    let (value, _) = bincode::serde::decode_from_slice(&data, bincode::config::legacy())
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    Ok(value)
+}
+
+/// Write a message list of the v5 queue section: count (u64), then each
+/// message as one [`QueueMessageRecord`] blob.
+async fn write_message_list<W>(
+    writer: &mut W,
+    checksum: &mut CRC64,
+    messages: &[QueueMessage],
+) -> std::io::Result<()>
+where
+    W: AsyncWriteExt + Unpin,
+{
+    let count = messages.len() as u64;
+    writer.write_u64(count).await?;
+    checksum.update(&count.to_le_bytes());
+    for message in messages {
+        write_bincode(writer, checksum, &QueueMessageRecord::from(message)).await?;
+    }
+    Ok(())
+}
+
+/// Read a message list written by [`write_message_list`].
+async fn read_message_list<R>(
+    reader: &mut R,
+    checksum: &mut CRC64,
+) -> std::io::Result<Vec<QueueMessageRecord>>
+where
+    R: AsyncReadExt + Unpin,
+{
+    let count = reader.read_u64().await?;
+    checksum.update(&count.to_le_bytes());
+    let mut messages = Vec::new();
+    for _ in 0..count {
+        messages.push(read_bincode(reader, checksum).await?);
+    }
+    Ok(messages)
 }
 
 /// Write a `HashMap<String, V>` section: count (u64), then per entry the UTF-8
@@ -788,7 +868,7 @@ mod tests {
         mgr.create_snapshot(stores, 5).await.unwrap();
 
         let (snapshot, _) = mgr.load_latest().await.unwrap().unwrap();
-        assert_eq!(snapshot.version, 4);
+        assert_eq!(snapshot.version, 5);
         assert_eq!(snapshot.kv_expires_at_ms.len(), 1);
         assert_eq!(snapshot.kv_expires_at_ms["t"], deadline);
         assert_eq!(snapshot.kv_data["p"], b"v".to_vec());

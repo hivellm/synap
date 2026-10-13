@@ -410,7 +410,7 @@ pub(super) async fn run(
                 .queue_manager
                 .as_deref()
                 .ok_or_else(|| "ERR queue subsystem not enabled".to_string())?;
-            qm.create_queue(&name, None)
+            durable::queue_create(state.persistence.as_deref(), qm, &name, None)
                 .await
                 .map(|()| SynapValue::Str("OK".into()))
                 .map_err(|e| e.to_string())
@@ -421,7 +421,7 @@ pub(super) async fn run(
                 .queue_manager
                 .as_deref()
                 .ok_or_else(|| "ERR queue subsystem not enabled".to_string())?;
-            qm.delete_queue(&name)
+            durable::queue_delete(state.persistence.as_deref(), qm, &name)
                 .await
                 .map(SynapValue::Bool)
                 .map_err(|e| e.to_string())
@@ -578,7 +578,7 @@ pub(super) async fn run(
                 .queue_manager
                 .as_deref()
                 .ok_or_else(|| "ERR queue subsystem not enabled".to_string())?;
-            qm.purge(&name)
+            durable::queue_purge(state.persistence.as_deref(), qm, &name)
                 .await
                 .map(|n| SynapValue::Int(n as i64))
                 .map_err(|e| e.to_string())

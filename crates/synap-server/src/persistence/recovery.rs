@@ -4,7 +4,7 @@ use crate::core::QueueConfig;
 use crate::core::hash::HashStore;
 use crate::core::kv_store::KVStore;
 use crate::core::list::ListStore;
-use crate::core::queue::QueueManager;
+use crate::core::queue::{QueueManager, QueueState};
 use crate::core::set::SetStore;
 use crate::core::sorted_set::{SortedSetStore, ZAddOptions};
 use crate::core::types::KVConfig;
@@ -62,6 +62,13 @@ pub async fn recover(
 /// phase23 have their relative TTL anchored at the entry's own timestamp, and
 /// any key whose deadline has already passed is left out. HyperLogLog and
 /// bitmap data come from the v4 snapshot sections plus the WAL.
+///
+/// Queue messages keep their identity (phase24): snapshot queues are restored
+/// whole (v5: configuration, ready, in-flight and dead-lettered messages with
+/// their metadata; older files: the ready messages), WAL publishes are
+/// restored with their original ID and metadata, and replayed ACK/NACK/purge
+/// records act by message ID. A replay error other than a settled message
+/// being already gone fails recovery.
 pub async fn recover_all(
     config: &PersistenceConfig,
     kv_config: KVConfig,
@@ -135,20 +142,21 @@ pub async fn recover_all(
                 bitmap_store.restore(key, value);
             }
 
-            // Restore Queue manager
-            let queues = QueueManager::new(queue_config);
-            for (queue_name, messages) in snapshot.queue_data {
-                queues.create_queue(&queue_name, None).await?;
-                for message in messages {
-                    queues
-                        .publish(
-                            &queue_name,
-                            (*message.payload).clone(), // Convert Arc<Vec<u8>> to Vec<u8>
-                            Some(message.priority),
-                            Some(message.max_retries),
-                        )
-                        .await?;
-                }
+            // Restore every queue whole: configuration (v5; older files get
+            // the server default) and every message with its original ID and
+            // metadata. In-flight messages become ready again.
+            let queues = QueueManager::new(queue_config.clone());
+            for (queue_name, image) in snapshot.queue_data {
+                let records = |list: Vec<_>| list.into_iter().map(Into::into).collect();
+                queues.restore_queue(
+                    &queue_name,
+                    QueueState {
+                        config: image.config.unwrap_or_else(|| queue_config.clone()),
+                        ready: records(image.ready),
+                        in_flight: records(image.in_flight),
+                        dead_letter: records(image.dead_letter),
+                    },
+                );
             }
 
             // Restore List store
