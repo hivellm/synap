@@ -573,6 +573,23 @@ mod tests {
         (wal, faults)
     }
 
+    /// Periodic interval for the tests on tokio's paused clock. The writer's
+    /// ticker runs on that clock, but the group-commit check (`sync_due`)
+    /// measures wall-clock time since open; an hour is beyond any load stall,
+    /// so only the ticker can fsync and only advancing the clock reaches it.
+    const PAUSED_INTERVAL: Duration = Duration::from_secs(3600);
+    const PAUSED_INTERVAL_MS: u64 = 3_600_000;
+
+    /// [`open_faulty`] on tokio's paused clock, then let the writer start: its
+    /// interval's first tick completes immediately and finds nothing unsynced,
+    /// so the first write is fsynced by the tick one interval after open, not
+    /// by that first tick racing the write.
+    async fn open_paused(config: &WALConfig) -> (AsyncWAL, Faults) {
+        let opened = open_faulty(config).await;
+        tokio::task::yield_now().await;
+        opened
+    }
+
     /// Entries a fresh reader sees in the file right now (what the OS has).
     fn entries_on_disk(config: &WALConfig) -> Vec<WALEntry> {
         let mut entries = Vec::new();
@@ -680,15 +697,18 @@ mod tests {
 
     /// Periodic mode fsyncs on its own interval while idle: one acknowledged
     /// entry and no further writes still reaches the disk within the interval.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn periodic_mode_fsyncs_while_idle() {
-        let config = fresh_config("idle", FsyncMode::Periodic, 1000);
-        let (wal, faults) = open_faulty(&config).await;
+        let config = fresh_config("idle", FsyncMode::Periodic, PAUSED_INTERVAL_MS);
+        let (wal, faults) = open_paused(&config).await;
 
         wal.append(set("idle")).await.unwrap();
         assert_eq!(faults.syncs(), 0, "fsync ran before the interval elapsed");
 
-        tokio::time::sleep(Duration::from_millis(2000)).await;
+        // The paused clock jumps to the interval tick only once the runtime is
+        // idle, and a running fsync (a blocking task) holds it back, so the
+        // sleep ends after the tick's fsync however slow the disk is.
+        tokio::time::sleep(PAUSED_INTERVAL * 2).await;
         assert_eq!(faults.syncs(), 1, "idle writer never fsynced");
         assert_eq!(entries_on_disk(&config).len(), 1);
         assert!(wal.poison_reason().is_none());
@@ -696,13 +716,14 @@ mod tests {
 
     /// Shutdown 10 ms after an acknowledgement, well before the interval,
     /// still flushes and fsyncs it, and later appends are refused.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn shutdown_before_the_interval_drains_and_fsyncs() {
-        let config = fresh_config("shutdown", FsyncMode::Periodic, 1000);
-        let (wal, faults) = open_faulty(&config).await;
+        let config = fresh_config("shutdown", FsyncMode::Periodic, PAUSED_INTERVAL_MS);
+        let (wal, faults) = open_paused(&config).await;
 
         wal.append(set("before-shutdown")).await.unwrap();
         tokio::time::sleep(Duration::from_millis(10)).await;
+        assert_eq!(faults.syncs(), 0, "fsync ran before the shutdown");
         wal.shutdown().await.unwrap();
 
         assert_eq!(faults.syncs(), 1);
@@ -714,7 +735,7 @@ mod tests {
 
     /// Never mode hands each group to the OS without filling the buffer and
     /// never fsyncs, even on a flush barrier or when the WAL is dropped.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn never_mode_writes_without_fsync() {
         let config = fresh_config("never", FsyncMode::Never, 1000);
         let (wal, faults) = open_faulty(&config).await;
@@ -723,6 +744,8 @@ mod tests {
         assert_eq!(entries_on_disk(&config).len(), 1);
         wal.flush().await.unwrap();
         drop(wal);
+        // On the paused clock this sleep ends only once the writer has run its
+        // drop path to completion, so a stray fsync there would be counted.
         tokio::time::sleep(Duration::from_millis(100)).await;
         assert_eq!(faults.syncs(), 0);
     }
@@ -797,14 +820,14 @@ mod tests {
 
     /// A failed fsync on the Periodic interval poisons the writer even though
     /// no append is waiting on it.
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn periodic_interval_fsync_failure_poisons() {
-        let config = fresh_config("periodic_fail", FsyncMode::Periodic, 300);
-        let (wal, faults) = open_faulty(&config).await;
+        let config = fresh_config("periodic_fail", FsyncMode::Periodic, PAUSED_INTERVAL_MS);
+        let (wal, faults) = open_paused(&config).await;
         faults.fail_next_sync();
         // Acknowledged once handed to the OS, before the interval's fsync.
         wal.append(set("a")).await.unwrap();
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        tokio::time::sleep(PAUSED_INTERVAL * 2).await;
         assert!(wal.poison_reason().unwrap().contains("fsync failed"));
         assert!(wal.append(set("b")).await.is_err());
     }
