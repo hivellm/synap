@@ -295,20 +295,21 @@ async fn test_s2s_workflow() {
 
 ## Test Coverage
 
-### By Module
+Line coverage is measured per component in CI and every component is held to
+a recorded floor; a drop fails the pull request. Measured on 2026-10-13, in
+the mode CI runs:
 
-| Module | Coverage | Tests |
-|--------|----------|-------|
-| `core::kv_store` | ~95% | 15 |
-| `core::types` | ~90% | Indirect |
-| `core::error` | ~85% | Indirect |
-| `compression` | ~95% | 6 |
-| `server::handlers` | ~90% | 30 |
-| `server::router` | ~85% | Indirect |
-| `protocol::envelope` | ~90% | Indirect |
-| `config` | ~70% | Indirect |
+| Component | Line coverage |
+|-----------|---------------|
+| synap-core (unit tests) | 85.31% |
+| synap-server (unit tests) | 47.74% |
+| synap-sdk, Rust (unit tests) | 45.05% |
+| TypeScript SDK (unit tests) | 68.41% |
+| Python SDK (unit tests) | 62.21% |
+| C# SDK (unit tests) | 38.30% |
 
-**Overall**: ~90% code coverage
+None meets the 95% policy yet. Floors, the gap to the policy, and how to
+measure locally are in [CI_GATES.md](CI_GATES.md#coverage).
 
 ---
 
@@ -433,8 +434,8 @@ cargo test --test '*'
 # All tests
 cargo test
 
-# With coverage (requires tarpaulin)
-cargo tarpaulin --out Html
+# With coverage, the way CI measures it
+cargo llvm-cov --lib --workspace --locked --html
 ```
 
 ### Watch Mode
@@ -466,7 +467,7 @@ cargo bench -- --save-baseline main
 ## Test Summary
 
 ```
-✅ 388+ tests passing (99.30% coverage)
+✅ 388+ tests passing
 
 Core Library:            106/106 passing
 Replication Unit:         25/25  passing

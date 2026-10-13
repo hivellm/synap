@@ -133,6 +133,23 @@ migration notes before upgrading.
   valid ones used to end the scan silently and lose the history after it;
   startup now fails with the byte position so an operator can decide.
 
+- **Reproducible builds and contract gates on pull requests** (review finding
+  E-06). `Cargo.lock` is committed and CI, release builds, SDK publishing and
+  the Docker image build with `--locked`; `rust-toolchain.toml` pins
+  `nightly-2026-07-23`, which every workflow and the Dockerfile install from
+  the file. Pull requests now run the TypeScript, Python, C# and PHP SDK
+  tests, GUI type-check, lint, build and contract tests, the SDK E2E and S2S
+  suites against a release build, and the cross-language interop matrix in a
+  new `--strict` mode where a cell that cannot run fails. Per-component
+  coverage floors (`.github/coverage-floors.json`, enforced by
+  `scripts/ci/coverage_gate.py`) stop coverage from dropping; every component
+  is still below the 95% policy and the gap is documented in
+  `docs/development/CI_GATES.md`. SDK publishing installs each packed artifact
+  and runs it against a server built from the release tag before publishing.
+  GUI lint works again under ESLint 9 (flat config), with the existing
+  findings baselined as bulk suppressions. The Docker build, broken by a new
+  CLI test target, copies `crates/synap-cli/tests` again.
+
 ### Performance
 
 - **One credential check per MCP request.** `/mcp` carried its own

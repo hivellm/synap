@@ -2,7 +2,6 @@
 /target/
 **/*.rs.bk
 *.pdb
-Cargo.lock
 
 # IDE
 .vscode/
@@ -21,6 +20,7 @@ Thumbs.db
 # Test outputs
 test-results/
 coverage/
+/lcov.info
 
 # Persistence data
 data/

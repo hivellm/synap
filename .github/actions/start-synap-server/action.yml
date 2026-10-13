@@ -1,0 +1,46 @@
+name: Start synap-server for SDK suites
+description: >
+  Starts a built synap-server in the background with config/config.yml (HTTP
+  15500, SynapRPC 15501, RESP3 6379, authentication off), the defaults the SDK
+  server-to-server suites connect to, and waits until all three ports accept
+  connections. The server keeps running for the rest of the job.
+
+inputs:
+  binary:
+    description: Path to the synap-server binary
+    required: true
+
+outputs:
+  log:
+    description: Path of the server log
+    value: ${{ steps.start.outputs.log }}
+
+runs:
+  using: composite
+  steps:
+    - name: Start synap-server
+      id: start
+      shell: bash
+      env:
+        SERVER_BIN: ${{ inputs.binary }}
+      run: |
+        chmod +x "$SERVER_BIN"
+        server_bin=$(cd "$(dirname "$SERVER_BIN")" && pwd)/$(basename "$SERVER_BIN")
+        dir="$RUNNER_TEMP/synap-server"
+        mkdir -p "$dir"
+        cp config/config.yml "$dir/config.yml"
+        echo "log=$dir/server.log" >> "$GITHUB_OUTPUT"
+        # Its WAL and snapshots land in its own directory, not the checkout.
+        (cd "$dir" && nohup "$server_bin" --config config.yml > server.log 2>&1 &)
+        for port in 15500 15501 6379; do
+          for _ in $(seq 1 60); do
+            if (exec 3<>"/dev/tcp/127.0.0.1/$port") 2>/dev/null; then
+              continue 2
+            fi
+            sleep 1
+          done
+          echo "::error::synap-server did not open port $port within 60s"
+          cat "$dir/server.log"
+          exit 1
+        done
+        echo "synap-server is up on 15500 (HTTP), 15501 (SynapRPC) and 6379 (RESP3)"

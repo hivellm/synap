@@ -17,7 +17,13 @@ python scripts/interop/run-matrix.py                 # every cell
 python scripts/interop/run-matrix.py rust go         # a subset
 python scripts/interop/run-matrix.py --list          # what exists
 python scripts/interop/run-matrix.py --json out.json # machine-readable results
+python scripts/interop/run-matrix.py --strict         # a cell that cannot run fails
 ```
+
+Without `--strict` a cell whose toolchain is missing is reported as "not run"
+and the run still exits 0, which is convenient on a workstation. CI passes
+`--strict` (`.github/workflows/sdk-gui-contract.yml`), so a missing toolchain
+or a failed setup cannot turn a cell green by omission.
 
 The driver starts one server from [`server-config.yml`](server-config.yml) in a
 temporary directory, runs each client against it, and renders the matrix. Ports

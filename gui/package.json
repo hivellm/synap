@@ -19,7 +19,9 @@
     "preview": "vite preview",
     "electron:dev": "vite",
     "electron:build": "vite build && electron-builder",
-    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix --ignore-path .gitignore"
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "lint:prune": "eslint . --prune-suppressions"
   },
   "dependencies": {
     "@vueuse/core": "^11.3.0",
@@ -32,6 +34,7 @@
     "vue-router": "^4.6.3"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.1",
     "@tailwindcss/postcss": "^4.1.17",
     "@types/node": "^22.10.5",
     "@typescript-eslint/eslint-plugin": "^8.18.1",
@@ -43,6 +46,7 @@
     "electron-builder": "^26.15.3",
     "eslint": "^9.17.0",
     "eslint-plugin-vue": "^9.32.0",
+    "globals": "^14.0.0",
     "happy-dom": "^21.0.1",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.17",

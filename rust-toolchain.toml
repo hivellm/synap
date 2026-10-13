@@ -1,5 +1,10 @@
+# Pinned to one dated nightly so every build of a commit uses the same
+# compiler. CI, release and the Docker image all read this file
+# (.github/actions/setup-rust). The dist date is one day after the date in
+# `rustc -vV`: nightly-2026-07-23 is rustc 1.99.0-nightly (6f72b5dd5 2026-07-22).
+# To move it, change the date here and nowhere else; see docs/development/CI_GATES.md.
 [toolchain]
-channel = "nightly"
+channel = "nightly-2026-07-23"
 components = ["rustfmt", "clippy"]
 profile = "minimal"
 
