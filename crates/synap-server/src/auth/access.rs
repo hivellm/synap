@@ -558,6 +558,10 @@ pub fn classify_envelope(command: &str, payload: &serde_json::Value) -> Option<V
         // arguments (values included) and the client list exposes addresses.
         "info" | "slowlog.get" | "client.list" => admin(),
 
+        // ── Connection ─────────────────────────────────────────────────────
+        // Touches no data, like the native PING.
+        "ping" => Vec::new(),
+
         // ── Transactions ───────────────────────────────────────────────────
         "transaction.multi"
         | "transaction.exec"

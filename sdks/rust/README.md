@@ -240,10 +240,20 @@ let exists = client.kv().exists("key").await?;
 let new_value = client.kv().incr("counter").await?;
 let new_value = client.kv().decr("counter").await?;
 
+// By a given amount (raw command; INCRBY/DECRBY on SynapRPC and RESP3)
+let reply = client
+    .send_command("kv.incr", serde_json::json!({"key": "counter", "amount": 10}))
+    .await?;
+
 // Get statistics
 let stats = client.kv().stats().await?;
 tracing::info!("Total keys: {}", stats.total_keys);
 ```
+
+An amount behaves the same on every transport: HTTP applies it in the
+`kv.incr`/`kv.decr` envelope, SynapRPC and RESP3 send `INCRBY`/`DECRBY`.
+Zero and negative amounts apply as given, a non-integer amount is refused,
+and a change past the 64-bit range fails and leaves the counter unchanged.
 
 ### KV Watch (Reactive)
 

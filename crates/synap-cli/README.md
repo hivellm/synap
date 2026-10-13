@@ -20,7 +20,10 @@ cargo build --release -p synap-cli
 ./target/release/synap-cli
 
 # Custom host / port
-./target/release/synap-cli -h 10.0.0.1 -p 15500
+./target/release/synap-cli -H 10.0.0.1 -p 15500
+
+# Other transports, with credentials
+./target/release/synap-cli --url synap://10.0.0.1:15501 --user ops --password secret PING
 
 # Single command, then exit
 ./target/release/synap-cli SET mykey "hello"
@@ -31,8 +34,16 @@ cargo build --release -p synap-cli
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--host` | `-h` | `127.0.0.1` | Server host |
+| `--url` | `-u` | — | `http://`, `synap://` (SynapRPC) or `resp3://` URL; overrides host/port |
+| `--host` | `-H` | `127.0.0.1` | Server host |
 | `--port` | `-p` | `15500` | Server port |
+| `--transport` | | `http` | Transport for host/port: `http`, `rpc`, `resp3` |
+| `--user` | | — | Username (HTTP Basic auth, SynapRPC handshake); needs `--password` |
+| `--password` | | — | Password for `--user` |
+| `--timeout` | | `30` | Connection and request timeout, in seconds |
+
+The RESP3 transport does not send credentials, so `--user`/`--password` with a
+`resp3://` URL is refused rather than silently ignored.
 
 ## Commands
 
@@ -44,8 +55,13 @@ cargo build --release -p synap-cli
 | `GET key` | Get a value |
 | `DEL key [key …]` | Delete one or more keys |
 | `EXISTS key` | Check if a key exists |
-| `INCR key` | Increment integer value |
-| `DECR key` | Decrement integer value |
+| `INCR key [amount]` | Increment integer value (by 1 without an amount) |
+| `DECR key [amount]` | Decrement integer value (by 1 without an amount) |
+
+An amount must be a 64-bit integer. A malformed amount (`INCR views ten`) is
+refused before anything is sent, and the CLI exits non-zero. Zero and negative
+amounts apply as given, identically over HTTP, SynapRPC and RESP3; a change
+past the 64-bit range fails and leaves the counter unchanged.
 
 ### TTL
 
@@ -82,9 +98,28 @@ cargo build --release -p synap-cli
 | Command | Description |
 |---------|-------------|
 | `INFO` / `STATS` | Server statistics |
-| `PING` | Ping the server |
+| `PING` | Ping the server (protocol ping; see exit status below) |
 | `HELP` | Show command list |
 | `QUIT` / `EXIT` | Exit the REPL |
+
+## Exit status
+
+A single command exits `0` on success and `1` on failure, with the result on
+stdout and the diagnostic on stderr. `PING` sends the protocol's own ping —
+`PING` on SynapRPC/RESP3, the authenticated `ping` envelope command on HTTP —
+and exits `0` only when the server answered `PONG`. A refused connection, a
+timeout or rejected credentials exits non-zero:
+
+```bash
+if synap-cli --url http://127.0.0.1:15500 --timeout 5 PING >/dev/null; then
+  echo healthy
+else
+  echo unhealthy   # the reason is on stderr
+fi
+```
+
+Before 1.4.0 `PING` printed `Server unreachable` and exited `0` when the server
+was down or the credentials were rejected.
 
 ## REPL prompt
 

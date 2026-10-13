@@ -25,6 +25,32 @@ internal static class CommandMapper
         "SADD", "SREM",
     };
 
+    /// <summary>
+    /// The <c>amount</c> of <c>kv.incr</c> / <c>kv.decr</c>, or null when absent.
+    /// The HTTP envelope reads <c>amount</c>, so the native maps read the same
+    /// field. An integer travels as a long; anything else travels as its JSON
+    /// text, so the server refuses it on every transport as it does over HTTP.
+    /// </summary>
+    private static object? CounterAmount(Dictionary<string, object?> payload)
+    {
+        if (!payload.TryGetValue("amount", out var amount))
+        {
+            return null;
+        }
+
+        return amount switch
+        {
+            null => null,
+            long or int or short or sbyte or byte or uint or ushort =>
+                Convert.ToInt64(amount, System.Globalization.CultureInfo.InvariantCulture),
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Null } => null,
+            System.Text.Json.JsonElement e when e.ValueKind == System.Text.Json.JsonValueKind.Number
+                && e.TryGetInt64(out var n) => n,
+            System.Text.Json.JsonElement e => e.GetRawText(),
+            _ => System.Text.Json.JsonSerializer.Serialize(amount),
+        };
+    }
+
     internal static (string Command, object?[] Args)? MapCommand(
         string operation,
         Dictionary<string, object?> payload)
@@ -68,10 +94,10 @@ internal static class CommandMapper
                 ? ("EXPIRE", new object?[] { key, ttl })
                 : null,
             "kv.set" => BuildKvSet(key, payload),
-            "kv.incr" => payload.TryGetValue("delta", out var d)
+            "kv.incr" => CounterAmount(payload) is { } d
                 ? ("INCRBY", new object?[] { key, d })
                 : ("INCR", new object?[] { key }),
-            "kv.decr" => payload.TryGetValue("delta", out var dd)
+            "kv.decr" => CounterAmount(payload) is { } dd
                 ? ("DECRBY", new object?[] { key, dd })
                 : ("DECR", new object?[] { key }),
             "kv.incr_float" => payload.TryGetValue("delta", out var df)

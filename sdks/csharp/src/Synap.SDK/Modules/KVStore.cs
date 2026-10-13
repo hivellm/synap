@@ -112,7 +112,7 @@ public sealed class KVStore
     /// <returns>The new value after incrementing.</returns>
     public async Task<long> IncrAsync(string key, int delta = 1, CancellationToken cancellationToken = default)
     {
-        var data = new Dictionary<string, object?> { ["delta"] = delta };
+        var data = new Dictionary<string, object?> { ["amount"] = delta };
         using var response = await _client.ExecuteAsync("kv.incr", key, data, cancellationToken).ConfigureAwait(false);
 
         if (response.RootElement.TryGetProperty("value", out var value))
@@ -132,7 +132,7 @@ public sealed class KVStore
     /// <returns>The new value after decrementing.</returns>
     public async Task<long> DecrAsync(string key, int delta = 1, CancellationToken cancellationToken = default)
     {
-        var data = new Dictionary<string, object?> { ["delta"] = delta };
+        var data = new Dictionary<string, object?> { ["amount"] = delta };
         using var response = await _client.ExecuteAsync("kv.decr", key, data, cancellationToken).ConfigureAwait(false);
 
         if (response.RootElement.TryGetProperty("value", out var value))

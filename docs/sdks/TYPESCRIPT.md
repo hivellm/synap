@@ -166,6 +166,11 @@ const count = await client.kv.incr('counter', 5);
 const remaining = await client.kv.decr('inventory:item:42');
 ```
 
+An amount behaves the same on every transport: HTTP applies it in the
+`kv.incr`/`kv.decr` envelope, SynapRPC and RESP3 send `INCRBY`/`DECRBY`.
+Zero and negative amounts apply as given, a non-integer amount is refused,
+and a change past the 64-bit range fails and leaves the counter unchanged.
+
 ### SCAN - Scan Keys
 
 ```typescript

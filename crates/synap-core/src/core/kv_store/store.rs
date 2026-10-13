@@ -829,8 +829,14 @@ impl KVStore {
     }
 
     /// Atomic decrement
+    ///
+    /// `i64::MIN` has no positive counterpart, so decrementing by it is an
+    /// overflow like any other: the counter is left untouched.
     pub async fn decr(&self, key: &str, amount: i64) -> Result<i64> {
-        self.incr(key, -amount).await
+        let delta = amount
+            .checked_neg()
+            .ok_or_else(|| SynapError::InvalidValue("Integer overflow on INCR/DECR".to_string()))?;
+        self.incr(key, delta).await
     }
 
     /// Set multiple key-value pairs
