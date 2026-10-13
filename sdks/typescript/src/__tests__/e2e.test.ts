@@ -41,18 +41,28 @@ function serverBinary(): string {
   return full;
 }
 
+/** Turn off a top-level section's `enabled` flag, past any comment lines. */
+function disableSection(yaml: string, section: string): string {
+  return yaml.replace(
+    new RegExp(`^(${section}:\\n(?:[ \\t]*#.*\\n)*[ \\t]+enabled: )true`, 'm'),
+    '$1false',
+  );
+}
+
 function writeTestConfig(): string {
   const root = workspaceRoot();
-  const base = fs.readFileSync(path.join(root, 'config.yml'), 'utf8');
+  const base = fs
+    .readFileSync(path.join(root, 'config', 'config.yml'), 'utf8')
+    .replace(/\r\n/g, '\n');
 
-  const patched = base
+  let patched = base
     .replace('host: "0.0.0.0"', 'host: "127.0.0.1"')
     .replace('port: 15500', `port: ${HTTP_PORT}`)
     .replace('port: 15501', `port: ${RPC_PORT}`)
-    .replace('port: 6379', `port: ${RESP3_PORT}`)
-    .replace('persistence:\n  enabled: true', 'persistence:\n  enabled: false')
-    .replace('hub:\n  enabled: true', 'hub:\n  enabled: false')
-    .replace('replication:\n  enabled: true', 'replication:\n  enabled: false');
+    .replace('port: 6379', `port: ${RESP3_PORT}`);
+  for (const section of ['persistence', 'hub', 'replication']) {
+    patched = disableSection(patched, section);
+  }
 
   const tmpFile = path.join(
     os.tmpdir(),
