@@ -1,14 +1,351 @@
 //! Synchronization utilities for replication
 //!
 //! This module provides helpers for:
-//! - Snapshot creation and transfer
-//! - Incremental sync
+//! - The full-sync image: capture, versioned encoding and loading on a replica
+//! - The 1.3.x KV + stream snapshot, still accepted from older masters
 //! - Checksum verification
 
-use crate::core::{KVStore, StreamManager};
+use super::types::{ReplicationCommand, ReplicationError, ReplicationResult};
+use crate::core::queue::QueueMessage;
+use crate::core::{
+    BitmapValue, HyperLogLogValue, KVStore, ListValue, SetValue, StreamEvent, StreamManager,
+    SynapError, ZAddOptions,
+};
+use crate::persistence::apply::apply_operation;
 use crate::persistence::types::Operation;
+use crate::persistence::{SnapshotImage, StoreRefs};
 use serde::{Deserialize, Serialize};
-use tracing::{debug, info};
+use std::collections::HashMap;
+use tracing::{debug, info, warn};
+
+/// Format version of the full-sync image this build writes, and the only
+/// one its replicas read from a `ReplicationCommand::FullSyncImage`.
+/// Version 1 is the 1.3.x KV + stream snapshot carried by
+/// `ReplicationCommand::FullSync`.
+pub const FULL_SYNC_VERSION: u32 = 2;
+
+/// Every replicated datatype as the master held it at one replication
+/// offset (format version [`FULL_SYNC_VERSION`]).
+///
+/// KV values carry their absolute expiry (Unix ms); HyperLogLog and bitmap
+/// values carry their own (`created_at + ttl_secs`). Queues hold their
+/// ready messages, as in snapshots.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct FullSyncData {
+    pub kv: Vec<(String, Vec<u8>, Option<u64>)>,
+    pub hashes: HashMap<String, HashMap<String, Vec<u8>>>,
+    pub lists: HashMap<String, ListValue>,
+    pub sets: HashMap<String, SetValue>,
+    pub sorted_sets: HashMap<String, Vec<(Vec<u8>, f64)>>,
+    pub hyperloglogs: HashMap<String, HyperLogLogValue>,
+    pub bitmaps: HashMap<String, BitmapValue>,
+    pub queues: HashMap<String, Vec<QueueMessage>>,
+    pub streams: HashMap<String, Vec<StreamEvent>>,
+}
+
+impl FullSyncData {
+    /// Build the image from the stores copied under the write barrier plus
+    /// the stream events read after it.
+    pub fn from_image(image: SnapshotImage, streams: HashMap<String, Vec<StreamEvent>>) -> Self {
+        let SnapshotImage {
+            kv,
+            queues,
+            hashes,
+            lists,
+            sets,
+            sorted_sets,
+            hyperloglogs,
+            bitmaps,
+        } = image;
+        Self {
+            kv: kv
+                .into_iter()
+                .map(|(key, value, expires_at_ms)| (key, value.to_vec(), expires_at_ms))
+                .collect(),
+            hashes,
+            lists,
+            sets,
+            sorted_sets,
+            hyperloglogs,
+            bitmaps,
+            queues,
+            streams,
+        }
+    }
+
+    /// Key count per datatype, for logs.
+    pub fn summary(&self) -> String {
+        format!(
+            "{} KV keys, {} hashes, {} lists, {} sets, {} sorted sets, {} HyperLogLogs, {} bitmaps, {} queues, {} stream rooms",
+            self.kv.len(),
+            self.hashes.len(),
+            self.lists.len(),
+            self.sets.len(),
+            self.sorted_sets.len(),
+            self.hyperloglogs.len(),
+            self.bitmaps.len(),
+            self.queues.len(),
+            self.streams.len()
+        )
+    }
+}
+
+/// Encode `data` as the current full-sync command for `offset`.
+pub fn encode_full_sync(data: &FullSyncData, offset: u64) -> ReplicationResult<ReplicationCommand> {
+    let image = bincode::serde::encode_to_vec(data, bincode::config::legacy())?;
+    Ok(ReplicationCommand::FullSyncImage {
+        version: FULL_SYNC_VERSION,
+        offset,
+        checksum: crc32fast::hash(&image),
+        image,
+    })
+}
+
+/// Check and decode a `FullSyncImage` payload without touching any store.
+///
+/// Fails on a version other than [`FULL_SYNC_VERSION`] (naming both), on a
+/// checksum mismatch and on bytes that do not decode as one whole image.
+pub fn decode_full_sync(
+    version: u32,
+    checksum: u32,
+    image: &[u8],
+) -> ReplicationResult<FullSyncData> {
+    if version != FULL_SYNC_VERSION {
+        return Err(ReplicationError::FullSync(format!(
+            "the master sent full-sync image version {version}, this replica reads version {FULL_SYNC_VERSION}; upgrade replicas before the master"
+        )));
+    }
+    let actual = crc32fast::hash(image);
+    if actual != checksum {
+        return Err(ReplicationError::FullSync(format!(
+            "checksum mismatch: expected {checksum}, got {actual}"
+        )));
+    }
+    let (data, read): (FullSyncData, usize) =
+        bincode::serde::decode_from_slice(image, bincode::config::legacy())?;
+    if read != image.len() {
+        return Err(ReplicationError::FullSync(format!(
+            "{} trailing bytes after the image",
+            image.len() - read
+        )));
+    }
+    Ok(data)
+}
+
+/// Replace the replica's state with `data`: clear every store present in
+/// `stores`, then load the image into them.
+///
+/// The caller decodes and checks the whole image first
+/// ([`decode_full_sync`]), so a bad image never reaches this point, and runs
+/// this on the replication task before applying any streamed command. Data
+/// for a store the replica does not have is skipped with a warning. KV keys
+/// and HyperLogLogs/bitmaps whose deadline passed in transit are not created.
+pub async fn load_full_sync(data: FullSyncData, stores: StoreRefs<'_>) -> Result<(), SynapError> {
+    clear_all(stores).await;
+    let summary = data.summary();
+    let FullSyncData {
+        kv,
+        hashes,
+        lists,
+        sets,
+        sorted_sets,
+        hyperloglogs,
+        bitmaps,
+        queues,
+        streams,
+    } = data;
+
+    let kv_only = StoreRefs::kv_only(stores.kv_store);
+    for (key, value, expires_at_ms) in kv {
+        apply_operation(
+            Operation::KVSetAt {
+                key,
+                value,
+                expires_at_ms,
+            },
+            kv_only,
+        )
+        .await?;
+    }
+    load_collections(stores, hashes, lists, sets, sorted_sets)?;
+    match (stores.hyperloglog_store, hyperloglogs.is_empty()) {
+        (Some(hll), _) => hyperloglogs
+            .into_iter()
+            .for_each(|(k, v)| hll.restore(k, v)),
+        (None, false) => skipped("HyperLogLog", hyperloglogs.len()),
+        (None, true) => {}
+    }
+    match (stores.bitmap_store, bitmaps.is_empty()) {
+        (Some(bitmap), _) => bitmaps.into_iter().for_each(|(k, v)| bitmap.restore(k, v)),
+        (None, false) => skipped("bitmap", bitmaps.len()),
+        (None, true) => {}
+    }
+    load_queues(stores, queues).await?;
+    match (stores.stream_manager, streams.is_empty()) {
+        (Some(sm), _) => {
+            for (room, events) in streams {
+                sm.restore_room(&room, events)
+                    .await
+                    .map_err(SynapError::InternalError)?;
+            }
+        }
+        (None, false) => skipped("stream room", streams.len()),
+        (None, true) => {}
+    }
+    info!("Full sync loaded: {}", summary);
+    Ok(())
+}
+
+/// Log that the image holds `count` values of a datatype the replica has no
+/// store for.
+fn skipped(datatype: &str, count: usize) {
+    warn!(
+        "Full sync: skipping {} {} value(s): this replica has no {} store",
+        count, datatype, datatype
+    );
+}
+
+/// Empty every store present in `stores` (queues and stream rooms are
+/// deleted).
+async fn clear_all(stores: StoreRefs<'_>) {
+    stores.kv_store.clear().await;
+    if let Some(h) = stores.hash_store {
+        h.clear();
+    }
+    if let Some(l) = stores.list_store {
+        l.clear();
+    }
+    if let Some(s) = stores.set_store {
+        s.clear();
+    }
+    if let Some(z) = stores.sorted_set_store {
+        z.clear();
+    }
+    if let Some(hll) = stores.hyperloglog_store {
+        hll.clear();
+    }
+    if let Some(bitmap) = stores.bitmap_store {
+        bitmap.clear();
+    }
+    if let Some(qm) = stores.queue_manager {
+        for queue in qm.list_queues().await.unwrap_or_default() {
+            let _ = qm.delete_queue(&queue).await;
+        }
+    }
+    if let Some(sm) = stores.stream_manager {
+        clear_streams(sm).await;
+    }
+}
+
+/// Delete every stream room.
+async fn clear_streams(sm: &StreamManager) {
+    for room in sm.list_rooms().await {
+        let _ = sm.delete_room(&room).await;
+    }
+}
+
+/// Load the hash, list, set and sorted-set sections.
+fn load_collections(
+    stores: StoreRefs<'_>,
+    hashes: HashMap<String, HashMap<String, Vec<u8>>>,
+    lists: HashMap<String, ListValue>,
+    sets: HashMap<String, SetValue>,
+    sorted_sets: HashMap<String, Vec<(Vec<u8>, f64)>>,
+) -> Result<(), SynapError> {
+    match stores.hash_store {
+        Some(h) => {
+            for (key, fields) in hashes.into_iter().filter(|(_, f)| !f.is_empty()) {
+                h.hmset(&key, fields)?;
+            }
+        }
+        None if !hashes.is_empty() => skipped("hash", hashes.len()),
+        None => {}
+    }
+    match stores.list_store {
+        Some(l) => {
+            for (key, list) in lists {
+                let elements = list.into_elements();
+                if !elements.is_empty() {
+                    l.rpush(&key, elements, false)?;
+                }
+            }
+        }
+        None if !lists.is_empty() => skipped("list", lists.len()),
+        None => {}
+    }
+    match stores.set_store {
+        Some(s) => {
+            for (key, set) in sets {
+                let members = set.into_members();
+                if !members.is_empty() {
+                    s.sadd(&key, members)?;
+                }
+            }
+        }
+        None if !sets.is_empty() => skipped("set", sets.len()),
+        None => {}
+    }
+    match stores.sorted_set_store {
+        Some(z) => {
+            let opts = ZAddOptions::default();
+            for (key, members) in sorted_sets {
+                for (member, score) in members {
+                    z.zadd(&key, member, score, &opts);
+                }
+            }
+        }
+        None if !sorted_sets.is_empty() => skipped("sorted set", sorted_sets.len()),
+        None => {}
+    }
+    Ok(())
+}
+
+/// Recreate every queue (empty ones included) and publish its messages
+/// through the shared applier, the same path a streamed `QueuePublish` takes.
+async fn load_queues(
+    stores: StoreRefs<'_>,
+    queues: HashMap<String, Vec<QueueMessage>>,
+) -> Result<(), SynapError> {
+    let Some(qm) = stores.queue_manager else {
+        if !queues.is_empty() {
+            skipped("queue", queues.len());
+        }
+        return Ok(());
+    };
+    let queue_only = StoreRefs {
+        queue_manager: Some(qm),
+        ..StoreRefs::kv_only(stores.kv_store)
+    };
+    for (queue, messages) in queues {
+        qm.create_queue(&queue, None).await?;
+        for message in messages {
+            apply_operation(
+                Operation::QueuePublish {
+                    queue: queue.clone(),
+                    message,
+                },
+                queue_only,
+            )
+            .await?;
+        }
+    }
+    Ok(())
+}
+
+/// Replace the replica's KV keys and stream rooms with a 1.3.x full sync
+/// (decoded with [`decode_legacy_snapshot`]). The other datatypes are not in
+/// that image and are left as they are.
+pub async fn load_legacy_full_sync(
+    kv_store: &KVStore,
+    stream_manager: Option<&StreamManager>,
+    operations: Vec<Operation>,
+) {
+    kv_store.clear().await;
+    if let Some(sm) = stream_manager {
+        clear_streams(sm).await;
+    }
+    apply_legacy_operations(kv_store, stream_manager, operations).await;
+}
 
 /// Snapshot metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,12 +358,14 @@ pub struct SnapshotMetadata {
     pub checksum: u32,
 }
 
-/// Create a snapshot of KV store and streams for full sync
+/// Create a 1.3.x (version 1) snapshot of the KV store, as older masters
+/// sent it.
 pub async fn create_snapshot(kv_store: &KVStore, offset: u64) -> Result<Vec<u8>, String> {
     create_snapshot_with_streams(kv_store, None, offset).await
 }
 
-/// Create a snapshot with optional stream manager
+/// Create a 1.3.x (version 1) snapshot of the KV store and streams, as
+/// older masters sent it. Current masters send [`encode_full_sync`].
 pub async fn create_snapshot_with_streams(
     kv_store: &KVStore,
     stream_manager: Option<&StreamManager>,
@@ -106,12 +445,23 @@ pub async fn apply_snapshot(kv_store: &KVStore, snapshot: &[u8]) -> Result<u64, 
     apply_snapshot_with_streams(kv_store, None, snapshot).await
 }
 
-/// Apply snapshot with optional stream manager
+/// Apply a 1.3.x snapshot with optional stream manager, merging it into the
+/// stores (nothing is cleared).
 pub async fn apply_snapshot_with_streams(
     kv_store: &KVStore,
     stream_manager: Option<&StreamManager>,
     snapshot: &[u8],
 ) -> Result<u64, String> {
+    let (metadata, operations) = decode_legacy_snapshot(snapshot)?;
+    apply_legacy_operations(kv_store, stream_manager, operations).await;
+    info!("Snapshot applied successfully");
+    Ok(metadata.offset)
+}
+
+/// Check and decode a 1.3.x snapshot without touching any store.
+pub fn decode_legacy_snapshot(
+    snapshot: &[u8],
+) -> Result<(SnapshotMetadata, Vec<Operation>), String> {
     // Deserialize metadata
     let (metadata, metadata_size): (SnapshotMetadata, usize) =
         bincode::serde::decode_from_slice(snapshot, bincode::config::legacy())
@@ -133,14 +483,21 @@ pub async fn apply_snapshot_with_streams(
             .map_err(|e| e.to_string())?;
 
     info!(
-        "Applying snapshot: {} operations ({} keys, {} streams), offset: {}",
+        "Decoded 1.3.x snapshot: {} operations ({} keys, {} streams), offset: {}",
         operations.len(),
         metadata.total_keys,
         metadata.total_streams,
         metadata.offset
     );
+    Ok((metadata, operations))
+}
 
-    // Apply operations
+/// Apply the KV and stream operations of a 1.3.x snapshot.
+async fn apply_legacy_operations(
+    kv_store: &KVStore,
+    stream_manager: Option<&StreamManager>,
+    operations: Vec<Operation>,
+) {
     for op in operations {
         match op {
             Operation::KVSet { key, value, ttl } => {
@@ -173,9 +530,6 @@ pub async fn apply_snapshot_with_streams(
             }
         }
     }
-
-    info!("Snapshot applied successfully");
-    Ok(metadata.offset)
 }
 
 fn current_timestamp() -> u64 {

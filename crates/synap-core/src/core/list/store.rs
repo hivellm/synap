@@ -121,6 +121,15 @@ impl ListStore {
         out
     }
 
+    /// Remove every list, e.g. before a replica loads a full-sync image.
+    /// Blocked poppers keep waiting; the memory contribution is recomputed.
+    pub fn clear(&self) {
+        for shard in self.shards.iter() {
+            shard.write().clear();
+        }
+        self.refresh_memory();
+    }
+
     /// Create new list store
     pub fn new() -> Self {
         let mut shards = Vec::with_capacity(SHARD_COUNT);

@@ -44,6 +44,24 @@ impl ReplicationLog {
 
     /// Append operation to replication log
     pub fn append(&self, operation: Operation) -> u64 {
+        self.append_with(operation, |_| {})
+    }
+
+    /// Append `operation` and run `queued` on the appended record before any
+    /// other append can happen.
+    ///
+    /// The offset is assigned under the buffer lock, so the buffer holds
+    /// records in offset order, and whatever `queued` does (the master hands
+    /// the record to its fan-out channel) also happens in offset order. Two
+    /// writers to different keys could otherwise take offsets 5 and 6 and
+    /// queue 6 first; a replica, which skips offsets below the one it
+    /// expects, would then drop 5.
+    pub fn append_with(
+        &self,
+        operation: Operation,
+        queued: impl FnOnce(&ReplicationOperation),
+    ) -> u64 {
+        let mut ops = self.operations.write();
         let offset = self.current_offset.fetch_add(1, Ordering::SeqCst);
 
         let repl_op = ReplicationOperation {
@@ -51,8 +69,7 @@ impl ReplicationLog {
             timestamp: Self::current_timestamp(),
             operation,
         };
-
-        let mut ops = self.operations.write();
+        queued(&repl_op);
 
         // If buffer is full, remove oldest
         if ops.len() >= self.max_size

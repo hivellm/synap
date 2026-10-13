@@ -483,6 +483,14 @@ impl BitmapStore {
         out
     }
 
+    /// Remove every bitmap, e.g. before a replica loads a full-sync image.
+    /// Operation counters are kept.
+    pub fn clear(&self) {
+        for shard in &self.shards {
+            shard.write().clear();
+        }
+    }
+
     /// Restore one bitmap from a snapshot, as stored. A value whose expiry has
     /// passed is skipped.
     pub fn restore(&self, key: String, value: BitmapValue) {
