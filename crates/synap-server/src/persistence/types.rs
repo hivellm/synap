@@ -62,6 +62,12 @@ pub enum PersistenceError {
         found: u32,
         supported: u32,
     },
+
+    /// The newest snapshot file(s) are damaged or unreadable and no older
+    /// starting point is provably complete (the WAL no longer holds every
+    /// record after it), so recovering would lose acknowledged writes.
+    #[error("cannot recover from the snapshots: {0}")]
+    SnapshotUnrecoverable(String),
 }
 
 impl PersistenceError {
@@ -69,14 +75,18 @@ impl PersistenceError {
     ///
     /// Interior corruption, a WAL written by a newer format and a damaged WAL
     /// header all mean the WAL holds acknowledged history this process cannot
-    /// replay safely. Starting fresh would hide that history and append after
-    /// it, so startup must fail instead.
+    /// replay safely; so does a damaged snapshot recovery cannot safely fall
+    /// back from. Starting fresh would hide that history, append after it and
+    /// let the next snapshot and retention delete it, so startup must fail
+    /// instead.
     pub fn refuses_startup(&self) -> bool {
         matches!(
             self,
             PersistenceError::WALInteriorCorruption { .. }
                 | PersistenceError::WALUnsupportedVersion { .. }
                 | PersistenceError::WALCorrupted { .. }
+                | PersistenceError::SnapshotCorrupted(_)
+                | PersistenceError::SnapshotUnrecoverable(_)
         )
     }
 }
