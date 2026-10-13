@@ -25,9 +25,10 @@ impl WriteAheadLog {
             tokio::fs::create_dir_all(parent).await?;
         }
 
-        // Verify every frame and truncate a torn tail before opening for
-        // append; interior corruption fails here with its byte position.
-        let report = wal_frame::repair_async(config.path.clone()).await?;
+        // Verify every frame, truncate a torn tail, and write or upgrade the
+        // format header before opening for append; interior corruption and an
+        // unsupported format version fail here.
+        let report = wal_frame::prepare_async(config.path.clone()).await?;
 
         // Open or create file (append mode)
         let file = OpenOptions::new()
@@ -67,19 +68,9 @@ impl WriteAheadLog {
             operation,
         };
 
-        // Serialize entry
-        let data = bincode::serde::encode_to_vec(&entry, bincode::config::legacy())?;
-        let checksum = crc32fast::hash(&data);
-
-        debug!("WAL append: offset={}, size={}", offset, data.len());
-
-        // Write entry format:
-        // - size (u64)
-        // - checksum (u32)
-        // - data (serialized entry)
-        self.file.write_u64(data.len() as u64).await?;
-        self.file.write_u32(checksum).await?;
-        self.file.write_all(&data).await?;
+        let frame = wal_frame::encode_frame(&entry)?;
+        debug!("WAL append: offset={}, frame size={}", offset, frame.len());
+        self.file.write_all(&frame).await?;
 
         // Handle fsync based on mode
         match self.config.fsync_mode {
@@ -136,17 +127,17 @@ impl WriteAheadLog {
             .await?;
 
         let mut new_writer = BufWriter::new(new_file);
+        new_writer
+            .write_all(&wal_frame::encode_file_header())
+            .await?;
 
         // Replay and copy entries
         let entries = self.replay(keep_after_offset).await?;
 
         for entry in entries {
-            let data = bincode::serde::encode_to_vec(&entry, bincode::config::legacy())?;
-            let checksum = crc32fast::hash(&data);
-
-            new_writer.write_u64(data.len() as u64).await?;
-            new_writer.write_u32(checksum).await?;
-            new_writer.write_all(&data).await?;
+            new_writer
+                .write_all(&wal_frame::encode_frame(&entry)?)
+                .await?;
         }
 
         new_writer.flush().await?;

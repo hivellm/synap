@@ -14,7 +14,7 @@ use std::time::Duration;
 use synap_server::auth::{ApiKeyManager, UserManager};
 use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
 use synap_server::monitoring::{ClientListManager, MonitoringManager};
-use synap_server::persistence::{PersistenceError, PersistenceLayer, recover};
+use synap_server::persistence::{PersistenceLayer, recover};
 use synap_server::replication::NodeRole;
 use synap_server::{
     AppState, ConsumerGroupConfig, ConsumerGroupManager, KVStore, PartitionConfig,
@@ -368,9 +368,10 @@ async fn main() -> Result<()> {
                     offset,
                 )
             }
-            // Interior WAL corruption: starting fresh would hide acknowledged
-            // history and append after the damage. Refuse to start instead.
-            Err(e @ PersistenceError::WALInteriorCorruption { .. }) => {
+            // Interior WAL corruption, a damaged header or a WAL written by a
+            // newer format: starting fresh would hide acknowledged history and
+            // append after it. Refuse to start instead.
+            Err(e) if e.refuses_startup() => {
                 error!("Recovery failed: {}", e);
                 return Err(anyhow::anyhow!("refusing to start: {e}"));
             }
@@ -549,7 +550,7 @@ async fn main() -> Result<()> {
                 // store (hash/list/set/sorted-set) has been constructed.
                 Some(Arc::new(layer))
             }
-            Err(e @ PersistenceError::WALInteriorCorruption { .. }) => {
+            Err(e) if e.refuses_startup() => {
                 error!("Failed to initialize persistence: {}", e);
                 return Err(anyhow::anyhow!("refusing to start: {e}"));
             }

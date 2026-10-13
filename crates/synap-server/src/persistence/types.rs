@@ -50,6 +50,35 @@ pub enum PersistenceError {
         "WAL writer is poisoned ({0}); this write is not durable and every later write fails until the server restarts"
     )]
     WALPoisoned(String),
+
+    /// The WAL header declares a format version newer than this server can
+    /// read. The file was written by a newer Synap; replaying it here would
+    /// misread records this version does not know.
+    #[error(
+        "WAL {path:?} uses format version {found}, but this server reads WAL format versions up to {supported}; run a Synap release that supports version {found} or restore a WAL backup"
+    )]
+    WALUnsupportedVersion {
+        path: PathBuf,
+        found: u32,
+        supported: u32,
+    },
+}
+
+impl PersistenceError {
+    /// Whether this error must stop the server from starting.
+    ///
+    /// Interior corruption, a WAL written by a newer format and a damaged WAL
+    /// header all mean the WAL holds acknowledged history this process cannot
+    /// replay safely. Starting fresh would hide that history and append after
+    /// it, so startup must fail instead.
+    pub fn refuses_startup(&self) -> bool {
+        matches!(
+            self,
+            PersistenceError::WALInteriorCorruption { .. }
+                | PersistenceError::WALUnsupportedVersion { .. }
+                | PersistenceError::WALCorrupted { .. }
+        )
+    }
 }
 
 impl From<bincode::error::EncodeError> for PersistenceError {
@@ -264,6 +293,18 @@ pub enum Operation {
         destination: String,
         keys: Vec<String>,
     },
+
+    /// A committed MULTI/EXEC transaction, stored as ONE record.
+    ///
+    /// The WAL writes it as a single frame under a single checksum, so a crash
+    /// leaves either the whole record or a torn tail that startup discards
+    /// whole; replication ships it as one command. Recovery and replicas apply
+    /// every operation in it, in order. It never nests another `Transaction`.
+    ///
+    /// This variant MUST stay last: bincode encodes the variant index, so
+    /// appending keeps every earlier variant's encoding (and 1.3.x WALs)
+    /// readable. Only WAL format version 2 and later contain it.
+    Transaction { operations: Vec<Operation> },
 }
 
 /// Snapshot containing full system state

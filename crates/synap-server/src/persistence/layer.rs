@@ -93,14 +93,17 @@ impl PersistenceLayer {
         Ok(())
     }
 
-    /// Log an entire committed transaction as one atomic unit (audit M-010).
+    /// Log an entire committed transaction as one atomic unit (audit M-010,
+    /// phase22).
     ///
     /// Each [`CommittedWrite`](crate::core::CommittedWrite) is mapped to its
-    /// persistence [`Operation`], every op is propagated to replicas (so the
-    /// transaction is replicated, decoupled from the WAL), and the whole set is
-    /// appended to the WAL as a single atomic batch — so a MULTI/EXEC survives a
-    /// crash all-or-nothing rather than as interleavable single appends. With
-    /// persistence disabled the ops are still replicated (no WAL append).
+    /// persistence [`Operation`] and the set is wrapped in ONE
+    /// [`Operation::Transaction`] record. That record is propagated to replicas
+    /// as a single replication command with a single offset (decoupled from the
+    /// WAL), so a replica applies the transaction whole or not at all, and is
+    /// appended to the WAL as a single frame under one checksum, so a crash
+    /// recovers every effect or none. With persistence disabled the record is
+    /// still replicated (no WAL append).
     pub async fn log_transaction(
         &self,
         writes: &[crate::core::CommittedWrite],
@@ -109,18 +112,17 @@ impl PersistenceLayer {
             return Ok(());
         }
 
-        let ops: Vec<Operation> = writes
+        let operations: Vec<Operation> = writes
             .iter()
             .map(Self::committed_write_to_operation)
             .collect();
+        let record = Operation::Transaction { operations };
 
         // Propagate to replicas first (decoupled from the WAL, phase6j).
-        for op in &ops {
-            self.maybe_replicate(op);
-        }
+        self.maybe_replicate(&record);
 
         if let Some(wal) = &self.wal {
-            wal.append_batch(ops).await?;
+            wal.append(record).await?;
             *self.operations_since_snapshot.write() += writes.len();
         }
 
@@ -894,6 +896,30 @@ mod tests {
                 .is_err()
         );
         assert!(layer.flush().await.is_err());
+    }
+
+    /// A master ships a transaction as ONE replication unit: one record at one
+    /// replication offset, holding every operation in order.
+    #[tokio::test]
+    async fn log_transaction_replicates_one_unit() {
+        use crate::replication::{MasterNode, NodeRole, ReplicationConfig};
+
+        let mut repl = ReplicationConfig::default();
+        repl.enabled = true;
+        repl.role = NodeRole::Master;
+        repl.replica_listen_address = Some("127.0.0.1:0".parse().unwrap());
+        let kv = Arc::new(crate::core::KVStore::new(KVConfig::default()));
+        let master = Arc::new(MasterNode::new(repl, kv, None).await.unwrap());
+
+        let mut config = PersistenceConfig::default();
+        config.enabled = false;
+        let layer = PersistenceLayer::new_with_replication(config, Some(Arc::clone(&master)))
+            .await
+            .unwrap();
+        let writes = all_committed_writes();
+        layer.log_transaction(&writes).await.unwrap();
+
+        assert_eq!(master.replication_offset(), 1);
     }
 
     /// A transaction logged with WAL enabled is recovered as its effects.

@@ -570,20 +570,39 @@ Time: 1-5 seconds
 ### Crash Recovery
 
 ```
-1. Scan the WAL: verify each frame's length (must fit in the file) and CRC32
-2. First invalid frame with no valid frame after it (torn tail):
+1. Read the file header: "SYNAPWAL" + format version (u32 BE). No header means
+   a 1.3.x file (format version 1, frames from byte 0); a version newer than
+   the server reads fails startup naming both versions
+2. Scan the WAL: verify each frame's length (must fit in the file) and CRC32
+3. First invalid frame with no valid frame after it (torn tail):
    truncate the file to the last valid frame before anything is appended
-3. First invalid frame followed by a valid frame (interior corruption):
+4. First invalid frame followed by a valid frame (interior corruption):
    fail startup with the byte position of the bad frame
-4. Load latest valid snapshot
-5. Replay WAL from the snapshot offset
-6. Resume operations
+5. Write the header of a new file, or upgrade a 1.3.x file in place
+   (temp file with header + unchanged frames, fsync, rename)
+6. Load latest valid snapshot
+7. Replay WAL from the snapshot offset; a transaction record applies every
+   operation it holds
+8. Resume operations
 Time: 1-10 seconds
 ```
 
 The scanner lives in `persistence/wal_frame.rs` and is shared by the async WAL
 and the recovery WAL. A corrupt length that hides the next frame boundary is
 handled by searching the rest of the file byte by byte for a valid frame.
+
+### Transaction Records
+
+A committed MULTI/EXEC is logged as ONE `Operation::Transaction { operations }`
+record: one frame, one CRC32, one WAL offset. A crash at any byte of it leaves
+a torn tail that step 3 discards whole, so recovery holds all of the
+transaction's effects or none. Replication ships the same record as one
+command at one replication offset; a replica decodes a command only once all
+of its bytes arrived, so a dropped connection applies nothing and the resync
+delivers the whole record. The variant is the last in `Operation`, so the
+bincode variant indices of every older operation, and therefore 1.3.x frames,
+are unchanged. Format version 2 files may contain it; 1.3.x binaries cannot
+read them (no downgrade).
 
 ### WAL Write Failures
 
