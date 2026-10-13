@@ -835,4 +835,146 @@ mod tests {
         assert_eq!(items.len(), 2);
         assert_eq!(store.zscan("missing", 0, None, 10), (0, vec![]));
     }
+
+    // ── Blocking pops on several keys (phase33) ─────────────────────────────
+
+    mod blocking_wakeup {
+        use super::*;
+        use std::time::Duration;
+        use tokio::sync::Mutex;
+        use tokio::time::{Instant, timeout};
+
+        const WAKE_BOUND: Duration = Duration::from_secs(2);
+
+        fn keys(names: &[&str]) -> Vec<String> {
+            names.iter().map(|k| (*k).to_owned()).collect()
+        }
+
+        async fn until_blocked(store: &SortedSetStore, key: &str, clients: usize) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while store.blocked_clients(key) < clients {
+                assert!(
+                    Instant::now() < deadline,
+                    "{clients} client(s) never blocked on {key}"
+                );
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        }
+
+        type Popped = Result<(String, Vec<u8>, f64), crate::core::SynapError>;
+
+        fn spawn_bzpopmin(
+            store: &Arc<SortedSetStore>,
+            names: &[&str],
+        ) -> tokio::task::JoinHandle<Popped> {
+            let store = Arc::clone(store);
+            let names = keys(names);
+            tokio::spawn(async move { store.bzpopmin(names, Some(10)).await })
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn bzpopmin_wakes_on_the_second_key() {
+            let store = Arc::new(SortedSetStore::new());
+            let handle = spawn_bzpopmin(&store, &["z1", "z2"]);
+            until_blocked(&store, "z2", 1).await;
+
+            seed(&store, "z2", &[("m", 1.0)]);
+
+            let popped = timeout(WAKE_BOUND, handle)
+                .await
+                .expect("a ZADD to the second key wakes the client")
+                .unwrap()
+                .unwrap();
+            assert_eq!(popped, ("z2".to_owned(), b"m".to_vec(), 1.0));
+            assert_eq!(store.blocked_clients("z1"), 0);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn bzpopmax_pops_the_first_ready_key_in_argument_order() {
+            let store = Arc::new(SortedSetStore::new());
+            let gate = Arc::new(Mutex::new(()));
+            let handle = {
+                let store = Arc::clone(&store);
+                let gate = Arc::clone(&gate);
+                tokio::spawn(async move {
+                    store
+                        .bzpop_guarded(keys(&["z1", "z2"]), Some(10), false, || gate.lock())
+                        .await
+                        .map(|(popped, _guard)| popped)
+                })
+            };
+            until_blocked(&store, "z1", 1).await;
+
+            {
+                let _held = gate.lock().await;
+                seed(&store, "z2", &[("late", 9.0)]);
+                seed(&store, "z1", &[("low", 1.0), ("high", 2.0)]);
+            }
+
+            let popped = timeout(WAKE_BOUND, handle).await.unwrap().unwrap().unwrap();
+            assert_eq!(popped, ("z1".to_owned(), b"high".to_vec(), 2.0));
+            assert_eq!(store.zcard("z2"), 1, "the later key keeps its member");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn zincrby_and_zunionstore_wake_blocked_clients() {
+            let store = Arc::new(SortedSetStore::new());
+            let by_incr = spawn_bzpopmin(&store, &["incr"]);
+            let by_store = spawn_bzpopmin(&store, &["dest"]);
+            until_blocked(&store, "incr", 1).await;
+            until_blocked(&store, "dest", 1).await;
+
+            store.zincrby("incr", b"m".to_vec(), 2.5);
+            seed(&store, "src", &[("u", 4.0)]);
+            store.zunionstore("dest", &["src"], None, Aggregate::Sum);
+
+            let popped = timeout(WAKE_BOUND, by_incr)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert_eq!(popped, ("incr".to_owned(), b"m".to_vec(), 2.5));
+            let popped = timeout(WAKE_BOUND, by_store)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            assert_eq!(popped, ("dest".to_owned(), b"u".to_vec(), 4.0));
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn concurrent_waiters_each_get_one_member() {
+            let store = Arc::new(SortedSetStore::new());
+            let waiters: Vec<_> = (0..16)
+                .map(|_| spawn_bzpopmin(&store, &["za", "zb"]))
+                .collect();
+            until_blocked(&store, "za", 16).await;
+
+            let pushers: Vec<_> = (0..16)
+                .map(|i| {
+                    let store = Arc::clone(&store);
+                    tokio::spawn(async move {
+                        let key = if i % 2 == 0 { "za" } else { "zb" };
+                        let member = format!("m{i}").into_bytes();
+                        store.zadd(key, member, f64::from(i), &ZAddOptions::default());
+                    })
+                })
+                .collect();
+            for pusher in pushers {
+                pusher.await.unwrap();
+            }
+
+            let mut got = std::collections::BTreeSet::new();
+            for waiter in waiters {
+                let (_, member, _) = timeout(WAKE_BOUND, waiter)
+                    .await
+                    .expect("every blocked client is served")
+                    .unwrap()
+                    .unwrap();
+                assert!(got.insert(member), "a member was delivered twice");
+            }
+            assert_eq!(got.len(), 16);
+            assert_eq!(store.zcard("za") + store.zcard("zb"), 0);
+        }
+    }
 }
