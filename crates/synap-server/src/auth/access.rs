@@ -588,8 +588,9 @@ pub fn classify_envelope(command: &str, payload: &serde_json::Value) -> Option<V
 
         // ── Server introspection ───────────────────────────────────────────
         // Admin-only, as `GET /info` is: the slow log records command
-        // arguments (values included) and the client list exposes addresses.
-        "info" | "slowlog.get" | "client.list" => admin(),
+        // arguments (values included), the client list exposes addresses and
+        // the configuration describes the whole deployment (secrets redacted).
+        "info" | "slowlog.get" | "client.list" | "admin.config" => admin(),
 
         // ── Connection ─────────────────────────────────────────────────────
         // Touches no data, like the native PING.
@@ -1302,6 +1303,7 @@ mod tests {
             ("kv.scan", json!({"prefix": "a"})),
             ("kv.flushall", json!({})),
             ("info", json!({})),
+            ("admin.config", json!({})),
             ("queue.list", json!({})),
             ("pubsub.stats", json!({})),
             ("script.load", json!({"script": "return 1"})),

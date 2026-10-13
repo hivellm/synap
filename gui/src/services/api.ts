@@ -122,6 +122,35 @@ export interface TopicInfo {
   messages_published: number;
 }
 
+/** Key types `key.type` reports; `none` means the key does not exist. */
+export type KeyTypeName = 'string' | 'hash' | 'list' | 'set' | 'zset' | 'none';
+
+const KEY_TYPE_NAMES: readonly KeyTypeName[] = ['string', 'hash', 'list', 'set', 'zset', 'none'];
+
+/** `memory.usage` result for one key. */
+export interface KeyMemoryUsage {
+  bytes: number;
+  human: string;
+}
+
+/** `admin.config` result: the effective configuration, secrets redacted. */
+export interface ServerConfigSnapshot {
+  /** The configuration as a JSON object. */
+  config: Record<string, unknown>;
+  /** The same configuration as YAML, loadable by the server. */
+  yaml: string;
+}
+
+/** One sorted-set member as `sortedset.zrange` reports it with scores. */
+export interface ScoredMember {
+  member: string;
+  score: number;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export class SynapApiClient {
   private client: AxiosInstance;
   private config: ServerConfig;
@@ -734,32 +763,148 @@ export class SynapApiClient {
     }
   }
 
-  // Key Type (using command endpoint since no REST endpoint exists)
-  async keyType(key: string): Promise<ApiResponse<string>> {
-    try {
-      const response = await this.executeCommand('kv.type', { key });
-      if (response.success && response.data) {
-        const payload = response.data.payload || response.data;
-        return { success: true, data: payload.type || payload.key_type || 'string' };
-      }
-      return { success: false, error: 'Failed to get key type' };
-    } catch (error: any) {
-      return { success: false, error: error.message || 'Failed to get key type' };
+  /**
+   * Type of `key` through `key.type`, which answers `{ key, type }`. A missing
+   * key is not an error: its type is `none`.
+   */
+  async keyType(key: string): Promise<ApiResponse<KeyTypeName>> {
+    const response = await this.executeCommand('key.type', { key });
+    if (!response.success) {
+      return { success: false, error: response.error || 'Failed to get key type' };
     }
+    const type = isRecord(response.data) ? response.data.type : undefined;
+    if (typeof type === 'string' && (KEY_TYPE_NAMES as readonly string[]).includes(type)) {
+      return { success: true, data: type as KeyTypeName };
+    }
+    return { success: false, error: `Unexpected key.type response: ${JSON.stringify(response.data)}` };
   }
 
-  // Memory Usage (using command endpoint since no REST endpoint exists)
-  async memoryUsage(key: string): Promise<ApiResponse<{ bytes: number }>> {
-    try {
-      const response = await this.executeCommand('kv.memory', { key });
-      if (response.success && response.data) {
-        const payload = response.data.payload || response.data;
-        return { success: true, data: { bytes: payload.bytes || payload.memory || 0 } };
-      }
-      return { success: false, error: 'Failed to get memory usage' };
-    } catch (error: any) {
-      return { success: false, error: error.message || 'Failed to get memory usage' };
+  /**
+   * Memory used by `key` through `memory.usage`, which answers
+   * `{ key, bytes, human }` and fails for a missing key.
+   */
+  async memoryUsage(key: string): Promise<ApiResponse<KeyMemoryUsage>> {
+    const response = await this.executeCommand('memory.usage', { key });
+    if (!response.success) {
+      return { success: false, error: response.error || 'Failed to get memory usage' };
     }
+    const data = response.data;
+    if (isRecord(data) && typeof data.bytes === 'number' && typeof data.human === 'string') {
+      return { success: true, data: { bytes: data.bytes, human: data.human } };
+    }
+    return { success: false, error: `Unexpected memory.usage response: ${JSON.stringify(data)}` };
+  }
+
+  /**
+   * The server's effective configuration through the admin-only
+   * `admin.config` command, secrets redacted. A non-admin caller gets the
+   * server's permission error.
+   */
+  async getServerConfig(): Promise<ApiResponse<ServerConfigSnapshot>> {
+    const response = await this.executeCommand('admin.config', {});
+    if (!response.success) {
+      return { success: false, error: response.error || 'Failed to load the server configuration' };
+    }
+    const data = response.data;
+    if (isRecord(data) && isRecord(data.config) && typeof data.yaml === 'string') {
+      return { success: true, data: { config: data.config, yaml: data.yaml } };
+    }
+    return { success: false, error: 'Unexpected admin.config response' };
+  }
+
+  /** Fields of hash `key` through `hash.getall` (`{ fields, count }`). */
+  async hashGetAll(key: string): Promise<ApiResponse<Record<string, unknown>>> {
+    return this.commandField('hash.getall', { key }, 'fields', isRecord);
+  }
+
+  /** Set `field` of hash `key` through `hash.set`. */
+  async hashSet(key: string, field: string, value: string): Promise<ApiResponse<boolean>> {
+    return this.commandDone('hash.set', { key, field, value });
+  }
+
+  /** Delete `field` of hash `key` through `hash.del`. */
+  async hashDelete(key: string, field: string): Promise<ApiResponse<boolean>> {
+    return this.commandDone('hash.del', { key, fields: [field] });
+  }
+
+  /** Every element of list `key` through `list.lrange` (`{ values }`). */
+  async listRange(key: string): Promise<ApiResponse<unknown[]>> {
+    return this.commandField('list.lrange', { key, start: 0, stop: -1 }, 'values', Array.isArray);
+  }
+
+  /** Push `value` onto the left or right end of list `key`. */
+  async listPush(key: string, side: 'left' | 'right', value: string): Promise<ApiResponse<boolean>> {
+    return this.commandDone(side === 'left' ? 'list.lpush' : 'list.rpush', { key, values: [value] });
+  }
+
+  /** Remove the first occurrence of `value` from list `key` through `list.lrem`. */
+  async listRemove(key: string, value: unknown): Promise<ApiResponse<boolean>> {
+    return this.commandDone('list.lrem', { key, count: 1, value });
+  }
+
+  /** Members of set `key` through `set.members` (`{ members }`). */
+  async setMembers(key: string): Promise<ApiResponse<unknown[]>> {
+    return this.commandField('set.members', { key }, 'members', Array.isArray);
+  }
+
+  /** Add `member` to set `key` through `set.add`. */
+  async setAdd(key: string, member: string): Promise<ApiResponse<boolean>> {
+    return this.commandDone('set.add', { key, members: [member] });
+  }
+
+  /** Remove `member` from set `key` through `set.rem`. */
+  async setRemove(key: string, member: unknown): Promise<ApiResponse<boolean>> {
+    return this.commandDone('set.rem', { key, members: [member] });
+  }
+
+  /** Members of sorted set `key` with scores, lowest first, through `sortedset.zrange`. */
+  async zsetRange(key: string): Promise<ApiResponse<ScoredMember[]>> {
+    const isScored = (value: unknown): boolean =>
+      Array.isArray(value) &&
+      value.every((m) => isRecord(m) && typeof m.member === 'string' && typeof m.score === 'number');
+    return this.commandField(
+      'sortedset.zrange',
+      { key, start: 0, stop: -1, withscores: true },
+      'members',
+      isScored,
+    );
+  }
+
+  /** Add `member` with `score` to sorted set `key` through `sortedset.zadd`. */
+  async zsetAdd(key: string, member: string, score: number): Promise<ApiResponse<boolean>> {
+    return this.commandDone('sortedset.zadd', { key, member, score });
+  }
+
+  /** Remove `member` from sorted set `key` through `sortedset.zrem`. */
+  async zsetRemove(key: string, member: string): Promise<ApiResponse<boolean>> {
+    return this.commandDone('sortedset.zrem', { key, members: [member] });
+  }
+
+  /** Run `command` and return its payload field `field` when `isValid` accepts it. */
+  private async commandField<T>(
+    command: string,
+    payload: Record<string, unknown>,
+    field: string,
+    isValid: (value: unknown) => boolean,
+  ): Promise<ApiResponse<T>> {
+    const response = await this.executeCommand(command, payload);
+    if (!response.success) {
+      return { success: false, error: response.error || `${command} failed` };
+    }
+    const value = isRecord(response.data) ? response.data[field] : undefined;
+    if (isValid(value)) {
+      return { success: true, data: value as T };
+    }
+    return { success: false, error: `Unexpected ${command} response: ${JSON.stringify(response.data)}` };
+  }
+
+  /** Run a write `command`, reporting only whether the server accepted it. */
+  private async commandDone(command: string, payload: Record<string, unknown>): Promise<ApiResponse<boolean>> {
+    const response = await this.executeCommand(command, payload);
+    if (!response.success) {
+      return { success: false, error: response.error || `${command} failed` };
+    }
+    return { success: true, data: true };
   }
 
   // Slowlog

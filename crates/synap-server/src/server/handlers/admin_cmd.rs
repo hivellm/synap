@@ -59,6 +59,22 @@ pub(super) async fn handle_info_cmd(
     Ok(response)
 }
 
+/// `admin.config`: the configuration the server runs with, every override
+/// applied and every secret redacted, as the JSON object `config` and as the
+/// YAML text `yaml` (the same YAML parser loads it back). Admin-only; read-only
+/// by design — the configuration is changed in the file the server starts from.
+pub(super) async fn handle_admin_config_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let config = state.server_config.as_deref().ok_or_else(|| {
+        SynapError::InternalError("this server exposes no configuration snapshot".to_string())
+    })?;
+    let yaml = serde_saphyr::to_string(config)
+        .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    Ok(serde_json::json!({ "config": config, "yaml": yaml }))
+}
+
 pub(super) async fn handle_slowlog_get_cmd(
     state: AppState,
     request: &Request,

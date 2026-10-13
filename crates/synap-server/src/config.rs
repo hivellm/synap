@@ -485,6 +485,15 @@ impl ServerConfig {
         format!("{}:{}", self.server.host, self.server.port)
     }
 
+    /// The configuration as JSON with every secret replaced by [`REDACTED`]:
+    /// what the `admin.config` command reports. See [`redact_secrets`] for
+    /// which fields count as secrets.
+    pub fn redacted(&self) -> Result<serde_json::Value, serde_json::Error> {
+        let mut value = serde_json::to_value(self)?;
+        redact_secrets(&mut value);
+        Ok(value)
+    }
+
     /// Refuse Hub mode alongside a listener that has no tenant authentication.
     ///
     /// Hub mode confines every tenant to its own namespace on the HTTP
@@ -514,9 +523,121 @@ impl ServerConfig {
     }
 }
 
+/// What a secret configuration value is replaced with in [`ServerConfig::redacted`].
+pub const REDACTED: &str = "[redacted]";
+
+/// Field-name fragments that mark a configuration value as a secret.
+const SECRET_FIELD_MARKERS: &[&str] = &[
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "credential",
+    "api_key",
+    "access_key",
+    "private_key",
+];
+
+/// Whether a configuration field holds a secret, judged by its name: any name
+/// containing a [`SECRET_FIELD_MARKERS`] fragment, plus `key` itself and any
+/// name ending in `_key`/`_keys` (`hub.service_api_key`, a TLS `key`).
+/// `default_key_ttl` and other names that merely mention keys are not secrets.
+fn is_secret_field(name: &str) -> bool {
+    let name = name.to_ascii_lowercase().replace('-', "_");
+    name == "key"
+        || name == "keys"
+        || name.ends_with("_key")
+        || name.ends_with("_keys")
+        || SECRET_FIELD_MARKERS
+            .iter()
+            .any(|marker| name.contains(marker))
+}
+
+/// Replace, anywhere in `value`, the value of every secret field (see
+/// [`is_secret_field`]) with [`REDACTED`], whatever its shape — a string, a
+/// number, a list of keys or a whole credentials object. `null` and an empty
+/// string are kept: they say a secret is not configured and reveal nothing.
+pub fn redact_secrets(value: &mut serde_json::Value) {
+    use serde_json::Value;
+    match value {
+        Value::Object(fields) => {
+            for (name, field) in fields.iter_mut() {
+                if !is_secret_field(name) {
+                    redact_secrets(field);
+                    continue;
+                }
+                let unset = match field {
+                    Value::Null => true,
+                    Value::String(s) => s.is_empty(),
+                    _ => false,
+                };
+                if !unset {
+                    *field = Value::String(REDACTED.to_string());
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(redact_secrets),
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redacted_config_hides_every_secret_and_still_loads() {
+        let mut config = ServerConfig::default();
+        config.auth.enabled = true;
+        config.auth.root.password = "root-pass-7f3a".to_string();
+        config.hub.service_api_key = "hub-key-91c2".to_string();
+
+        let redacted = config.redacted().unwrap();
+        let text = redacted.to_string();
+        assert!(!text.contains("root-pass-7f3a"), "{text}");
+        assert!(!text.contains("hub-key-91c2"), "{text}");
+        assert_eq!(redacted["auth"]["root"]["password"], REDACTED);
+        assert_eq!(redacted["hub"]["service_api_key"], REDACTED);
+        // Non-secret values are reported as configured.
+        assert_eq!(redacted["auth"]["root"]["username"], "root");
+        assert_eq!(redacted["auth"]["default_key_ttl"], 3600);
+        assert_eq!(redacted["server"]["port"], 15500);
+
+        // The YAML form loads back as a configuration, secrets still hidden.
+        let yaml = serde_saphyr::to_string(&redacted).unwrap();
+        assert!(!yaml.contains("root-pass-7f3a") && !yaml.contains("hub-key-91c2"));
+        let reloaded: ServerConfig = serde_saphyr::from_str(&yaml).unwrap();
+        assert_eq!(reloaded.auth.root.password, REDACTED);
+        assert_eq!(reloaded.server.port, 15500);
+    }
+
+    #[test]
+    fn redaction_covers_secrets_of_any_shape_and_keeps_unset_ones() {
+        let mut value = serde_json::json!({
+            "hub": {"service_api_key": "", "api_url": "http://hub"},
+            "auth": {
+                "users": [{"username": "ana", "password": "p1"}],
+                "api_keys": ["k1", "k2"],
+                "default_key_ttl": 60
+            },
+            "tls": {"cert": "/c.pem", "key": "/k.pem", "private-key": "pem"},
+            "replication": {"auth_token": 42, "credentials": {"user": "u", "pass": "x"}},
+            "secret": null
+        });
+        redact_secrets(&mut value);
+        assert_eq!(value["hub"]["service_api_key"], "", "unset stays visible");
+        assert_eq!(value["hub"]["api_url"], "http://hub");
+        assert_eq!(value["auth"]["users"][0]["password"], REDACTED);
+        assert_eq!(value["auth"]["users"][0]["username"], "ana");
+        assert_eq!(value["auth"]["api_keys"], REDACTED);
+        assert_eq!(value["auth"]["default_key_ttl"], 60);
+        assert_eq!(value["tls"]["cert"], "/c.pem");
+        assert_eq!(value["tls"]["key"], REDACTED);
+        assert_eq!(value["tls"]["private-key"], REDACTED);
+        assert_eq!(value["replication"]["auth_token"], REDACTED);
+        assert_eq!(value["replication"]["credentials"], REDACTED);
+        assert!(value["secret"].is_null());
+    }
 
     #[test]
     fn hub_mode_refuses_listeners_without_tenant_auth() {

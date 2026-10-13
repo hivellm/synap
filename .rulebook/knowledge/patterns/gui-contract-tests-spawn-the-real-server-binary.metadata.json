@@ -1,0 +1,16 @@
+{
+  "id": "gui-contract-tests-spawn-the-real-server-binary",
+  "type": "pattern",
+  "title": "GUI contract tests spawn the real server binary",
+  "category": "testing",
+  "description": "Vitest contract and smoke tests for the GUI start the real synap-server binary per test file (free port, temp cwd, auth required, known secrets), mint API keys via /auth/keys, and exercise src/services/api.ts and mounted views against it. Use node:http (not the DOM env fetch), avoid new URL(path, import.meta.url) (Vite asset rewrite in DOM envs), seed order-sensitive data sequentially, and assert configured secrets never come back.",
+  "createdAt": "2026-10-13T07:10:00.000Z",
+  "tags": [
+    "gui",
+    "vitest",
+    "contract-tests",
+    "synap-server",
+    "phase27"
+  ],
+  "source": "manual"
+}
