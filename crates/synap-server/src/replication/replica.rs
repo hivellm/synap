@@ -234,7 +234,13 @@ impl ReplicaNode {
         Ok(())
     }
 
-    /// Read command with length prefix
+    /// Read one length-prefixed command.
+    ///
+    /// Nothing is decoded until every byte of the command has arrived, so a
+    /// connection that drops mid-command applies none of it. This is what makes
+    /// a transaction record (one `Operation::Transaction` per command) reach
+    /// the replica whole or not at all; the offset is not advanced, so the
+    /// resync after reconnecting delivers the whole record again.
     async fn read_command(stream: &mut TcpStream) -> ReplicationResult<ReplicationCommand> {
         // Read length prefix (4 bytes)
         let mut len_buf = [0u8; 4];

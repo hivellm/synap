@@ -520,11 +520,14 @@ async fn interior_corruption_fails_startup_with_the_byte_position() {
         layer.shutdown().await.unwrap();
     }
     let mut bytes = std::fs::read(&config.wal.path).unwrap();
-    let first_frame_len = 12 + u64::from_be_bytes(bytes[..8].try_into().unwrap()) as usize;
-    bytes[first_frame_len + 14] ^= 0xFF; // inside the second frame's payload
+    // Frames follow the file header.
+    let first = wal_frame::FILE_HEADER_LEN as usize;
+    let second =
+        first + 12 + u64::from_be_bytes(bytes[first..first + 8].try_into().unwrap()) as usize;
+    bytes[second + 14] ^= 0xFF; // inside the second frame's payload
     std::fs::write(&config.wal.path, &bytes).unwrap();
 
-    let expected = format!("at byte {first_frame_len}");
+    let expected = format!("at byte {second}");
     let err = recover(&config, KVConfig::default(), QueueConfig::default())
         .await
         .err()

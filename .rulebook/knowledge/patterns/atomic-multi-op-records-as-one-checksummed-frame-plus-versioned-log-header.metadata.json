@@ -1,0 +1,20 @@
+{
+  "id": "atomic-multi-op-records-as-one-checksummed-frame-plus-versioned-log-header",
+  "type": "pattern",
+  "title": "Atomic multi-op records: one checksummed frame, plus a versioned log header",
+  "category": "persistence",
+  "description": "Crash and replication atomicity for a multi-operation unit comes from making it ONE checksummed record (one frame, one offset) and ONE replication command, not from writing its frames contiguously. A new record kind needs a format version: magic+version header for new files, headerless files read as legacy and upgraded via temp+fsync+rename, newer versions refuse startup naming both versions; append enum variants at the end. Test the legacy path with a fixture from an independent encoder.",
+  "example": "see atomic-multi-op-records-as-one-checksummed-frame-plus-versioned-log-header.md",
+  "whenToUse": "Multi-operation units that must survive a crash or dropped connection all-or-nothing; on-disk format changes old binaries cannot read.",
+  "whenNotToUse": "Single-operation writes; files rewritten atomically as a whole (snapshots).",
+  "createdAt": "2026-10-13T12:00:00.000Z",
+  "tags": [
+    "persistence",
+    "wal",
+    "transactions",
+    "replication",
+    "versioning",
+    "phase22"
+  ],
+  "source": "manual"
+}

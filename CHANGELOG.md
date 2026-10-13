@@ -73,6 +73,13 @@ migration notes before upgrading.
   refuses to start in Hub mode while RESP3 or SynapRPC is enabled (both are on
   by default), naming the listener, because neither authenticates tenants.
 
+- **Transactions are crash-atomic** (review finding D-03). A committed
+  MULTI/EXEC is written to the WAL as one record under one checksum, so a crash
+  at any byte recovers all of its effects or none (a crash between two
+  operations used to recover a prefix), and replication ships it as one unit at
+  one offset: a replica whose connection drops mid-transaction applies none of
+  it and receives it whole on resync. A replica still applies the operations of
+  a transaction one after another, so a reader there can observe it half-applied.
 - **Counter amounts behave the same on every transport** (review finding
   E-04). The SDK native maps (Rust, TypeScript, Python, C#, PHP, Go) send
   `INCRBY`/`DECRBY` when `kv.incr`/`kv.decr` carries an `amount` and keep
@@ -95,6 +102,14 @@ migration notes before upgrading.
   is refused before anything is sent, and errors go to stderr. New flags:
   `--user`, `--password`, `--timeout`. The `/api/v1/command` endpoint gains a
   `ping` command, which requires credentials when authentication is on.
+- **The WAL has a versioned header** (`SYNAPWAL` + format version 2). WALs
+  written by 1.3.x replay as before and are upgraded in place on first start
+  (temporary file, fsync, rename). Startup refuses a WAL of a newer format,
+  naming both versions, or one with a damaged header, instead of starting with
+  empty data. **Breaking (downgrade):** 1.3.x cannot read a WAL written or
+  upgraded by 1.4.0 — back up the WAL and snapshot directories before
+  upgrading — and replicas must be upgraded before the master, since a 1.3.x
+  replica cannot decode the new transaction record.
 - **A WAL with interior corruption stops startup.** A bad frame followed by
   valid ones used to end the scan silently and lose the history after it;
   startup now fails with the byte position so an operator can decide.

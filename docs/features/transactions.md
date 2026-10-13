@@ -28,17 +28,44 @@ A committed `EXEC` is now durable and replicated, not just applied in memory:
   the WAL never diverge from the master.
 - **One shared persistence hook.** Every `EXEC` entry point (REST, RESP3,
   SynapRPC, admin, MCP) calls `PersistenceLayer::log_transaction(&writes)`, which
-  maps each `CommittedWrite` to a persistence `Operation`, propagates all of them
-  to replicas, and appends them to the WAL.
-- **Logged as one atomic batch.** `log_transaction` uses a WAL batch API
-  (`AsyncWAL::append_batch`) so the transaction's operations are written
-  contiguously and confirmed as a unit under a single group-commit fsync — a
-  committed `EXEC` survives a crash all-or-nothing rather than as interleavable
-  single appends. With sync durability (`wal.fsync_mode: always`) the commit is
-  fsynced before `EXEC` acknowledges success.
+  maps each `CommittedWrite` to a persistence `Operation` and wraps them in one
+  `Operation::Transaction` record that it propagates to replicas and appends to
+  the WAL.
+- **Crash-atomic: one WAL record (phase22).** The record is written as a
+  single WAL frame under a single CRC32 checksum, with a single WAL offset.
+  A crash while it is being written leaves a torn frame, and startup discards a
+  torn frame whole (see
+  [Torn tails and corruption](../users/configuration/PERSISTENCE.md#torn-tails-and-corruption)),
+  so recovery replays every operation of the transaction or none of them — at
+  any byte the crash may cut. A transaction larger than the WAL write buffer is
+  no exception: it is acknowledged only after the whole frame reached the OS
+  (and the disk with `wal.fsync_mode: always`). Before 1.4.0 each operation was
+  its own frame, so a crash between two of them recovered a prefix of the
+  transaction.
+- **Replicated as one unit (phase22).** The master ships the record to replicas
+  as one replication command at one replication offset. A replica decodes a
+  command only after all of its bytes have arrived, so a connection that drops
+  mid-transaction applies none of it; the replica reconnects asking to resume
+  at that offset, and the resync delivers the whole transaction again. Replicas
+  apply its operations in order. A replica does not isolate readers from a
+  transaction it is applying (another client can read between two of its
+  operations); the guarantee is that a crash or a dropped connection never
+  leaves part of it applied.
 - **Replicated even without persistence.** Propagation is decoupled from the WAL
   (phase6j), so a master replicates a transaction to its replicas even when
   `persistence.enabled = false`.
+
+### Upgrading to 1.4.0
+
+The transaction record is new in 1.4.0, so mixed versions have limits:
+
+- **WAL.** 1.4.0 replays a WAL written by 1.3.x and upgrades it in place to the
+  versioned format on first start. A 1.3.x binary cannot read a WAL written or
+  upgraded by 1.4.0, so there is no downgrade: copy the WAL and snapshot
+  directories before upgrading (see
+  [WAL file format and versions](../users/configuration/PERSISTENCE.md#wal-file-format-and-versions)).
+- **Replication.** A 1.3.x replica cannot decode the transaction record a 1.4.0
+  master sends. Upgrade replicas before the master.
 
 ### When the commit cannot be logged
 
