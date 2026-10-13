@@ -238,6 +238,44 @@ mod tests {
         assert!(matches!(result, Err(ReplicationError::FullSyncRequired)));
     }
 
+    /// phase31: concurrent appenders see `append_with` run in offset order,
+    /// and the buffer holds records in offset order, so the master's fan-out
+    /// never queues a lower offset after a higher one.
+    #[test]
+    fn append_with_runs_in_offset_order() {
+        let log = Arc::new(ReplicationLog::new(100_000));
+        let queued = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let threads: Vec<_> = (0..8)
+            .map(|t| {
+                let log = Arc::clone(&log);
+                let queued = Arc::clone(&queued);
+                std::thread::spawn(move || {
+                    for i in 0..2_000 {
+                        let op = Operation::KVSet {
+                            key: format!("k{t}_{i}"),
+                            value: vec![],
+                            ttl: None,
+                        };
+                        log.append_with(op, |record| queued.lock().push(record.offset));
+                    }
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        let queued = queued.lock();
+        assert_eq!(queued.len(), 16_000);
+        assert!(queued.windows(2).all(|w| w[0] + 1 == w[1]));
+        let buffered: Vec<u64> = log
+            .get_from_offset(0)
+            .unwrap()
+            .iter()
+            .map(|op| op.offset)
+            .collect();
+        assert_eq!(buffered, *queued);
+    }
+
     #[test]
     fn test_calculate_lag() {
         let log = ReplicationLog::new(100);

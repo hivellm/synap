@@ -544,6 +544,258 @@ mod tests {
     use super::*;
     use crate::core::KVConfig;
 
+    /// Every datatype store, as a master or a replica holds them.
+    struct AllStores {
+        kv: KVStore,
+        hash: crate::core::HashStore,
+        list: crate::core::ListStore,
+        set: crate::core::SetStore,
+        zset: crate::core::SortedSetStore,
+        hll: crate::core::HyperLogLogStore,
+        bitmap: crate::core::BitmapStore,
+        queues: crate::core::QueueManager,
+        streams: StreamManager,
+    }
+
+    impl AllStores {
+        fn new() -> Self {
+            Self {
+                kv: KVStore::new(KVConfig::default()),
+                hash: crate::core::HashStore::new(),
+                list: crate::core::ListStore::new(),
+                set: crate::core::SetStore::new(),
+                zset: crate::core::SortedSetStore::new(),
+                hll: crate::core::HyperLogLogStore::new(),
+                bitmap: crate::core::BitmapStore::new(),
+                queues: crate::core::QueueManager::new(crate::core::QueueConfig::default()),
+                streams: StreamManager::new(crate::core::StreamConfig::default()),
+            }
+        }
+
+        fn refs(&self) -> StoreRefs<'_> {
+            StoreRefs {
+                kv_store: &self.kv,
+                hash_store: Some(&self.hash),
+                list_store: Some(&self.list),
+                set_store: Some(&self.set),
+                sorted_set_store: Some(&self.zset),
+                queue_manager: Some(&self.queues),
+                stream_manager: Some(&self.streams),
+                hyperloglog_store: Some(&self.hll),
+                bitmap_store: Some(&self.bitmap),
+            }
+        }
+
+        /// One value of every datatype under `prefix`.
+        async fn fill(&self, prefix: &str, deadline_ms: u64) {
+            use crate::core::{Expiry, SetOptions};
+            let k = |name: &str| format!("{prefix}{name}");
+            self.kv
+                .set_with_opts(
+                    &k("kv"),
+                    b"v".to_vec(),
+                    Some(Expiry::UnixMilliseconds(deadline_ms)),
+                    SetOptions::default(),
+                )
+                .await
+                .unwrap();
+            self.kv.set(&k("plain"), b"p".to_vec(), None).await.unwrap();
+            self.hash.hset(&k("hash"), "f", b"hv".to_vec()).unwrap();
+            self.list
+                .rpush(&k("list"), vec![b"a".to_vec(), b"b".to_vec()], false)
+                .unwrap();
+            self.set.sadd(&k("set"), vec![b"m".to_vec()]).unwrap();
+            self.zset
+                .zadd(&k("zset"), b"z".to_vec(), 2.5, &ZAddOptions::default());
+            self.hll
+                .pfadd(&k("hll"), vec![b"x".to_vec(), b"y".to_vec()], None)
+                .unwrap();
+            self.bitmap.setbit(&k("bitmap"), 7, 1).unwrap();
+            self.queues.create_queue(&k("queue"), None).await.unwrap();
+            self.queues
+                .publish(&k("queue"), b"msg".to_vec(), Some(3), Some(2))
+                .await
+                .unwrap();
+            self.queues
+                .create_queue(&k("empty_queue"), None)
+                .await
+                .unwrap();
+            self.streams.create_room(&k("room")).await.unwrap();
+            self.streams
+                .publish(&k("room"), "evt", b"data".to_vec())
+                .await
+                .unwrap();
+        }
+
+        /// A comparable description of every value (queue message ids and
+        /// stream event ids are assigned anew on the replica, so payloads
+        /// are compared).
+        async fn fingerprint(&self) -> Vec<String> {
+            let mut out = Vec::new();
+            for (key, value, expiry) in self.kv.dump_with_expiry().await.unwrap() {
+                out.push(format!("kv:{key}={:?}@{expiry:?}", value.to_vec()));
+            }
+            for (key, fields) in self.hash.dump() {
+                let fields: std::collections::BTreeMap<_, _> = fields.into_iter().collect();
+                out.push(format!("hash:{key}={fields:?}"));
+            }
+            for (key, list) in self.list.dump() {
+                out.push(format!("list:{key}={:?}", list.into_elements()));
+            }
+            for (key, set) in self.set.dump() {
+                let mut members = set.into_members();
+                members.sort();
+                out.push(format!("set:{key}={members:?}"));
+            }
+            for (key, members) in self.zset.dump() {
+                out.push(format!("zset:{key}={members:?}"));
+            }
+            for (key, hll) in self.hll.dump() {
+                out.push(format!("hll:{key}={:?}", hll.registers));
+            }
+            for (key, bitmap) in self.bitmap.dump() {
+                out.push(format!("bitmap:{key}={:?}", bitmap.data));
+            }
+            for (queue, messages) in self.queues.dump().await.unwrap() {
+                let payloads: Vec<_> = messages
+                    .iter()
+                    .map(|m| (m.payload.to_vec(), m.priority, m.max_retries))
+                    .collect();
+                out.push(format!("queue:{queue}={payloads:?}"));
+            }
+            for (room, events) in self.streams.get_all_events().await {
+                let events: Vec<_> = events.iter().map(|e| (&e.event, &e.data)).collect();
+                out.push(format!("room:{room}={events:?}"));
+            }
+            out.sort();
+            out
+        }
+
+        /// The current full-sync command at `offset`.
+        async fn full_sync(&self, offset: u64) -> ReplicationCommand {
+            let image = SnapshotImage::capture(self.refs()).await.unwrap();
+            let data = FullSyncData::from_image(image, self.streams.get_all_events().await);
+            encode_full_sync(&data, offset).unwrap()
+        }
+    }
+
+    fn far_deadline() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+            + 3_600_000
+    }
+
+    fn image_parts(cmd: ReplicationCommand) -> (u32, u64, u32, Vec<u8>) {
+        match cmd {
+            ReplicationCommand::FullSyncImage {
+                version,
+                offset,
+                checksum,
+                image,
+            } => (version, offset, checksum, image),
+            other => panic!("expected FullSyncImage, got {other:?}"),
+        }
+    }
+
+    /// phase31: the image carries every datatype, and loading it replaces
+    /// the replica's state: stale values of every datatype are gone.
+    #[tokio::test]
+    async fn full_sync_image_replaces_every_datatype() {
+        let master = AllStores::new();
+        master.fill("m_", far_deadline()).await;
+        let (version, offset, checksum, image) = image_parts(master.full_sync(42).await);
+        assert_eq!((version, offset), (FULL_SYNC_VERSION, 42));
+
+        let replica = AllStores::new();
+        replica.fill("stale_", far_deadline()).await;
+        let data = decode_full_sync(version, checksum, &image).unwrap();
+        load_full_sync(data, replica.refs()).await.unwrap();
+
+        let expected = master.fingerprint().await;
+        assert_eq!(expected.len(), 11, "fixture covers every datatype");
+        assert_eq!(replica.fingerprint().await, expected);
+    }
+
+    /// An image version this replica does not read is refused before any
+    /// store changes, naming both versions.
+    #[tokio::test]
+    async fn unsupported_full_sync_version_is_refused() {
+        let master = AllStores::new();
+        master.fill("m_", far_deadline()).await;
+        let (_, _, checksum, image) = image_parts(master.full_sync(1).await);
+
+        let err = decode_full_sync(FULL_SYNC_VERSION + 1, checksum, &image)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("version 3"), "{err}");
+        assert!(err.contains("reads version 2"), "{err}");
+        assert!(err.contains("upgrade replicas before the master"), "{err}");
+    }
+
+    /// A corrupted image fails its checksum; one with trailing bytes is
+    /// refused too.
+    #[tokio::test]
+    async fn corrupt_full_sync_image_is_refused() {
+        let master = AllStores::new();
+        master.fill("m_", far_deadline()).await;
+        let (version, _, checksum, mut image) = image_parts(master.full_sync(1).await);
+
+        let last = image.len() - 1;
+        image[last] ^= 0xFF;
+        let err = decode_full_sync(version, checksum, &image)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("checksum mismatch"), "{err}");
+
+        image[last] ^= 0xFF;
+        image.push(0);
+        let err = decode_full_sync(version, crc32fast::hash(&image), &image)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("1 trailing bytes"), "{err}");
+    }
+
+    /// A 1.3.x full sync replaces the replica's KV keys and stream rooms and
+    /// leaves the datatypes it does not carry alone.
+    #[tokio::test]
+    async fn legacy_full_sync_replaces_kv_and_streams() {
+        let master = AllStores::new();
+        master.kv.set("new", b"n".to_vec(), None).await.unwrap();
+        master.streams.create_room("room").await.unwrap();
+        master
+            .streams
+            .publish("room", "evt", b"d".to_vec())
+            .await
+            .unwrap();
+        let snapshot = create_snapshot_with_streams(&master.kv, Some(&master.streams), 9)
+            .await
+            .unwrap();
+
+        let replica = AllStores::new();
+        replica.fill("stale_", far_deadline()).await;
+        let (metadata, operations) = decode_legacy_snapshot(&snapshot).unwrap();
+        assert_eq!(metadata.offset, 9);
+        load_legacy_full_sync(&replica.kv, Some(&replica.streams), operations).await;
+
+        let keys: Vec<String> = replica
+            .kv
+            .dump_with_expiry()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(k, _, _)| k)
+            .collect();
+        assert_eq!(keys, vec!["new".to_string()]);
+        assert_eq!(replica.streams.list_rooms().await, vec!["room".to_string()]);
+        assert_eq!(
+            replica.hash.hget("stale_hash", "f").unwrap(),
+            Some(b"hv".to_vec()),
+            "a 1.3.x image does not cover hashes"
+        );
+    }
+
     #[tokio::test]
     async fn test_snapshot_creation_and_application() {
         let kv1 = KVStore::new(KVConfig::default());
