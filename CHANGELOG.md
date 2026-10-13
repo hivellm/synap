@@ -92,6 +92,29 @@ migration notes before upgrading.
   real TTL. RESP3/SynapRPC FLUSHALL report a disabled flush as an error instead
   of replying OK, and envelope `kv.append`/`kv.setrange`/`kv.getset` store
   strings as raw UTF-8 like `kv.set`.
+- **Snapshots match their WAL position, and writes to one key keep their
+  order** (review findings D-04, D-08). A snapshot recorded its WAL cutoff
+  before dumping the stores, so a write that landed between the two was
+  applied twice on recovery (duplicate LPUSH elements, double HINCRBY), and
+  concurrent writes to one key could reach the WAL in the opposite order from
+  memory, so APPEND/INCR/SETRANGE replayed to the wrong value. Writers now hold
+  a per-key ordering lock (striped by key hash) from applying a write until
+  its record is queued; a snapshot holds every stripe only while it records its
+  cutoff and copies the stores, then serializes outside the barrier. Recovery
+  applies every write exactly once, including multi-key commands and
+  MULTI/EXEC, and blocking pops are ordered against the pushes they race. No
+  cost with persistence off; about 69 ns per write with it on, and writers
+  pause only for the in-memory copy (about 58 ms for 160k keys).
+- **Expiry survives restarts as an absolute deadline** (review finding D-07).
+  Snapshots dropped expiry (keys came back permanent) and WAL replay restarted
+  TTLs from boot time (keys that expired during downtime came back). Snapshot
+  format v4 and the new `KVSetAt`, `KVExpireAt` and `HllAddAt` WAL records
+  store the Unix-ms deadline the store actually used; records from before 1.4
+  count their TTL from their entry timestamp, keys already expired are not
+  restored, and replicas keep the master's deadlines. Snapshot v4 also carries
+  HyperLogLog and bitmap sections, so that data now survives a snapshot
+  restart; v3 and v2 snapshots still load. **Breaking (downgrade only):** 1.3.x
+  cannot read v4 snapshots.
 - **Transactions are crash-atomic** (review finding D-03). A committed
   MULTI/EXEC is written to the WAL as one record under one checksum, so a crash
   at any byte recovers all of its effects or none (a crash between two

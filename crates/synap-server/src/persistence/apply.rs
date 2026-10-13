@@ -19,10 +19,20 @@
 
 use crate::core::sorted_set::{SortedSetStore, ZAddOptions};
 use crate::core::{
-    Aggregate, BitfieldOperation, BitmapOperation, BitmapStore, HashStore, HyperLogLogStore,
-    KVStore, ListStore, QueueManager, SetStore, StreamManager, SynapError,
+    Aggregate, BitfieldOperation, BitmapOperation, BitmapStore, Expiry, HashStore,
+    HyperLogLogStore, KVStore, ListStore, QueueManager, SetOptions, SetStore, StreamManager,
+    SynapError,
 };
 use crate::persistence::types::Operation;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Current Unix time in milliseconds.
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 
 /// Borrowed bundle of every store a persistence routine can touch.
 ///
@@ -198,6 +208,38 @@ async fn apply_single(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapE
         },
         Operation::KVFlush => {
             kv_store.clear().await;
+        }
+        // Absolute expiry (phase23). A deadline that has already passed means
+        // the write happened and the key then expired: it is removed, never
+        // resurrected.
+        Operation::KVSetAt {
+            key,
+            value,
+            expires_at_ms,
+        } => match expires_at_ms {
+            None => {
+                kv_store.set(key, value, None).await?;
+            }
+            Some(deadline) if deadline <= now_ms() => {
+                kv_store.delete(&key).await?;
+            }
+            Some(deadline) => {
+                kv_store
+                    .set_with_opts(
+                        &key,
+                        value,
+                        Some(Expiry::UnixMilliseconds(deadline)),
+                        SetOptions::default(),
+                    )
+                    .await?;
+            }
+        },
+        Operation::KVExpireAt { key, expires_at_ms } => {
+            if expires_at_ms <= now_ms() {
+                kv_store.delete(&key).await?;
+            } else {
+                kv_store.expire_at(&key, expires_at_ms).await?;
+            }
         }
 
         // ── Queue ───────────────────────────────────────────────────────────
@@ -451,6 +493,15 @@ async fn apply_single(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapE
         } => {
             if let Some(h) = hyperloglog_store {
                 h.pfmerge(&destination, sources)?;
+            }
+        }
+        Operation::HllAddAt {
+            key,
+            elements,
+            expires_at_ms,
+        } => {
+            if let Some(h) = hyperloglog_store {
+                h.pfadd_until(&key, elements, expires_at_ms)?;
             }
         }
 
@@ -1249,5 +1300,84 @@ mod tests {
         assert!(matches!(parse_aggregate("MAX"), Aggregate::Max));
         assert!(matches!(parse_aggregate("sum"), Aggregate::Sum));
         assert!(matches!(parse_aggregate("other"), Aggregate::Sum));
+    }
+
+    /// phase23: absolute deadlines apply as is; a deadline already passed
+    /// removes the key (KV and HyperLogLog) instead of resurrecting it.
+    #[tokio::test]
+    async fn applies_absolute_expiry() {
+        let s = stores();
+        let now = now_ms();
+        apply(
+            &s,
+            Operation::KVSetAt {
+                key: "k".into(),
+                value: b"v".to_vec(),
+                expires_at_ms: Some(now + 60_000),
+            },
+        )
+        .await;
+        assert!(matches!(s.kv.ttl("k").await, Ok(Some(t)) if (55..=60).contains(&t)));
+        apply(
+            &s,
+            Operation::KVExpireAt {
+                key: "k".into(),
+                expires_at_ms: now + 20_000,
+            },
+        )
+        .await;
+        assert!(matches!(s.kv.ttl("k").await, Ok(Some(t)) if (15..=20).contains(&t)));
+        apply(
+            &s,
+            Operation::KVExpireAt {
+                key: "k".into(),
+                expires_at_ms: now - 1,
+            },
+        )
+        .await;
+        assert!(!s.kv.exists("k").await.unwrap());
+
+        s.kv.set("p", b"old".to_vec(), None).await.unwrap();
+        apply(
+            &s,
+            Operation::KVSetAt {
+                key: "p".into(),
+                value: b"new".to_vec(),
+                expires_at_ms: Some(now - 1),
+            },
+        )
+        .await;
+        assert!(!s.kv.exists("p").await.unwrap());
+        apply(
+            &s,
+            Operation::KVSetAt {
+                key: "p".into(),
+                value: b"v".to_vec(),
+                expires_at_ms: None,
+            },
+        )
+        .await;
+        assert_eq!(s.kv.ttl("p").await.unwrap(), None);
+
+        apply(
+            &s,
+            Operation::HllAddAt {
+                key: "h".into(),
+                elements: vec![b"a".to_vec()],
+                expires_at_ms: now + 30_000,
+            },
+        )
+        .await;
+        assert_eq!(s.hll.pfcount("h").unwrap(), 1);
+        apply(
+            &s,
+            Operation::HllAddAt {
+                key: "h".into(),
+                elements: vec![b"b".to_vec()],
+                expires_at_ms: now - 1_000,
+            },
+        )
+        .await;
+        assert!(s.hll.pfcount("h").is_err());
     }
 }

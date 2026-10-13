@@ -50,7 +50,7 @@ fn three_writes() -> Vec<CommittedWrite> {
         CommittedWrite::KvSet {
             key: "tk".into(),
             value: b"tv".to_vec(),
-            ttl: None,
+            expires_at_ms: None,
         },
         CommittedWrite::HashSet {
             key: "th".into(),
@@ -164,7 +164,7 @@ async fn transaction_larger_than_the_writer_buffer_survives_a_crash_after_ack() 
             .map(|(i, value)| CommittedWrite::KvSet {
                 key: format!("big{i}"),
                 value: value.clone(),
-                ttl: None,
+                expires_at_ms: None,
             })
             .collect();
 

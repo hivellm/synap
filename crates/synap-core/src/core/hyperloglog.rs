@@ -71,6 +71,23 @@ impl HyperLogLogValue {
             .unwrap_or(0)
     }
 
+    /// Absolute expiry in Unix milliseconds (`created_at + ttl_secs`), or
+    /// `None` without a TTL.
+    pub fn expires_at_ms(&self) -> Option<u64> {
+        self.ttl_secs
+            .map(|ttl| self.created_at.saturating_add(ttl).saturating_mul(1_000))
+    }
+
+    /// Make the HLL expire at the absolute Unix millisecond `expires_at_ms`
+    /// (whole seconds, the precision this type keeps). A deadline that has
+    /// already passed leaves the value expired.
+    pub fn set_expires_at_ms(&mut self, expires_at_ms: u64) {
+        let now = Self::current_timestamp();
+        self.created_at = now;
+        self.updated_at = now;
+        self.ttl_secs = Some((expires_at_ms / 1_000).saturating_sub(now));
+    }
+
     /// Check if HLL has expired
     pub fn is_expired(&self) -> bool {
         if let Some(ttl) = self.ttl_secs {
@@ -228,6 +245,17 @@ impl HyperLogLogStore {
 
     /// PFADD - Add element(s) to HyperLogLog
     pub fn pfadd(&self, key: &str, elements: Vec<Vec<u8>>, ttl_secs: Option<u64>) -> Result<usize> {
+        Ok(self.pfadd_with_expiry(key, elements, ttl_secs)?.0)
+    }
+
+    /// PFADD that also returns the absolute expiry (Unix ms) the HLL holds
+    /// afterwards, read under the same shard lock, so it can be persisted.
+    pub fn pfadd_with_expiry(
+        &self,
+        key: &str,
+        elements: Vec<Vec<u8>>,
+        ttl_secs: Option<u64>,
+    ) -> Result<(usize, Option<u64>)> {
         let shard = self.shard(key);
         let mut map = shard.write();
 
@@ -238,25 +266,77 @@ impl HyperLogLogStore {
             map.remove(key);
         }
 
-        let added = match map.entry(key.to_string()) {
+        let (added, expires_at_ms) = match map.entry(key.to_string()) {
             Entry::Occupied(mut entry) => {
                 let hll = entry.get_mut();
                 if let Some(ttl) = ttl_secs {
                     hll.set_ttl(Some(ttl));
                 }
-                hll.pfadd(elements)
+                (hll.pfadd(elements), hll.expires_at_ms())
             }
             Entry::Vacant(vacant) => {
                 let mut hll = HyperLogLogValue::new(ttl_secs);
                 let added = hll.pfadd(elements);
+                let expires_at_ms = hll.expires_at_ms();
                 vacant.insert(hll);
-                added
+                (added, expires_at_ms)
             }
         };
 
         self.stats.write().pfadd_count += 1;
 
+        Ok((added, expires_at_ms))
+    }
+
+    /// Replay a PFADD that left the HLL expiring at the absolute Unix
+    /// millisecond `expires_at_ms`. A deadline that has already passed removes
+    /// the key instead: the write happened, then the HLL expired.
+    pub fn pfadd_until(
+        &self,
+        key: &str,
+        elements: Vec<Vec<u8>>,
+        expires_at_ms: u64,
+    ) -> Result<usize> {
+        let shard = self.shard(key);
+        let mut map = shard.write();
+        if expires_at_ms / 1_000 <= HyperLogLogValue::current_timestamp() {
+            map.remove(key);
+            return Ok(0);
+        }
+        if map.get(key).is_some_and(HyperLogLogValue::is_expired) {
+            map.remove(key);
+        }
+        let hll = map
+            .entry(key.to_string())
+            .or_insert_with(|| HyperLogLogValue::new(None));
+        hll.set_expires_at_ms(expires_at_ms);
+        let added = hll.pfadd(elements);
+        self.stats.write().pfadd_count += 1;
         Ok(added)
+    }
+
+    /// Every live HLL, for snapshots. Each value keeps its own absolute
+    /// expiry (`created_at + ttl_secs`).
+    pub fn dump(&self) -> HashMap<String, HyperLogLogValue> {
+        let mut out = HashMap::new();
+        for shard in &self.shards {
+            let map = shard.read();
+            for (key, value) in map.iter() {
+                if !value.is_expired() {
+                    out.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        out
+    }
+
+    /// Restore one HLL from a snapshot, as stored (registers and absolute
+    /// expiry). A value whose expiry has passed is skipped.
+    pub fn restore(&self, key: String, value: HyperLogLogValue) {
+        if value.is_expired() {
+            return;
+        }
+        self.shard(&key).write().insert(key, value);
     }
 
     /// PFCOUNT - Estimate cardinality of HyperLogLog
@@ -690,5 +770,48 @@ mod tests {
         assert_eq!(stats_after.pfadd_count, 0);
         assert_eq!(stats_after.pfcount_count, 0);
         assert_eq!(stats_after.pfmerge_count, 0);
+    }
+
+    /// phase23: PFADD reports the absolute deadline it set, a replayed
+    /// deadline is applied as is (or removes the HLL once passed), and
+    /// dump/restore keep each value's own expiry, skipping expired ones.
+    #[test]
+    fn absolute_expiry_dump_and_restore() {
+        let store = HyperLogLogStore::new();
+        let now = HyperLogLogValue::current_timestamp();
+        let (_, deadline) = store
+            .pfadd_with_expiry("t", vec![b"a".to_vec()], Some(100))
+            .unwrap();
+        assert_eq!(deadline, Some((now + 100) * 1_000));
+        let (_, none) = store
+            .pfadd_with_expiry("p", vec![b"a".to_vec()], None)
+            .unwrap();
+        assert_eq!(none, None);
+
+        store
+            .pfadd_until("u", vec![b"a".to_vec(), b"b".to_vec()], (now + 60) * 1_000)
+            .unwrap();
+        assert_eq!(store.pfcount("u").unwrap(), 2);
+        let restored_deadline = store.dump()["u"].expires_at_ms().unwrap();
+        assert!(restored_deadline <= (now + 61) * 1_000 && restored_deadline >= (now + 59) * 1_000);
+
+        // A deadline already passed removes the key.
+        store
+            .pfadd_until("u", vec![b"c".to_vec()], (now - 1) * 1_000)
+            .unwrap();
+        assert!(store.pfcount("u").is_err());
+
+        let dump = store.dump();
+        assert_eq!(dump.len(), 2);
+        let other = HyperLogLogStore::new();
+        for (key, value) in dump {
+            other.restore(key, value);
+        }
+        let mut expired = HyperLogLogValue::new(Some(1));
+        expired.created_at = now - 10;
+        other.restore("old".into(), expired);
+        assert_eq!(other.pfcount("t").unwrap(), 1);
+        assert_eq!(other.dump()["t"].expires_at_ms(), deadline);
+        assert!(other.pfcount("old").is_err());
     }
 }

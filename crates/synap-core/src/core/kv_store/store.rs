@@ -311,6 +311,20 @@ impl KVStore {
         value: impl Into<Arc<[u8]>>,
         ttl_secs: Option<u64>,
     ) -> Result<()> {
+        self.set_returning_deadline(key, value, ttl_secs)
+            .await
+            .map(|_| ())
+    }
+
+    /// [`set`](Self::set) that also returns the absolute expiry (Unix ms) the
+    /// stored entry got, computed once inside the store, so a caller can
+    /// persist exactly the deadline the key holds.
+    pub async fn set_returning_deadline(
+        &self,
+        key: impl Into<String>,
+        value: impl Into<Arc<[u8]>>,
+        ttl_secs: Option<u64>,
+    ) -> Result<Option<u64>> {
         let key: String = key.into();
         // Isolate this write against an in-flight EXEC touching the same key
         // (audit M-010). EXEC calls `set_unlocked` while holding the lock itself.
@@ -320,6 +334,7 @@ impl KVStore {
 
     /// SET body without the per-key lock. Callers MUST already hold the key's
     /// lock (the public `set`, or `TransactionManager::exec` for its key set).
+    /// Returns the absolute expiry (Unix ms) of the stored entry.
     ///
     /// `value` accepts a `Vec<u8>` (converted once) or an `Arc<[u8]>` straight
     /// from the parser (zero-copy — phase13 parse-bulk-into-arc): the stored
@@ -329,7 +344,7 @@ impl KVStore {
         key: String,
         value: impl Into<Arc<[u8]>>,
         ttl_secs: Option<u64>,
-    ) -> Result<()> {
+    ) -> Result<Option<u64>> {
         let value: Arc<[u8]> = value.into();
         debug!("SET key={}, size={}, ttl={:?}", key, value.len(), ttl_secs);
 
@@ -337,6 +352,7 @@ impl KVStore {
         self.check_cluster_routing(&key)?;
 
         let stored = StoredValue::new(Arc::clone(&value), ttl_secs);
+        let expires_at_ms = stored.expires_at_ms();
         let entry_size = self.estimate_entry_size(&key, &stored);
 
         // Check memory limits against the shared cross-datatype budget (audit
@@ -419,7 +435,7 @@ impl KVStore {
             self.notify_watch("set", &k, Some(&value));
         }
 
-        Ok(())
+        Ok(expires_at_ms)
     }
 
     /// Set a value with full Redis-compatible options (NX / XX / GET / KEEPTTL / PX / PXAT).
@@ -1481,23 +1497,45 @@ impl KVStore {
 
     /// Set expiration time
     pub async fn expire(&self, key: &str, ttl_secs: u64) -> Result<bool> {
-        debug!("EXPIRE key={}, ttl={}", key, ttl_secs);
+        Ok(self
+            .expire_returning_deadline(key, ttl_secs)
+            .await?
+            .is_some())
+    }
 
+    /// EXPIRE that returns the absolute expiry (Unix ms) the key got, or
+    /// `None` when the key does not exist, so the deadline can be persisted
+    /// exactly as stored.
+    pub async fn expire_returning_deadline(&self, key: &str, ttl_secs: u64) -> Result<Option<u64>> {
+        debug!("EXPIRE key={}, ttl={}", key, ttl_secs);
+        Ok(self.expire_with(key, Expiry::Seconds(ttl_secs)))
+    }
+
+    /// Give an existing key an absolute expiry (Unix ms), like PEXPIREAT. Used
+    /// to replay a persisted deadline; returns whether the key existed.
+    pub async fn expire_at(&self, key: &str, expires_at_ms: u64) -> Result<bool> {
+        debug!("PEXPIREAT key={}, at={}", key, expires_at_ms);
+        Ok(self
+            .expire_with(key, Expiry::UnixMilliseconds(expires_at_ms))
+            .is_some())
+    }
+
+    /// Give an existing key the expiry `expiry`; returns its absolute deadline,
+    /// or `None` when the key does not exist.
+    fn expire_with(&self, key: &str, expiry: Expiry) -> Option<u64> {
         let shard = self.get_shard(key);
         let mut data = shard.data.write();
 
-        if let Some(value) = data.remove(key) {
-            // Convert to expiring variant or update existing
-            let new_value = StoredValue::new(value.data().to_vec(), Some(ttl_secs));
-            shard.track_ttl(&new_value, key);
-            data.insert(key.to_string(), new_value);
-            drop(data);
-            self.notify_keyspace(crate::core::EventClass::Generic, "expire", key);
-            self.notify_watch("expire", key, None);
-            Ok(true)
-        } else {
-            Ok(false)
-        }
+        let value = data.remove(key)?;
+        // Convert to expiring variant or update existing
+        let new_value = StoredValue::with_expiry(value.data().to_vec(), expiry);
+        let expires_at_ms = new_value.expires_at_ms();
+        shard.track_ttl(&new_value, key);
+        data.insert(key.to_string(), new_value);
+        drop(data);
+        self.notify_keyspace(crate::core::EventClass::Generic, "expire", key);
+        self.notify_watch("expire", key, None);
+        expires_at_ms
     }
 
     /// Remove expiration from key
@@ -1518,6 +1556,28 @@ impl KVStore {
         } else {
             Ok(false)
         }
+    }
+
+    /// Every live key with its shared value buffer and absolute expiry (Unix
+    /// ms, `None` = persistent), for snapshots and replication full sync.
+    ///
+    /// Values are `Arc<[u8]>` handles (a refcount bump, no copy), which keeps
+    /// the snapshot barrier short.
+    pub async fn dump_with_expiry(&self) -> Result<Vec<(String, Arc<[u8]>, Option<u64>)>> {
+        let mut dump = Vec::with_capacity(self.dbsize().await?);
+        for shard in self.shards.iter() {
+            let entries = {
+                let data = shard.data.read();
+                data.iter()
+            };
+            for (key, value) in entries {
+                if !value.is_expired() {
+                    let expires_at_ms = value.expires_at_ms();
+                    dump.push((key, value.data_arc(), expires_at_ms));
+                }
+            }
+        }
+        Ok(dump)
     }
 
     /// Dump all key-value pairs for persistence

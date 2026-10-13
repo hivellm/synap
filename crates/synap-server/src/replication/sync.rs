@@ -34,22 +34,21 @@ pub async fn create_snapshot_with_streams(
 ) -> Result<Vec<u8>, String> {
     info!("Creating snapshot at offset {}", offset);
 
-    // Get all keys
-    let keys = kv_store.keys().await.map_err(|e| e.to_string())?;
-    let total_keys = keys.len();
+    // Every live key with its absolute expiry (Unix ms), so the replica keeps
+    // the master's deadline instead of restarting the TTL on arrival.
+    let entries = kv_store
+        .dump_with_expiry()
+        .await
+        .map_err(|e| e.to_string())?;
+    let total_keys = entries.len();
 
-    // Serialize all key-value pairs
-    let mut operations = Vec::new();
-    for key in keys {
-        if let Ok(Some(value)) = kv_store.get(&key).await {
-            // Get TTL for the key (returns remaining seconds)
-            let ttl = kv_store.ttl(&key).await.ok().flatten();
-            operations.push(Operation::KVSet {
-                key: key.clone(),
-                value,
-                ttl,
-            });
-        }
+    let mut operations = Vec::with_capacity(total_keys);
+    for (key, value, expires_at_ms) in entries {
+        operations.push(Operation::KVSetAt {
+            key,
+            value: value.to_vec(),
+            expires_at_ms,
+        });
     }
 
     // Add stream operations
@@ -146,6 +145,15 @@ pub async fn apply_snapshot_with_streams(
         match op {
             Operation::KVSet { key, value, ttl } => {
                 let _ = kv_store.set(key, value, ttl).await; // S-12: move owned key
+            }
+            // Images from phase23 masters carry absolute expiry; a key whose
+            // deadline has passed in transit is not created.
+            op @ Operation::KVSetAt { .. } => {
+                let _ = crate::persistence::apply::apply_operation(
+                    op,
+                    crate::persistence::StoreRefs::kv_only(kv_store),
+                )
+                .await;
             }
             Operation::StreamPublish {
                 room,
@@ -272,5 +280,46 @@ mod tests {
             "TTL should be preserved, got: {}",
             remaining
         );
+    }
+
+    /// phase23: the full-sync image carries each key's absolute deadline, so
+    /// a replica keeps the master's deadline and does not create a key whose
+    /// deadline passed while the image was in transit.
+    #[tokio::test]
+    async fn full_sync_carries_absolute_expiry() {
+        use crate::core::{Expiry, SetOptions};
+        let master = KVStore::new(KVConfig::default());
+        let deadline = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+            + 50_000;
+        master
+            .set_with_opts(
+                "long",
+                b"v".to_vec(),
+                Some(Expiry::UnixMilliseconds(deadline)),
+                SetOptions::default(),
+            )
+            .await
+            .unwrap();
+        master
+            .set_with_opts(
+                "short",
+                b"v".to_vec(),
+                Some(Expiry::Milliseconds(300)),
+                SetOptions::default(),
+            )
+            .await
+            .unwrap();
+        let image = create_snapshot(&master, 7).await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+
+        let replica = KVStore::new(KVConfig::default());
+        assert_eq!(apply_snapshot(&replica, &image).await.unwrap(), 7);
+        let dump = replica.dump_with_expiry().await.unwrap();
+        assert_eq!(dump.len(), 1, "the expired key was created on the replica");
+        assert_eq!(dump[0].0, "long");
+        assert_eq!(dump[0].2, Some(deadline));
     }
 }

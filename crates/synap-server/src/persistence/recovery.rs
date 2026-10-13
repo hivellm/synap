@@ -8,7 +8,8 @@ use crate::core::queue::QueueManager;
 use crate::core::set::SetStore;
 use crate::core::sorted_set::{SortedSetStore, ZAddOptions};
 use crate::core::types::KVConfig;
-use crate::core::{BitmapStore, HyperLogLogStore};
+use crate::core::{BitmapStore, Expiry, HyperLogLogStore, SetOptions};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::info;
 
 /// Every store rebuilt by [`recover_all`], plus the WAL offset replay ended at.
@@ -56,8 +57,11 @@ pub async fn recover(
 
 /// Recover every store from the latest snapshot plus the WAL written after it.
 ///
-/// HyperLogLog and bitmap data have no snapshot section yet (the v3 format
-/// predates their WAL records), so they are rebuilt from the WAL alone.
+/// Expiry is absolute (phase23): snapshot keys keep the deadline they had
+/// (v4 files; v3/v2 keys load without expiry), WAL records written before
+/// phase23 have their relative TTL anchored at the entry's own timestamp, and
+/// any key whose deadline has already passed is left out. HyperLogLog and
+/// bitmap data come from the v4 snapshot sections plus the WAL.
 pub async fn recover_all(
     config: &PersistenceConfig,
     kv_config: KVConfig,
@@ -82,6 +86,8 @@ pub async fn recover_all(
 
     let snapshot_mgr = SnapshotManager::new(config.snapshot.clone());
     let wal = WriteAheadLog::open(config.wal.clone()).await?;
+    let hyperloglog_store = HyperLogLogStore::new();
+    let bitmap_store = BitmapStore::new();
 
     // Step 1: Load latest snapshot (if exists)
     let (kv_store, hash_store, list_store, set_store, sorted_set_store, queue_manager, last_offset) =
@@ -91,10 +97,42 @@ pub async fn recover_all(
                 path, snapshot.wal_offset
             );
 
-            // Restore KV store
+            // Restore KV store, each key with its absolute expiry; keys that
+            // expired while the server was down are left out.
             let kv = KVStore::new(kv_config);
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let mut expired = 0usize;
             for (key, value) in snapshot.kv_data {
-                kv.set(&key, value, None).await?;
+                match snapshot.kv_expires_at_ms.get(&key) {
+                    None => kv.set(&key, value, None).await?,
+                    Some(&deadline) if deadline <= now_ms => expired += 1,
+                    Some(&deadline) => {
+                        kv.set_with_opts(
+                            &key,
+                            value,
+                            Some(Expiry::UnixMilliseconds(deadline)),
+                            SetOptions::default(),
+                        )
+                        .await?;
+                    }
+                }
+            }
+            if expired > 0 {
+                info!(
+                    "Skipped {} snapshot keys that expired before restart",
+                    expired
+                );
+            }
+
+            // Restore HyperLogLog and bitmap values (v4); expired ones are skipped.
+            for (key, value) in snapshot.hyperloglog_data {
+                hyperloglog_store.restore(key, value);
+            }
+            for (key, value) in snapshot.bitmap_data {
+                bitmap_store.restore(key, value);
             }
 
             // Restore Queue manager
@@ -177,12 +215,12 @@ pub async fn recover_all(
     info!("Replaying WAL from offset {}...", last_offset);
     let entries = wal.replay(last_offset).await?;
     let mut replayed = 0;
-    let hyperloglog_store = HyperLogLogStore::new();
-    let bitmap_store = BitmapStore::new();
 
     for entry in entries {
+        // Records written before phase23 carry TTLs relative to when they were
+        // written; anchor them at the entry's timestamp.
         crate::persistence::apply::apply_operation(
-            entry.operation,
+            entry.operation.with_absolute_expiry(entry.timestamp),
             crate::persistence::apply::StoreRefs {
                 kv_store: &kv_store,
                 hash_store: hash_store.as_ref(),

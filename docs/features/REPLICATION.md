@@ -269,6 +269,16 @@ replication:
      push) are not applied twice.
    - A replica joining a master mid-write converges to the full dataset.
 
+7. **Expiry and write order** (1.4.0)
+   - Streamed records and the full-sync image carry each key's absolute
+     expiry (Unix ms: `KVSetAt`, `KVExpireAt`, `HllAddAt`), so a replica keeps
+     the master's deadlines instead of restarting TTLs on arrival, and does not
+     create a key whose deadline passed in transit. Deadlines are compared
+     with the replica's own clock, so keep master and replica clocks in sync.
+   - Writes to one key are queued for replication in the order the master
+     applied them in memory, so resulting-value records (APPEND, INCR,
+     SETRANGE) end on the master's value.
+
 ### ❌ What Synap Does NOT Guarantee
 
 1. **Strong Consistency**

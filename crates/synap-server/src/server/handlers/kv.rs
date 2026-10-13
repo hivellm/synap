@@ -1103,21 +1103,26 @@ pub async fn transaction_exec(
     let client_id = "rest_client";
 
     debug!("REST EXEC client_id={}", client_id);
-    match state.transaction_manager.exec(client_id).await? {
-        Some((results, writes)) => {
-            // Persist + replicate the whole transaction as one atomic unit
-            // (audit M-010). A commit that could not be logged is not durable,
-            // so the client gets an error instead of a false success.
-            if let Some(ref persistence) = state.persistence
-                && let Err(e) = persistence.log_transaction(&writes).await
-            {
-                error!("Failed to log EXEC transaction to WAL: {}", e);
-                return Err(SynapError::InternalError(
-                    crate::persistence::layer::exec_not_durable_message(&e),
-                ));
-            }
-            Ok(Json(ExecResponse::Success { results }))
+    // Persist + replicate the whole transaction as one atomic unit (audit
+    // M-010), ordered against plain writers and snapshots (phase23). A commit
+    // that could not be logged is not durable, so the client gets an error
+    // instead of a false success.
+    let outcome = match crate::persistence::durable::exec(
+        state.persistence.as_deref(),
+        &state.transaction_manager,
+        client_id,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(crate::persistence::durable::ExecError::Failed(e)) => return Err(e),
+        Err(e @ crate::persistence::durable::ExecError::NotDurable(_)) => {
+            error!("Failed to log EXEC transaction to WAL: {}", e);
+            return Err(SynapError::InternalError(e.to_string()));
         }
+    };
+    match outcome {
+        Some((results, _writes)) => Ok(Json(ExecResponse::Success { results })),
         None => Ok(Json(ExecResponse::Aborted { aborted: true })),
     }
 }

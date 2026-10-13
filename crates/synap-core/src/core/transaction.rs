@@ -18,7 +18,9 @@ use tracing::debug;
 
 /// The per-command JSON results and the durable writes produced by a committed
 /// `EXEC`; `None` when the transaction aborted (a `WATCH`ed key changed).
-type ExecOutcome = Option<(Vec<serde_json::Value>, Vec<CommittedWrite>)>;
+/// What EXEC returns: `Some((results, writes))` when it committed, `None`
+/// when a watched key changed and the transaction was aborted.
+pub type ExecOutcome = Option<(Vec<serde_json::Value>, Vec<CommittedWrite>)>;
 
 /// Command to be executed in a transaction
 #[derive(Debug, Clone)]
@@ -88,10 +90,12 @@ pub enum TransactionCommand {
 /// from the master (audit M-010).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommittedWrite {
+    /// The key now holds `value`, expiring at `expires_at_ms` (absolute Unix
+    /// milliseconds, the deadline the store stored; `None` = persistent).
     KvSet {
         key: String,
         value: Vec<u8>,
-        ttl: Option<u64>,
+        expires_at_ms: Option<u64>,
     },
     KvDel {
         keys: Vec<String>,
@@ -397,16 +401,26 @@ impl TransactionManager {
     /// durable effects the caller must persist and replicate (audit M-010) — or
     /// `Ok(None)` if watched keys changed (the transaction is aborted).
     pub async fn exec(&self, client_id: &str) -> Result<ExecOutcome> {
+        let transaction = self.take_transaction(client_id)?;
+        self.exec_transaction(transaction).await
+    }
+
+    /// First half of [`exec`](Self::exec): remove the client's transaction so
+    /// nothing more can be queued on it. A caller that must hold its own locks
+    /// over the transaction's keys (the persistence layer orders WAL records
+    /// that way) reads [`Transaction::get_keys_to_lock`] here, then runs
+    /// [`exec_transaction`](Self::exec_transaction).
+    pub fn take_transaction(&self, client_id: &str) -> Result<Transaction> {
         debug!("EXEC client_id={}", client_id);
+        let mut transactions = self.transactions.write();
+        transactions
+            .remove(client_id)
+            .ok_or_else(|| SynapError::InvalidRequest("No transaction in progress".to_string()))
+    }
 
-        // Remove transaction from map first (atomic)
-        let transaction = {
-            let mut transactions = self.transactions.write();
-            transactions.remove(client_id).ok_or_else(|| {
-                SynapError::InvalidRequest("No transaction in progress".to_string())
-            })?
-        };
-
+    /// Second half of [`exec`](Self::exec): check WATCH and run a transaction
+    /// taken with [`take_transaction`](Self::take_transaction).
+    pub async fn exec_transaction(&self, transaction: Transaction) -> Result<ExecOutcome> {
         if let Some(reason) = &transaction.aborted {
             debug!("EXEC refused: transaction aborted ({})", reason);
             return Err(SynapError::InvalidRequest(format!(
@@ -510,13 +524,14 @@ impl TransactionManager {
                 TransactionCommand::KVSet { key, value, ttl } => {
                     // `*_unlocked`: EXEC already holds the per-key locks for the
                     // whole key set, so re-locking here would deadlock.
-                    self.kv_store
+                    let expires_at_ms = self
+                        .kv_store
                         .set_unlocked(key.clone(), value.clone(), *ttl)
                         .await?;
                     writes.push(CommittedWrite::KvSet {
                         key: key.clone(),
                         value: value.clone(),
-                        ttl: *ttl,
+                        expires_at_ms,
                     });
                     serde_json::json!({"ok": true})
                 }
@@ -541,7 +556,7 @@ impl TransactionManager {
                     writes.push(CommittedWrite::KvSet {
                         key: key.clone(),
                         value: value.to_string().into_bytes(),
-                        ttl: crate::core::types::ttl_secs_from_deadline(expires_at_ms),
+                        expires_at_ms,
                     });
                     serde_json::json!({"value": value})
                 }
@@ -978,13 +993,13 @@ mod tests {
             CommittedWrite::KvSet {
                 key: "k1".into(),
                 value: b"v1".to_vec(),
-                ttl: None,
+                expires_at_ms: None,
             },
             // INCR resolved to the resulting SET.
             CommittedWrite::KvSet {
                 key: "counter".into(),
                 value: b"5".to_vec(),
-                ttl: None,
+                expires_at_ms: None,
             },
             CommittedWrite::KvDel {
                 keys: vec!["k1".into()],

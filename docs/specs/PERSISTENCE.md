@@ -604,6 +604,66 @@ bincode variant indices of every older operation, and therefore 1.3.x frames,
 are unchanged. Format version 2 files may contain it; 1.3.x binaries cannot
 read them (no downgrade).
 
+### Snapshot Consistency
+
+A snapshot is paired exactly with its WAL position (phase23). Every
+persisted write, on every transport, goes through `persistence::durable`,
+which locks the ordering stripes of the keys it touches (1024 striped
+`tokio::sync::Mutex`es, `persistence/order.rs`), applies the write, queues its
+record for replication and the WAL, and only then releases the stripes;
+durability (group commit, fsync) is awaited afterwards. A snapshot locks
+every stripe, places a mark in the WAL writer queue and copies the stores in
+memory, releases the stripes, and serializes the copy outside that barrier.
+The mark resolves to the offset of the first record queued after it: the
+snapshot's cutoff. Every write is therefore either in the image (queued
+before the mark, not replayed) or after the cutoff (not in the image,
+replayed) — never both, so recovery applies non-idempotent writes such as
+LPUSH and HINCRBY exactly once, and multi-key commands and MULTI/EXEC
+transactions land wholly on one side.
+
+The same stripes order writes to one key: their records reach the WAL and
+the replication stream in the order memory applied them, so replaying
+resulting-value records (APPEND, INCR, SETRANGE) ends on the value the key
+held. Blocking pops hold the stripes only while they pop, not while they
+wait.
+
+Writers pause while the snapshot copies the stores (measured: ~58 ms for
+160,000 KV keys plus 10,000 ten-field hashes in a release build; KV values
+are shared buffers, collections are cloned). Serialization and fsync happen
+after the barrier is released. With persistence and replication both
+disabled no stripe is taken.
+
+### Expiry Across Restarts
+
+Expiry is stored as an absolute Unix-millisecond deadline everywhere it is
+persisted:
+
+- Snapshot v4 stores each KV key's deadline (`0` = persistent) and the
+  HyperLogLog and bitmap values, which carry `created_at + ttl_secs`.
+- WAL records that set or change expiry carry the deadline the store stored:
+  `KVSetAt { key, value, expires_at_ms }` (SET EX/PX/EXAT/PXAT/KEEPTTL, and
+  INCR/APPEND/SETRANGE on an expiring key), `KVExpireAt { key, expires_at_ms }`
+  (EXPIRE) and `HllAddAt { key, elements, expires_at_ms }` (PFADD with a TTL).
+  Writes that leave no expiry keep `KVSet { ttl: None }`, `KVExpire { ttl:
+  None }` (PERSIST) and `HllAdd { ttl: None }`.
+- Records written before 1.4.0 hold TTLs relative to when they were written;
+  recovery anchors them at the WAL entry's timestamp (whole seconds), so a
+  1.3.2 record setting `k` with a 100 s TTL at time T leaves `k` at most 60 s
+  to live when recovered at T + 40 s.
+
+Recovery leaves out every key whose deadline has passed (a write whose
+deadline is already past deletes the key), so keys that expired while the
+server was down do not come back, and keys that had time left keep exactly
+the time they had. Replicas receive the same deadlines, in streamed records
+and in the full-sync image (`KVSetAt`).
+
+### Downgrade
+
+1.4.0 reads v2 and v3 snapshots and 1.3.x WALs. 1.3.x cannot read a v4
+snapshot (unknown magic) nor a version-2 WAL, so downgrading after 1.4.0 has
+written either is not supported; keep a copy of the 1.3.x data directory
+before upgrading if a rollback may be needed.
+
 ### WAL Write Failures
 
 A failed write, flush or fsync fails every acknowledgement in its group commit
@@ -711,19 +771,15 @@ systemctl restart synap
 
 ### Snapshot Binary Format
 
+Streamed sections ending in a CRC64 digest; the current layout is v4 (magic
+`SYNAP004`), described byte by byte in
+[`docs/internals/persistence-snapshot-format.md`](../internals/persistence-snapshot-format.md):
+
 ```
-┌────────────────────────────────────┐
-│  Checksum (u64, 8 bytes)           │
-├────────────────────────────────────┤
-│  Compressed Data (zstd)            │
-│  └─ Serialized Snapshot (bincode)  │
-│      ├─ version (u32)              │
-│      ├─ timestamp (u64)            │
-│      ├─ wal_offset (u64)           │
-│      ├─ kv_data (HashMap)          │
-│      ├─ queues (HashMap)           │
-│      └─ checksum (u64)             │
-└────────────────────────────────────┘
+magic + version + timestamp + wal_offset (the cutoff)
+KV (key, value, absolute expiry ms) · queues · streams
+hashes · lists · sets · sorted sets · HyperLogLogs · bitmaps
+CRC64
 ```
 
 ## Error Handling

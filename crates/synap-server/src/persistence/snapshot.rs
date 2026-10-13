@@ -1,18 +1,66 @@
+use super::apply::StoreRefs;
 use super::types::{PersistenceError, Result, Snapshot, SnapshotConfig, StreamEvent};
 use crate::core::queue::QueueMessage;
+use crate::core::{BitmapValue, HyperLogLogValue, ListValue, SetValue, StreamManager};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::SystemTime;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tracing::{debug, info, warn};
 
-/// v2 = kv + queue + stream. v3 (current) also persists hash/list/set/sorted-set.
-const SNAPSHOT_VERSION: u8 = 3;
-const SNAPSHOT_MAGIC: &[u8; 8] = b"SYNAP003";
+/// v2 = kv + queue + stream. v3 adds hash/list/set/sorted-set. v4 (current)
+/// adds each KV key's absolute expiry and the HyperLogLog and bitmap sections.
+const SNAPSHOT_VERSION: u8 = 4;
+const SNAPSHOT_MAGIC: &[u8; 8] = b"SYNAP004";
+const SNAPSHOT_MAGIC_V3: &[u8; 8] = b"SYNAP003";
 const SNAPSHOT_MAGIC_V2: &[u8; 8] = b"SYNAP002";
+
+/// In-memory copy of every WAL-backed store, taken while the snapshot barrier
+/// holds (see [`super::order`]) and serialized after it is released.
+///
+/// KV values are shared `Arc<[u8]>` buffers, so capturing them is a refcount
+/// bump per key; the collections are cloned. Streams are not part of the
+/// image: they are not in the WAL, so they need no barrier and are read when
+/// the file is written.
+pub struct SnapshotImage {
+    kv: Vec<(String, Arc<[u8]>, Option<u64>)>,
+    queues: HashMap<String, Vec<QueueMessage>>,
+    hashes: HashMap<String, HashMap<String, Vec<u8>>>,
+    lists: HashMap<String, ListValue>,
+    sets: HashMap<String, SetValue>,
+    sorted_sets: HashMap<String, Vec<(Vec<u8>, f64)>>,
+    hyperloglogs: HashMap<String, HyperLogLogValue>,
+    bitmaps: HashMap<String, BitmapValue>,
+}
+
+impl SnapshotImage {
+    /// Copy every store present in `stores` (absent ones are empty).
+    pub async fn capture(stores: StoreRefs<'_>) -> Result<Self> {
+        Ok(Self {
+            kv: stores.kv_store.dump_with_expiry().await?,
+            queues: match stores.queue_manager {
+                Some(qm) => qm.dump().await?,
+                None => HashMap::new(),
+            },
+            hashes: stores.hash_store.map(|s| s.dump()).unwrap_or_default(),
+            lists: stores.list_store.map(|s| s.dump()).unwrap_or_default(),
+            sets: stores.set_store.map(|s| s.dump()).unwrap_or_default(),
+            sorted_sets: stores
+                .sorted_set_store
+                .map(|s| s.dump())
+                .unwrap_or_default(),
+            hyperloglogs: stores
+                .hyperloglog_store
+                .map(|s| s.dump())
+                .unwrap_or_default(),
+            bitmaps: stores.bitmap_store.map(|s| s.dump()).unwrap_or_default(),
+        })
+    }
+}
 
 /// Snapshot manager for periodic state dumps with streaming support
 pub struct SnapshotManager {
@@ -25,22 +73,36 @@ impl SnapshotManager {
         Self { config }
     }
 
-    /// Create a snapshot using streaming serialization (O(1) memory usage)
-    pub async fn create_snapshot(
+    /// Capture the stores and write them as a snapshot whose WAL replay starts
+    /// at `wal_offset`.
+    ///
+    /// The capture is not synchronized with writers; the persistence layer's
+    /// [`PersistenceLayer::snapshot`](super::PersistenceLayer::snapshot) pairs
+    /// the image with its WAL cutoff under the write barrier instead.
+    pub async fn create_snapshot(&self, stores: StoreRefs<'_>, wal_offset: u64) -> Result<PathBuf> {
+        let image = SnapshotImage::capture(stores).await?;
+        self.write_image(image, stores.stream_manager, wal_offset)
+            .await
+    }
+
+    /// Serialize `image` (plus the current stream events) as a v4 snapshot
+    /// whose WAL replay starts at `wal_offset`, fsync it and prune old files.
+    pub async fn write_image(
         &self,
-        stores: super::apply::StoreRefs<'_>,
+        image: SnapshotImage,
+        stream_manager: Option<&StreamManager>,
         wal_offset: u64,
     ) -> Result<PathBuf> {
-        let super::apply::StoreRefs {
-            kv_store,
-            hash_store,
-            list_store,
-            set_store,
-            sorted_set_store,
-            queue_manager,
-            stream_manager,
-            ..
-        } = stores;
+        let SnapshotImage {
+            kv,
+            queues,
+            hashes,
+            lists,
+            sets,
+            sorted_sets,
+            hyperloglogs,
+            bitmaps,
+        } = image;
         // Create directory if it doesn't exist
         tokio::fs::create_dir_all(&self.config.directory).await?;
 
@@ -71,17 +133,14 @@ impl SnapshotManager {
         writer.write_u64(wal_offset).await?;
         checksum.update(&wal_offset.to_le_bytes());
 
-        // Stream KV data
-        let kv_data = kv_store.dump().await?;
-        let kv_count = kv_data.len() as u64;
-
+        // KV section: key, value and absolute expiry (Unix ms, 0 = none).
+        let kv_count = kv.len() as u64;
         writer.write_u64(kv_count).await?;
         checksum.update(&kv_count.to_le_bytes());
 
         debug!("Streaming {} KV entries", kv_count);
 
-        for (key, value) in kv_data {
-            // Write key length + key + value length + value
+        for (key, value, expires_at_ms) in kv {
             let key_bytes = key.as_bytes();
             let key_len = key_bytes.len() as u32;
             let value_len = value.len() as u32;
@@ -97,22 +156,19 @@ impl SnapshotManager {
 
             writer.write_all(&value).await?;
             checksum.update(&value);
+
+            let expiry = expires_at_ms.unwrap_or(0);
+            writer.write_u64(expiry).await?;
+            checksum.update(&expiry.to_le_bytes());
         }
 
-        // Stream queue data (if available)
-        let queue_data = if let Some(qm) = queue_manager {
-            qm.dump().await?
-        } else {
-            std::collections::HashMap::new()
-        };
-
-        let queue_count = queue_data.len() as u64;
+        let queue_count = queues.len() as u64;
         writer.write_u64(queue_count).await?;
         checksum.update(&queue_count.to_le_bytes());
 
         debug!("Streaming {} queue entries", queue_count);
 
-        for (queue_name, messages) in queue_data {
+        for (queue_name, messages) in queues {
             // Write queue name
             let name_bytes = queue_name.as_bytes();
             let name_len = name_bytes.len() as u32;
@@ -142,7 +198,8 @@ impl SnapshotManager {
             }
         }
 
-        // Stream stream data (if available)
+        // Streams are not in the WAL, so they are read here, outside the
+        // snapshot barrier.
         let stream_data = if let Some(sm) = stream_manager {
             sm.get_all_events().await
         } else {
@@ -195,34 +252,22 @@ impl SnapshotManager {
             }
         }
 
-        // Stream hash / list / set / sorted-set data (v3+).
-        let hash_data = match hash_store {
-            Some(hs) => hs.dump(),
-            None => HashMap::new(),
-        };
-        debug!("Streaming {} hashes", hash_data.len());
-        write_map_section(&mut writer, &mut checksum, &hash_data).await?;
+        // Hash / list / set / sorted-set sections (v3+).
+        debug!("Streaming {} hashes", hashes.len());
+        write_map_section(&mut writer, &mut checksum, &hashes).await?;
+        debug!("Streaming {} lists", lists.len());
+        write_map_section(&mut writer, &mut checksum, &lists).await?;
+        debug!("Streaming {} sets", sets.len());
+        write_map_section(&mut writer, &mut checksum, &sets).await?;
+        debug!("Streaming {} sorted sets", sorted_sets.len());
+        write_map_section(&mut writer, &mut checksum, &sorted_sets).await?;
 
-        let list_data = match list_store {
-            Some(ls) => ls.dump(),
-            None => HashMap::new(),
-        };
-        debug!("Streaming {} lists", list_data.len());
-        write_map_section(&mut writer, &mut checksum, &list_data).await?;
-
-        let set_data = match set_store {
-            Some(ss) => ss.dump(),
-            None => HashMap::new(),
-        };
-        debug!("Streaming {} sets", set_data.len());
-        write_map_section(&mut writer, &mut checksum, &set_data).await?;
-
-        let sorted_set_data = match sorted_set_store {
-            Some(zs) => zs.dump(),
-            None => HashMap::new(),
-        };
-        debug!("Streaming {} sorted sets", sorted_set_data.len());
-        write_map_section(&mut writer, &mut checksum, &sorted_set_data).await?;
+        // HyperLogLog / bitmap sections (v4+). Each value carries its own
+        // absolute expiry (`created_at + ttl_secs`).
+        debug!("Streaming {} HyperLogLogs", hyperloglogs.len());
+        write_map_section(&mut writer, &mut checksum, &hyperloglogs).await?;
+        debug!("Streaming {} bitmaps", bitmaps.len());
+        write_map_section(&mut writer, &mut checksum, &bitmaps).await?;
 
         // Write checksum at end
         let final_checksum = checksum.finalize();
@@ -268,25 +313,29 @@ impl SnapshotManager {
         reader.read_exact(&mut magic).await?;
         checksum.update(&magic);
 
-        // v3 (SNAPSHOT_MAGIC) carries the hash/list/set/sorted-set sections;
-        // v2 (SNAPSHOT_MAGIC_V2) does not. Any other magic is unreadable.
-        let has_collections = if &magic == SNAPSHOT_MAGIC {
-            true
+        // The magic names the format: v4 (current), v3 (no KV expiry, no
+        // HyperLogLog/bitmap sections) or v2 (no collection sections either).
+        let expected_version: u8 = if &magic == SNAPSHOT_MAGIC {
+            SNAPSHOT_VERSION
+        } else if &magic == SNAPSHOT_MAGIC_V3 {
+            3
         } else if &magic == SNAPSHOT_MAGIC_V2 {
-            false
+            2
         } else {
             return Err(PersistenceError::SnapshotCorrupted(latest.clone()));
         };
 
         let version = reader.read_u8().await?;
         checksum.update(&[version]);
-        if version != 2 && version != SNAPSHOT_VERSION {
+        if version != expected_version {
             warn!(
-                "Unsupported snapshot version: expected 2 or {}, got {}",
-                SNAPSHOT_VERSION, version
+                "Snapshot version byte {} does not match its magic (version {})",
+                version, expected_version
             );
             return Err(PersistenceError::SnapshotCorrupted(latest.clone()));
         }
+        let has_collections = version >= 3;
+        let has_expiry_and_hll_bitmap = version >= 4;
 
         // Read metadata
         let timestamp = reader.read_u64().await?;
@@ -298,6 +347,7 @@ impl SnapshotManager {
         let kv_count = reader.read_u64().await?;
         checksum.update(&kv_count.to_le_bytes());
         let mut kv_data = HashMap::new();
+        let mut kv_expires_at_ms = HashMap::new();
 
         for _ in 0..kv_count {
             let key_len = reader.read_u32().await?;
@@ -313,6 +363,14 @@ impl SnapshotManager {
             let mut value = vec![0u8; value_len as usize];
             reader.read_exact(&mut value).await?;
             checksum.update(&value);
+
+            if has_expiry_and_hll_bitmap {
+                let expires_at_ms = reader.read_u64().await?;
+                checksum.update(&expires_at_ms.to_le_bytes());
+                if expires_at_ms != 0 {
+                    kv_expires_at_ms.insert(key.clone(), expires_at_ms);
+                }
+            }
 
             kv_data.insert(key, value);
         }
@@ -400,6 +458,15 @@ impl SnapshotManager {
             )
         };
 
+        // Read HyperLogLog / bitmap sections (v4+).
+        let (hyperloglog_data, bitmap_data) = if has_expiry_and_hll_bitmap {
+            let hyperloglog_data = read_map_section(&mut reader, &mut checksum).await?;
+            let bitmap_data = read_map_section(&mut reader, &mut checksum).await?;
+            (hyperloglog_data, bitmap_data)
+        } else {
+            (HashMap::new(), HashMap::new())
+        };
+
         // Verify integrity: the trailing CRC64 must match the running digest.
         let stored_checksum = reader.read_u64().await?;
         let computed_checksum = checksum.finalize();
@@ -431,6 +498,9 @@ impl SnapshotManager {
             set_data,
             sorted_set_data,
             hash_data,
+            kv_expires_at_ms,
+            hyperloglog_data,
+            bitmap_data,
         };
 
         Ok(Some((snapshot, latest.clone())))
@@ -602,5 +672,130 @@ impl CRC64 {
 
     fn finalize(self) -> u64 {
         !self.crc
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::{BitmapStore, Expiry, HyperLogLogStore, KVConfig, KVStore, SetOptions};
+
+    /// Hand-written snapshot bytes: numbers are streamed big-endian and fed
+    /// to the CRC64 little-endian, as the format specifies.
+    struct Fixture {
+        bytes: Vec<u8>,
+        crc: CRC64,
+    }
+
+    impl Default for Fixture {
+        fn default() -> Self {
+            Self {
+                bytes: Vec::new(),
+                crc: CRC64::new(),
+            }
+        }
+    }
+
+    impl Fixture {
+        fn raw(&mut self, data: &[u8]) {
+            self.bytes.extend_from_slice(data);
+            self.crc.update(data);
+        }
+
+        fn u64(&mut self, v: u64) {
+            self.bytes.extend_from_slice(&v.to_be_bytes());
+            self.crc.update(&v.to_le_bytes());
+        }
+
+        fn u32(&mut self, v: u32) {
+            self.bytes.extend_from_slice(&v.to_be_bytes());
+            self.crc.update(&v.to_le_bytes());
+        }
+    }
+
+    fn manager(name: &str) -> SnapshotManager {
+        let dir = format!("./target/snapshot_format_{name}");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        SnapshotManager::new(SnapshotConfig {
+            directory: dir.into(),
+            ..SnapshotConfig::default()
+        })
+    }
+
+    /// A v3 file, written byte by byte here rather than by the v4 writer,
+    /// still loads: its keys come back without expiry and the v4-only
+    /// sections are empty.
+    #[tokio::test]
+    async fn v3_snapshot_still_loads() {
+        let mgr = manager("v3");
+        let mut f = Fixture::default();
+        f.raw(b"SYNAP003");
+        f.raw(&[3]);
+        f.u64(1_700_000_000); // timestamp
+        f.u64(9); // wal_offset
+        f.u64(1); // kv count
+        f.u32(1);
+        f.raw(b"k");
+        f.u32(1);
+        f.raw(b"v");
+        // queue, stream, hash, list, set and sorted-set sections: all empty.
+        for _ in 0..6 {
+            f.u64(0);
+        }
+        let mut bytes = f.bytes;
+        bytes.extend_from_slice(&f.crc.finalize().to_be_bytes());
+        std::fs::write(
+            mgr.config.directory.join("snapshot-v3-1700000000.bin"),
+            bytes,
+        )
+        .unwrap();
+
+        let (snapshot, _) = mgr.load_latest().await.unwrap().unwrap();
+        assert_eq!(snapshot.version, 3);
+        assert_eq!(snapshot.wal_offset, 9);
+        assert_eq!(snapshot.kv_data["k"], b"v".to_vec());
+        assert!(snapshot.kv_expires_at_ms.is_empty());
+        assert!(snapshot.hyperloglog_data.is_empty());
+        assert!(snapshot.bitmap_data.is_empty());
+    }
+
+    /// v4 keeps every KV key's absolute deadline (persistent keys have none)
+    /// and the HyperLogLog and bitmap values.
+    #[tokio::test]
+    async fn v4_snapshot_keeps_expiry_hyperloglog_and_bitmaps() {
+        let mgr = manager("v4");
+        let kv = KVStore::new(KVConfig::default());
+        let deadline = 4_102_444_800_000; // 2100-01-01
+        kv.set_with_opts(
+            "t",
+            b"v".to_vec(),
+            Some(Expiry::UnixMilliseconds(deadline)),
+            SetOptions::default(),
+        )
+        .await
+        .unwrap();
+        kv.set("p", b"v".to_vec(), None).await.unwrap();
+        let hll = HyperLogLogStore::new();
+        hll.pfadd("h", vec![b"a".to_vec()], Some(60)).unwrap();
+        let bitmap = BitmapStore::new();
+        bitmap.setbit("b", 3, 1).unwrap();
+        let stores = StoreRefs {
+            hyperloglog_store: Some(&hll),
+            bitmap_store: Some(&bitmap),
+            ..StoreRefs::kv_only(&kv)
+        };
+        mgr.create_snapshot(stores, 5).await.unwrap();
+
+        let (snapshot, _) = mgr.load_latest().await.unwrap().unwrap();
+        assert_eq!(snapshot.version, 4);
+        assert_eq!(snapshot.kv_expires_at_ms.len(), 1);
+        assert_eq!(snapshot.kv_expires_at_ms["t"], deadline);
+        assert_eq!(snapshot.kv_data["p"], b"v".to_vec());
+        assert_eq!(
+            snapshot.hyperloglog_data["h"].expires_at_ms(),
+            hll.dump()["h"].expires_at_ms()
+        );
+        assert_eq!(snapshot.bitmap_data["b"].data, bitmap.dump()["b"].data);
     }
 }

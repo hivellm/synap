@@ -468,6 +468,30 @@ impl BitmapStore {
         &self.shards[self.shard_index(key)]
     }
 
+    /// Every live bitmap, for snapshots. Each value keeps its own expiry
+    /// (`created_at + ttl_secs`).
+    pub fn dump(&self) -> HashMap<String, BitmapValue> {
+        let mut out = HashMap::new();
+        for shard in &self.shards {
+            let map = shard.read();
+            for (key, value) in map.iter() {
+                if !value.is_expired() {
+                    out.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        out
+    }
+
+    /// Restore one bitmap from a snapshot, as stored. A value whose expiry has
+    /// passed is skipped.
+    pub fn restore(&self, key: String, value: BitmapValue) {
+        if value.is_expired() {
+            return;
+        }
+        self.shard(&key).write().insert(key, value);
+    }
+
     /// SETBIT - Set bit at offset to value (0 or 1)
     pub fn setbit(&self, key: &str, offset: usize, value: u8) -> Result<u8> {
         let shard = self.shard(key);
