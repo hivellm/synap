@@ -1,0 +1,124 @@
+name: Performance baseline
+
+# Runs scripts/bench/perf_baseline.py and uploads its JSON report. There is no
+# latency or throughput gate: the job fails only when the measurement breaks
+# (server did not start, load generator failed, error replies). See
+# docs/development/CI_GATES.md#performance-baseline.
+#
+# Runner choice:
+# - Repository variable PERF_BENCH_RUNNER set (Settings > Secrets and
+#   variables > Actions > Variables): the `baseline` job runs on that runner
+#   label, e.g. `synap-perf` on a dedicated self-hosted machine, with the full
+#   repeated matrix. Its numbers are labeled comparable.
+# - Variable unset: only the `smoke` job runs, on a shared GitHub runner, with
+#   one short run. Its numbers are labeled not comparable.
+
+on:
+  schedule:
+    # Mondays 04:17 UTC
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: Repetitions of the whole matrix (controlled runner only)
+        required: false
+        default: "5"
+      duration:
+        description: Measured seconds per cell (controlled runner only)
+        required: false
+        default: "5"
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  baseline:
+    name: Baseline (controlled runner)
+    if: ${{ vars.PERF_BENCH_RUNNER != '' }}
+    runs-on: ${{ vars.PERF_BENCH_RUNNER }}
+    timeout-minutes: 240
+    # The dedicated machine may run any OS. Bash is already required by
+    # .github/actions/setup-rust, and "$RUNS" / "$DURATION" below expand only in
+    # bash (PowerShell, the Windows default, would pass empty strings).
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python -m pip install pyyaml
+
+      - name: Build synap-server and the load generator
+        run: cargo build --release --locked --package synap-server --bin synap-server --example bench_loadgen
+
+      - name: Run the baseline
+        env:
+          RUNS: ${{ inputs.runs || '5' }}
+          DURATION: ${{ inputs.duration || '5' }}
+        run: >-
+          python scripts/bench/perf_baseline.py --no-build --runner-class controlled
+          --runs "$RUNS" --duration "$DURATION" --out-dir perf-baseline
+
+      - name: Upload the report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-baseline-${{ github.run_id }}
+          path: perf-baseline/
+          retention-days: 90
+
+  smoke:
+    name: Smoke (shared runner, numbers not comparable)
+    if: ${{ vars.PERF_BENCH_RUNNER == '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: perf-smoke
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PyYAML
+        run: python -m pip install pyyaml
+
+      - name: Build synap-server and the load generator
+        run: cargo build --release --locked --package synap-server --bin synap-server --example bench_loadgen
+
+      - name: Run the script once, briefly
+        run: >-
+          python scripts/bench/perf_baseline.py --no-build --runner-class shared
+          --runs 1 --duration 1 --warmup 0.2 --out-dir perf-smoke
+
+      - name: Upload the report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: perf-smoke-not-comparable-${{ github.run_id }}
+          path: perf-smoke/
+          retention-days: 14
