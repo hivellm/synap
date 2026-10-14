@@ -45,11 +45,15 @@ retention_secs: 3600            # time-based; 0 = keep events regardless of age
 ```
 
 Time-based retention runs on compaction (`auto_compact`, every
-`compact_interval_secs`): it removes events older than `retention_secs`, from
-the oldest on, so the offsets left stay contiguous; once every event has
-expired, the room's earliest offset is the next one to be published, and a read
-below it is out of range. `retention_secs: 0` turns time-based retention off;
-the two buffer caps above still apply.
+`compact_interval_secs`): it removes the oldest events while they are older
+than `retention_secs` and stops at the first that is not, so the offsets left
+stay contiguous. An event stamped later than the ones after it (the wall clock
+was stepped back, or rooms were restored from a snapshot taken while it ran
+ahead) therefore keeps them until it is that old itself; the buffer caps still
+bound the room meanwhile. Once every event has expired, the room's earliest
+offset is the next one to be published, and a read below it is out of range.
+`retention_secs: 0` turns time-based retention off; the two buffer caps above
+still apply.
 
 ### Scope
 

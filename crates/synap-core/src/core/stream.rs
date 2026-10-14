@@ -29,9 +29,11 @@ pub struct StreamConfig {
     /// behaves as a ring buffer at `max_buffer_size`.
     #[serde(default = "default_max_unread_buffer_size")]
     pub max_unread_buffer_size: usize,
-    /// Time-based retention in seconds: compaction removes events older than
-    /// this. 0 = infinite (no time-based retention); the buffer caps above
-    /// still apply.
+    /// Time-based retention in seconds: compaction removes the oldest events
+    /// while they are older than this, stopping at the first that is not, so
+    /// an event stamped later than the ones after it (the wall clock was
+    /// stepped back) keeps them until it is that old itself. 0 = infinite (no
+    /// time-based retention); the buffer caps above still apply.
     pub retention_secs: u64,
     /// Enable automatic compaction
     pub auto_compact: bool,
@@ -351,14 +353,17 @@ impl Room {
         self.stats.clone()
     }
 
-    /// Time-based retention: remove the events older than `retention_secs`.
-    /// A `retention_secs` of 0 keeps every event; the buffer caps are enforced
-    /// by publish and restore, not here.
+    /// Time-based retention: remove the oldest events while they are older
+    /// than `retention_secs`. A `retention_secs` of 0 keeps every event; the
+    /// buffer caps are enforced by publish and restore, not here.
     ///
-    /// Events are removed from the oldest on, so the offsets left stay
-    /// contiguous (`consume` relies on it) even when the wall clock stepped
-    /// back between publishes. When none is left, the earliest offset becomes
-    /// the next one, so the next publish is read at its own offset.
+    /// Removal stops at the first event that is not that old, so the offsets
+    /// left stay contiguous (`consume` relies on it). When the wall clock
+    /// stepped back between publishes, or rooms were restored from a snapshot
+    /// taken while it ran ahead, an event stamped later than the ones after it
+    /// keeps them until it is that old itself; the buffer caps still bound the
+    /// room meanwhile. When none is left, the earliest offset becomes the next
+    /// one, so the next publish is read at its own offset.
     fn compact(&mut self) {
         if !self.config.auto_compact || self.config.retention_secs == 0 {
             return;
@@ -1180,9 +1185,10 @@ mod tests {
         ));
     }
 
-    /// Retention removes events from the oldest on, so the offsets left stay
-    /// contiguous even when the wall clock stepped back between publishes: an
-    /// expired event newer than a live one is kept until that one expires.
+    /// Retention removes the oldest events while they are older than it, so
+    /// the offsets left stay contiguous even when the wall clock stepped back
+    /// between publishes: an event older than the retention behind a younger
+    /// one is kept until that one is that old too, and then both go.
     #[test]
     fn test_retention_keeps_offsets_contiguous_when_timestamps_step_back() {
         let now = now_millis() / 1000;
@@ -1202,6 +1208,14 @@ mod tests {
             .map(|e| e.offset)
             .collect();
         assert_eq!(read, [3]);
+
+        // Once the event at offset 1 is older than the retention as well, the
+        // one behind it goes with it.
+        room.buffer[0].timestamp = now - 61;
+        room.compact();
+        let offsets: Vec<u64> = room.buffer.iter().map(|e| e.offset).collect();
+        assert_eq!(offsets, [3]);
+        assert_eq!(room.stats().min_offset, 3);
     }
 
     /// Offsets that are not ascending and contiguous, an offset with no

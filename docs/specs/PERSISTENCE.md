@@ -598,9 +598,9 @@ exists):
   given to new events; each restored room is therefore a new incarnation and
   reports a new `generation`;
 - retention applies to restored events as to any other: compaction removes
-  those older than `retention_secs` (none when it is 0, which keeps events
-  regardless of age), and only the newest `max_buffer_size` events of a room
-  are kept;
+  the oldest while they are older than `retention_secs` (none when it is 0,
+  which keeps events regardless of age), and only the newest
+  `max_buffer_size` events of a room are kept;
 - a room whose recorded offsets are not contiguous is skipped with a warning
   naming it; the other rooms and every other store still come back.
 
