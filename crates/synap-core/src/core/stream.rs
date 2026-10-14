@@ -29,7 +29,11 @@ pub struct StreamConfig {
     /// behaves as a ring buffer at `max_buffer_size`.
     #[serde(default = "default_max_unread_buffer_size")]
     pub max_unread_buffer_size: usize,
-    /// Retention time in seconds (0 = infinite)
+    /// Time-based retention in seconds: compaction removes the oldest events
+    /// while they are older than this, stopping at the first that is not, so
+    /// an event stamped later than the ones after it (the wall clock was
+    /// stepped back) keeps them until it is that old itself. 0 = infinite (no
+    /// time-based retention); the buffer caps above still apply.
     pub retention_secs: u64,
     /// Enable automatic compaction
     pub auto_compact: bool,
@@ -215,6 +219,32 @@ impl Room {
         }
     }
 
+    /// A new incarnation of the room `name` holding `events`, whose offsets
+    /// are ascending and contiguous and do not end at `u64::MAX`, as a
+    /// snapshot recorded them: each keeps its ID, offset and timestamp, and
+    /// the next publish gets the offset after the last one. As with a publish
+    /// that no subscriber protects, only the newest `max_buffer_size` events
+    /// are kept.
+    fn restored(name: String, config: StreamConfig, events: Vec<StreamEvent>) -> Self {
+        let mut room = Self::new(name, config);
+        if let (Some(first), Some(last)) = (events.first(), events.last()) {
+            room.min_offset = first.offset;
+            room.next_offset = last.offset + 1;
+        }
+        room.buffer.extend(events);
+        while room.buffer.len() > room.config.max_buffer_size {
+            if let Some(evt) = room.buffer.pop_front() {
+                room.min_offset = evt.offset + 1;
+            }
+        }
+        room.stats.message_count = room.buffer.len();
+        room.stats.min_offset = room.min_offset;
+        room.stats.max_offset = room.next_offset.saturating_sub(1);
+        // Offsets are assigned one per publish, from 0.
+        room.stats.total_published = room.next_offset;
+        room
+    }
+
     /// Publish an event to the room
     fn publish(&mut self, mut event: StreamEvent) -> u64 {
         // Assign offset
@@ -323,9 +353,19 @@ impl Room {
         self.stats.clone()
     }
 
-    /// Compact old messages based on retention policy
+    /// Time-based retention: remove the oldest events while they are older
+    /// than `retention_secs`. A `retention_secs` of 0 keeps every event; the
+    /// buffer caps are enforced by publish and restore, not here.
+    ///
+    /// Removal stops at the first event that is not that old, so the offsets
+    /// left stay contiguous (`consume` relies on it). When the wall clock
+    /// stepped back between publishes, or rooms were restored from a snapshot
+    /// taken while it ran ahead, an event stamped later than the ones after it
+    /// keeps them until it is that old itself; the buffer caps still bound the
+    /// room meanwhile. When none is left, the earliest offset becomes the next
+    /// one, so the next publish is read at its own offset.
     fn compact(&mut self) {
-        if !self.config.auto_compact {
+        if !self.config.auto_compact || self.config.retention_secs == 0 {
             return;
         }
 
@@ -336,14 +376,21 @@ impl Room {
             .saturating_sub(self.config.retention_secs);
 
         let initial_len = self.buffer.len();
-        self.buffer.retain(|evt| evt.timestamp > cutoff_time);
+        while self
+            .buffer
+            .front()
+            .is_some_and(|evt| evt.timestamp <= cutoff_time)
+        {
+            self.buffer.pop_front();
+        }
 
-        let removed = initial_len - self.buffer.len();
-        if removed > 0 && !self.buffer.is_empty() {
-            if let Some(first) = self.buffer.front() {
-                self.min_offset = first.offset;
-            }
+        if self.buffer.len() < initial_len {
+            self.min_offset = self
+                .buffer
+                .front()
+                .map_or(self.next_offset, |first| first.offset);
             self.stats.message_count = self.buffer.len();
+            self.stats.min_offset = self.min_offset;
         }
     }
 }
@@ -521,6 +568,54 @@ impl StreamManager {
         }
 
         all_events
+    }
+
+    /// Restore the room `room_name` at startup with `events`, as a snapshot's
+    /// stream section recorded them: each event keeps its ID, offset, type,
+    /// data and timestamp, so consumers resume at the offsets they had, and
+    /// the next publish gets the offset after the last event. The room is a
+    /// new incarnation (a new `generation`): events published after the
+    /// snapshot are not in it, so their offsets will be given to new events.
+    ///
+    /// Fails, restoring nothing, when the room exists or the offsets are not
+    /// ascending and contiguous.
+    pub async fn restore_events(
+        &self,
+        room_name: &str,
+        mut events: Vec<StreamEvent>,
+    ) -> Result<(), String> {
+        if let Some(pair) = events
+            .windows(2)
+            .find(|pair| pair[0].offset.checked_add(1) != Some(pair[1].offset))
+        {
+            return Err(format!(
+                "Room '{}': event offsets go from {} to {}, but a room's offsets are ascending and contiguous",
+                room_name, pair[0].offset, pair[1].offset
+            ));
+        }
+        if events.last().is_some_and(|event| event.offset == u64::MAX) {
+            return Err(format!(
+                "Room '{}': event offset {} leaves no offset for the next event",
+                room_name,
+                u64::MAX
+            ));
+        }
+        for event in &mut events {
+            event.room = room_name.to_string();
+        }
+
+        {
+            let mut rooms = self.rooms.write();
+            if rooms.contains_key(room_name) {
+                return Err(format!("Room '{}' already exists", room_name));
+            }
+            rooms.insert(
+                room_name.to_string(),
+                Room::restored(room_name.to_string(), self.config.clone(), events),
+            );
+        }
+        self.refresh_memory();
+        Ok(())
     }
 
     /// Restore a room from snapshot (for replication)
@@ -916,6 +1011,236 @@ mod tests {
             after.generation,
             before.generation
         );
+    }
+
+    /// Events recorded from offset `first` on, as a snapshot holds them.
+    fn recorded(first: u64, count: u64) -> Vec<StreamEvent> {
+        (0..count)
+            .map(|i| first + i)
+            .map(|offset| StreamEvent {
+                id: format!("id-{offset}"),
+                offset,
+                room: "elsewhere".to_string(),
+                event: "created".to_string(),
+                data: offset.to_le_bytes().to_vec(),
+                timestamp: 1_700_000_000 + offset % 1000,
+                metadata: HashMap::new(),
+            })
+            .collect()
+    }
+
+    /// A restored room serves every event with its own ID, offset and
+    /// timestamp, and the next publish continues after the last offset.
+    #[tokio::test]
+    async fn test_restored_room_keeps_every_event_and_continues_its_offsets() {
+        let manager = StreamManager::new(StreamConfig::default());
+        let fresh = {
+            manager.create_room("fresh").await.unwrap();
+            manager.room_stats("fresh").await.unwrap().generation
+        };
+        manager
+            .restore_events("feed", recorded(0, 3))
+            .await
+            .unwrap();
+
+        let events = manager.consume("feed", "c", 0, 10).await.unwrap();
+        assert_eq!(events.len(), 3);
+        for (event, expected) in events.iter().zip(recorded(0, 3)) {
+            assert_eq!(event.id, expected.id);
+            assert_eq!(event.offset, expected.offset);
+            assert_eq!(event.event, expected.event);
+            assert_eq!(event.data, expected.data);
+            assert_eq!(event.timestamp, expected.timestamp);
+            assert_eq!(event.room, "feed");
+        }
+        let stats = manager.room_stats("feed").await.unwrap();
+        assert_eq!(
+            (stats.message_count, stats.min_offset, stats.max_offset),
+            (3, 0, 2)
+        );
+        assert_eq!(stats.total_published, 3);
+        assert!(
+            stats.generation > fresh,
+            "a restored room is a new incarnation"
+        );
+
+        let next = manager
+            .publish("feed", "created", b"x".to_vec())
+            .await
+            .unwrap();
+        assert_eq!(next, 3);
+    }
+
+    /// Events compacted away before the snapshot stay gone: a read below the
+    /// first restored offset is out of range, and the buffer cap applies.
+    #[tokio::test]
+    async fn test_restored_room_keeps_its_retention_window() {
+        let manager = StreamManager::new(StreamConfig {
+            max_buffer_size: 4,
+            ..StreamConfig::default()
+        });
+        manager
+            .restore_events("feed", recorded(10, 6))
+            .await
+            .unwrap();
+
+        let stats = manager.room_stats("feed").await.unwrap();
+        assert_eq!(
+            (stats.message_count, stats.min_offset, stats.max_offset),
+            (4, 12, 15)
+        );
+        let events = manager.consume("feed", "c", 12, 10).await.unwrap();
+        let offsets: Vec<u64> = events.iter().map(|e| e.offset).collect();
+        assert_eq!(offsets, [12, 13, 14, 15]);
+        let error = manager.consume("feed", "c", 3, 10).await.unwrap_err();
+        assert!(error.contains("12"), "{error}");
+    }
+
+    /// A room compacted every interval, keeping events for `retention_secs`.
+    fn compacting(retention_secs: u64, max_buffer_size: usize) -> StreamConfig {
+        StreamConfig {
+            max_buffer_size,
+            retention_secs,
+            auto_compact: true,
+            ..StreamConfig::default()
+        }
+    }
+
+    /// `retention_secs: 0` is no time-based retention: compaction keeps every
+    /// event, however old, and the buffer cap still applies.
+    #[test]
+    fn test_zero_retention_keeps_old_events_through_compaction() {
+        let mut room = Room::restored("r".to_string(), compacting(0, 4), recorded(10, 6));
+        room.compact();
+
+        let offsets: Vec<u64> = room.buffer.iter().map(|e| e.offset).collect();
+        assert_eq!(offsets, [12, 13, 14, 15], "the buffer cap still applies");
+        let stats = room.stats();
+        assert_eq!((stats.message_count, stats.min_offset), (4, 12));
+        assert_eq!(room.consume("c", 12, 10).unwrap().len(), 4);
+
+        room.publish(StreamEvent::new("r".to_string(), "e".to_string(), vec![]));
+        room.compact();
+        let offsets: Vec<u64> = room.buffer.iter().map(|e| e.offset).collect();
+        assert_eq!(offsets, [13, 14, 15, 16]);
+    }
+
+    /// A positive retention removes the events older than it on compaction;
+    /// the room's earliest offset and statistics follow what is left.
+    #[test]
+    fn test_positive_retention_expires_old_events() {
+        let mut events = recorded(0, 3);
+        events[2].timestamp = now_millis() / 1000;
+        let mut room = Room::restored("r".to_string(), compacting(60, 100), events);
+        room.compact();
+
+        let offsets: Vec<u64> = room.buffer.iter().map(|e| e.offset).collect();
+        assert_eq!(offsets, [2]);
+        let stats = room.stats();
+        assert_eq!(
+            (stats.message_count, stats.min_offset, stats.max_offset),
+            (1, 2, 2)
+        );
+        assert!(matches!(
+            room.consume("c", 0, 10),
+            Err(SynapError::StreamOffsetOutOfRange {
+                requested: 0,
+                earliest: 2
+            })
+        ));
+        assert_eq!(room.consume("c", 2, 10).unwrap().len(), 1);
+    }
+
+    /// When every event expires, the room is empty from the next offset on:
+    /// the next publish is read at its own offset, and an expired offset is
+    /// out of range.
+    #[test]
+    fn test_positive_retention_expiring_every_event_keeps_the_room_readable() {
+        let mut room = Room::restored("r".to_string(), compacting(60, 100), recorded(0, 3));
+        room.compact();
+
+        assert!(room.buffer.is_empty());
+        let stats = room.stats();
+        assert_eq!((stats.message_count, stats.min_offset), (0, 3));
+
+        let offset = room.publish(StreamEvent::new("r".to_string(), "e".to_string(), vec![7]));
+        assert_eq!(offset, 3);
+        let events = room.consume("c", 3, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(
+            (events[0].offset, events[0].data.as_slice()),
+            (3, &[7u8][..])
+        );
+        let stats = room.stats();
+        assert_eq!(
+            (stats.message_count, stats.min_offset, stats.max_offset),
+            (1, 3, 3)
+        );
+        assert!(matches!(
+            room.consume("c", 1, 10),
+            Err(SynapError::StreamOffsetOutOfRange {
+                requested: 1,
+                earliest: 3
+            })
+        ));
+    }
+
+    /// Retention removes the oldest events while they are older than it, so
+    /// the offsets left stay contiguous even when the wall clock stepped back
+    /// between publishes: an event older than the retention behind a younger
+    /// one is kept until that one is that old too, and then both go.
+    #[test]
+    fn test_retention_keeps_offsets_contiguous_when_timestamps_step_back() {
+        let now = now_millis() / 1000;
+        let mut events = recorded(0, 4);
+        events[1].timestamp = now;
+        events[3].timestamp = now;
+        let mut room = Room::restored("r".to_string(), compacting(60, 100), events);
+        room.compact();
+
+        let offsets: Vec<u64> = room.buffer.iter().map(|e| e.offset).collect();
+        assert_eq!(offsets, [1, 2, 3]);
+        assert_eq!(room.stats().min_offset, 1);
+        let read: Vec<u64> = room
+            .consume("c", 3, 10)
+            .unwrap()
+            .iter()
+            .map(|e| e.offset)
+            .collect();
+        assert_eq!(read, [3]);
+
+        // Once the event at offset 1 is older than the retention as well, the
+        // one behind it goes with it.
+        room.buffer[0].timestamp = now - 61;
+        room.compact();
+        let offsets: Vec<u64> = room.buffer.iter().map(|e| e.offset).collect();
+        assert_eq!(offsets, [3]);
+        assert_eq!(room.stats().min_offset, 3);
+    }
+
+    /// Offsets that are not ascending and contiguous, an offset with no
+    /// successor, and an existing room are refused without restoring anything.
+    #[tokio::test]
+    async fn test_restore_refuses_a_broken_section_or_an_existing_room() {
+        let manager = StreamManager::new(StreamConfig::default());
+        let mut gap = recorded(0, 2);
+        gap.extend(recorded(5, 1));
+        let error = manager.restore_events("gap", gap).await.unwrap_err();
+        assert!(error.contains("from 1 to 5"), "{error}");
+
+        let error = manager
+            .restore_events("last", recorded(u64::MAX, 1))
+            .await
+            .unwrap_err();
+        assert!(error.contains("no offset for the next event"), "{error}");
+
+        manager.create_room("taken").await.unwrap();
+        let error = manager
+            .restore_events("taken", recorded(0, 1))
+            .await
+            .unwrap_err();
+        assert!(error.contains("already exists"), "{error}");
+        assert_eq!(manager.list_rooms().await, ["taken"]);
     }
 
     #[tokio::test]

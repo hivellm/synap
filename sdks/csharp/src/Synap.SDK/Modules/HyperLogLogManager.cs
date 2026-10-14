@@ -44,7 +44,7 @@ public sealed class HyperLogLogManager
         };
 
         using var response = await _client.ExecuteAsync("hyperloglog.pfadd", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("added", out var added))
+        if (response.RootElement.TryGetProperty("added", out var added))
         {
             return added.GetInt32();
         }
@@ -63,7 +63,7 @@ public sealed class HyperLogLogManager
     {
         var data = new Dictionary<string, object?> { ["key"] = key };
         using var response = await _client.ExecuteAsync("hyperloglog.pfcount", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("count", out var count))
+        if (response.RootElement.TryGetProperty("count", out var count))
         {
             return count.GetInt64();
         }
@@ -96,7 +96,7 @@ public sealed class HyperLogLogManager
         };
 
         using var response = await _client.ExecuteAsync("hyperloglog.pfmerge", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("count", out var count))
+        if (response.RootElement.TryGetProperty("count", out var count))
         {
             return count.GetInt64();
         }
@@ -111,11 +111,7 @@ public sealed class HyperLogLogManager
     public async Task<HyperLogLogStats> StatsAsync(CancellationToken cancellationToken = default)
     {
         using var response = await _client.ExecuteAsync("hyperloglog.stats", string.Empty, null, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload))
-        {
-            return JsonSerializer.Deserialize<HyperLogLogStats>(payload.GetRawText()) ?? new HyperLogLogStats();
-        }
-        return new HyperLogLogStats();
+        return JsonSerializer.Deserialize<HyperLogLogStats>(response.RootElement.GetRawText()) ?? new HyperLogLogStats();
     }
 }
 

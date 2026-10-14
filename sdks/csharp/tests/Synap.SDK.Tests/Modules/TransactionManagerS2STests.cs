@@ -7,7 +7,7 @@ namespace Synap.SDK.Tests.Modules;
 
 /// <summary>
 /// S2S integration tests for TransactionManager.
-/// These tests require a running Synap server.
+/// These tests require a running Synap server and run only when SYNAP_S2S=true.
 /// </summary>
 public class TransactionManagerS2STests
 {
@@ -19,7 +19,7 @@ public class TransactionManagerS2STests
         _client = new SynapClient(new SynapConfig(url));
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task MultiExec_Works()
     {
         var clientId = $"test:{Guid.NewGuid()}";
@@ -47,7 +47,7 @@ public class TransactionManagerS2STests
         Assert.Equal("value2", value2);
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task Discard_Works()
     {
         var clientId = $"test:{Guid.NewGuid()}";
@@ -68,7 +68,7 @@ public class TransactionManagerS2STests
         Assert.Null(value);
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task WatchUnwatch_Works()
     {
         var clientId = $"test:{Guid.NewGuid()}";
@@ -88,7 +88,7 @@ public class TransactionManagerS2STests
         Assert.True(result.Success);
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task WatchAbortOnConflict_Works()
     {
         var clientId = $"test:{Guid.NewGuid()}";
@@ -113,7 +113,7 @@ public class TransactionManagerS2STests
         Assert.True(aborted.Aborted);
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task EmptyTransaction_Works()
     {
         var clientId = $"test:{Guid.NewGuid()}";

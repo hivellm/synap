@@ -1,5 +1,17 @@
 # Findings — synap-v1-release
 
+> **Historical analysis.** Dated 2026-07-08; committed in `75f4cff`
+> (Release/v1.0.0, #235, 2026-07-09) and first released in v1.0.0. It plans the
+> 1.0.0 restructure, including a `synap-protocol` crate that was later
+> dissolved: the binary wire layer is now the external Thunder crate
+> (`thunder-rpc`). The code has moved since: paths, line numbers and findings
+> describe that revision, not the current tree. Current behavior:
+> [1.4.0 guarantees](../../operations/guarantees.md). Current design:
+> [persistence](../../specs/PERSISTENCE.md),
+> [transports](../../protocol/transports.md),
+> [KV store internals](../../internals/kv-store.md) and the
+> [documentation index](../../INDEX.md).
+
 Numbered findings with evidence. Confidence: High = verified at file:line; Medium = needs
 per-item triage during implementation.
 

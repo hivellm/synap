@@ -25,6 +25,32 @@ internal static class CommandMapper
         "SADD", "SREM",
     };
 
+    /// <summary>
+    /// The <c>amount</c> of <c>kv.incr</c> / <c>kv.decr</c>, or null when absent.
+    /// The HTTP envelope reads <c>amount</c>, so the native maps read the same
+    /// field. An integer travels as a long; anything else travels as its JSON
+    /// text, so the server refuses it on every transport as it does over HTTP.
+    /// </summary>
+    private static object? CounterAmount(Dictionary<string, object?> payload)
+    {
+        if (!payload.TryGetValue("amount", out var amount))
+        {
+            return null;
+        }
+
+        return amount switch
+        {
+            null => null,
+            long or int or short or sbyte or byte or uint or ushort =>
+                Convert.ToInt64(amount, System.Globalization.CultureInfo.InvariantCulture),
+            System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Null } => null,
+            System.Text.Json.JsonElement e when e.ValueKind == System.Text.Json.JsonValueKind.Number
+                && e.TryGetInt64(out var n) => n,
+            System.Text.Json.JsonElement e => e.GetRawText(),
+            _ => System.Text.Json.JsonSerializer.Serialize(amount),
+        };
+    }
+
     internal static (string Command, object?[] Args)? MapCommand(
         string operation,
         Dictionary<string, object?> payload)
@@ -68,10 +94,10 @@ internal static class CommandMapper
                 ? ("EXPIRE", new object?[] { key, ttl })
                 : null,
             "kv.set" => BuildKvSet(key, payload),
-            "kv.incr" => payload.TryGetValue("delta", out var d)
+            "kv.incr" => CounterAmount(payload) is { } d
                 ? ("INCRBY", new object?[] { key, d })
                 : ("INCR", new object?[] { key }),
-            "kv.decr" => payload.TryGetValue("delta", out var dd)
+            "kv.decr" => CounterAmount(payload) is { } dd
                 ? ("DECRBY", new object?[] { key, dd })
                 : ("DECR", new object?[] { key }),
             "kv.incr_float" => payload.TryGetValue("delta", out var df)
@@ -149,7 +175,7 @@ internal static class CommandMapper
             "bitmap.getbit" => payload.TryGetValue("offset", out var bgo)
                 ? ("GETBIT", new object?[] { key, bgo })
                 : null,
-            "bitmap.bitcount" => ("BITCOUNT", [key]),
+            "bitmap.bitcount" => BuildBitCount(key, payload),
             "bitmap.bitop.and" => BuildBitOp("AND", payload),
             "bitmap.bitop.or" => BuildBitOp("OR", payload),
             "bitmap.bitop.xor" => BuildBitOp("XOR", payload),
@@ -207,11 +233,12 @@ internal static class CommandMapper
             "stream.list" => ("SLIST", Array.Empty<object?>()),
 
             // ---- Pub/Sub ----
-            "pubsub.publish" => BuildPPublish(payload),
-            "pubsub.subscribe" => BuildPSubscribe(payload),
-            "pubsub.unsubscribe" => BuildPUnsubscribe(payload),
-            "pubsub.topics" => ("PTOPICS", Array.Empty<object?>()),
-            "pubsub.stats" => ("PSTATS", Array.Empty<object?>()),
+            // Only PUBLISH maps. Subscriptions are HTTP-only here (ObserveAsync
+            // is the SynapRPC push path): a native SUBSCRIBE turns the request
+            // connection into a push connection. The topic list is TOPICS on
+            // SynapRPC but PUBSUB CHANNELS on RESP3, and the statistics exist on
+            // SynapRPC only, so neither has one native name to map to.
+            "pubsub.publish" => BuildPublish(payload),
 
             // ---- Transaction ----
             "transaction.multi" => payload.TryGetValue("client_id", out var tmid)
@@ -267,7 +294,8 @@ internal static class CommandMapper
             "sorted_set.rank" => new Dictionary<string, object?> { ["rank"] = raw },
             "sorted_set.range" => new Dictionary<string, object?> { ["members"] = ZRangeToList(raw) },
 
-            "bitmap.getbit" => new Dictionary<string, object?> { ["bit"] = raw },
+            "bitmap.setbit" => new Dictionary<string, object?> { ["old_value"] = raw },
+            "bitmap.getbit" => new Dictionary<string, object?> { ["value"] = raw },
             "bitmap.bitcount" => new Dictionary<string, object?> { ["count"] = raw },
 
             "hyperloglog.add" => new Dictionary<string, object?> { ["changed"] = raw is long hll && hll > 0 },
@@ -281,9 +309,7 @@ internal static class CommandMapper
             "queue.create" => new Dictionary<string, object?> { ["success"] = IsOk(raw) },
             "queue.delete" or "queue.purge" => new Dictionary<string, object?> { ["success"] = raw is true or 1L },
             "queue.publish" => new Dictionary<string, object?> { ["message_id"] = raw?.ToString() ?? string.Empty },
-            "queue.consume" => raw is null or "Null"
-                ? new Dictionary<string, object?>()
-                : new Dictionary<string, object?> { ["message"] = raw },
+            "queue.consume" => QueueConsumeResponse(raw),
             "queue.ack" or "queue.nack" => new Dictionary<string, object?> { ["success"] = true },
             "queue.stats" => raw is Dictionary<string, object?> qsd ? qsd : new Dictionary<string, object?> { ["result"] = raw },
             "queue.list" => new Dictionary<string, object?> { ["queues"] = RawToList(raw) },
@@ -299,15 +325,20 @@ internal static class CommandMapper
             "stream.list" => new Dictionary<string, object?> { ["rooms"] = RawToList(raw) },
 
             // ---- Pub/Sub responses ----
-            "pubsub.publish" => new Dictionary<string, object?> { ["subscribers_matched"] = raw is long pm ? pm : Convert.ToInt64(raw ?? 0L, System.Globalization.CultureInfo.InvariantCulture) },
-            "pubsub.subscribe" or "pubsub.unsubscribe" => new Dictionary<string, object?> { ["success"] = true },
-            "pubsub.topics" => new Dictionary<string, object?> { ["topics"] = RawToList(raw) },
-            "pubsub.stats" => raw is Dictionary<string, object?> psd ? psd : new Dictionary<string, object?> { ["result"] = raw },
+            // SynapRPC replies {message_id, subscribers_matched}; RESP3 replies
+            // the subscriber count alone.
+            "pubsub.publish" => raw is Dictionary<string, object?> pd
+                ? pd
+                : new Dictionary<string, object?> { ["subscribers_matched"] = Convert.ToInt64(raw ?? 0L, System.Globalization.CultureInfo.InvariantCulture) },
 
             // ---- Transaction responses ----
             "transaction.multi" or "transaction.discard" or "transaction.watch" or "transaction.unwatch"
                 => new Dictionary<string, object?> { ["success"] = IsOk(raw) },
-            "transaction.exec" => new Dictionary<string, object?> { ["success"] = true, ["results"] = RawToList(raw) },
+            // EXEC replies null when a watched key changed: the HTTP payload's
+            // {aborted} shape, not an empty success.
+            "transaction.exec" => raw is null or "Null"
+                ? new Dictionary<string, object?> { ["success"] = false, ["aborted"] = true }
+                : new Dictionary<string, object?> { ["success"] = true, ["results"] = RawToList(raw) },
 
             // ---- Scripting responses ----
             "script.eval" or "script.evalsha" => new Dictionary<string, object?> { ["result"] = raw },
@@ -374,6 +405,23 @@ internal static class CommandMapper
         }
 
         return ("ZRANGE", [key, start, stop]);
+    }
+
+    /// <summary>
+    /// BITCOUNT key [start end]. The native commands take the range only as a
+    /// pair, so a lone bound is completed with the whole-bitmap default
+    /// (start 0, end -1), which the server reads exactly as an absent bound.
+    /// </summary>
+    private static (string, object?[])? BuildBitCount(string key, Dictionary<string, object?> payload)
+    {
+        var hasStart = payload.TryGetValue("start", out var start) && start is not null;
+        var hasEnd = payload.TryGetValue("end", out var end) && end is not null;
+        if (!hasStart && !hasEnd)
+        {
+            return ("BITCOUNT", [key]);
+        }
+
+        return ("BITCOUNT", [key, hasStart ? start : 0L, hasEnd ? end : -1L]);
     }
 
     private static (string, object?[])? BuildBitOp(string op, Dictionary<string, object?> payload)
@@ -554,7 +602,64 @@ internal static class CommandMapper
         var payloadVal = payload.TryGetValue("payload", out var p) ? p : null;
         var priority   = payload.TryGetValue("priority", out var pr) ? pr : (object?)0L;
         var maxRetries = payload.TryGetValue("max_retries", out var mr) ? mr : (object?)3L;
-        return ("QPUBLISH", [queue, System.Text.Json.JsonSerializer.Serialize(payloadVal), priority, maxRetries]);
+        return ("QPUBLISH", [queue, QueuePayloadBytes(payloadVal), priority, maxRetries]);
+    }
+
+    /// <summary>
+    /// The bytes of a queue payload. QueueManager hands over the byte list the
+    /// HTTP command carries (an <c>int[]</c>); a raw caller may pass bytes, a
+    /// string (sent as UTF-8) or any other value (sent as its JSON).
+    /// </summary>
+    private static byte[] QueuePayloadBytes(object? payload) => payload switch
+    {
+        byte[] bytes => bytes,
+        int[] byteList => Array.ConvertAll(byteList, b => checked((byte)b)),
+        string text => Encoding.UTF8.GetBytes(text),
+        _ => System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(payload),
+    };
+
+    /// <summary>
+    /// Native QCONSUME replies the message flat (a map on SynapRPC, an
+    /// [id, payload, priority, retry_count] array on RESP3) or null when the
+    /// queue is empty. QueueManager reads the HTTP shape: {"message": {...}}
+    /// with the payload as a byte list.
+    /// </summary>
+    private static Dictionary<string, object?> QueueConsumeResponse(object? raw)
+    {
+        Dictionary<string, object?>? message = null;
+        if (raw is Dictionary<string, object?> map)
+        {
+            message = new Dictionary<string, object?>(map, StringComparer.Ordinal);
+        }
+        else if (AsRawArray(raw) is { Length: >= 4 } fields)
+        {
+            message = new Dictionary<string, object?>
+            {
+                ["id"] = fields[0],
+                ["payload"] = fields[1],
+                ["priority"] = fields[2],
+                ["retry_count"] = fields[3],
+            };
+        }
+
+        if (message is null)
+        {
+            return new Dictionary<string, object?> { ["message"] = null };
+        }
+
+        // SynapRPC bytes arrive as a string when they are UTF-8 (byte[]
+        // otherwise); the RESP3 reader yields text.
+        if (message.TryGetValue("payload", out var body))
+        {
+            message["payload"] = body switch
+            {
+                byte[] bytes => Array.ConvertAll(bytes, b => (int)b),
+                string text => Array.ConvertAll(Encoding.UTF8.GetBytes(text), b => (int)b),
+                _ => body,
+            };
+        }
+
+        return new Dictionary<string, object?> { ["message"] = message };
     }
 
     // ---- Stream helpers ----
@@ -572,7 +677,7 @@ internal static class CommandMapper
 
     // ---- Pub/Sub helpers ----
 
-    private static (string, object?[])? BuildPPublish(Dictionary<string, object?> payload)
+    private static (string, object?[])? BuildPublish(Dictionary<string, object?> payload)
     {
         if (!payload.TryGetValue("topic", out var topic))
         {
@@ -580,33 +685,7 @@ internal static class CommandMapper
         }
 
         var msg = payload.TryGetValue("payload", out var p) ? p : null;
-        return ("PPUBLISH", [topic, System.Text.Json.JsonSerializer.Serialize(msg)]);
-    }
-
-    private static (string, object?[])? BuildPSubscribe(Dictionary<string, object?> payload)
-    {
-        if (!payload.TryGetValue("subscriber_id", out var sid))
-        {
-            return null;
-        }
-
-        var topics = payload.TryGetValue("topics", out var t) && t is object?[] arr
-            ? arr
-            : Array.Empty<object?>();
-        return ("PSUBSCRIBE", new object?[] { sid }.Concat(topics).ToArray());
-    }
-
-    private static (string, object?[])? BuildPUnsubscribe(Dictionary<string, object?> payload)
-    {
-        if (!payload.TryGetValue("subscriber_id", out var sid))
-        {
-            return null;
-        }
-
-        var topics = payload.TryGetValue("topics", out var t) && t is object?[] arr
-            ? arr
-            : Array.Empty<object?>();
-        return ("PUNSUBSCRIBE", new object?[] { sid }.Concat(topics).ToArray());
+        return ("PUBLISH", [topic, System.Text.Json.JsonSerializer.Serialize(msg)]);
     }
 
     // ---- Transaction helpers ----
@@ -618,8 +697,11 @@ internal static class CommandMapper
             return null;
         }
 
-        var keys = payload.TryGetValue("keys", out var k) && k is object?[] arr
-            ? arr
+        // TransactionManager.WatchAsync passes the caller's collection (a
+        // List<string>, say), not an object?[]: take any sequence but a string.
+        var keys = payload.TryGetValue("keys", out var k)
+            && k is System.Collections.IEnumerable seq and not string
+            ? seq.Cast<object?>()
             : Array.Empty<object?>();
         return ("WATCH", new object?[] { clientId }.Concat(keys).ToArray());
     }

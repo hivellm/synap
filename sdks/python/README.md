@@ -160,7 +160,8 @@ await client.kv.set("session:abc", session_data, ttl=3600)
 # Get value
 data = await client.kv.get("session:abc")
 
-# Atomic operations
+# Atomic operations (`delta` applies identically on every transport;
+# zero and negative steps apply as given, overflow fails without a change)
 new_value = await client.kv.incr("counter", delta=1)
 exists = await client.kv.exists("session:abc")
 

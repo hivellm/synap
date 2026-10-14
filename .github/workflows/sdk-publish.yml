@@ -18,6 +18,11 @@ name: Publish SDKs
 # webhook), so nothing in this repository can push them. Tag them there.
 #
 # Every job is independent: a registry outage on one does not block the others.
+#
+# Before anything is published, each job installs the package it built (the
+# .crate, the npm tarball, the wheel, the .nupkg) into a scratch project and
+# runs scripts/release/artifact-smoke against a synap-server built from the
+# same tag, over every transport the SDK speaks. A broken package fails there.
 
 on:
   release:
@@ -46,9 +51,34 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  # The server every artifact test runs against, built once from the tag.
+  server:
+    name: Build synap-server for the artifact tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Install the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build synap-server
+        run: cargo build --release --locked --package synap-server --bin synap-server
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: synap-server-linux
+          path: target/release/synap-server
+          retention-days: 3
+          if-no-files-found: error
+
   # crates.io — Trusted Publisher (OIDC). `crates-io-auth-action` exchanges the
   # id-token below for a token that expires in 30 minutes.
   publish-rust:
+    needs: server
     if: github.event_name == 'release' || inputs.sdks == 'all' || inputs.sdks == 'rust'
     runs-on: ubuntu-latest
     permissions:
@@ -59,10 +89,8 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly
+      - name: Install the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
 
       - uses: Swatinem/rust-cache@v2
 
@@ -93,7 +121,24 @@ jobs:
 
       - name: Test
         if: steps.check.outputs.published == 'false'
-        run: cargo test -p synap-sdk
+        run: cargo test -p synap-sdk --locked
+
+      - name: Package
+        if: steps.check.outputs.published == 'false'
+        run: cargo package -p synap-sdk --locked
+
+      - name: Download the synap-server build
+        if: steps.check.outputs.published == 'false'
+        uses: actions/download-artifact@v8
+        with:
+          name: synap-server-linux
+          path: ${{ runner.temp }}/server
+
+      - name: Test the packaged crate against the server
+        if: steps.check.outputs.published == 'false'
+        run: |
+          chmod +x "$RUNNER_TEMP/server/synap-server"
+          python3 scripts/release/artifact-smoke/run.py rust --artifact "target/package/synap-sdk-${RELEASE_TAG#v}.crate" --server "$RUNNER_TEMP/server/synap-server"
 
       - name: Exchange the OIDC token for a short-lived crates.io token
         if: steps.check.outputs.published == 'false'
@@ -104,11 +149,12 @@ jobs:
         if: steps.check.outputs.published == 'false'
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.crates-auth.outputs.token }}
-        run: cargo publish -p synap-sdk
+        run: cargo publish -p synap-sdk --locked
 
   # npm — Trusted Publisher (OIDC). No NODE_AUTH_TOKEN anywhere: npm mints a
   # short-lived credential from the id-token below, and attaches provenance.
   publish-typescript:
+    needs: server
     if: github.event_name == 'release' || inputs.sdks == 'all' || inputs.sdks == 'typescript'
     runs-on: ubuntu-latest
     permissions:
@@ -163,6 +209,26 @@ jobs:
         if: steps.check.outputs.published == 'false'
         run: npm run test:unit
 
+      # `npm publish` below packs this same checkout again after
+      # `prepublishOnly` rebuilds it, from the sources tested here.
+      - name: Pack
+        if: steps.check.outputs.published == 'false'
+        run: npm run build && npm pack
+
+      - name: Download the synap-server build
+        if: steps.check.outputs.published == 'false'
+        uses: actions/download-artifact@v8
+        with:
+          name: synap-server-linux
+          path: ${{ runner.temp }}/server
+
+      - name: Test the packed tarball against the server
+        if: steps.check.outputs.published == 'false'
+        working-directory: .
+        run: |
+          chmod +x "$RUNNER_TEMP/server/synap-server"
+          python3 scripts/release/artifact-smoke/run.py typescript --artifact "sdks/typescript/hivehub-synap-${RELEASE_TAG#v}.tgz" --server "$RUNNER_TEMP/server/synap-server"
+
       - name: Publish
         if: steps.check.outputs.published == 'false'
         run: npm publish
@@ -170,6 +236,7 @@ jobs:
   # PyPI — Trusted Publisher (OIDC). Configure the publisher on PyPI against
   # this repository, this workflow filename, and the environment below.
   publish-python:
+    needs: server
     if: github.event_name == 'release' || inputs.sdks == 'all' || inputs.sdks == 'python'
     runs-on: ubuntu-latest
     permissions:
@@ -227,6 +294,19 @@ jobs:
         working-directory: sdks/python
         run: python -m build
 
+      - name: Download the synap-server build
+        if: steps.check.outputs.published == 'false'
+        uses: actions/download-artifact@v8
+        with:
+          name: synap-server-linux
+          path: ${{ runner.temp }}/server
+
+      - name: Test the wheel against the server
+        if: steps.check.outputs.published == 'false'
+        run: |
+          chmod +x "$RUNNER_TEMP/server/synap-server"
+          python3 scripts/release/artifact-smoke/run.py python --artifact "$(ls sdks/python/dist/*.whl)" --server "$RUNNER_TEMP/server/synap-server"
+
       - name: Publish
         if: steps.check.outputs.published == 'false'
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -237,6 +317,7 @@ jobs:
   # for a short-lived API key, so no long-lived key is stored in this repo.
   # `vars.NUGET_USER` must hold the nuget.org account that owns the policy.
   publish-csharp:
+    needs: server
     if: github.event_name == 'release' || inputs.sdks == 'all' || inputs.sdks == 'csharp'
     runs-on: ubuntu-latest
     permissions:
@@ -269,6 +350,18 @@ jobs:
 
       - name: Pack
         run: dotnet pack src/Synap.SDK/Synap.SDK.csproj --configuration Release --output ./artifacts
+
+      - name: Download the synap-server build
+        uses: actions/download-artifact@v8
+        with:
+          name: synap-server-linux
+          path: ${{ runner.temp }}/server
+
+      - name: Test the package against the server
+        working-directory: .
+        run: |
+          chmod +x "$RUNNER_TEMP/server/synap-server"
+          python3 scripts/release/artifact-smoke/run.py csharp --artifact "sdks/csharp/artifacts/HiveLLM.Synap.SDK.${RELEASE_TAG#v}.nupkg" --server "$RUNNER_TEMP/server/synap-server"
 
       - name: Exchange the OIDC token for a short-lived NuGet key
         uses: NuGet/login@v1

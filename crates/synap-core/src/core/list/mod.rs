@@ -978,4 +978,307 @@ mod tests {
         assert!(!store.delete("a").unwrap());
         assert!(store.exists("b"));
     }
+
+    // ── Blocking pops on several keys (phase33) ─────────────────────────────
+
+    mod blocking_wakeup {
+        use super::*;
+        use std::collections::BTreeSet;
+        use std::sync::Arc;
+        use std::time::Duration;
+        use tokio::sync::Mutex;
+        use tokio::time::{Instant, timeout};
+
+        /// Upper bound for a wake-up that must happen; far below the pops' own
+        /// timeouts, so a missed wake-up fails here instead of timing out.
+        const WAKE_BOUND: Duration = Duration::from_secs(2);
+
+        fn keys(names: &[&str]) -> Vec<String> {
+            names.iter().map(|k| (*k).to_owned()).collect()
+        }
+
+        async fn until_blocked(store: &ListStore, key: &str, clients: usize) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while store.blocked_clients(key) < clients {
+                assert!(
+                    Instant::now() < deadline,
+                    "{clients} client(s) never blocked on {key}"
+                );
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        }
+
+        /// BLPOP whose every pop attempt needs `gate`, so a test holding the
+        /// gate can change several keys before the woken client looks.
+        fn gated_blpop(
+            store: &Arc<ListStore>,
+            gate: &Arc<Mutex<()>>,
+            names: &[&str],
+        ) -> tokio::task::JoinHandle<Result<(String, Vec<u8>)>> {
+            let store = Arc::clone(store);
+            let gate = Arc::clone(gate);
+            let names = keys(names);
+            tokio::spawn(async move {
+                store
+                    .blpop_guarded(names, Some(10), || gate.lock())
+                    .await
+                    .map(|(key, value, _guard)| (key, value))
+            })
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn blpop_wakes_on_the_second_key() {
+            let store = Arc::new(ListStore::new());
+            let waiter = Arc::clone(&store);
+            let started = Instant::now();
+            let handle =
+                tokio::spawn(async move { waiter.blpop(keys(&["a", "b"]), Some(10)).await });
+            until_blocked(&store, "b", 1).await;
+
+            store.rpush("b", vec![b"x".to_vec()], false).unwrap();
+
+            let popped = timeout(WAKE_BOUND, handle)
+                .await
+                .expect("a push to the second key wakes the client")
+                .unwrap()
+                .unwrap();
+            assert_eq!(popped, ("b".to_owned(), b"x".to_vec()));
+            assert!(started.elapsed() < Duration::from_secs(5));
+            assert_eq!(store.blocked_clients("a"), 0, "the client left every queue");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn brpop_wakes_on_the_last_key() {
+            let store = Arc::new(ListStore::new());
+            let waiter = Arc::clone(&store);
+            let handle =
+                tokio::spawn(async move { waiter.brpop(keys(&["a", "b", "c"]), Some(10)).await });
+            until_blocked(&store, "c", 1).await;
+
+            store
+                .lpush("c", vec![b"1".to_vec(), b"2".to_vec()], false)
+                .unwrap();
+
+            let popped = timeout(WAKE_BOUND, handle)
+                .await
+                .expect("a push to the last key wakes the client")
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                popped,
+                ("c".to_owned(), b"1".to_vec()),
+                "BRPOP pops the tail"
+            );
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn woken_client_pops_the_first_ready_key_in_argument_order() {
+            let store = Arc::new(ListStore::new());
+            let gate = Arc::new(Mutex::new(()));
+            let handle = gated_blpop(&store, &gate, &["a", "b"]);
+            until_blocked(&store, "a", 1).await;
+
+            {
+                let _held = gate.lock().await;
+                store.rpush("b", vec![b"from-b".to_vec()], false).unwrap();
+                store.rpush("a", vec![b"from-a".to_vec()], false).unwrap();
+            }
+
+            let popped = timeout(WAKE_BOUND, handle).await.unwrap().unwrap().unwrap();
+            assert_eq!(popped, ("a".to_owned(), b"from-a".to_vec()));
+            assert_eq!(store.lrange("b", 0, -1).unwrap(), vec![b"from-b".to_vec()]);
+        }
+
+        #[tokio::test]
+        async fn timeout_returns_an_error_and_leaves_the_queues() {
+            let store = ListStore::new();
+            let result = store.blpop(keys(&["a", "b"]), Some(1)).await;
+            assert!(matches!(result, Err(SynapError::Timeout)));
+            let result = store.brpoplpush("a", "dst", Some(1)).await;
+            assert!(matches!(result, Err(SynapError::Timeout)));
+            assert_eq!(store.blocked_clients("a"), 0);
+            assert_eq!(store.blocked_clients("b"), 0);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn many_concurrent_waiters_each_get_one_element() {
+            let store = Arc::new(ListStore::new());
+            let waiters: Vec<_> = (0..32)
+                .map(|_| {
+                    let store = Arc::clone(&store);
+                    tokio::spawn(async move { store.blpop(keys(&["q"]), Some(10)).await })
+                })
+                .collect();
+            until_blocked(&store, "q", 32).await;
+
+            let pushers: Vec<_> = (0..8)
+                .map(|p| {
+                    let store = Arc::clone(&store);
+                    tokio::spawn(async move {
+                        for i in 0..4 {
+                            let value = format!("{p}-{i}").into_bytes();
+                            store.rpush("q", vec![value], false).unwrap();
+                        }
+                    })
+                })
+                .collect();
+            for pusher in pushers {
+                pusher.await.unwrap();
+            }
+
+            let mut got = BTreeSet::new();
+            for waiter in waiters {
+                let (key, value) = timeout(WAKE_BOUND, waiter)
+                    .await
+                    .expect("every blocked client is served")
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(key, "q");
+                assert!(got.insert(value), "an element was delivered twice");
+            }
+            assert_eq!(got.len(), 32);
+            assert!(!store.exists("q"), "every element was delivered");
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn no_wake_up_is_lost_when_pushes_race_blocking_pops() {
+            let store = Arc::new(ListStore::new());
+            for round in 0..200 {
+                let (a, b) = (format!("a{round}"), format!("b{round}"));
+                let waiters: Vec<_> = (0..4)
+                    .map(|_| {
+                        let store = Arc::clone(&store);
+                        let names = vec![a.clone(), b.clone()];
+                        tokio::spawn(async move { store.blpop(names, Some(30)).await })
+                    })
+                    .collect();
+                let pushers: Vec<_> = (0..4)
+                    .map(|i| {
+                        let store = Arc::clone(&store);
+                        let key = if i % 2 == 0 { a.clone() } else { b.clone() };
+                        tokio::spawn(async move {
+                            store.rpush(&key, vec![vec![i as u8]], false).unwrap();
+                        })
+                    })
+                    .collect();
+                for pusher in pushers {
+                    pusher.await.unwrap();
+                }
+                for waiter in waiters {
+                    timeout(WAKE_BOUND, waiter)
+                        .await
+                        .unwrap_or_else(|_| panic!("round {round}: a wake-up was lost"))
+                        .unwrap()
+                        .unwrap();
+                }
+                assert!(!store.exists(&a) && !store.exists(&b));
+            }
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn clients_blocked_on_one_key_are_served_in_arrival_order() {
+            let store = Arc::new(ListStore::new());
+            let spawn_waiter = |store: &Arc<ListStore>| {
+                let store = Arc::clone(store);
+                tokio::spawn(async move { store.blpop(keys(&["q"]), Some(10)).await })
+            };
+            let first = spawn_waiter(&store);
+            until_blocked(&store, "q", 1).await;
+            let second = spawn_waiter(&store);
+            until_blocked(&store, "q", 2).await;
+            let third = spawn_waiter(&store);
+            until_blocked(&store, "q", 3).await;
+
+            store.rpush("q", vec![b"one".to_vec()], false).unwrap();
+            let popped = timeout(WAKE_BOUND, first).await.unwrap().unwrap().unwrap();
+            assert_eq!(popped.1, b"one".to_vec(), "the oldest client is served");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            assert!(!second.is_finished() && !third.is_finished());
+            assert_eq!(store.blocked_clients("q"), 2);
+
+            store.rpush("q", vec![b"two".to_vec()], false).unwrap();
+            let popped = timeout(WAKE_BOUND, second).await.unwrap().unwrap().unwrap();
+            assert_eq!(popped.1, b"two".to_vec());
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            assert!(!third.is_finished());
+
+            store.rpush("q", vec![b"three".to_vec()], false).unwrap();
+            let popped = timeout(WAKE_BOUND, third).await.unwrap().unwrap().unwrap();
+            assert_eq!(popped.1, b"three".to_vec());
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn client_woken_for_a_key_it_did_not_pop_hands_the_wake_up_on() {
+            let store = Arc::new(ListStore::new());
+            let gate = Arc::new(Mutex::new(()));
+            // Oldest on `b`, but pops `a` first when both hold data.
+            let multi = gated_blpop(&store, &gate, &["a", "b"]);
+            until_blocked(&store, "b", 1).await;
+            let only_b = {
+                let store = Arc::clone(&store);
+                tokio::spawn(async move { store.blpop(keys(&["b"]), Some(10)).await })
+            };
+            until_blocked(&store, "b", 2).await;
+
+            {
+                let _held = gate.lock().await;
+                // Wakes `multi` (oldest on b) only; `multi` is already woken
+                // when `a` is pushed, so that push wakes nobody else.
+                store.rpush("b", vec![b"for-b".to_vec()], false).unwrap();
+                store.rpush("a", vec![b"for-a".to_vec()], false).unwrap();
+            }
+
+            let popped = timeout(WAKE_BOUND, multi).await.unwrap().unwrap().unwrap();
+            assert_eq!(popped, ("a".to_owned(), b"for-a".to_vec()));
+            let popped = timeout(WAKE_BOUND, only_b)
+                .await
+                .expect("the unused wake-up on b reaches the next client")
+                .unwrap()
+                .unwrap();
+            assert_eq!(popped, ("b".to_owned(), b"for-b".to_vec()));
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn cancelled_client_hands_its_wake_up_on() {
+            let store = Arc::new(ListStore::new());
+            let gate = Arc::new(Mutex::new(()));
+            let cancelled = gated_blpop(&store, &gate, &["q"]);
+            until_blocked(&store, "q", 1).await;
+            let next = {
+                let store = Arc::clone(&store);
+                tokio::spawn(async move { store.blpop(keys(&["q"]), Some(10)).await })
+            };
+            until_blocked(&store, "q", 2).await;
+
+            let held = gate.lock().await;
+            store.rpush("q", vec![b"v".to_vec()], false).unwrap(); // wakes `cancelled`
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            cancelled.abort(); // e.g. the connection closed while it waited for the gate
+            assert!(cancelled.await.unwrap_err().is_cancelled());
+            drop(held);
+
+            let popped = timeout(WAKE_BOUND, next)
+                .await
+                .expect("the cancelled client's wake-up is handed on")
+                .unwrap()
+                .unwrap();
+            assert_eq!(popped, ("q".to_owned(), b"v".to_vec()));
+            assert_eq!(store.blocked_clients("q"), 0);
+        }
+
+        #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+        async fn brpoplpush_wakes_on_a_push_to_its_source() {
+            let store = Arc::new(ListStore::new());
+            let waiter = Arc::clone(&store);
+            let handle =
+                tokio::spawn(async move { waiter.brpoplpush("src", "dst", Some(10)).await });
+            until_blocked(&store, "src", 1).await;
+
+            store.rpush("src", vec![b"m".to_vec()], false).unwrap();
+
+            let moved = timeout(WAKE_BOUND, handle).await.unwrap().unwrap().unwrap();
+            assert_eq!(moved, b"m".to_vec());
+            assert_eq!(store.lrange("dst", 0, -1).unwrap(), vec![b"m".to_vec()]);
+        }
+    }
 }

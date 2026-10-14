@@ -1,5 +1,17 @@
 use super::*;
 
+/// The tenant a WebSocket's resources are scoped to: none outside Hub mode,
+/// and in Hub mode the caller's, refusing a connection that has none.
+fn socket_tenant<'a>(
+    state: &AppState,
+    hub_ctx: &'a Option<crate::hub::HubUserContext>,
+) -> Result<Option<&'a uuid::Uuid>, SynapError> {
+    crate::hub::MultiTenant::required_tenant(
+        state.hub_client.is_some(),
+        hub_ctx.as_ref().map(|hub| hub.user_id()),
+    )
+}
+
 // ============================================================================
 // Pub/Sub WebSocket Handler
 // ============================================================================
@@ -12,6 +24,8 @@ use super::*;
 /// semantics.
 pub async fn kv_websocket(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     ws: WebSocketUpgrade,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
@@ -29,10 +43,30 @@ pub async fn kv_websocket(
 
     // Parse keys from query params
     let keys_str = params.get("keys").cloned().unwrap_or_default();
-    let channels: Vec<String> = keys_str
-        .split(',')
-        .filter(|s| !s.is_empty())
-        .map(|key| format!("__watch@0__:{key}"))
+    let keys: Vec<&str> = keys_str.split(',').filter(|s| !s.is_empty()).collect();
+
+    // Watching a key delivers its value: it needs read access to the key.
+    let accesses: Vec<crate::auth::Access> = keys
+        .iter()
+        .map(|key| crate::auth::Access::new(format!("kv:{key}"), Action::Read))
+        .collect();
+    if let Err(e) = crate::auth::require_access(&ctx, &accesses) {
+        return e.into_response();
+    }
+
+    // In Hub mode a key is the caller's own: watch its scoped channel.
+    let tenant = match socket_tenant(&state, &hub_ctx) {
+        Ok(tenant) => tenant,
+        Err(e) => return e.into_response(),
+    };
+    let channels: Vec<String> = keys
+        .iter()
+        .map(|key| {
+            format!(
+                "__watch@0__:{}",
+                crate::hub::MultiTenant::scope_kv_key(tenant, key)
+            )
+        })
         .collect();
 
     if channels.is_empty() {
@@ -67,10 +101,26 @@ pub async fn kv_websocket(
 /// GET /queue/:name/ws/:consumer_id
 pub async fn queue_websocket(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((queue_name, consumer_id)): Path<(String, String)>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> AxumResponse {
+    // The socket consumes (read) and accepts ACK/NACK frames (write).
+    let resource = format!("queue:{queue_name}");
+    let accesses = [
+        crate::auth::Access::new(resource.clone(), Action::Read),
+        crate::auth::Access::new(resource, Action::Write),
+    ];
+    if let Err(e) = crate::auth::require_access(&ctx, &accesses) {
+        return e.into_response();
+    }
+    let queue_name = match socket_tenant(&state, &hub_ctx) {
+        Ok(tenant) => crate::hub::MultiTenant::scope_queue_name(tenant, &queue_name),
+        Err(e) => return e.into_response(),
+    };
+
     let queue_manager = match state.queue_manager.as_ref() {
         Some(qm) => qm.clone(),
         None => {
@@ -82,7 +132,6 @@ pub async fn queue_websocket(
         }
     };
 
-    let client_list_manager = state.client_list_manager.clone();
     let client_addr = addr.to_string();
     let client_id = format!("queue-{}-{}", queue_name, consumer_id);
 
@@ -94,10 +143,10 @@ pub async fn queue_websocket(
     ws.on_upgrade(move |socket| {
         handle_queue_socket(
             socket,
+            state,
             queue_manager,
             queue_name,
             consumer_id,
-            client_list_manager,
             client_id,
             client_addr,
         )
@@ -107,13 +156,14 @@ pub async fn queue_websocket(
 /// Handle Queue WebSocket connection
 pub(super) async fn handle_queue_socket(
     socket: WebSocket,
+    state: AppState,
     queue_manager: Arc<crate::core::QueueManager>,
     queue_name: String,
     consumer_id: String,
-    client_list_manager: Arc<crate::monitoring::ClientListManager>,
     client_id: String,
     client_addr: String,
 ) {
+    let client_list_manager = state.client_list_manager.clone();
     let connected_at = std::time::SystemTime::now();
     let client_info =
         crate::monitoring::ClientInfo::new(client_id.clone(), client_addr, connected_at);
@@ -180,14 +230,14 @@ pub(super) async fn handle_queue_socket(
                             match cmd["command"].as_str() {
                                 Some("ack") => {
                                     if let Some(msg_id) = cmd["message_id"].as_str()
-                                        && let Err(e) = queue_manager.ack(&queue_name, msg_id).await {
+                                        && let Err(e) = crate::persistence::durable::queue_ack(state.persistence.as_deref(), &queue_manager, &queue_name, msg_id).await {
                                             error!("ACK error: {}", e);
                                         }
                                 }
                                 Some("nack") => {
                                     if let Some(msg_id) = cmd["message_id"].as_str() {
                                         let requeue = cmd["requeue"].as_bool().unwrap_or(true);
-                                        if let Err(e) = queue_manager.nack(&queue_name, msg_id, requeue).await {
+                                        if let Err(e) = crate::persistence::durable::queue_nack(state.persistence.as_deref(), &queue_manager, &queue_name, msg_id, requeue).await {
                                             error!("NACK error: {}", e);
                                         }
                                     }
@@ -234,11 +284,21 @@ pub(super) async fn handle_queue_socket(
 /// GET /stream/:room/ws/:subscriber_id?from_offset=0
 pub async fn stream_websocket(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((room_name, subscriber_id)): Path<(String, String)>,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
     ws: WebSocketUpgrade,
 ) -> AxumResponse {
+    if let Err(e) = require_resource_permission(&ctx, "stream:", &room_name, Action::Read) {
+        return e.into_response();
+    }
+    let room_name = match socket_tenant(&state, &hub_ctx) {
+        Ok(tenant) => crate::hub::MultiTenant::scope_stream_name(tenant, &room_name),
+        Err(e) => return e.into_response(),
+    };
+
     let stream_manager = match state.stream_manager.as_ref() {
         Some(sm) => sm.clone(),
         None => {
@@ -415,6 +475,8 @@ pub(super) async fn handle_stream_socket(socket: WebSocket, params: StreamSocket
 /// GET /pubsub/ws?topics=topic1,topic2,*.wildcard
 pub async fn pubsub_websocket(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     ws: WebSocketUpgrade,
     axum::extract::Query(params): axum::extract::Query<HashMap<String, String>>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<SocketAddr>,
@@ -438,6 +500,14 @@ pub async fn pubsub_websocket(
         .map(|s| s.to_string())
         .collect();
 
+    let accesses: Vec<crate::auth::Access> = topics
+        .iter()
+        .flat_map(|topic| crate::auth::pubsub_topic_access(topic, Action::Read))
+        .collect();
+    if let Err(e) = crate::auth::require_access(&ctx, &accesses) {
+        return e.into_response();
+    }
+
     if topics.is_empty() {
         return (
             axum::http::StatusCode::BAD_REQUEST,
@@ -445,6 +515,13 @@ pub async fn pubsub_websocket(
         )
             .into_response();
     }
+    let topics: Vec<String> = match socket_tenant(&state, &hub_ctx) {
+        Ok(tenant) => topics
+            .iter()
+            .map(|topic| crate::hub::MultiTenant::scope_topic(tenant, topic))
+            .collect(),
+        Err(e) => return e.into_response(),
+    };
 
     info!("WebSocket connection requested for topics: {:?}", topics);
 

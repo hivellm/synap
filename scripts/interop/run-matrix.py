@@ -100,7 +100,7 @@ def discover_cells() -> list[Cell]:
         Cell(
             name="rust",
             command=[
-                "cargo", "run", "--quiet", "--release",
+                "cargo", "run", "--quiet", "--release", "--locked",
                 "--package", "synap-sdk", "--example", "interop", "--",
             ],
             cwd=REPO,
@@ -335,6 +335,13 @@ def main() -> int:
         "configured like server-config.yml: auth required, same credentials.",
     )
     parser.add_argument("--timeout", type=float, default=300.0)
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="fail when a cell cannot run (toolchain missing, setup failed, "
+        "timed out) instead of reporting it as not run; CI passes this so a "
+        "missing toolchain cannot turn a cell green by omission",
+    )
     parser.add_argument("--json", type=Path, help="also write raw results here")
     args = parser.parse_args()
 
@@ -406,6 +413,9 @@ def main() -> int:
         print(f"\nnot run: {', '.join(not_run)}")
     if red:
         print(f"\nFAILED: {', '.join(red)}")
+        return 1
+    if args.strict and not_run:
+        print("\nFAILED: --strict, and some cells did not run")
         return 1
     print("\nevery cell that ran is green")
     return 0

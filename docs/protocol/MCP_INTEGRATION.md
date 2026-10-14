@@ -247,18 +247,36 @@ protocols:
 
 ## Security
 
-### Authentication
-MCP connections require API key authentication:
+### Authentication and Authorization
+`/mcp` and `/umicp` use the server's own authentication (`auth` in
+`config.yml`): send `Authorization: Basic ...` or an API key as
+`Authorization: Bearer sk_...`. With `require_auth: true` a request without
+credentials gets `401`.
 
-```yaml
-mcp:
-  auth:
-    enabled: true
-    api_keys:
-      - key: "mcp_key_abc123"
-        name: "AI Agent 1"
-        permissions: ["kv:read", "kv:write", "queue:consume"]
-```
+Every tool call is authorized with the credentials of the HTTP request that
+carries it — read from that request, never from shared state — using exactly
+the policy of the matching `/api/v1/command` command (see
+[Authentication](../features/AUTHENTICATION.md#one-policy-on-every-transport)):
+
+| Tool | Command | Needs |
+|------|---------|-------|
+| `synap_kv_get`, `synap_kv_getrange`, `synap_kv_strlen` | `kv.get`, `kv.getrange`, `kv.strlen` | `read` on `kv:<key>` |
+| `synap_kv_set`, `synap_kv_append` | `kv.set`, `kv.append` | `write` on `kv:<key>` |
+| `synap_kv_delete` | `kv.del` | `delete` on `kv:<key>` |
+| `synap_key_type`, `synap_key_exists` | `key.type`, `key.exists` | `read` on `kv:<key>` |
+| `synap_key_rename` | `key.rename` | `delete` on the source, `write` on the destination |
+| `synap_hash_*`, `synap_list_*`, `synap_set_*`, `synap_sortedset_*` | the `hash.*`, `list.*`, `set.*`, `sortedset.*` commands | the same grants on `hash:`, `list:`, `set:`, `sortedset:` |
+| `synap_queue_publish` | `queue.publish` | `write` on `queue:<queue>` |
+| `synap_transaction_multi`, `synap_transaction_exec` | `transaction.multi`, `transaction.exec` | nothing |
+
+A denied call returns a JSON-RPC error whose message starts with `NOPERM`
+and names the missing grant; UMICP returns it as the envelope's `error`. A
+request that reaches a tool without an identity while authentication is
+enabled is refused. With authentication disabled every call is allowed.
+
+A legacy MCP session (`mcp-session-id`) belongs to the credentials that
+created it with `initialize`: a request presenting the session id with other
+credentials gets `403`.
 
 ### Rate Limiting
 Protect against abuse with rate limiting:

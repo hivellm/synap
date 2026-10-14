@@ -181,7 +181,7 @@ async fn test_snapshot_create_and_load() {
     // Load snapshot
     let (snapshot, _path) = snapshot_mgr.load_latest().await.unwrap().unwrap();
 
-    assert_eq!(snapshot.version, 3); // v3 adds hash/list/set/sorted-set sections
+    assert_eq!(snapshot.version, 5); // v5 stores queues whole (v4 added KV expiry, HLL, bitmaps)
     assert_eq!(snapshot.wal_offset, 42);
     assert_eq!(snapshot.kv_data.len(), 2);
     assert_eq!(snapshot.kv_data.get("key1").unwrap(), b"value1");
@@ -228,7 +228,10 @@ async fn test_snapshot_rejects_corrupted_checksum() {
     // Load must fail with a corruption error rather than returning bad data.
     let result = snapshot_mgr.load_latest().await;
     assert!(
-        matches!(result, Err(types::PersistenceError::SnapshotCorrupted(_))),
+        matches!(
+            result,
+            Err(types::PersistenceError::SnapshotCorrupted { .. })
+        ),
         "expected SnapshotCorrupted, got {result:?}"
     );
 
@@ -285,6 +288,8 @@ async fn test_snapshot_roundtrip_all_datatypes() {
                 sorted_set_store: Some(&sorted_set_store),
                 queue_manager: None,
                 stream_manager: None,
+                hyperloglog_store: None,
+                bitmap_store: None,
             },
             99,
         )
@@ -293,7 +298,7 @@ async fn test_snapshot_roundtrip_all_datatypes() {
 
     let (snapshot, _path) = snapshot_mgr.load_latest().await.unwrap().unwrap();
 
-    assert_eq!(snapshot.version, 3);
+    assert_eq!(snapshot.version, 5);
     assert_eq!(snapshot.wal_offset, 99);
     assert_eq!(snapshot.kv_data.get("kvk").unwrap(), b"kvv");
     let h = snapshot.hash_data.get("h").unwrap();
@@ -409,4 +414,318 @@ async fn test_snapshot_cleanup_old() {
 
     // Cleanup
     let _ = tokio::fs::remove_dir_all(&snapshot_dir).await;
+}
+
+/// Persistence config rooted at a fresh `./target/<name>` directory.
+fn restart_config(name: &str) -> types::PersistenceConfig {
+    let dir = format!("./target/{name}");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(format!("{dir}/snap")).unwrap();
+    let mut config = types::PersistenceConfig::default();
+    config.wal.fsync_mode = types::FsyncMode::Always;
+    config.wal.path = std::path::PathBuf::from(format!("{dir}/wal.log"));
+    config.snapshot.enabled = false;
+    config.snapshot.directory = std::path::PathBuf::from(format!("{dir}/snap"));
+    config
+}
+
+/// One server lifetime: recover, log one SET through the WAL, shut down.
+async fn run_server_and_set(config: &types::PersistenceConfig, key: &str) -> KVStore {
+    let (kv, ..) = recover(config, KVConfig::default(), QueueConfig::default())
+        .await
+        .unwrap();
+    let layer = PersistenceLayer::new(config.clone()).await.unwrap();
+    layer
+        .log_kv_set(key.to_string(), key.as_bytes().to_vec(), None)
+        .await
+        .unwrap();
+    layer.shutdown().await.unwrap();
+    kv
+}
+
+/// A complete frame for a SET of `key` at `offset`.
+fn set_frame(offset: u64, key: &str) -> Vec<u8> {
+    wal_frame::encode_frame(&types::WALEntry {
+        offset,
+        timestamp: 0,
+        operation: types::Operation::KVSet {
+            key: key.into(),
+            value: key.as_bytes().to_vec(),
+            ttl: None,
+        },
+    })
+    .unwrap()
+}
+
+/// Spec "Torn tail then new writes": for every torn-tail shape (cut short,
+/// failing its checksum, zero fill), the first restart truncates the tail and
+/// acknowledges a new write; the second restart recovers every frame before
+/// the torn one plus the new write.
+#[tokio::test]
+async fn torn_tail_then_new_writes_survive_two_restarts() {
+    let torn_frame = set_frame(99, "torn");
+    let mut huge_length = (1u64 << 60).to_be_bytes().to_vec();
+    huge_length.extend_from_slice(&[0x5A; 64]);
+    let mut bad_checksum = torn_frame.clone();
+    bad_checksum[8] ^= 0xFF;
+    let shapes: Vec<(&str, Vec<u8>)> = vec![
+        ("partial_length", torn_frame[..4].to_vec()),
+        ("partial_checksum", torn_frame[..10].to_vec()),
+        (
+            "partial_payload",
+            torn_frame[..torn_frame.len() / 2].to_vec(),
+        ),
+        ("corrupt_huge_length", huge_length),
+        ("bad_checksum", bad_checksum),
+        ("zero_fill", vec![0u8; 4096]),
+    ];
+
+    for (shape, tail) in shapes {
+        let config = restart_config(&format!("restart_torn_{shape}"));
+        run_server_and_set(&config, "first").await;
+        let mut file = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&config.wal.path)
+            .unwrap();
+        std::io::Write::write_all(&mut file, &tail).unwrap();
+        drop(file);
+
+        // Restart 1: the torn tail is truncated before anything is appended.
+        let kv = run_server_and_set(&config, "second").await;
+        assert_eq!(
+            kv.get("first").await.unwrap(),
+            Some(b"first".to_vec()),
+            "{shape}"
+        );
+
+        // Restart 2: both writes recover and the file is clean.
+        let (kv, ..) = recover(&config, KVConfig::default(), QueueConfig::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            kv.get("first").await.unwrap(),
+            Some(b"first".to_vec()),
+            "{shape}"
+        );
+        assert_eq!(
+            kv.get("second").await.unwrap(),
+            Some(b"second".to_vec()),
+            "{shape}"
+        );
+        assert_eq!(kv.get("torn").await.unwrap(), None, "{shape}");
+        let report = wal_frame::scan(&config.wal.path, |_| {}).unwrap();
+        assert_eq!(report.end, wal_frame::ScanEnd::Clean, "{shape}");
+        assert_eq!(report.valid_frames, 2, "{shape}");
+    }
+}
+
+/// Spec "Interior corruption": a checksum mismatch followed by valid frames
+/// fails recovery and the WAL open with the bad frame's byte position.
+#[tokio::test]
+async fn interior_corruption_fails_startup_with_the_byte_position() {
+    let config = restart_config("restart_interior");
+    {
+        let layer = PersistenceLayer::new(config.clone()).await.unwrap();
+        for key in ["a", "b", "c"] {
+            layer
+                .log_kv_set(key.into(), key.as_bytes().to_vec(), None)
+                .await
+                .unwrap();
+        }
+        layer.shutdown().await.unwrap();
+    }
+    let mut bytes = std::fs::read(&config.wal.path).unwrap();
+    // Frames follow the file header.
+    let first = wal_frame::FILE_HEADER_LEN as usize;
+    let second =
+        first + 12 + u64::from_be_bytes(bytes[first..first + 8].try_into().unwrap()) as usize;
+    bytes[second + 14] ^= 0xFF; // inside the second frame's payload
+    std::fs::write(&config.wal.path, &bytes).unwrap();
+
+    let expected = format!("at byte {second}");
+    let err = recover(&config, KVConfig::default(), QueueConfig::default())
+        .await
+        .err()
+        .expect("recovery must fail on interior corruption");
+    assert!(
+        matches!(err, types::PersistenceError::WALInteriorCorruption { .. }),
+        "{err}"
+    );
+    assert!(err.to_string().contains(&expected), "{err}");
+    let err = PersistenceLayer::new(config.clone()).await.err().unwrap();
+    assert!(err.to_string().contains(&expected), "{err}");
+    // Nothing was truncated or appended.
+    assert_eq!(std::fs::read(&config.wal.path).unwrap(), bytes);
+}
+
+/// Spec "Record of an unknown type at the end of the WAL": a last frame that
+/// is complete and matches its checksum but holds a record type this release
+/// does not know is not a crash's leftovers. Recovery and the WAL open refuse
+/// startup, naming the WAL, the frame's byte position and a newer release, and
+/// leave the file byte for byte as it was.
+#[tokio::test]
+async fn an_unreadable_last_record_refuses_startup_and_is_kept() {
+    let config = restart_config("restart_unreadable");
+    run_server_and_set(&config, "first").await;
+    let mut bytes = std::fs::read(&config.wal.path).unwrap();
+    let position = bytes.len() as u64;
+    bytes.extend_from_slice(&unknown_record_frame(2));
+    std::fs::write(&config.wal.path, &bytes).unwrap();
+
+    let path = config.wal.path.display().to_string().replace('\\', "\\\\");
+    let check = |err: types::PersistenceError| {
+        assert!(
+            matches!(
+                &err,
+                types::PersistenceError::WALUnreadableRecord { position: at, .. } if *at == position
+            ),
+            "{err:?}"
+        );
+        assert!(err.refuses_startup(), "{err}");
+        let message = err.to_string();
+        assert!(message.contains(&path), "{message}");
+        assert!(
+            message.contains(&format!("at byte {position}")),
+            "{message}"
+        );
+        assert!(message.contains("newer Synap release"), "{message}");
+    };
+    check(
+        recover(&config, KVConfig::default(), QueueConfig::default())
+            .await
+            .err()
+            .expect("recovery must refuse an unreadable last record"),
+    );
+    check(PersistenceLayer::new(config.clone()).await.err().unwrap());
+    assert_eq!(std::fs::read(&config.wal.path).unwrap(), bytes);
+}
+
+/// A complete frame at `offset` whose checksum matches but whose record type
+/// this release does not know, as a newer release would append one.
+fn unknown_record_frame(offset: u64) -> Vec<u8> {
+    let mut unknown = set_frame(offset, "from-a-newer-release");
+    // Payload bytes 16..20 hold the operation variant tag (bincode legacy:
+    // offset u64, timestamp u64, then the tag as u32 LE); no variant has this
+    // number. Re-checksum so only the record type is unknown.
+    let payload = wal_frame::FRAME_HEADER_LEN as usize;
+    unknown[payload + 16..payload + 20].copy_from_slice(&1000u32.to_le_bytes());
+    let checksum = crc32fast::hash(&unknown[payload..]);
+    unknown[8..12].copy_from_slice(&checksum.to_be_bytes());
+    unknown
+}
+
+/// Spec "Damaged frame before a record of an unknown type": a frame failing
+/// its checksum, or zero fill, followed by a record this release cannot decode
+/// is interior corruption, not a torn tail. Recovery and the WAL open refuse
+/// startup with both byte positions and leave the file byte for byte as it
+/// was, so the record is not truncated with the damage.
+#[tokio::test]
+async fn a_damaged_frame_before_an_unreadable_record_refuses_startup_and_is_kept() {
+    let mut bad_checksum = set_frame(2, "damaged");
+    bad_checksum[8] ^= 0xFF;
+    let damages = [
+        ("checksum_mismatch", bad_checksum),
+        ("zero_fill", vec![0u8; wal_frame::FRAME_HEADER_LEN as usize]),
+    ];
+    for (damage, bad) in damages {
+        let config = restart_config(&format!("restart_damaged_then_unreadable_{damage}"));
+        run_server_and_set(&config, "first").await;
+        let mut bytes = std::fs::read(&config.wal.path).unwrap();
+        let position = bytes.len() as u64;
+        bytes.extend_from_slice(&bad);
+        let next = bytes.len() as u64;
+        bytes.extend_from_slice(&unknown_record_frame(3));
+        std::fs::write(&config.wal.path, &bytes).unwrap();
+
+        let check = |err: types::PersistenceError| {
+            assert!(
+                matches!(
+                    &err,
+                    types::PersistenceError::WALInteriorCorruption { position: at, next_valid, .. }
+                        if *at == position && *next_valid == next
+                ),
+                "{damage}: {err:?}"
+            );
+            assert!(err.refuses_startup(), "{damage}: {err}");
+            let message = err.to_string();
+            assert!(
+                message.contains(&format!("at byte {position}")),
+                "{damage}: {message}"
+            );
+            assert!(
+                message.contains(&format!("follows at byte {next}")),
+                "{damage}: {message}"
+            );
+        };
+        check(
+            recover(&config, KVConfig::default(), QueueConfig::default())
+                .await
+                .err()
+                .expect("recovery must refuse a damaged frame before an intact record"),
+        );
+        check(PersistenceLayer::new(config.clone()).await.err().unwrap());
+        assert_eq!(std::fs::read(&config.wal.path).unwrap(), bytes, "{damage}");
+    }
+}
+
+/// The newest snapshot's stream rooms come back at startup: every event with
+/// its ID, offset, type, data and timestamp, publishes continuing after the
+/// last offset, each room a new incarnation. A room the manager already has
+/// is skipped rather than merged.
+#[tokio::test]
+async fn snapshot_stream_rooms_are_restored_at_startup() {
+    use crate::core::stream::{StreamConfig, StreamManager};
+
+    let mut config = restart_config("restart_streams");
+    config.snapshot.enabled = true;
+    let before = StreamManager::new(StreamConfig::default());
+    before.create_room("feed").await.unwrap();
+    for body in ["a", "b", "c"] {
+        before
+            .publish("feed", "created", body.as_bytes().to_vec())
+            .await
+            .unwrap();
+    }
+    let published = before.consume("feed", "c", 0, 10).await.unwrap();
+    let kv = KVStore::new(KVConfig::default());
+    SnapshotManager::new(config.snapshot.clone())
+        .create_snapshot(
+            StoreRefs {
+                stream_manager: Some(&before),
+                ..StoreRefs::kv_only(&kv)
+            },
+            1,
+        )
+        .await
+        .unwrap();
+
+    let recovered = recover_all(&config, KVConfig::default(), QueueConfig::default())
+        .await
+        .unwrap();
+    assert_eq!(recovered.streams.len(), 1);
+    let after = StreamManager::new(StreamConfig::default());
+    assert_eq!(restore_streams(&after, recovered.streams.clone()).await, 1);
+    let restored = after.consume("feed", "c", 0, 10).await.unwrap();
+    assert_eq!(restored.len(), 3);
+    for (event, original) in restored.iter().zip(&published) {
+        assert_eq!(event.id, original.id);
+        assert_eq!(event.offset, original.offset);
+        assert_eq!(event.event, original.event);
+        assert_eq!(event.data, original.data);
+        assert_eq!(event.timestamp, original.timestamp);
+    }
+    assert_eq!(
+        after
+            .publish("feed", "created", b"d".to_vec())
+            .await
+            .unwrap(),
+        3
+    );
+    assert!(
+        after.room_stats("feed").await.unwrap().generation
+            > before.room_stats("feed").await.unwrap().generation
+    );
+
+    assert_eq!(restore_streams(&after, recovered.streams).await, 0);
+    assert_eq!(after.consume("feed", "c", 0, 10).await.unwrap().len(), 4);
 }

@@ -21,13 +21,12 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt
+      # `cargo fmt` with no `+toolchain`: the pinned rustfmt is the authority.
+      - name: Install the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
 
       - name: Check code formatting
-        run: cargo +nightly fmt --all -- --check
+        run: cargo fmt --all -- --check
 
   clippy:
     name: Clippy Lints
@@ -36,10 +35,8 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      - name: Install Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: clippy
+      - name: Install the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
@@ -51,7 +48,7 @@ jobs:
       # --all-targets`): anything they would catch, this catches. Keeping all
       # three compiled the workspace three times for one guarantee.
       - name: Run Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
   cargo-deny:
     name: Security & License Check
@@ -60,18 +57,23 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v7
 
+      # cargo-deny resolves the graph through cargo, so it runs on the pinned
+      # toolchain and, with `--locked`, audits exactly the committed Cargo.lock.
+      - name: Install the pinned Rust toolchain
+        uses: ./.github/actions/setup-rust
+
       - name: Install cargo-deny
         uses: taiki-e/install-action@cargo-deny
 
       - name: Check security advisories
-        run: cargo deny check advisories
+        run: cargo deny --locked check advisories
 
       - name: Check licenses
-        run: cargo deny check licenses
+        run: cargo deny --locked check licenses
         continue-on-error: true
 
       - name: Check bans
-        run: cargo deny check bans
+        run: cargo deny --locked check bans
         continue-on-error: true
 
   # A separate `cargo audit` job used to run here. It queried the same RustSec

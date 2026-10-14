@@ -1,3 +1,4 @@
+use crate::persistence::durable;
 use std::collections::HashMap;
 use std::sync::{
     Arc,
@@ -10,6 +11,7 @@ use parking_lot::RwLock;
 use sha1::{Digest, Sha1};
 use tokio::time;
 
+use crate::auth::{CommandArgs, OperationContext};
 use crate::core::{
     HashStore, KVStore, ListStore, ScoredMember, SetStore, SortedSetStore, SynapError, ZAddOptions,
 };
@@ -22,6 +24,35 @@ pub struct ScriptExecContext {
     pub list_store: Arc<ListStore>,
     pub set_store: Arc<SetStore>,
     pub sorted_set_store: Arc<SortedSetStore>,
+    /// Persistence layer every `redis.call` write is recorded through, exactly
+    /// as if the caller had sent the command directly. `None` without WAL or
+    /// replication.
+    pub persistence: Option<Arc<crate::persistence::PersistenceLayer>>,
+    /// Whoever ran the script: every `redis.call` is authorized against it,
+    /// exactly as if the caller had sent the command directly.
+    pub caller: Arc<OperationContext>,
+}
+
+/// `redis.call` arguments as text, converted the way the bridge's own
+/// `lua_value_to_string` reads them, so authorization sees every key it uses.
+struct LuaArgs<'a>(&'a [LuaValue]);
+
+impl CommandArgs for LuaArgs<'_> {
+    fn arg_count(&self) -> usize {
+        self.0.len()
+    }
+    fn arg(&self, index: usize) -> Option<std::borrow::Cow<'_, str>> {
+        match self.0.get(index)? {
+            LuaValue::String(s) => Some(std::borrow::Cow::Owned(
+                String::from_utf8_lossy(s.as_bytes().as_ref()).into_owned(),
+            )),
+            LuaValue::Number(n) => Some(std::borrow::Cow::Owned(n.to_string())),
+            LuaValue::Integer(i) => Some(std::borrow::Cow::Owned(i.to_string())),
+            LuaValue::Boolean(b) => Some(std::borrow::Cow::Borrowed(if *b { "1" } else { "0" })),
+            LuaValue::Nil => Some(std::borrow::Cow::Borrowed("")),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -196,6 +227,11 @@ async fn handle_redis_call(
     let normalized = command.to_ascii_lowercase();
     let command_name = command.to_ascii_uppercase();
 
+    context
+        .caller
+        .authorize_native(&command_name, &LuaArgs(&args))
+        .map_err(|denied| mlua::Error::RuntimeError(denied.to_string()))?;
+
     match normalized.as_str() {
         "get" => {
             ensure_min_args(&args, 1, &command_name)?;
@@ -216,11 +252,15 @@ async fn handle_redis_call(
             } else {
                 None
             };
-            context
-                .kv_store
-                .set(&key, value, ttl)
-                .await
-                .map_err(synap_err_to_lua)?;
+            durable::kv_set(
+                context.persistence.as_deref(),
+                &context.kv_store,
+                &key,
+                value,
+                ttl,
+            )
+            .await
+            .map_err(synap_err_to_lua)?;
             Ok(LuaValue::String(lua.create_string("OK")?))
         }
         "del" => {
@@ -229,7 +269,9 @@ async fn handle_redis_call(
             let mut deleted = 0i64;
             for value in args.iter() {
                 let key = lua_value_to_string(value, &command_name)?;
-                let removed = store.delete(&key).await.map_err(synap_err_to_lua)?;
+                let removed = durable::kv_delete(context.persistence.as_deref(), &store, &key)
+                    .await
+                    .map_err(synap_err_to_lua)?;
                 if removed {
                     deleted += 1;
                 }
@@ -257,11 +299,14 @@ async fn handle_redis_call(
             } else {
                 1
             };
-            let result = context
-                .kv_store
-                .incr(&key, amount)
-                .await
-                .map_err(synap_err_to_lua)?;
+            let result = durable::kv_incr(
+                context.persistence.as_deref(),
+                &context.kv_store,
+                &key,
+                amount,
+            )
+            .await
+            .map_err(synap_err_to_lua)?;
             Ok(LuaValue::Integer(result))
         }
         "decr" | "decrby" => {
@@ -272,32 +317,33 @@ async fn handle_redis_call(
             } else {
                 1
             };
-            let result = context
-                .kv_store
-                .incr(&key, -amount)
-                .await
-                .map_err(synap_err_to_lua)?;
+            let result = durable::kv_incr(
+                context.persistence.as_deref(),
+                &context.kv_store,
+                &key,
+                -amount,
+            )
+            .await
+            .map_err(synap_err_to_lua)?;
             Ok(LuaValue::Integer(result))
         }
         "expire" => {
             ensure_min_args(&args, 2, &command_name)?;
             let key = lua_value_to_string(&args[0], &command_name)?;
             let ttl = lua_value_to_u64(&args[1], &command_name)?;
-            let success = context
-                .kv_store
-                .expire(&key, ttl)
-                .await
-                .map_err(synap_err_to_lua)?;
+            let success =
+                durable::kv_expire(context.persistence.as_deref(), &context.kv_store, &key, ttl)
+                    .await
+                    .map_err(synap_err_to_lua)?;
             Ok(LuaValue::Integer(if success { 1 } else { 0 }))
         }
         "persist" => {
             ensure_min_args(&args, 1, &command_name)?;
             let key = lua_value_to_string(&args[0], &command_name)?;
-            let success = context
-                .kv_store
-                .persist(&key)
-                .await
-                .map_err(synap_err_to_lua)?;
+            let success =
+                durable::kv_persist(context.persistence.as_deref(), &context.kv_store, &key)
+                    .await
+                    .map_err(synap_err_to_lua)?;
             Ok(LuaValue::Integer(if success { 1 } else { 0 }))
         }
         "ttl" => {
@@ -315,10 +361,15 @@ async fn handle_redis_call(
             let key = lua_value_to_string(&args[0], &command_name)?;
             let field = lua_value_to_string(&args[1], &command_name)?;
             let value = lua_value_to_bytes(&args[2])?;
-            let created = context
-                .hash_store
-                .hset(&key, &field, value)
-                .map_err(synap_err_to_lua)?;
+            let created = durable::hset(
+                context.persistence.as_deref(),
+                &context.hash_store,
+                &key,
+                &field,
+                value,
+            )
+            .await
+            .map_err(synap_err_to_lua)?;
             Ok(LuaValue::Integer(if created { 1 } else { 0 }))
         }
         "hget" => {
@@ -337,10 +388,14 @@ async fn handle_redis_call(
         "hdel" => {
             let fields = collect_string_args(&args, 1, &command_name)?;
             let key = lua_value_to_string(&args[0], &command_name)?;
-            let deleted = context
-                .hash_store
-                .hdel(&key, &fields)
-                .map_err(synap_err_to_lua)?;
+            let deleted = durable::hdel(
+                context.persistence.as_deref(),
+                &context.hash_store,
+                &key,
+                &fields,
+            )
+            .await
+            .map_err(synap_err_to_lua)?;
             Ok(LuaValue::Integer(deleted as i64))
         }
         "hexists" => {
@@ -356,19 +411,29 @@ async fn handle_redis_call(
         "lpush" => {
             let values = collect_bytes_args(&args, 1, &command_name)?;
             let key = lua_value_to_string(&args[0], &command_name)?;
-            let len = context
-                .list_store
-                .lpush(&key, values, false)
-                .map_err(synap_err_to_lua)?;
+            let len = durable::lpush(
+                context.persistence.as_deref(),
+                &context.list_store,
+                &key,
+                values,
+                false,
+            )
+            .await
+            .map_err(synap_err_to_lua)?;
             Ok(LuaValue::Integer(len as i64))
         }
         "rpush" => {
             let values = collect_bytes_args(&args, 1, &command_name)?;
             let key = lua_value_to_string(&args[0], &command_name)?;
-            let len = context
-                .list_store
-                .rpush(&key, values, false)
-                .map_err(synap_err_to_lua)?;
+            let len = durable::rpush(
+                context.persistence.as_deref(),
+                &context.list_store,
+                &key,
+                values,
+                false,
+            )
+            .await
+            .map_err(synap_err_to_lua)?;
             Ok(LuaValue::Integer(len as i64))
         }
         "lpop" => {
@@ -379,7 +444,14 @@ async fn handle_redis_call(
             } else {
                 None
             };
-            match context.list_store.lpop(&key, count) {
+            match durable::lpop(
+                context.persistence.as_deref(),
+                &context.list_store,
+                &key,
+                count,
+            )
+            .await
+            {
                 Ok(values) => vec_bytes_to_lua(lua, values),
                 Err(SynapError::NotFound) | Err(SynapError::KeyExpired) => Ok(LuaValue::Nil),
                 Err(err) => Err(synap_err_to_lua(err)),
@@ -393,7 +465,14 @@ async fn handle_redis_call(
             } else {
                 None
             };
-            match context.list_store.rpop(&key, count) {
+            match durable::rpop(
+                context.persistence.as_deref(),
+                &context.list_store,
+                &key,
+                count,
+            )
+            .await
+            {
                 Ok(values) => vec_bytes_to_lua(lua, values),
                 Err(SynapError::NotFound) | Err(SynapError::KeyExpired) => Ok(LuaValue::Nil),
                 Err(err) => Err(synap_err_to_lua(err)),
@@ -411,16 +490,27 @@ async fn handle_redis_call(
         "sadd" => {
             let members = collect_bytes_args(&args, 1, &command_name)?;
             let key = lua_value_to_string(&args[0], &command_name)?;
-            let added = context
-                .set_store
-                .sadd(&key, members)
-                .map_err(synap_err_to_lua)?;
+            let added = durable::sadd(
+                context.persistence.as_deref(),
+                &context.set_store,
+                &key,
+                members,
+            )
+            .await
+            .map_err(synap_err_to_lua)?;
             Ok(LuaValue::Integer(added as i64))
         }
         "srem" => {
             let members = collect_bytes_args(&args, 1, &command_name)?;
             let key = lua_value_to_string(&args[0], &command_name)?;
-            match context.set_store.srem(&key, members) {
+            match durable::srem(
+                context.persistence.as_deref(),
+                &context.set_store,
+                &key,
+                members,
+            )
+            .await
+            {
                 Ok(removed) => Ok(LuaValue::Integer(removed as i64)),
                 Err(SynapError::NotFound) | Err(SynapError::KeyExpired) => Ok(LuaValue::Integer(0)),
                 Err(err) => Err(synap_err_to_lua(err)),
@@ -460,7 +550,16 @@ async fn handle_redis_call(
             while idx < args.len() {
                 let score = lua_value_to_f64(&args[idx], &command_name)?;
                 let member = lua_value_to_bytes(&args[idx + 1])?;
-                let (a, _) = context.sorted_set_store.zadd(&key, member, score, &opts);
+                let (a, _) = durable::zadd(
+                    context.persistence.as_deref(),
+                    &context.sorted_set_store,
+                    &key,
+                    member,
+                    score,
+                    &opts,
+                )
+                .await
+                .map_err(synap_err_to_lua)?;
                 added += a as i64;
                 idx += 2;
             }
@@ -470,7 +569,14 @@ async fn handle_redis_call(
             ensure_min_args(&args, 2, &command_name)?;
             let key = lua_value_to_string(&args[0], &command_name)?;
             let members = collect_bytes_args(&args, 1, &command_name)?;
-            let removed = context.sorted_set_store.zrem(&key, &members);
+            let removed = durable::zrem(
+                context.persistence.as_deref(),
+                &context.sorted_set_store,
+                &key,
+                &members,
+            )
+            .await
+            .map_err(synap_err_to_lua)?;
             Ok(LuaValue::Integer(removed as i64))
         }
         "zscore" => {
@@ -494,7 +600,15 @@ async fn handle_redis_call(
             let key = lua_value_to_string(&args[0], &command_name)?;
             let increment = lua_value_to_f64(&args[1], &command_name)?;
             let member = lua_value_to_bytes(&args[2])?;
-            let new_score = context.sorted_set_store.zincrby(&key, member, increment);
+            let new_score = durable::zincrby(
+                context.persistence.as_deref(),
+                &context.sorted_set_store,
+                &key,
+                member,
+                increment,
+            )
+            .await
+            .map_err(synap_err_to_lua)?;
             Ok(LuaValue::String(lua.create_string(new_score.to_string())?))
         }
         "zcount" => {
@@ -580,9 +694,23 @@ async fn handle_redis_call(
                 1
             };
             let members = if normalized == "zpopmin" {
-                context.sorted_set_store.zpopmin(&key, count)
+                durable::zpopmin(
+                    context.persistence.as_deref(),
+                    &context.sorted_set_store,
+                    &key,
+                    count,
+                )
+                .await
+                .map_err(synap_err_to_lua)?
             } else {
-                context.sorted_set_store.zpopmax(&key, count)
+                durable::zpopmax(
+                    context.persistence.as_deref(),
+                    &context.sorted_set_store,
+                    &key,
+                    count,
+                )
+                .await
+                .map_err(synap_err_to_lua)?
             };
             scored_members_to_lua(lua, members)
         }
@@ -591,7 +719,15 @@ async fn handle_redis_call(
             let key = lua_value_to_string(&args[0], &command_name)?;
             let start = lua_value_to_i64(&args[1], &command_name)?;
             let stop = lua_value_to_i64(&args[2], &command_name)?;
-            let removed = context.sorted_set_store.zremrangebyrank(&key, start, stop);
+            let removed = durable::zremrangebyrank(
+                context.persistence.as_deref(),
+                &context.sorted_set_store,
+                &key,
+                start,
+                stop,
+            )
+            .await
+            .map_err(synap_err_to_lua)?;
             Ok(LuaValue::Integer(removed as i64))
         }
         "zremrangebyscore" => {
@@ -599,7 +735,15 @@ async fn handle_redis_call(
             let key = lua_value_to_string(&args[0], &command_name)?;
             let min = lua_value_to_f64(&args[1], &command_name)?;
             let max = lua_value_to_f64(&args[2], &command_name)?;
-            let removed = context.sorted_set_store.zremrangebyscore(&key, min, max);
+            let removed = durable::zremrangebyscore(
+                context.persistence.as_deref(),
+                &context.sorted_set_store,
+                &key,
+                min,
+                max,
+            )
+            .await
+            .map_err(synap_err_to_lua)?;
             Ok(LuaValue::Integer(removed as i64))
         }
         "zmscore" => {
@@ -881,6 +1025,8 @@ mod tests {
             list_store: Arc::new(ListStore::new()),
             set_store: Arc::new(SetStore::new()),
             sorted_set_store: Arc::new(SortedSetStore::new()),
+            persistence: None,
+            caller: Arc::new(OperationContext::unrestricted()),
         }
     }
 
@@ -982,6 +1128,43 @@ mod tests {
         assert_eq!(val[1], serde_json::json!(2));
         assert_eq!(val[2], serde_json::json!(1));
         assert_eq!(val[3], serde_json::json!(1));
+    }
+
+    /// A script runs with its caller's permissions: a `redis.call` on a key the
+    /// caller may not write fails and leaves the key untouched.
+    #[tokio::test]
+    async fn redis_call_is_authorized_against_the_caller() {
+        use crate::auth::{Action, Permission, Role, UserManager};
+
+        let users = UserManager::new();
+        users
+            .create_role(Role::custom(
+                "x_writer",
+                vec![Permission::new("kv:x", Action::Write)],
+            ))
+            .unwrap();
+        users.create_user("scripter", "scripter123", false).unwrap();
+        users.add_user_role("scripter", "x_writer").unwrap();
+        let user = users.get_user("scripter").unwrap();
+
+        let mut c = ctx();
+        c.caller = Arc::new(OperationContext::for_user(Some(&users), Some(&user)));
+        let mgr = ScriptManager::new(Duration::from_secs(5));
+        let err = mgr
+            .eval(
+                c.clone(),
+                "redis.call('SET', 'x', '1'); return redis.call('SET', 'y', '2')",
+                vec![],
+                vec![],
+                None,
+            )
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("NOPERM") && err.contains("kv:y"), "{err}");
+        assert_eq!(c.kv_store.get("x").await.unwrap(), Some(b"1".to_vec()));
+        assert_eq!(c.kv_store.get("y").await.unwrap(), None);
     }
 
     #[tokio::test]

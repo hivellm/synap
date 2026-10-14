@@ -1,4 +1,5 @@
 use super::*;
+use crate::persistence::durable;
 
 // ==================== Sorted Set Handlers ====================
 
@@ -118,7 +119,15 @@ pub(super) async fn handle_sortedset_zadd_cmd(
             .unwrap_or(false),
     };
 
-    let (added, changed) = state.sorted_set_store.zadd(key, member_bytes, score, &opts);
+    let (added, changed) = durable::zadd(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        member_bytes,
+        score,
+        &opts,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "added": added, "changed": changed, "key": key }))
 }
@@ -149,7 +158,13 @@ pub(super) async fn handle_sortedset_zrem_cmd(
         .collect();
     let member_bytes = member_bytes?;
 
-    let removed = state.sorted_set_store.zrem(key, &member_bytes);
+    let removed = durable::zrem(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        &member_bytes,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "removed": removed, "key": key }))
 }
@@ -215,7 +230,14 @@ pub(super) async fn handle_sortedset_zincrby_cmd(
 
     let member_bytes = member.as_bytes().to_vec();
 
-    let new_score = state.sorted_set_store.zincrby(key, member_bytes, increment);
+    let new_score = durable::zincrby(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        member_bytes,
+        increment,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "score": new_score, "key": key }))
 }
@@ -377,7 +399,13 @@ pub(super) async fn handle_sortedset_zpopmin_cmd(
         .and_then(|v| v.as_u64())
         .unwrap_or(1) as usize;
 
-    let members = state.sorted_set_store.zpopmin(key, count);
+    let members = durable::zpopmin(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        count,
+    )
+    .await?;
     let result_count = members.len();
     let serialized = serialize_scored_members(members);
 
@@ -400,7 +428,13 @@ pub(super) async fn handle_sortedset_zpopmax_cmd(
         .and_then(|v| v.as_u64())
         .unwrap_or(1) as usize;
 
-    let members = state.sorted_set_store.zpopmax(key, count);
+    let members = durable::zpopmax(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        count,
+    )
+    .await?;
     let result_count = members.len();
     let serialized = serialize_scored_members(members);
 
@@ -465,7 +499,14 @@ pub(super) async fn handle_sortedset_zremrangebyrank_cmd(
         .and_then(|v| v.as_i64())
         .unwrap_or(-1);
 
-    let removed = state.sorted_set_store.zremrangebyrank(key, start, stop);
+    let removed = durable::zremrangebyrank(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        start,
+        stop,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "removed": removed, "key": key }))
 }
@@ -492,7 +533,14 @@ pub(super) async fn handle_sortedset_zremrangebyscore_cmd(
         .and_then(|v| v.as_f64())
         .unwrap_or(f64::INFINITY);
 
-    let removed = state.sorted_set_store.zremrangebyscore(key, min, max);
+    let removed = durable::zremrangebyscore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        min,
+        max,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "removed": removed, "key": key }))
 }
@@ -533,10 +581,15 @@ pub(super) async fn handle_sortedset_zinterstore_cmd(
         _ => crate::core::Aggregate::Sum,
     };
 
-    let count =
-        state
-            .sorted_set_store
-            .zinterstore(destination, &key_strs, weights.as_deref(), aggregate);
+    let count = durable::zinterstore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        destination,
+        &key_strs,
+        weights.as_deref(),
+        aggregate,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "count": count, "destination": destination }))
 }
@@ -577,10 +630,15 @@ pub(super) async fn handle_sortedset_zunionstore_cmd(
         _ => crate::core::Aggregate::Sum,
     };
 
-    let count =
-        state
-            .sorted_set_store
-            .zunionstore(destination, &key_strs, weights.as_deref(), aggregate);
+    let count = durable::zunionstore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        destination,
+        &key_strs,
+        weights.as_deref(),
+        aggregate,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "count": count, "destination": destination }))
 }
@@ -603,7 +661,13 @@ pub(super) async fn handle_sortedset_zdiffstore_cmd(
 
     let key_strs: Vec<&str> = keys.iter().filter_map(|v| v.as_str()).collect();
 
-    let count = state.sorted_set_store.zdiffstore(destination, &key_strs);
+    let count = durable::zdiffstore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        destination,
+        &key_strs,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "count": count, "destination": destination }))
 }
@@ -656,11 +720,16 @@ pub(super) async fn handle_sortedset_stats_cmd(
 pub async fn sortedset_zadd(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ZAddRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     // Check permission
     require_permission(&ctx, &format!("sortedset:{}", key), Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
 
     let opts = match &req {
         ZAddRequest::Single { nx, xx, gt, lt, .. } => crate::core::ZAddOptions {
@@ -690,9 +759,15 @@ pub async fn sortedset_zadd(
             let member_bytes = serde_json::to_vec(&member).map_err(|e| {
                 SynapError::InvalidValue(format!("Failed to serialize member: {}", e))
             })?;
-            let (added, _) = state
-                .sorted_set_store
-                .zadd(&key, member_bytes, score, &opts);
+            let (added, _) = durable::zadd(
+                state.persistence.as_deref(),
+                &state.sorted_set_store,
+                &scoped_key,
+                member_bytes,
+                score,
+                &opts,
+            )
+            .await?;
             added
         }
         ZAddRequest::Multiple {
@@ -709,9 +784,15 @@ pub async fn sortedset_zadd(
                 let member_bytes = serde_json::to_vec(&member).map_err(|e| {
                     SynapError::InvalidValue(format!("Failed to serialize member: {}", e))
                 })?;
-                let (added, _) = state
-                    .sorted_set_store
-                    .zadd(&key, member_bytes, score, &opts);
+                let (added, _) = durable::zadd(
+                    state.persistence.as_deref(),
+                    &state.sorted_set_store,
+                    &scoped_key,
+                    member_bytes,
+                    score,
+                    &opts,
+                )
+                .await?;
                 total_added += added;
             }
             total_added
@@ -725,6 +806,7 @@ pub async fn sortedset_zadd(
 pub async fn sortedset_zrem(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ZRemRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
@@ -733,12 +815,22 @@ pub async fn sortedset_zrem(
     // Check permission
     require_permission(&ctx, &format!("sortedset:{}", key), Action::Delete)?;
 
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     let members: Result<Vec<Vec<u8>>, _> = req.members.iter().map(serde_json::to_vec).collect();
 
     let members = members
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize members: {}", e)))?;
 
-    let removed = state.sorted_set_store.zrem(&key, &members);
+    let removed = durable::zrem(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &scoped_key,
+        &members,
+    )
+    .await?;
 
     Ok(Json(json!({ "removed": removed, "key": key })))
 }
@@ -746,12 +838,20 @@ pub async fn sortedset_zrem(
 /// GET /sortedset/:key/:member/zscore - Get score of member
 pub async fn sortedset_zscore(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((key, member)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     debug!("REST ZSCORE key={} member={}", key, member);
 
     let member_bytes = member.as_bytes();
-    let score = state.sorted_set_store.zscore(&key, member_bytes);
+    let score = state.sorted_set_store.zscore(&scoped_key, member_bytes);
 
     Ok(Json(
         json!({ "score": score, "key": key, "member": member }),
@@ -761,11 +861,19 @@ pub async fn sortedset_zscore(
 /// GET /sortedset/:key/zcard - Get cardinality
 pub async fn sortedset_zcard(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     debug!("REST ZCARD key={}", key);
 
-    let count = state.sorted_set_store.zcard(&key);
+    let count = state.sorted_set_store.zcard(&scoped_key);
 
     Ok(Json(json!({ "count": count, "key": key })))
 }
@@ -773,9 +881,17 @@ pub async fn sortedset_zcard(
 /// POST /sortedset/:key/zincrby - Increment score
 pub async fn sortedset_zincrby(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ZAddRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     let (member, increment) = match req {
         ZAddRequest::Single { member, score, .. } => (member, score),
         ZAddRequest::Multiple { .. } => {
@@ -793,9 +909,14 @@ pub async fn sortedset_zincrby(
     let member_bytes = serde_json::to_vec(&member)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize member: {}", e)))?;
 
-    let new_score = state
-        .sorted_set_store
-        .zincrby(&key, member_bytes, increment);
+    let new_score = durable::zincrby(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &scoped_key,
+        member_bytes,
+        increment,
+    )
+    .await?;
 
     Ok(Json(json!({ "score": new_score, "key": key })))
 }
@@ -804,11 +925,16 @@ pub async fn sortedset_zincrby(
 pub async fn sortedset_zrange(
     State(state): State<AppState>,
     AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
     // Check permission
     require_permission(&ctx, &format!("sortedset:{}", key), Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
     let start: i64 = params
         .get("start")
         .and_then(|s| s.parse().ok())
@@ -829,7 +955,7 @@ pub async fn sortedset_zrange(
 
     let members = state
         .sorted_set_store
-        .zrange(&key, start, stop, with_scores);
+        .zrange(&scoped_key, start, stop, with_scores);
 
     Ok(Json(json!({ "members": members, "key": key })))
 }
@@ -837,9 +963,17 @@ pub async fn sortedset_zrange(
 /// GET /sortedset/:key/zrevrange - Get reverse range by rank
 pub async fn sortedset_zrevrange(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     let start: i64 = params
         .get("start")
         .and_then(|s| s.parse().ok())
@@ -860,7 +994,7 @@ pub async fn sortedset_zrevrange(
 
     let members = state
         .sorted_set_store
-        .zrevrange(&key, start, stop, with_scores);
+        .zrevrange(&scoped_key, start, stop, with_scores);
 
     Ok(Json(json!({ "members": members, "key": key })))
 }
@@ -868,12 +1002,20 @@ pub async fn sortedset_zrevrange(
 /// GET /sortedset/:key/:member/zrank - Get rank of member
 pub async fn sortedset_zrank(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((key, member)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     debug!("REST ZRANK key={} member={}", key, member);
 
     let member_bytes = member.as_bytes();
-    let rank = state.sorted_set_store.zrank(&key, member_bytes);
+    let rank = state.sorted_set_store.zrank(&scoped_key, member_bytes);
 
     Ok(Json(json!({ "rank": rank, "key": key, "member": member })))
 }
@@ -881,14 +1023,29 @@ pub async fn sortedset_zrank(
 /// POST /sortedset/zinterstore - Intersection
 pub async fn sortedset_zinterstore(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Json(req): Json<ZInterstoreRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &req.destination, Action::Write)?;
+    for key in &req.keys {
+        require_resource_permission(&ctx, "sortedset:", key, Action::Read)?;
+    }
+
     debug!(
         "REST ZINTERSTORE dest={} keys={:?}",
         req.destination, req.keys
     );
 
-    let keys: Vec<&str> = req.keys.iter().map(|s| s.as_str()).collect();
+    // Apply multi-tenant scoping if Hub mode is active
+    let tenant = hub_ctx.as_ref().map(|c| c.user_id());
+    let destination = crate::hub::MultiTenant::scope_kv_key(tenant, &req.destination);
+    let scoped_keys: Vec<_> = req
+        .keys
+        .iter()
+        .map(|key| crate::hub::MultiTenant::scope_kv_key(tenant, key))
+        .collect();
+    let keys: Vec<&str> = scoped_keys.iter().map(|key| key.as_ref()).collect();
     let weights = req.weights.as_deref();
 
     let aggregate = match req.aggregate.to_lowercase().as_str() {
@@ -897,9 +1054,15 @@ pub async fn sortedset_zinterstore(
         _ => crate::core::Aggregate::Sum,
     };
 
-    let count = state
-        .sorted_set_store
-        .zinterstore(&req.destination, &keys, weights, aggregate);
+    let count = durable::zinterstore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &destination,
+        &keys,
+        weights,
+        aggregate,
+    )
+    .await?;
 
     Ok(Json(
         json!({ "count": count, "destination": req.destination }),
@@ -909,14 +1072,29 @@ pub async fn sortedset_zinterstore(
 /// POST /sortedset/zunionstore - Union
 pub async fn sortedset_zunionstore(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Json(req): Json<ZInterstoreRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &req.destination, Action::Write)?;
+    for key in &req.keys {
+        require_resource_permission(&ctx, "sortedset:", key, Action::Read)?;
+    }
+
     debug!(
         "REST ZUNIONSTORE dest={} keys={:?}",
         req.destination, req.keys
     );
 
-    let keys: Vec<&str> = req.keys.iter().map(|s| s.as_str()).collect();
+    // Apply multi-tenant scoping if Hub mode is active
+    let tenant = hub_ctx.as_ref().map(|c| c.user_id());
+    let destination = crate::hub::MultiTenant::scope_kv_key(tenant, &req.destination);
+    let scoped_keys: Vec<_> = req
+        .keys
+        .iter()
+        .map(|key| crate::hub::MultiTenant::scope_kv_key(tenant, key))
+        .collect();
+    let keys: Vec<&str> = scoped_keys.iter().map(|key| key.as_ref()).collect();
     let weights = req.weights.as_deref();
 
     let aggregate = match req.aggregate.to_lowercase().as_str() {
@@ -925,9 +1103,15 @@ pub async fn sortedset_zunionstore(
         _ => crate::core::Aggregate::Sum,
     };
 
-    let count = state
-        .sorted_set_store
-        .zunionstore(&req.destination, &keys, weights, aggregate);
+    let count = durable::zunionstore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &destination,
+        &keys,
+        weights,
+        aggregate,
+    )
+    .await?;
 
     Ok(Json(
         json!({ "count": count, "destination": req.destination }),
@@ -957,12 +1141,20 @@ pub async fn sortedset_stats(
 /// GET /sortedset/:key/:member/zrevrank - Get reverse rank of member
 pub async fn sortedset_zrevrank(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((key, member)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     debug!("REST ZREVRANK key={} member={}", key, member);
 
     let member_bytes = member.as_bytes();
-    let rank = state.sorted_set_store.zrevrank(&key, member_bytes);
+    let rank = state.sorted_set_store.zrevrank(&scoped_key, member_bytes);
 
     Ok(Json(json!({ "rank": rank, "key": key, "member": member })))
 }
@@ -970,9 +1162,17 @@ pub async fn sortedset_zrevrank(
 /// GET /sortedset/:key/zcount - Count members in score range
 pub async fn sortedset_zcount(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     let min: f64 = params
         .get("min")
         .and_then(|s| s.parse().ok())
@@ -984,7 +1184,7 @@ pub async fn sortedset_zcount(
 
     debug!("REST ZCOUNT key={} min={} max={}", key, min, max);
 
-    let count = state.sorted_set_store.zcount(&key, min, max);
+    let count = state.sorted_set_store.zcount(&scoped_key, min, max);
 
     Ok(Json(json!({ "count": count, "key": key })))
 }
@@ -992,16 +1192,24 @@ pub async fn sortedset_zcount(
 /// POST /sortedset/:key/zmscore - Get multiple scores
 pub async fn sortedset_zmscore(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<ZRemRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     debug!("REST ZMSCORE key={} members={:?}", key, req.members);
 
     let members: Result<Vec<Vec<u8>>, _> = req.members.iter().map(serde_json::to_vec).collect();
     let members = members
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize members: {}", e)))?;
 
-    let scores = state.sorted_set_store.zmscore(&key, &members);
+    let scores = state.sorted_set_store.zmscore(&scoped_key, &members);
 
     Ok(Json(json!({ "scores": scores, "key": key })))
 }
@@ -1009,9 +1217,17 @@ pub async fn sortedset_zmscore(
 /// GET /sortedset/:key/zrangebyscore - Get range by score
 pub async fn sortedset_zrangebyscore(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     let min: f64 = params
         .get("min")
         .and_then(|s| s.parse().ok())
@@ -1032,7 +1248,7 @@ pub async fn sortedset_zrangebyscore(
 
     let members = state
         .sorted_set_store
-        .zrangebyscore(&key, min, max, with_scores);
+        .zrangebyscore(&scoped_key, min, max, with_scores);
 
     Ok(Json(json!({ "members": members, "key": key })))
 }
@@ -1040,9 +1256,17 @@ pub async fn sortedset_zrangebyscore(
 /// POST /sortedset/:key/zpopmin - Pop minimum scored members
 pub async fn sortedset_zpopmin(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     let count: usize = params
         .get("count")
         .and_then(|s| s.parse().ok())
@@ -1050,7 +1274,13 @@ pub async fn sortedset_zpopmin(
 
     debug!("REST ZPOPMIN key={} count={}", key, count);
 
-    let members = state.sorted_set_store.zpopmin(&key, count);
+    let members = durable::zpopmin(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &scoped_key,
+        count,
+    )
+    .await?;
 
     Ok(Json(
         json!({ "members": members, "count": members.len(), "key": key }),
@@ -1060,9 +1290,17 @@ pub async fn sortedset_zpopmin(
 /// POST /sortedset/:key/zpopmax - Pop maximum scored members
 pub async fn sortedset_zpopmax(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     let count: usize = params
         .get("count")
         .and_then(|s| s.parse().ok())
@@ -1070,7 +1308,13 @@ pub async fn sortedset_zpopmax(
 
     debug!("REST ZPOPMAX key={} count={}", key, count);
 
-    let members = state.sorted_set_store.zpopmax(&key, count);
+    let members = durable::zpopmax(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &scoped_key,
+        count,
+    )
+    .await?;
 
     Ok(Json(
         json!({ "members": members, "count": members.len(), "key": key }),
@@ -1080,9 +1324,17 @@ pub async fn sortedset_zpopmax(
 /// POST /sortedset/:key/zremrangebyrank - Remove members by rank range
 pub async fn sortedset_zremrangebyrank(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Delete)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     let start: i64 = params
         .get("start")
         .and_then(|s| s.parse().ok())
@@ -1097,7 +1349,14 @@ pub async fn sortedset_zremrangebyrank(
         key, start, stop
     );
 
-    let removed = state.sorted_set_store.zremrangebyrank(&key, start, stop);
+    let removed = durable::zremrangebyrank(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &scoped_key,
+        start,
+        stop,
+    )
+    .await?;
 
     Ok(Json(json!({ "removed": removed, "key": key })))
 }
@@ -1105,9 +1364,17 @@ pub async fn sortedset_zremrangebyrank(
 /// POST /sortedset/:key/zremrangebyscore - Remove members by score range
 pub async fn sortedset_zremrangebyscore(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Delete)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     let min: f64 = params
         .get("min")
         .and_then(|s| s.parse().ok())
@@ -1119,7 +1386,14 @@ pub async fn sortedset_zremrangebyscore(
 
     debug!("REST ZREMRANGEBYSCORE key={} min={} max={}", key, min, max);
 
-    let removed = state.sorted_set_store.zremrangebyscore(&key, min, max);
+    let removed = durable::zremrangebyscore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &scoped_key,
+        min,
+        max,
+    )
+    .await?;
 
     Ok(Json(json!({ "removed": removed, "key": key })))
 }
@@ -1127,15 +1401,36 @@ pub async fn sortedset_zremrangebyscore(
 /// POST /sortedset/zdiffstore - Difference store
 pub async fn sortedset_zdiffstore(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Json(req): Json<ZInterstoreRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &req.destination, Action::Write)?;
+    for key in &req.keys {
+        require_resource_permission(&ctx, "sortedset:", key, Action::Read)?;
+    }
+
     debug!(
         "REST ZDIFFSTORE dest={} keys={:?}",
         req.destination, req.keys
     );
 
-    let keys: Vec<&str> = req.keys.iter().map(|s| s.as_str()).collect();
-    let count = state.sorted_set_store.zdiffstore(&req.destination, &keys);
+    // Apply multi-tenant scoping if Hub mode is active
+    let tenant = hub_ctx.as_ref().map(|c| c.user_id());
+    let destination = crate::hub::MultiTenant::scope_kv_key(tenant, &req.destination);
+    let scoped_keys: Vec<_> = req
+        .keys
+        .iter()
+        .map(|key| crate::hub::MultiTenant::scope_kv_key(tenant, key))
+        .collect();
+    let keys: Vec<&str> = scoped_keys.iter().map(|key| key.as_ref()).collect();
+    let count = durable::zdiffstore(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        &destination,
+        &keys,
+    )
+    .await?;
 
     Ok(Json(
         json!({ "count": count, "destination": req.destination }),

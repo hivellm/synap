@@ -1,22 +1,21 @@
 //! End-to-end tests against a real Synap server binary.
 //!
 //! Run with:
-//!   cargo test --features e2e --test e2e_test -- --test-threads=1 --nocapture
+//!   cargo test --features e2e --test e2e_test -- --nocapture
 //!
-//! The test fixture starts the release binary ONCE (shared across all tests),
-//! waits for readiness, exercises HTTP / SynapRPC / RESP3 transports, then
-//! kills the process when all tests finish.
-//!
-//! **IMPORTANT**: Tests MUST run with `--test-threads=1` because they share a
-//! single server process bound to fixed ports.
+//! Each test starts its own release binary on free loopback ports (persistence,
+//! Hub and replication off), waits for readiness, exercises HTTP / SynapRPC /
+//! RESP3, and kills the process when the test ends. The kill is in the guard's
+//! `Drop`, which also runs when an assertion fails. No server outlives its
+//! test, tests can run in parallel, and a server left behind by an earlier run
+//! cannot answer in place of the binary under test.
 
 #![cfg(feature = "e2e")]
 
 use std::{
-    net::TcpStream,
+    net::{TcpListener, TcpStream},
     path::PathBuf,
     process::{Child, Command, Stdio},
-    sync::{LazyLock, Mutex},
     time::{Duration, Instant},
 };
 use synap_sdk::{
@@ -25,25 +24,30 @@ use synap_sdk::{
 };
 use tempfile::NamedTempFile;
 
-// ── Ports (chosen to avoid conflicts with production defaults) ────────────────
+// ── Server fixture ────────────────────────────────────────────────────────────
 
-const HTTP_PORT: u16 = 25500;
-const RPC_PORT: u16 = 25501;
-const RESP3_PORT: u16 = 26379;
-
-// ── Shared server singleton ──────────────────────────────────────────────────
-
-/// Single server instance shared by all tests in this file.
-/// Started lazily on first access, killed when the process exits.
-static SERVER: LazyLock<Mutex<ServerGuard>> = LazyLock::new(|| Mutex::new(ServerGuard::start()));
-
-/// Ensure the server is running. Call this at the top of every test.
-fn ensure_server() {
-    // Accessing the LazyLock triggers start() exactly once.
-    let _lock = SERVER.lock().expect("server mutex poisoned");
+/// The three listener ports of one test server.
+struct Ports {
+    http: u16,
+    rpc: u16,
+    resp3: u16,
 }
 
-// ── Server fixture ────────────────────────────────────────────────────────────
+impl Ports {
+    /// Three distinct loopback ports the OS reports free. All three listeners
+    /// stay open until every port is chosen, so none is handed out twice.
+    fn free() -> Self {
+        let listeners: Vec<TcpListener> = (0..3)
+            .map(|_| TcpListener::bind(("127.0.0.1", 0)).expect("reserve a loopback port"))
+            .collect();
+        let port = |i: usize| listeners[i].local_addr().expect("reserved port").port();
+        Self {
+            http: port(0),
+            rpc: port(1),
+            resp3: port(2),
+        }
+    }
+}
 
 fn server_binary() -> PathBuf {
     // Resolve relative to the workspace root (two levels up from sdks/rust).
@@ -71,7 +75,7 @@ fn server_binary() -> PathBuf {
 }
 
 /// Build a test config by reading the workspace config.yml and patching ports.
-fn write_test_config() -> NamedTempFile {
+fn write_test_config(ports: &Ports) -> NamedTempFile {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let workspace = manifest
         .ancestors()
@@ -79,24 +83,20 @@ fn write_test_config() -> NamedTempFile {
         .expect("workspace root")
         .to_path_buf();
     let base_cfg = std::fs::read_to_string(workspace.join("config").join("config.yml"))
-        .expect("config/config.yml not found in workspace root");
+        .expect("config/config.yml not found in workspace root")
+        .replace("\r\n", "\n");
 
     // Patch ports and bind to loopback only, using simple string replace on YAML values.
-    let patched = base_cfg
+    let mut patched = base_cfg
         .replace("host: \"0.0.0.0\"", "host: \"127.0.0.1\"")
-        .replace("port: 15500", &format!("port: {HTTP_PORT}"))
-        .replace("port: 15501", &format!("port: {RPC_PORT}"))
-        .replace("port: 6379", &format!("port: {RESP3_PORT}"))
-        // Disable persistence, hub, replication to speed up startup
-        .replace(
-            "persistence:\n  enabled: true",
-            "persistence:\n  enabled: false",
-        )
-        .replace("hub:\n  enabled: true", "hub:\n  enabled: false")
-        .replace(
-            "replication:\n  enabled: true",
-            "replication:\n  enabled: false",
-        );
+        .replace("port: 15500", &format!("port: {}", ports.http))
+        .replace("port: 15501", &format!("port: {}", ports.rpc))
+        .replace("port: 6379", &format!("port: {}", ports.resp3));
+    // Persistence would write its WAL and snapshots under `/data`; Hub and
+    // replication need peers this test does not start.
+    for section in ["persistence", "hub", "replication"] {
+        patched = disable_section(&patched, section);
+    }
 
     let mut file = NamedTempFile::new().expect("tmp config");
     use std::io::Write as _;
@@ -104,15 +104,50 @@ fn write_test_config() -> NamedTempFile {
     file
 }
 
+/// Set a top-level section's `enabled:` flag to `false`, past the comment lines
+/// between the section header and the flag. Panics when the section has no
+/// such flag, so a reshaped config.yml cannot leave the section on unnoticed.
+fn disable_section(yaml: &str, section: &str) -> String {
+    let header = format!("{section}:");
+    let mut in_section = false;
+    let mut disabled = false;
+    let mut out = Vec::new();
+    for line in yaml.lines() {
+        let mut line = line.to_string();
+        if line == header {
+            in_section = true;
+        } else if in_section && !disabled {
+            let top_level = !line.is_empty() && !line.starts_with([' ', '#']);
+            if top_level {
+                in_section = false;
+            } else if line
+                .strip_prefix("  ")
+                .is_some_and(|rest| rest.starts_with("enabled:"))
+            {
+                line = "  enabled: false".to_string();
+                disabled = true;
+            }
+        }
+        out.push(line);
+    }
+    assert!(
+        disabled,
+        "config/config.yml has no `{section}.enabled` flag to turn off"
+    );
+    out.join("\n")
+}
+
 struct ServerGuard {
     child: Child,
+    ports: Ports,
     /// Keep the temp config file alive for the duration of the test.
     _config: NamedTempFile,
 }
 
 impl ServerGuard {
     fn start() -> Self {
-        let config = write_test_config();
+        let ports = Ports::free();
+        let config = write_test_config(&ports);
         let child = Command::new(server_binary())
             .arg("--config")
             .arg(config.path())
@@ -123,6 +158,7 @@ impl ServerGuard {
 
         let guard = Self {
             child,
+            ports,
             _config: config,
         };
         guard.wait_ready();
@@ -132,7 +168,7 @@ impl ServerGuard {
     /// Poll all three ports until they accept connections or the deadline passes.
     fn wait_ready(&self) {
         let deadline = Instant::now() + Duration::from_secs(15);
-        let ports = [HTTP_PORT, RPC_PORT, RESP3_PORT];
+        let ports = [self.ports.http, self.ports.rpc, self.ports.resp3];
 
         for &port in &ports {
             loop {
@@ -146,6 +182,30 @@ impl ServerGuard {
             }
         }
     }
+
+    fn http_client(&self) -> SynapClient {
+        SynapClient::new(
+            SynapConfig::new(format!("http://127.0.0.1:{}", self.ports.http))
+                .with_timeout(Duration::from_secs(5)),
+        )
+        .expect("http client")
+    }
+
+    fn rpc_client(&self) -> SynapClient {
+        SynapClient::new(
+            SynapConfig::new(format!("synap://127.0.0.1:{}", self.ports.rpc))
+                .with_timeout(Duration::from_secs(5)),
+        )
+        .expect("rpc client")
+    }
+
+    fn resp3_client(&self) -> SynapClient {
+        SynapClient::new(
+            SynapConfig::new(format!("resp3://127.0.0.1:{}", self.ports.resp3))
+                .with_timeout(Duration::from_secs(5)),
+        )
+        .expect("resp3 client")
+    }
 }
 
 impl Drop for ServerGuard {
@@ -153,32 +213,6 @@ impl Drop for ServerGuard {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-fn http_client() -> SynapClient {
-    SynapClient::new(
-        SynapConfig::new(format!("http://127.0.0.1:{HTTP_PORT}"))
-            .with_timeout(Duration::from_secs(5)),
-    )
-    .expect("http client")
-}
-
-fn rpc_client() -> SynapClient {
-    SynapClient::new(
-        SynapConfig::new(format!("synap://127.0.0.1:{RPC_PORT}"))
-            .with_timeout(Duration::from_secs(5)),
-    )
-    .expect("rpc client")
-}
-
-fn resp3_client() -> SynapClient {
-    SynapClient::new(
-        SynapConfig::new(format!("resp3://127.0.0.1:{RESP3_PORT}"))
-            .with_timeout(Duration::from_secs(5)),
-    )
-    .expect("resp3 client")
 }
 
 // ── KV helpers used across all three transports ───────────────────────────────
@@ -300,8 +334,8 @@ async fn run_list_suite(client: &SynapClient, prefix: &str) {
 
 #[tokio::test]
 async fn e2e_http_transport() {
-    ensure_server();
-    let client = http_client();
+    let server = ServerGuard::start();
+    let client = server.http_client();
 
     run_kv_suite(&client, "http").await;
     run_hash_suite(&client, "http").await;
@@ -310,8 +344,8 @@ async fn e2e_http_transport() {
 
 #[tokio::test]
 async fn e2e_synap_rpc_transport() {
-    ensure_server();
-    let client = rpc_client();
+    let server = ServerGuard::start();
+    let client = server.rpc_client();
 
     run_kv_suite(&client, "rpc").await;
     run_hash_suite(&client, "rpc").await;
@@ -320,8 +354,8 @@ async fn e2e_synap_rpc_transport() {
 
 #[tokio::test]
 async fn e2e_resp3_transport() {
-    ensure_server();
-    let client = resp3_client();
+    let server = ServerGuard::start();
+    let client = server.resp3_client();
 
     run_kv_suite(&client, "resp3").await;
     run_hash_suite(&client, "resp3").await;
@@ -331,11 +365,11 @@ async fn e2e_resp3_transport() {
 /// Verify that the three transports agree on the same data when interleaved.
 #[tokio::test]
 async fn e2e_cross_transport_consistency() {
-    ensure_server();
+    let server = ServerGuard::start();
 
-    let http = http_client();
-    let rpc = rpc_client();
-    let resp3 = resp3_client();
+    let http = server.http_client();
+    let rpc = server.rpc_client();
+    let resp3 = server.resp3_client();
 
     let key = "e2e:cross:key";
 
@@ -631,8 +665,8 @@ async fn run_script_suite(client: &SynapClient, _prefix: &str) {
 
 #[tokio::test]
 async fn e2e_http_queues_streams_pubsub_txn_scripts() {
-    ensure_server();
-    let client = http_client();
+    let server = ServerGuard::start();
+    let client = server.http_client();
 
     run_queue_suite(&client, "http").await;
     run_stream_suite(&client, "http").await;
@@ -643,8 +677,8 @@ async fn e2e_http_queues_streams_pubsub_txn_scripts() {
 
 #[tokio::test]
 async fn e2e_rpc_queues_streams_pubsub_txn_scripts() {
-    ensure_server();
-    let client = rpc_client();
+    let server = ServerGuard::start();
+    let client = server.rpc_client();
 
     run_queue_suite(&client, "rpc").await;
     run_stream_suite(&client, "rpc").await;
@@ -656,8 +690,8 @@ async fn e2e_rpc_queues_streams_pubsub_txn_scripts() {
 
 #[tokio::test]
 async fn e2e_resp3_queues_streams_pubsub_txn_scripts() {
-    ensure_server();
-    let client = resp3_client();
+    let server = ServerGuard::start();
+    let client = server.resp3_client();
 
     run_queue_suite(&client, "resp3").await;
     // Stream: RESP3 uses Redis X* commands, not Synap SCREATE/SPUBLISH.
@@ -673,10 +707,10 @@ async fn e2e_resp3_queues_streams_pubsub_txn_scripts() {
 /// NOT silently fall back to HTTP.
 #[tokio::test]
 async fn e2e_unsupported_command_raises_error() {
-    ensure_server();
+    let server = ServerGuard::start();
 
     // SynapRPC transport
-    let rpc = rpc_client();
+    let rpc = server.rpc_client();
     let rpc_err = rpc
         .bitmap()
         .setbit("e2e:bitmap:rpc", 0, 1)
@@ -688,7 +722,7 @@ async fn e2e_unsupported_command_raises_error() {
     );
 
     // RESP3 transport
-    let resp3 = resp3_client();
+    let resp3 = server.resp3_client();
     let resp3_err = resp3
         .bitmap()
         .setbit("e2e:bitmap:resp3", 0, 1)
@@ -700,7 +734,7 @@ async fn e2e_unsupported_command_raises_error() {
     );
 
     // HTTP transport — bitmap IS supported via the HTTP handler (no error)
-    let http = http_client();
+    let http = server.http_client();
     http.bitmap()
         .setbit("e2e:bitmap:http", 0, 1)
         .await
@@ -718,10 +752,10 @@ async fn e2e_unsupported_command_raises_error() {
 fn resp3_pipelining_returns_all_responses_in_order() {
     use std::io::{Read, Write};
 
-    ensure_server();
+    let server = ServerGuard::start();
 
     let mut sock =
-        TcpStream::connect(("127.0.0.1", RESP3_PORT)).expect("connect to RESP3 listener");
+        TcpStream::connect(("127.0.0.1", server.ports.resp3)).expect("connect to RESP3 listener");
     sock.set_read_timeout(Some(Duration::from_secs(5)))
         .expect("set read timeout");
 

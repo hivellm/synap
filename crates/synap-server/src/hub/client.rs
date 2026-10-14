@@ -12,12 +12,53 @@ use super::sdk::{
 use super::usage::UsageReporter;
 use crate::core::error::SynapError;
 
+use futures_util::future::BoxFuture;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
+
+/// Resolves a Hub access key to the tenant (Hub user) that owns it.
+///
+/// Hub mode authenticates every data request through this, so the tenant it
+/// returns decides which namespace the request may touch.
+pub trait AccessKeyValidator: Send + Sync {
+    /// The owner and plan of `access_key`. `Err(SynapError::Unauthorized)`
+    /// means the key is unknown, revoked or expired; any other error means the
+    /// key could not be checked at all.
+    fn validate<'a>(
+        &'a self,
+        access_key: &'a str,
+    ) -> BoxFuture<'a, Result<(Uuid, Plan), SynapError>>;
+}
+
+/// Why the production validator refuses every key.
+pub const ACCESS_KEY_VALIDATION_UNAVAILABLE: &str = "Hub access-key validation is unavailable: \
+     the HiveHub SDK has no endpoint that validates an access-key secret (hivellm/synap#230)";
+
+/// The production validator: the HiveHub API.
+///
+/// hivehub-internal-sdk 1.0.0 has no endpoint that validates an access-key
+/// secret (it can generate, list, fetch by id and revoke keys only), so no key
+/// can be validated and Hub mode refuses every data request until the SDK
+/// gains one (hivellm/synap#230). Failing closed is deliberate: accepting a
+/// key it cannot check would hand any caller a tenant of its choosing.
+struct HubApiAccessKeyValidator;
+
+impl AccessKeyValidator for HubApiAccessKeyValidator {
+    fn validate<'a>(
+        &'a self,
+        _access_key: &'a str,
+    ) -> BoxFuture<'a, Result<(Uuid, Plan), SynapError>> {
+        Box::pin(async {
+            Err(SynapError::InternalServerError(
+                ACCESS_KEY_VALIDATION_UNAVAILABLE.to_string(),
+            ))
+        })
+    }
+}
 
 /// Cached access key validation result
 #[derive(Debug, Clone)]
@@ -37,16 +78,36 @@ pub struct HubClient {
     usage_reporter: Arc<UsageReporter>,
     /// Access key validation cache (access_key -> AccessKeyCache)
     access_key_cache: Arc<RwLock<HashMap<String, AccessKeyCache>>>,
+    /// Resolves the access keys the cache does not hold
+    validator: Arc<dyn AccessKeyValidator>,
     /// Configuration
     config: HubConfig,
 }
 
 impl HubClient {
-    /// Create a new HubClient
+    /// Create a new HubClient that validates access keys against the HiveHub
+    /// API, which cannot validate any yet: every key is refused
+    /// (hivellm/synap#230).
     ///
     /// # Errors
     /// Returns error if SDK client initialization fails
     pub fn new(config: HubConfig) -> Result<Self, SynapError> {
+        warn!(
+            "Hub mode: {}. Every request that needs a Hub access key is refused until it is resolved",
+            ACCESS_KEY_VALIDATION_UNAVAILABLE
+        );
+        Self::with_validator(config, Arc::new(HubApiAccessKeyValidator))
+    }
+
+    /// Create a HubClient that resolves access keys with `validator`.
+    ///
+    /// # Errors
+    /// Returns error if the configuration is invalid or SDK client
+    /// initialization fails
+    pub fn with_validator(
+        config: HubConfig,
+        validator: Arc<dyn AccessKeyValidator>,
+    ) -> Result<Self, SynapError> {
         // Validate configuration
         config.validate().map_err(|e| {
             SynapError::InternalServerError(format!("Invalid Hub configuration: {}", e))
@@ -71,13 +132,15 @@ impl HubClient {
                 config.usage_report_interval,
             ))),
             access_key_cache: Arc::new(RwLock::new(HashMap::new())),
+            validator,
             config,
         })
     }
 
     /// Validate access key and return user_id + plan
     ///
-    /// Uses 60s cache to avoid hitting Hub API on every request
+    /// Successful validations are cached for `cache_ttl` seconds so the Hub
+    /// API is not hit on every request; failures are never cached.
     pub async fn validate_access_key(&self, access_key: &str) -> Result<(Uuid, Plan), SynapError> {
         // Check cache first
         {
@@ -93,16 +156,18 @@ impl HubClient {
             }
         }
 
-        // Cache miss - validate with Hub API
-        debug!("Access key validation cache miss - calling Hub API");
-
-        // Access-key validation against the Hub SDK is not yet available —
-        // tracked in hivellm/synap#230. Once implemented in HiveHub:
-        // let validation = self.sdk_client.access_keys().validate(access_key).await?;
-
-        Err(SynapError::InternalServerError(
-            "Access key validation not yet implemented in Hub SDK".to_string(),
-        ))
+        // Cache miss - ask the validator; only a successful answer is cached.
+        debug!("Access key validation cache miss - calling the validator");
+        let (user_id, plan) = self.validator.validate(access_key).await?;
+        self.access_key_cache.write().insert(
+            access_key.to_string(),
+            AccessKeyCache {
+                user_id,
+                plan,
+                cached_at: Instant::now(),
+            },
+        );
+        Ok((user_id, plan))
     }
 
     /// Get user quota (from cache or Hub API)
@@ -328,6 +393,67 @@ mod tests {
         let stats = client.get_cache_stats();
         assert_eq!(stats.access_key_cache_size, 0);
         assert_eq!(stats.quota_cache_size, 0);
+    }
+
+    /// Resolves exactly one key and counts how often it is asked.
+    struct OneKey {
+        key: &'static str,
+        user_id: Uuid,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl AccessKeyValidator for OneKey {
+        fn validate<'a>(
+            &'a self,
+            access_key: &'a str,
+        ) -> BoxFuture<'a, Result<(Uuid, Plan), SynapError>> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let known = access_key == self.key;
+            let user_id = self.user_id;
+            Box::pin(async move {
+                if known {
+                    Ok((user_id, Plan::Pro))
+                } else {
+                    Err(SynapError::Unauthorized("unknown key".to_string()))
+                }
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn production_validator_refuses_every_key_and_names_the_issue() {
+        let client = HubClient::new(create_test_config()).unwrap();
+        let err = client.validate_access_key("sk_any").await.unwrap_err();
+        assert!(matches!(err, SynapError::InternalServerError(_)), "{err}");
+        assert!(err.to_string().contains("hivellm/synap#230"), "{err}");
+        assert_eq!(client.get_cache_stats().access_key_cache_size, 0);
+    }
+
+    #[tokio::test]
+    async fn validated_keys_are_cached_and_failures_are_not() {
+        let validator = Arc::new(OneKey {
+            key: "good",
+            user_id: Uuid::new_v4(),
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        let client = HubClient::with_validator(create_test_config(), validator.clone()).unwrap();
+
+        let (user, plan) = client.validate_access_key("good").await.unwrap();
+        assert_eq!(user, validator.user_id);
+        assert_eq!(plan, Plan::Pro);
+        client.validate_access_key("good").await.unwrap();
+        assert_eq!(
+            validator.calls.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "the second lookup is a cache hit"
+        );
+
+        for _ in 0..2 {
+            let err = client.validate_access_key("bad").await.unwrap_err();
+            assert!(matches!(err, SynapError::Unauthorized(_)), "{err}");
+        }
+        assert_eq!(validator.calls.load(std::sync::atomic::Ordering::SeqCst), 3);
+        assert_eq!(client.get_cache_stats().access_key_cache_size, 1);
     }
 
     #[test]

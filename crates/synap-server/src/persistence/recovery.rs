@@ -1,4 +1,5 @@
-use super::types::{PersistenceConfig, Result};
+use super::types::{PersistenceConfig, PersistenceError, Result, Snapshot, StreamEvent, WALEntry};
+use super::wal_frame::{self, ScanEnd};
 use super::{SnapshotManager, WriteAheadLog};
 use crate::core::QueueConfig;
 use crate::core::hash::HashStore;
@@ -7,10 +8,41 @@ use crate::core::list::ListStore;
 use crate::core::queue::QueueManager;
 use crate::core::set::SetStore;
 use crate::core::sorted_set::{SortedSetStore, ZAddOptions};
+use crate::core::stream::StreamManager;
 use crate::core::types::KVConfig;
-use tracing::info;
+use crate::core::{BitmapStore, Expiry, HyperLogLogStore, SetOptions};
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::{info, warn};
 
-/// Recover system state from persistence
+/// Every store rebuilt by [`recover_all`], plus the offset the next WAL record
+/// must get.
+pub struct RecoveredStores {
+    pub kv_store: KVStore,
+    pub hash_store: Option<HashStore>,
+    pub list_store: Option<ListStore>,
+    pub set_store: Option<SetStore>,
+    pub sorted_set_store: Option<SortedSetStore>,
+    pub queue_manager: Option<QueueManager>,
+    pub hyperloglog_store: HyperLogLogStore,
+    pub bitmap_store: BitmapStore,
+    /// The loaded snapshot's stream section (room -> events; empty without a
+    /// snapshot). Streams are not in the WAL, so this is every event that
+    /// survives the restart; hand it to [`restore_streams`] once the stream
+    /// manager exists.
+    pub streams: HashMap<String, Vec<StreamEvent>>,
+    /// Offset the next WAL record must get: past every record in the WAL and
+    /// never below the loaded snapshot's cutoff. Hand it to
+    /// [`PersistenceLayer::continue_wal_at`](super::PersistenceLayer::continue_wal_at).
+    pub wal_offset: u64,
+}
+
+/// Recover system state from persistence.
+///
+/// Returns the KV, collection and queue stores as a tuple; use
+/// [`recover_all`] to also get the HyperLogLog and bitmap stores the WAL
+/// replay rebuilt.
 pub async fn recover(
     config: &PersistenceConfig,
     kv_config: KVConfig,
@@ -24,52 +56,170 @@ pub async fn recover(
     Option<QueueManager>,
     u64,
 )> {
+    let r = recover_all(config, kv_config, queue_config).await?;
+    Ok((
+        r.kv_store,
+        r.hash_store,
+        r.list_store,
+        r.set_store,
+        r.sorted_set_store,
+        r.queue_manager,
+        r.wal_offset,
+    ))
+}
+
+/// Recover every store from the latest snapshot plus the WAL written after it.
+///
+/// Snapshots are tried newest first. A damaged file (truncated, failing its
+/// checksum, undecodable) is skipped only when the WAL provably still holds
+/// every record after the older snapshot's cutoff (the whole history when no
+/// valid snapshot is left); otherwise recovery fails with
+/// [`PersistenceError::SnapshotUnrecoverable`], which refuses startup. A
+/// snapshot that cannot be read for another reason (permissions, device
+/// errors) also fails recovery: it may be intact.
+///
+/// Expiry is absolute (phase23): snapshot keys keep the deadline they had
+/// (v4 files; v3/v2 keys load without expiry), WAL records written before
+/// phase23 have their relative TTL anchored at the entry's own timestamp, and
+/// any key whose deadline has already passed is left out. HyperLogLog and
+/// bitmap data come from the v4 snapshot sections plus the WAL.
+///
+/// Queue messages keep their identity (phase24): snapshot queues are restored
+/// whole (v5: configuration, ready, in-flight and dead-lettered messages with
+/// their metadata; older files: the ready messages), WAL publishes are
+/// restored with their original ID and metadata, and replayed ACK/NACK/purge
+/// records act by message ID. A replay error other than a settled message
+/// being already gone fails recovery.
+pub async fn recover_all(
+    config: &PersistenceConfig,
+    kv_config: KVConfig,
+    queue_config: QueueConfig,
+) -> Result<RecoveredStores> {
     if !config.enabled {
         info!("Persistence disabled, starting with fresh state");
-        return Ok((
-            KVStore::new(kv_config),
-            Some(HashStore::new()),
-            Some(ListStore::new()),
-            Some(SetStore::new()),
-            Some(SortedSetStore::new()),
-            Some(QueueManager::new(queue_config)),
-            0,
-        ));
+        return Ok(RecoveredStores {
+            kv_store: KVStore::new(kv_config),
+            hash_store: Some(HashStore::new()),
+            list_store: Some(ListStore::new()),
+            set_store: Some(SetStore::new()),
+            sorted_set_store: Some(SortedSetStore::new()),
+            queue_manager: Some(QueueManager::new(queue_config)),
+            hyperloglog_store: HyperLogLogStore::new(),
+            bitmap_store: BitmapStore::new(),
+            streams: HashMap::new(),
+            wal_offset: 0,
+        });
     }
 
     info!("Starting recovery process...");
 
     let snapshot_mgr = SnapshotManager::new(config.snapshot.clone());
-    let wal = WriteAheadLog::open(config.wal.clone()).await?;
+    // Opening the WAL repairs a torn tail and upgrades a 1.3.x file before it
+    // is read below.
+    WriteAheadLog::open(config.wal.clone()).await?;
 
-    // Step 1: Load latest snapshot (if exists)
+    // Step 1: pick the newest valid snapshot and check that skipping any
+    // damaged newer file loses nothing.
+    let choice = load_newest_valid(&snapshot_mgr, &config.snapshot.directory).await?;
+    let cutoff = choice.loaded.as_ref().map_or(0, |(s, _)| s.wal_offset);
+    let wal = read_wal(config.wal.path.clone(), cutoff).await?;
+    check_fallback(
+        config,
+        &choice.damaged,
+        choice.loaded.as_ref().map(|(_, path)| path.as_path()),
+        cutoff,
+        &wal,
+    )?;
+    let highest = wal.highest.unwrap_or(0);
+    if cutoff > highest.saturating_add(1) {
+        warn!(
+            "The WAL ends before the snapshot cutoff {} (last record {}): records the snapshot holds were lost from the WAL, likely by a power loss right after a snapshot taken by an earlier release. New records continue from offset {}",
+            cutoff, highest, cutoff
+        );
+    }
+
+    // Steps 2 and 3: restore the snapshot, then replay the WAL from its
+    // cutoff.
+    let snapshot = choice.loaded.map(|(snapshot, path)| {
+        info!(
+            "Loaded snapshot from {:?} at offset {}",
+            path, snapshot.wal_offset
+        );
+        snapshot
+    });
+    let next_offset = wal.next_offset(cutoff);
+    rebuild(snapshot, wal.entries, next_offset, kv_config, queue_config).await
+}
+
+/// Rebuild every store from `snapshot` (when there is one) plus the WAL
+/// records `entries` written after its cutoff, applied in order: steps 2 and 3
+/// of [`recover_all`], which calls it once it has read the data directory.
+///
+/// It reads and writes no file, so `synap-migrate` rebuilds a data directory
+/// it must leave untouched with the same code the server starts from. The
+/// snapshot's stream section is returned as [`RecoveredStores::streams`] for
+/// [`restore_streams`], and `next_offset` as [`RecoveredStores::wal_offset`].
+pub async fn rebuild(
+    mut snapshot: Option<Snapshot>,
+    entries: Vec<WALEntry>,
+    next_offset: u64,
+    kv_config: KVConfig,
+    queue_config: QueueConfig,
+) -> Result<RecoveredStores> {
+    let hyperloglog_store = HyperLogLogStore::new();
+    let bitmap_store = BitmapStore::new();
+    let streams = snapshot
+        .as_mut()
+        .map(|snapshot| std::mem::take(&mut snapshot.stream_data))
+        .unwrap_or_default();
+
+    // Step 2: restore the snapshot
     let (kv_store, hash_store, list_store, set_store, sorted_set_store, queue_manager, last_offset) =
-        if let Some((snapshot, path)) = snapshot_mgr.load_latest().await? {
-            info!(
-                "Loaded snapshot from {:?} at offset {}",
-                path, snapshot.wal_offset
-            );
-
-            // Restore KV store
+        if let Some(snapshot) = snapshot {
+            // Restore KV store, each key with its absolute expiry; keys that
+            // expired while the server was down are left out.
             let kv = KVStore::new(kv_config);
+            let now_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as u64;
+            let mut expired = 0usize;
             for (key, value) in snapshot.kv_data {
-                kv.set(&key, value, None).await?;
-            }
-
-            // Restore Queue manager
-            let queues = QueueManager::new(queue_config);
-            for (queue_name, messages) in snapshot.queue_data {
-                queues.create_queue(&queue_name, None).await?;
-                for message in messages {
-                    queues
-                        .publish(
-                            &queue_name,
-                            (*message.payload).clone(), // Convert Arc<Vec<u8>> to Vec<u8>
-                            Some(message.priority),
-                            Some(message.max_retries),
+                match snapshot.kv_expires_at_ms.get(&key) {
+                    None => kv.set(&key, value, None).await?,
+                    Some(&deadline) if deadline <= now_ms => expired += 1,
+                    Some(&deadline) => {
+                        kv.set_with_opts(
+                            &key,
+                            value,
+                            Some(Expiry::UnixMilliseconds(deadline)),
+                            SetOptions::default(),
                         )
                         .await?;
+                    }
                 }
+            }
+            if expired > 0 {
+                info!(
+                    "Skipped {} snapshot keys that expired before restart",
+                    expired
+                );
+            }
+
+            // Restore HyperLogLog and bitmap values (v4); expired ones are skipped.
+            for (key, value) in snapshot.hyperloglog_data {
+                hyperloglog_store.restore(key, value);
+            }
+            for (key, value) in snapshot.bitmap_data {
+                bitmap_store.restore(key, value);
+            }
+
+            // Restore every queue whole: configuration (v5; older files get
+            // the server default) and every message with its original ID and
+            // metadata. In-flight messages become ready again.
+            let queues = QueueManager::new(queue_config.clone());
+            for (queue_name, image) in snapshot.queue_data {
+                queues.restore_queue(&queue_name, image.into_state(queue_config.clone()));
             }
 
             // Restore List store
@@ -132,14 +282,15 @@ pub async fn recover(
             )
         };
 
-    // Step 2: Replay WAL from snapshot offset
+    // Step 3: replay the WAL from the snapshot's cutoff
     info!("Replaying WAL from offset {}...", last_offset);
-    let entries = wal.replay(last_offset).await?;
     let mut replayed = 0;
 
     for entry in entries {
+        // Records written before phase23 carry TTLs relative to when they were
+        // written; anchor them at the entry's timestamp.
         crate::persistence::apply::apply_operation(
-            entry.operation,
+            entry.operation.with_absolute_expiry(entry.timestamp),
             crate::persistence::apply::StoreRefs {
                 kv_store: &kv_store,
                 hash_store: hash_store.as_ref(),
@@ -148,6 +299,8 @@ pub async fn recover(
                 sorted_set_store: sorted_set_store.as_ref(),
                 queue_manager: queue_manager.as_ref(),
                 stream_manager: None, // WAL recovery skips streams (StreamPersistence owns them)
+                hyperloglog_store: Some(&hyperloglog_store),
+                bitmap_store: Some(&bitmap_store),
             },
         )
         .await?;
@@ -156,17 +309,225 @@ pub async fn recover(
 
     info!("Recovery complete. Replayed {} operations", replayed);
 
-    let final_offset = last_offset + replayed;
-
-    Ok((
+    Ok(RecoveredStores {
         kv_store,
         hash_store,
         list_store,
         set_store,
         sorted_set_store,
         queue_manager,
-        final_offset,
-    ))
+        hyperloglog_store,
+        bitmap_store,
+        streams,
+        wal_offset: next_offset,
+    })
+}
+
+/// Restore the stream rooms of a snapshot's stream section
+/// ([`RecoveredStores::streams`]) into `manager` at startup. Each event keeps
+/// its ID, offset, type, data and timestamp, so consumers resume at the
+/// offsets they had; events published after the snapshot are lost, since
+/// streams are not in the WAL, and each room is a new incarnation (a new
+/// `generation`). The manager's retention then applies as to any event.
+///
+/// A room the manager refuses (it exists already, or its offsets are not
+/// contiguous) is skipped with a warning naming it; streams are a bounded
+/// buffer, so the other rooms and every other store still come back. Returns
+/// the number of rooms restored.
+pub async fn restore_streams(
+    manager: &StreamManager,
+    streams: HashMap<String, Vec<StreamEvent>>,
+) -> usize {
+    let mut restored = 0;
+    for (room, events) in streams {
+        let events = events
+            .into_iter()
+            .map(|event| crate::core::stream::StreamEvent {
+                id: event.id,
+                offset: event.offset,
+                room: room.clone(),
+                event: event.event_type,
+                data: event.data,
+                timestamp: event.timestamp,
+                metadata: HashMap::new(),
+            })
+            .collect();
+        match manager.restore_events(&room, events).await {
+            Ok(()) => restored += 1,
+            Err(e) => warn!(
+                "Stream room {:?} from the snapshot was not restored: {}",
+                room, e
+            ),
+        }
+    }
+    restored
+}
+
+/// The snapshot recovery starts from, and the damaged newer files it skipped.
+struct SnapshotChoice {
+    loaded: Option<(Snapshot, PathBuf)>,
+    damaged: Vec<PathBuf>,
+}
+
+/// Load the newest snapshot that verifies, trying files newest first.
+///
+/// Damaged files are skipped and returned. Any other failure stops recovery:
+/// a file that cannot be read may be intact, and skipping it could lose the
+/// writes it holds.
+async fn load_newest_valid(mgr: &SnapshotManager, dir: &Path) -> Result<SnapshotChoice> {
+    let files = mgr.list_snapshots().await.map_err(|e| {
+        PersistenceError::SnapshotUnrecoverable(format!(
+            "cannot list the snapshot directory {dir:?}: {e}"
+        ))
+    })?;
+    let mut damaged = Vec::new();
+    for path in files.into_iter().rev() {
+        match mgr.load(&path).await {
+            Ok(snapshot) => {
+                return Ok(SnapshotChoice {
+                    loaded: Some((snapshot, path)),
+                    damaged,
+                });
+            }
+            Err(PersistenceError::SnapshotCorrupted { .. }) => damaged.push(path),
+            Err(e) => {
+                return Err(PersistenceError::SnapshotUnrecoverable(format!(
+                    "cannot read snapshot {path:?}: {e}"
+                )));
+            }
+        }
+    }
+    Ok(SnapshotChoice {
+        loaded: None,
+        damaged,
+    })
+}
+
+/// The WAL records to replay, plus what the whole file says about which
+/// offsets it still holds.
+struct WalReplay {
+    /// Records at or after the cutoff, in file order.
+    entries: Vec<WALEntry>,
+    lowest: Option<u64>,
+    highest: Option<u64>,
+    /// First record after the cutoff whose offset does not follow the record
+    /// before it: `(previous, found)`.
+    break_at: Option<(u64, u64)>,
+}
+
+impl WalReplay {
+    /// Offset the next record must get: past every record in the WAL, and
+    /// never below `cutoff`, since the snapshot already holds every record
+    /// below it.
+    fn next_offset(&self, cutoff: u64) -> u64 {
+        self.highest
+            .map_or(1, |highest| highest.saturating_add(1))
+            .max(cutoff)
+    }
+}
+
+/// Read the WAL at `path` once: keep the records at or after `cutoff` and
+/// note its lowest and highest offsets and the first break in the offsets
+/// that reaches past the cutoff.
+async fn read_wal(path: PathBuf, cutoff: u64) -> Result<WalReplay> {
+    tokio::task::spawn_blocking(move || {
+        let mut wal = WalReplay {
+            entries: Vec::new(),
+            lowest: None,
+            highest: None,
+            break_at: None,
+        };
+        let mut previous: Option<u64> = None;
+        let report = wal_frame::scan(&path, |entry| {
+            let offset = entry.offset;
+            if let Some(prev) = previous
+                && offset > cutoff
+                && prev.checked_add(1) != Some(offset)
+                && wal.break_at.is_none()
+            {
+                wal.break_at = Some((prev, offset));
+            }
+            previous = Some(offset);
+            wal.lowest = Some(wal.lowest.map_or(offset, |lowest| lowest.min(offset)));
+            wal.highest = Some(wal.highest.map_or(offset, |highest| highest.max(offset)));
+            if offset >= cutoff {
+                wal.entries.push(entry);
+            }
+        })?;
+        if let ScanEnd::TornTail {
+            valid_len, reason, ..
+        } = &report.end
+        {
+            warn!(
+                "WAL {:?}: replay stops at an unrepaired torn tail at byte {} ({})",
+                path, valid_len, reason
+            );
+        }
+        info!("Replayed {} WAL entries", wal.entries.len());
+        Ok(wal)
+    })
+    .await
+    .map_err(|e| PersistenceError::IOError(std::io::Error::other(e)))?
+}
+
+/// Check that skipping the `damaged` snapshot files loses nothing.
+///
+/// Recovery falls back to `fallback` (cutoff `cutoff`), or to an empty state
+/// plus the whole WAL when no valid snapshot is left. That is complete only if
+/// the WAL still holds every record from the cutoff on: the WAL is enabled,
+/// reaches back to the cutoff (offsets start at 1, so an uncut WAL starts
+/// there), has no break in its offsets after the cutoff, and holds records if
+/// the snapshot was taken after some were written. The server never cuts the
+/// WAL, so this fails only after the WAL was removed, truncated or replaced,
+/// or with the WAL disabled.
+fn check_fallback(
+    config: &PersistenceConfig,
+    damaged: &[PathBuf],
+    fallback: Option<&Path>,
+    cutoff: u64,
+    wal: &WalReplay,
+) -> Result<()> {
+    if damaged.is_empty() {
+        return Ok(());
+    }
+    let target = match fallback {
+        Some(path) => format!("the older snapshot {path:?} (WAL cutoff {cutoff})"),
+        None => "an empty state plus the whole WAL (no valid snapshot is left)".to_string(),
+    };
+    let first_needed = cutoff.max(1);
+    let gap = if !config.wal.enabled {
+        Some(
+            "the WAL is disabled, so nothing else records the writes the damaged files hold"
+                .to_string(),
+        )
+    } else if let Some((previous, found)) = wal.break_at {
+        Some(format!(
+            "the WAL offsets jump from {previous} to {found}, so records after the cutoff are missing"
+        ))
+    } else {
+        match wal.lowest {
+            Some(lowest) if lowest > first_needed => Some(format!(
+                "the WAL starts at offset {lowest}, so the records from {first_needed} to {} are gone",
+                lowest - 1
+            )),
+            None if cutoff > 1 => Some(format!(
+                "the WAL holds no records although that snapshot was taken at offset {cutoff}, so the WAL was removed or replaced"
+            )),
+            _ => None,
+        }
+    };
+    match gap {
+        None => {
+            warn!(
+                "Snapshot file(s) {:?} are damaged; recovering from {} instead, which loses nothing: the WAL still holds every record after it",
+                damaged, target
+            );
+            Ok(())
+        }
+        Some(gap) => Err(PersistenceError::SnapshotUnrecoverable(format!(
+            "the newest snapshot file(s) {damaged:?} are damaged, and falling back to {target} would lose acknowledged writes: {gap}. Restore the damaged files from a backup, or move them out of the snapshot directory to accept that loss"
+        ))),
+    }
 }
 
 /// Test recovery without actually loading data (validation only)

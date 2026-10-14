@@ -95,8 +95,9 @@ impl Coordinate {
 
 /// Convert coordinate to geohash score (Redis-compatible encoding)
 /// Redis uses: (lat + 90.0) * (1 << 26) + (lon + 180.0)
-/// This produces a 52-bit integer stored as f64
-fn coordinate_to_score(lat: f64, lon: f64) -> f64 {
+/// This produces a 52-bit integer stored as f64. Public so a GEOADD can be
+/// persisted as the sorted-set scores it wrote.
+pub fn coordinate_to_score(lat: f64, lon: f64) -> f64 {
     // Normalize to [0, 180) for lat and [0, 360) for lon
     let normalized_lat = (lat + 90.0).clamp(0.0, 180.0);
     let normalized_lon = (lon + 180.0).clamp(0.0, 360.0);

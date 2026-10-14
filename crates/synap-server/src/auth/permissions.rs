@@ -149,6 +149,24 @@ impl Permission {
         self.matches_pattern(resource)
     }
 
+    /// True when this permission alone grants everything `requested` grants:
+    /// its action includes the requested action, and every resource the
+    /// requested pattern can match is matched by this pattern. Used to stop
+    /// an issuer from delegating more than it holds.
+    ///
+    /// The check is conservative: a request covered only by the union of
+    /// several grants (e.g. `kv:a*` plus `kv:b*` for `kv:*`) is not covered.
+    pub fn covers(&self, requested: &Permission) -> bool {
+        if !self.action.includes(requested.action) {
+            return false;
+        }
+        match PatternSet::of(&requested.resource_pattern) {
+            PatternSet::Nothing => true,
+            PatternSet::Exact(resource) => self.matches_pattern(resource),
+            requested_set => PatternSet::of(&self.resource_pattern).contains(&requested_set),
+        }
+    }
+
     /// Check if resource matches the pattern
     fn matches_pattern(&self, resource: &str) -> bool {
         // Empty pattern should not match anything (security)
@@ -203,7 +221,61 @@ impl Permission {
 
         false
     }
+}
 
+/// The set of resources a pattern matches, mirroring the precedence of
+/// [`Permission::matches_pattern`]: empty, `*`, trailing `*`, leading `*`,
+/// `a:*:b`, then exact.
+#[derive(Debug, PartialEq, Eq)]
+enum PatternSet<'a> {
+    Nothing,
+    All,
+    Prefix(&'a str),
+    Suffix(&'a str),
+    /// `a:*:b` — resources starting with `a:`, ending with `b`, and holding
+    /// `:b` somewhere after the `a:` (so `a:x:b:yb` is a member).
+    Middle(&'a str, &'a str),
+    Exact(&'a str),
+}
+
+impl<'a> PatternSet<'a> {
+    fn of(pattern: &'a str) -> Self {
+        if pattern.is_empty() {
+            PatternSet::Nothing
+        } else if pattern == "*" {
+            PatternSet::All
+        } else if let Some(prefix) = pattern.strip_suffix('*') {
+            PatternSet::Prefix(prefix)
+        } else if let Some(suffix) = pattern.strip_prefix('*') {
+            PatternSet::Suffix(suffix)
+        } else if let Some((a, b)) = pattern.split_once(":*:")
+            && !b.contains(":*:")
+        {
+            PatternSet::Middle(a, b)
+        } else {
+            PatternSet::Exact(pattern)
+        }
+    }
+
+    /// True when every resource in `other` is also in `self`. `other` is
+    /// never `Exact` or `Nothing`; [`Permission::covers`] handles those.
+    fn contains(&self, other: &PatternSet<'_>) -> bool {
+        match (self, other) {
+            (PatternSet::All, _) => true,
+            (PatternSet::Prefix(held), PatternSet::Prefix(asked)) => asked.starts_with(held),
+            (PatternSet::Suffix(held), PatternSet::Suffix(asked)) => asked.ends_with(held),
+            (PatternSet::Prefix(held), PatternSet::Middle(a, _)) => {
+                format!("{a}:").starts_with(held)
+            }
+            // Members only promise to end with `b`, not with `:b`.
+            (PatternSet::Suffix(held), PatternSet::Middle(_, b)) => b.ends_with(held),
+            (PatternSet::Middle(ha, hb), PatternSet::Middle(a, b)) => ha == a && hb == b,
+            _ => false,
+        }
+    }
+}
+
+impl Permission {
     /// Get resource type from resource string (e.g., "queue:orders" -> "queue")
     pub fn get_resource_type(resource: &str) -> Option<&str> {
         resource.split(':').next()
@@ -495,5 +567,104 @@ mod tests {
         let perm = Permission::new("pubsub:*", Action::Write);
         assert!(perm.matches("pubsub:user.created", Action::Write));
         assert!(perm.matches("pubsub:order.placed", Action::Write));
+    }
+
+    #[test]
+    fn covers_requires_the_action() {
+        let held = Permission::new("kv:*", Action::Write);
+        assert!(held.covers(&Permission::new("kv:a", Action::Write)));
+        assert!(!held.covers(&Permission::new("kv:a", Action::Delete)));
+        assert!(!held.covers(&Permission::new("kv:a", Action::All)));
+        assert!(!Permission::new("*", Action::Read).covers(&Permission::new("*", Action::All)));
+        assert!(Permission::new("*", Action::All).covers(&Permission::new("*", Action::All)));
+        // Configure includes read and write, so granting it needs configure.
+        assert!(!held.covers(&Permission::new("kv:a", Action::Configure)));
+        assert!(
+            Permission::new("queue:*", Action::Configure)
+                .covers(&Permission::new("queue:a", Action::Configure))
+        );
+    }
+
+    #[test]
+    fn covers_requires_pattern_containment() {
+        let held = Permission::new("kv:orders:*", Action::Write);
+        assert!(held.covers(&Permission::new("kv:orders:eu:*", Action::Write)));
+        assert!(held.covers(&Permission::new("kv:orders:1", Action::Write)));
+        assert!(!held.covers(&Permission::new("kv:*", Action::Write)));
+        assert!(!held.covers(&Permission::new("*", Action::Write)));
+        assert!(!held.covers(&Permission::new("*:1", Action::Write)));
+
+        let suffix = Permission::new("*:eu", Action::Read);
+        assert!(suffix.covers(&Permission::new("*:orders:eu", Action::Read)));
+        assert!(!suffix.covers(&Permission::new("*eu", Action::Read)));
+        // `kv:*:eu` also matches `kv:x:eu:yeu`, which does not end with `:eu`.
+        assert!(!suffix.covers(&Permission::new("kv:*:eu", Action::Read)));
+        assert!(
+            Permission::new("*eu", Action::Read).covers(&Permission::new("kv:*:eu", Action::Read))
+        );
+
+        let exact = Permission::new("kv:a", Action::Read);
+        assert!(exact.covers(&Permission::new("kv:a", Action::Read)));
+        assert!(!exact.covers(&Permission::new("kv:a*", Action::Read)));
+    }
+
+    /// Whatever `covers` accepts must really be a subset: every sampled
+    /// resource the requested permission matches, the held one matches too.
+    #[test]
+    fn covers_never_accepts_a_wider_grant() {
+        let patterns = [
+            "*",
+            "kv:*",
+            "kv:orders:*",
+            "*:orders",
+            "*s",
+            "kv:*:eu",
+            "queue:*:eu",
+            "kv:orders:1",
+            "kv:a*x*",
+            "kv:*:*:eu",
+            "**",
+            "*:*:eu",
+            "kv:",
+            "kv",
+        ];
+        let resources = [
+            "kv:orders:1",
+            "kv:orders:eu:2",
+            "kv:x:eu",
+            "kv:x:eu:yeu",
+            "queue:a:eu",
+            "kv:orders",
+            "x:orders",
+            "kv:*",
+            "kv:a*x",
+            "kv:a*xyz",
+            "queue:orders",
+            "kv:*:eu",
+            "*",
+            "kv:",
+            "kv",
+            "kv::eu",
+            "kv:a:b:eu",
+            "*:*:eu",
+            "s",
+        ];
+        for held in patterns {
+            for asked in patterns {
+                let held_perm = Permission::new(held, Action::Read);
+                let asked_perm = Permission::new(asked, Action::Read);
+                if !held_perm.covers(&asked_perm) {
+                    continue;
+                }
+                for resource in resources {
+                    if asked_perm.matches(resource, Action::Read) {
+                        assert!(
+                            held_perm.matches(resource, Action::Read),
+                            "`{held}` was said to cover `{asked}` but misses `{resource}`"
+                        );
+                    }
+                }
+            }
+        }
     }
 }

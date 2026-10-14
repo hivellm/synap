@@ -94,6 +94,11 @@ pub struct AppState {
     /// Live replication role handle, so INFO/metrics report real status. `None`
     /// when replication is disabled (phase6j item 1.4).
     pub replication: Option<crate::replication::ReplicationHandle>,
+    /// The effective configuration with its secrets redacted
+    /// ([`crate::config::ServerConfig::redacted`]), reported by the admin-only
+    /// `admin.config` command. `None` when the embedder supplies no
+    /// configuration (most tests); the command then reports an error.
+    pub server_config: Option<Arc<serde_json::Value>>,
 }
 
 // Request/Response types for REST API
@@ -219,13 +224,44 @@ pub struct ScriptKillResponse {
     pub terminated: bool,
 }
 
-/// Health check endpoint
-pub async fn health_check() -> Json<serde_json::Value> {
-    Json(serde_json::json!({
-        "status": "healthy",
-        "service": "synap",
-        "version": env!("CARGO_PKG_VERSION")
-    }))
+/// Health check endpoint.
+///
+/// Reports the WAL as `ok`, `disabled`, or `poisoned`. A poisoned WAL (a write,
+/// flush or fsync failed) refuses every write until the server restarts, so the
+/// endpoint answers 503 with the failure reason, letting a supervisor restart
+/// the process.
+pub async fn health_check(
+    State(state): State<AppState>,
+) -> (axum::http::StatusCode, Json<serde_json::Value>) {
+    let poisoned = state
+        .persistence
+        .as_ref()
+        .and_then(|layer| layer.wal_poison_reason());
+    if let Some(reason) = poisoned {
+        return (
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            Json(serde_json::json!({
+                "status": "unhealthy",
+                "service": "synap",
+                "version": env!("CARGO_PKG_VERSION"),
+                "wal": "poisoned",
+                "wal_error": reason
+            })),
+        );
+    }
+    let wal = match &state.persistence {
+        Some(layer) if layer.has_wal() => "ok",
+        _ => "disabled",
+    };
+    (
+        axum::http::StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "healthy",
+            "service": "synap",
+            "version": env!("CARGO_PKG_VERSION"),
+            "wal": wal
+        })),
+    )
 }
 
 // Queue REST API types
@@ -297,6 +333,8 @@ pub fn default_unit() -> String {
 
 pub async fn command_handler(
     State(state): State<AppState>,
+    AuthContextExtractor(auth): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Json(request): Json<Request>,
 ) -> Result<Json<Response>, SynapError> {
     debug!(
@@ -304,15 +342,87 @@ pub async fn command_handler(
         request.command, request.request_id
     );
 
-    let response = handle_command(state, request).await?;
+    let ctx = crate::auth::OperationContext::from_auth_context(&auth)
+        .with_tenant(hub_ctx.map(|hub| hub.user_id));
+    let response = handle_command(state, &ctx, request).await?;
     Ok(Json(response))
 }
 
-/// Handle individual commands
-async fn handle_command(state: AppState, request: Request) -> Result<Response, SynapError> {
+/// Authorize an envelope command for `ctx` and, in Hub mode, confine its
+/// payload to the caller's tenant before anything runs.
+fn admit_command(
+    state: &AppState,
+    ctx: &crate::auth::OperationContext,
+    request: &mut Request,
+) -> Result<(), crate::auth::Denied> {
+    ctx.authorize_envelope(&request.command, &request.payload)?;
+    let Some(tenant) = ctx.tenant_scope(state.hub_client.is_some())? else {
+        return Ok(());
+    };
+    // The transaction handlers fall back to the request id when no client id
+    // is given; pin that fallback first so it is confined like any other id.
+    if request.command.starts_with("transaction.")
+        && request
+            .payload
+            .get("client_id")
+            .and_then(|v| v.as_str())
+            .is_none()
+    {
+        if request.payload.is_null() {
+            request.payload = serde_json::json!({});
+        }
+        if let Some(fields) = request.payload.as_object_mut() {
+            fields.insert(
+                "client_id".to_string(),
+                serde_json::Value::String(request.request_id.clone()),
+            );
+        }
+    }
+    crate::auth::scope_envelope(&request.command, &mut request.payload, tenant)
+}
+
+/// Handle individual commands. Every command is authorized against `ctx`
+/// before it runs, with the same policy as the native protocols, and in Hub
+/// mode confined to the caller's tenant.
+async fn handle_command(
+    state: AppState,
+    ctx: &crate::auth::OperationContext,
+    mut request: Request,
+) -> Result<Response, SynapError> {
     let request_id = request.request_id.clone();
+    let client_id = request
+        .payload
+        .get("client_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
+
+    if let Err(denied) = admit_command(&state, ctx, &mut request) {
+        // A refused write aimed at an open transaction aborts it, so its EXEC
+        // applies nothing rather than the commands that were allowed. In Hub
+        // mode the transaction is the tenant's own, under its scoped id.
+        let transaction = match ctx.tenant_scope(state.hub_client.is_some()) {
+            Ok(None) => client_id,
+            Ok(Some(tenant)) => client_id.map(|id| crate::hub::ResourceNaming::format(tenant, &id)),
+            Err(_) => None,
+        };
+        if let Some(transaction) = transaction {
+            state
+                .transaction_manager
+                .abort(&transaction, denied.message());
+        }
+        return Ok(Response {
+            success: false,
+            request_id,
+            payload: None,
+            error: Some(SynapError::Forbidden(denied.to_string()).to_string()),
+        });
+    }
 
     let result = match request.command.as_str() {
+        // The envelope's protocol ping: unlike the public `/health`, it runs
+        // behind the authentication layer, so it proves the caller's
+        // credentials are accepted as well as the server being up.
+        "ping" => Ok(serde_json::json!("PONG")),
         "kv.set" => kv_cmd::handle_kv_set_cmd(&state, &request).await,
         "kv.get" => kv_cmd::handle_kv_get_cmd(state.kv_store.clone(), &request).await,
         "kv.del" => kv_cmd::handle_kv_del_cmd(&state, &request).await,
@@ -325,11 +435,11 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "kv.scan" => kv_cmd::handle_kv_scan_cmd(state.kv_store.clone(), &request).await,
         "kv.keys" => kv_cmd::handle_kv_keys_cmd(state.kv_store.clone(), &request).await,
         "kv.dbsize" => kv_cmd::handle_kv_dbsize_cmd(state.kv_store.clone(), &request).await,
-        "kv.flushdb" => kv_cmd::handle_kv_flushdb_cmd(state.kv_store.clone(), &request).await,
-        "kv.flushall" => kv_cmd::handle_kv_flushall_cmd(state.kv_store.clone(), &request).await,
-        "kv.expire" => kv_cmd::handle_kv_expire_cmd(state.kv_store.clone(), &request).await,
+        "kv.flushdb" => kv_cmd::handle_kv_flushdb_cmd(&state, &request).await,
+        "kv.flushall" => kv_cmd::handle_kv_flushall_cmd(&state, &request).await,
+        "kv.expire" => kv_cmd::handle_kv_expire_cmd(&state, &request).await,
         "kv.ttl" => kv_cmd::handle_kv_ttl_cmd(state.kv_store.clone(), &request).await,
-        "kv.persist" => kv_cmd::handle_kv_persist_cmd(state.kv_store.clone(), &request).await,
+        "kv.persist" => kv_cmd::handle_kv_persist_cmd(&state, &request).await,
         "kv.stats" => kv_cmd::handle_kv_stats_cmd(state.kv_store.clone(), &request).await,
         // String extension commands
         "kv.append" => kv_cmd::handle_kv_append_cmd(&state, &request).await,
@@ -351,6 +461,7 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         "slowlog.reset" => admin_cmd::handle_slowlog_reset_cmd(state.clone(), &request).await,
         "memory.usage" => admin_cmd::handle_memory_usage_cmd(state.clone(), &request).await,
         "client.list" => admin_cmd::handle_client_list_cmd(state.clone(), &request).await,
+        "admin.config" => admin_cmd::handle_admin_config_cmd(&state, &request).await,
         // Transaction commands
         "transaction.multi" => {
             admin_cmd::handle_transaction_multi_cmd(state.clone(), &request).await
@@ -484,8 +595,8 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
         }
         "sortedset.zmscore" => sorted_set::handle_sortedset_zmscore_cmd(&state, &request).await,
         "sortedset.stats" => sorted_set::handle_sortedset_stats_cmd(&state, &request).await,
-        "script.eval" => script::handle_script_eval_cmd(&state, &request).await,
-        "script.evalsha" => script::handle_script_evalsha_cmd(&state, &request).await,
+        "script.eval" => script::handle_script_eval_cmd(&state, ctx, &request).await,
+        "script.evalsha" => script::handle_script_evalsha_cmd(&state, ctx, &request).await,
         "script.load" => script::handle_script_load_cmd(&state, &request).await,
         "script.exists" => script::handle_script_exists_cmd(&state, &request).await,
         "script.flush" => script::handle_script_flush_cmd(&state, &request).await,
@@ -521,6 +632,265 @@ async fn handle_command(state: AppState, request: Request) -> Result<Response, S
                 payload: None,
                 error: Some(e.to_string()),
             })
+        }
+    }
+}
+
+/// AppState with fresh in-memory stores and no persistence, for unit tests.
+#[cfg(test)]
+pub(crate) fn test_app_state() -> AppState {
+    use crate::core::types::KVConfig;
+    let kv_store = Arc::new(KVStore::new(KVConfig::default()));
+    let hash_store = Arc::new(HashStore::new());
+    let list_store = Arc::new(crate::core::ListStore::new());
+    let set_store = Arc::new(crate::core::SetStore::new());
+    let sorted_set_store = Arc::new(SortedSetStore::new());
+    AppState {
+        monitoring: Arc::new(crate::monitoring::MonitoringManager::new(
+            kv_store.clone(),
+            hash_store.clone(),
+            list_store.clone(),
+            set_store.clone(),
+            sorted_set_store.clone(),
+        )),
+        transaction_manager: Arc::new(TransactionManager::new(
+            kv_store.clone(),
+            hash_store.clone(),
+            list_store.clone(),
+            set_store.clone(),
+            sorted_set_store.clone(),
+        )),
+        hyperloglog_store: Arc::new(HyperLogLogStore::new()),
+        bitmap_store: Arc::new(crate::core::BitmapStore::new()),
+        geospatial_store: Arc::new(GeospatialStore::new(sorted_set_store.clone())),
+        kv_store,
+        hash_store,
+        list_store,
+        set_store,
+        sorted_set_store,
+        queue_manager: None,
+        stream_manager: None,
+        partition_manager: None,
+        consumer_group_manager: None,
+        pubsub_router: None,
+        persistence: None,
+        script_manager: Arc::new(ScriptManager::new(Duration::from_secs(5))),
+        client_list_manager: Arc::new(crate::monitoring::ClientListManager::new()),
+        cluster_topology: None,
+        cluster_migration: None,
+        hub_client: None,
+        user_manager: None,
+        require_auth: false,
+        replication: None,
+        server_config: None,
+    }
+}
+
+#[cfg(test)]
+mod admin_config_tests {
+    use super::*;
+    use crate::auth::{AuthContext, OperationContext, Permission};
+
+    fn caller(is_admin: bool, permissions: Vec<Permission>) -> OperationContext {
+        OperationContext::from_auth_context(&AuthContext {
+            user_id: Some(if is_admin { "admin" } else { "reader" }.to_string()),
+            api_key_id: None,
+            client_ip: std::net::IpAddr::from([127, 0, 0, 1]),
+            permissions,
+            is_admin,
+        })
+    }
+
+    fn config_request() -> Request {
+        serde_json::from_value(json!({
+            "command": "admin.config",
+            "request_id": "cfg-1",
+            "payload": {}
+        }))
+        .unwrap()
+    }
+
+    fn state_with_secrets() -> AppState {
+        let mut config = crate::config::ServerConfig::default();
+        config.auth.enabled = true;
+        config.auth.root.password = "root-pass-7f3a".to_string();
+        config.hub.service_api_key = "hub-key-91c2".to_string();
+        let mut state = test_app_state();
+        state.server_config = Some(Arc::new(config.redacted().unwrap()));
+        state
+    }
+
+    /// Spec "Admin views configuration": the effective configuration, every
+    /// secret redacted in both the object and the YAML.
+    #[tokio::test]
+    async fn admin_gets_the_redacted_configuration() {
+        let response = handle_command(
+            state_with_secrets(),
+            &caller(true, vec![]),
+            config_request(),
+        )
+        .await
+        .unwrap();
+        assert!(response.success, "{:?}", response.error);
+        let payload = response.payload.unwrap();
+        assert_eq!(payload["config"]["server"]["port"], 15500);
+        assert_eq!(
+            payload["config"]["auth"]["root"]["password"],
+            crate::config::REDACTED
+        );
+        assert_eq!(
+            payload["config"]["hub"]["service_api_key"],
+            crate::config::REDACTED
+        );
+        let yaml = payload["yaml"].as_str().unwrap();
+        assert!(yaml.contains("port: 15500"), "{yaml}");
+        let text = payload.to_string();
+        assert!(!text.contains("root-pass-7f3a") && !text.contains("hub-key-91c2"));
+    }
+
+    /// Spec "Non-admin request": a read-only user is denied, and nothing of the
+    /// configuration comes back.
+    #[tokio::test]
+    async fn read_only_user_is_denied() {
+        let reader = caller(false, vec![Permission::new("*", crate::auth::Action::Read)]);
+        let response = handle_command(state_with_secrets(), &reader, config_request())
+            .await
+            .unwrap();
+        assert!(!response.success);
+        assert!(response.payload.is_none());
+        let error = response.error.unwrap();
+        assert!(
+            error.contains("NOPERM") && error.contains("admin:*"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_snapshot_is_an_error_not_a_default() {
+        let response = handle_command(test_app_state(), &caller(true, vec![]), config_request())
+            .await
+            .unwrap();
+        assert!(!response.success);
+        assert!(response.payload.is_none());
+        assert!(response.error.unwrap().contains("no configuration"));
+    }
+}
+
+#[cfg(test)]
+mod wal_failure_tests {
+    use super::*;
+    use crate::core::TransactionCommand;
+    use crate::persistence::layer::test_support::faulty_layer;
+
+    fn admin() -> AuthContextExtractor {
+        AuthContextExtractor(crate::auth::AuthContext {
+            user_id: None,
+            api_key_id: None,
+            client_ip: std::net::IpAddr::from([127, 0, 0, 1]),
+            permissions: vec![],
+            is_admin: true,
+        })
+    }
+
+    async fn rest_set(state: &AppState, key: &str) -> Result<Json<SetResponse>, SynapError> {
+        let req: SetRequest = serde_json::from_value(json!({"key": key, "value": "v"})).unwrap();
+        kv_set(
+            State(state.clone()),
+            admin(),
+            crate::hub::HubContextExtractor(None),
+            Json(req),
+        )
+        .await
+    }
+
+    /// Queue one SET inside a transaction for `client_id`.
+    fn queue_set(state: &AppState, client_id: &str) {
+        state
+            .transaction_manager
+            .multi(client_id.to_string())
+            .unwrap();
+        state
+            .transaction_manager
+            .queue_command_if_transaction(
+                client_id,
+                TransactionCommand::KVSet {
+                    key: "tx:k".into(),
+                    value: b"v".to_vec(),
+                    ttl: None,
+                },
+            )
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn health_is_ok_with_a_healthy_wal() {
+        let (status, Json(body)) = health_check(State(test_app_state())).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(body["status"], "healthy");
+        assert_eq!(body["wal"], "disabled");
+
+        let mut state = test_app_state();
+        state.persistence = Some(faulty_layer("health_ok").await.0);
+        let (status, Json(body)) = health_check(State(state)).await;
+        assert_eq!(status, axum::http::StatusCode::OK);
+        assert_eq!(body["wal"], "ok");
+    }
+
+    /// Spec "Injected fsync failure": in Always mode a write whose fsync fails
+    /// returns an error, the next write fails too, and /health reports it.
+    #[tokio::test]
+    async fn fsync_failure_fails_writes_and_health() {
+        let mut state = test_app_state();
+        let (layer, faults) = faulty_layer("rest_fsync").await;
+        state.persistence = Some(layer);
+        assert!(rest_set(&state, "before").await.is_ok());
+
+        faults.fail_next_sync();
+        assert!(rest_set(&state, "lost").await.is_err());
+        assert!(rest_set(&state, "next").await.is_err());
+
+        let (status, Json(body)) = health_check(State(state)).await;
+        assert_eq!(status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(body["status"], "unhealthy");
+        assert_eq!(body["wal"], "poisoned");
+        assert!(body["wal_error"].as_str().unwrap().contains("fsync failed"));
+    }
+
+    #[tokio::test]
+    async fn rest_exec_reports_a_transaction_the_wal_could_not_log() {
+        let mut state = test_app_state();
+        let (layer, faults) = faulty_layer("rest_exec").await;
+        state.persistence = Some(layer);
+        queue_set(&state, "rest_client");
+
+        faults.fail_next_flush();
+        match transaction_exec(State(state)).await {
+            Err(SynapError::InternalError(message)) => {
+                assert!(message.contains("not durable"), "{message}")
+            }
+            Err(other) => panic!("unexpected error {other:?}"),
+            Ok(_) => panic!("EXEC must fail when the WAL rejects it"),
+        }
+    }
+
+    #[tokio::test]
+    async fn envelope_exec_reports_a_transaction_the_wal_could_not_log() {
+        let mut state = test_app_state();
+        let (layer, faults) = faulty_layer("envelope_exec").await;
+        state.persistence = Some(layer);
+        queue_set(&state, "envelope_client");
+
+        faults.fail_next_flush();
+        let request = Request {
+            command: "transaction.exec".into(),
+            request_id: "r1".into(),
+            payload: json!({"client_id": "envelope_client"}),
+        };
+        match admin_cmd::handle_transaction_exec_cmd(state, &request).await {
+            Err(SynapError::InternalError(message)) => {
+                assert!(message.contains("not durable"), "{message}")
+            }
+            other => panic!("EXEC must fail when the WAL rejects it, got {other:?}"),
         }
     }
 }

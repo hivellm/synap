@@ -130,12 +130,12 @@ class KVStore:
         Returns:
             The new value after incrementing
         """
-        if delta == 1:
-            response = await self._client.send_command("kv.incr", {"key": key})
-        else:
-            response = await self._client.send_command(
-                "kv.incrby", {"key": key, "amount": delta}
-            )
+        # `kv.incr` + `amount` is what the HTTP envelope understands; the native
+        # transports map the same payload to INCRBY, so every transport agrees.
+        payload: dict[str, Any] = {"key": key}
+        if delta != 1:
+            payload["amount"] = delta
+        response = await self._client.send_command("kv.incr", payload)
         return int(_field(response, "value", 0))
 
     async def decr(self, key: str, delta: int = 1) -> int:
@@ -148,12 +148,10 @@ class KVStore:
         Returns:
             The new value after decrementing
         """
-        if delta == 1:
-            response = await self._client.send_command("kv.decr", {"key": key})
-        else:
-            response = await self._client.send_command(
-                "kv.decrby", {"key": key, "amount": delta}
-            )
+        payload: dict[str, Any] = {"key": key}
+        if delta != 1:
+            payload["amount"] = delta
+        response = await self._client.send_command("kv.decr", payload)
         return int(_field(response, "value", 0))
 
     async def scan(self, prefix: str, limit: int = 100) -> list[str]:

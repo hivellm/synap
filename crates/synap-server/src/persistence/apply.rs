@@ -11,12 +11,34 @@
 //! `StreamPersistence`), while a replica must apply them from the stream. This
 //! is expressed by the `stream_manager` argument — pass `None` to skip stream
 //! ops (recovery), `Some(..)` to apply them (replica).
+//!
+//! A transaction record ([`Operation::Transaction`]) reaches this module only
+//! whole: the WAL stores it as one checksummed frame and replication ships it
+//! as one length-prefixed command, so a torn or interrupted record is never
+//! decoded. [`apply_operation`] then applies every operation in it.
+//!
+//! Queue records keep message identity (phase24): a publish is restored with
+//! its original ID and metadata, and ACK/NACK/purge act by message ID whether
+//! the message is ready or pending. Deliveries are not logged, so during a
+//! replay a delivered message is ready until its ACK or NACK arrives.
 
+use crate::core::QueueMessage;
 use crate::core::sorted_set::{SortedSetStore, ZAddOptions};
 use crate::core::{
-    Aggregate, HashStore, KVStore, ListStore, QueueManager, SetStore, StreamManager, SynapError,
+    Aggregate, BitfieldOperation, BitmapOperation, BitmapStore, Expiry, HashStore,
+    HyperLogLogStore, KVStore, ListStore, QueueManager, SetOptions, SetStore, StreamManager,
+    SynapError,
 };
 use crate::persistence::types::Operation;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+/// Current Unix time in milliseconds.
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
 
 /// Borrowed bundle of every store a persistence routine can touch.
 ///
@@ -33,6 +55,8 @@ pub struct StoreRefs<'a> {
     pub sorted_set_store: Option<&'a SortedSetStore>,
     pub queue_manager: Option<&'a QueueManager>,
     pub stream_manager: Option<&'a StreamManager>,
+    pub hyperloglog_store: Option<&'a HyperLogLogStore>,
+    pub bitmap_store: Option<&'a BitmapStore>,
 }
 
 impl<'a> StoreRefs<'a> {
@@ -46,6 +70,8 @@ impl<'a> StoreRefs<'a> {
             sorted_set_store: None,
             queue_manager: None,
             stream_manager: None,
+            hyperloglog_store: None,
+            bitmap_store: None,
         }
     }
 }
@@ -61,6 +87,8 @@ pub struct StoreArcs {
     pub sorted_set_store: Option<std::sync::Arc<SortedSetStore>>,
     pub queue_manager: Option<std::sync::Arc<QueueManager>>,
     pub stream_manager: Option<std::sync::Arc<StreamManager>>,
+    pub hyperloglog_store: Option<std::sync::Arc<HyperLogLogStore>>,
+    pub bitmap_store: Option<std::sync::Arc<BitmapStore>>,
 }
 
 impl StoreArcs {
@@ -74,6 +102,8 @@ impl StoreArcs {
             sorted_set_store: None,
             queue_manager: None,
             stream_manager: None,
+            hyperloglog_store: None,
+            bitmap_store: None,
         }
     }
 
@@ -87,16 +117,59 @@ impl StoreArcs {
             sorted_set_store: self.sorted_set_store.as_deref(),
             queue_manager: self.queue_manager.as_deref(),
             stream_manager: self.stream_manager.as_deref(),
+            hyperloglog_store: self.hyperloglog_store.as_deref(),
+            bitmap_store: self.bitmap_store.as_deref(),
         }
     }
 }
 
-/// Apply a single [`Operation`] to the provided stores.
+/// Apply an [`Operation`] to the provided stores.
 ///
-/// Errors from KV and hash writes propagate; list/set/sorted-set/queue/stream
+/// Errors from KV, hash and queue writes propagate; list/set/sorted-set/stream
 /// applies are best-effort (idempotent replays), matching WAL recovery
-/// semantics.
+/// semantics. Queue ACK, NACK and purge records tolerate only a missing
+/// message or queue (a snapshot taken after the message was settled no
+/// longer holds it); any other queue error fails the apply. A transaction
+/// record applies every operation it holds (see [`apply_transaction`]).
 pub async fn apply_operation(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapError> {
+    match op {
+        Operation::Transaction { operations } => apply_transaction(operations, stores).await,
+        op => apply_single(op, stores).await,
+    }
+}
+
+/// Apply a committed transaction record: every operation, in order.
+///
+/// A record that nests another transaction is rejected before anything is
+/// applied; the writer never produces one. Once applying has started, a
+/// failing operation does not stop the rest: the master committed every
+/// effect, so applying all the others is the closest state to it. The first
+/// error is returned (WAL recovery then refuses the whole replay).
+async fn apply_transaction(
+    operations: Vec<Operation>,
+    stores: StoreRefs<'_>,
+) -> Result<(), SynapError> {
+    if operations
+        .iter()
+        .any(|op| matches!(op, Operation::Transaction { .. }))
+    {
+        return Err(nested_transaction_error());
+    }
+    let mut first_error = None;
+    for operation in operations {
+        if let Err(e) = apply_single(operation, stores).await {
+            first_error.get_or_insert(e);
+        }
+    }
+    first_error.map_or(Ok(()), Err)
+}
+
+fn nested_transaction_error() -> SynapError {
+    SynapError::InvalidValue("a transaction record cannot contain another transaction".into())
+}
+
+/// Apply one non-transaction [`Operation`].
+async fn apply_single(op: Operation, stores: StoreRefs<'_>) -> Result<(), SynapError> {
     let StoreRefs {
         kv_store,
         hash_store,
@@ -105,6 +178,8 @@ pub async fn apply_operation(op: Operation, stores: StoreRefs<'_>) -> Result<(),
         sorted_set_store,
         queue_manager,
         stream_manager,
+        hyperloglog_store,
+        bitmap_store,
     } = stores;
     match op {
         // ── KV ──────────────────────────────────────────────────────────────
@@ -120,30 +195,77 @@ pub async fn apply_operation(op: Operation, stores: StoreRefs<'_>) -> Result<(),
             source,
             destination,
         } => {
-            if let Some(data) = kv_store.get(&source).await? {
-                let ttl = kv_store.ttl(&source).await?;
-                kv_store.set(destination, data, ttl).await?;
-                kv_store.delete(&source).await?;
+            transfer_key(stores, &source, &destination, true).await?;
+        }
+        Operation::KeyCopy {
+            source,
+            destination,
+            replace,
+        } => {
+            if replace || !key_exists(stores, &destination).await? {
+                transfer_key(stores, &source, &destination, false).await?;
+            }
+        }
+        Operation::KVExpire { key, ttl } => match ttl {
+            Some(secs) => {
+                kv_store.expire(&key, secs).await?;
+            }
+            None => {
+                kv_store.persist(&key).await?;
+            }
+        },
+        Operation::KVFlush => {
+            kv_store.clear().await;
+        }
+        // Absolute expiry (phase23). A deadline that has already passed means
+        // the write happened and the key then expired: it is removed, never
+        // resurrected.
+        Operation::KVSetAt {
+            key,
+            value,
+            expires_at_ms,
+        } => match expires_at_ms {
+            None => {
+                kv_store.set(key, value, None).await?;
+            }
+            Some(deadline) if deadline <= now_ms() => {
+                kv_store.delete(&key).await?;
+            }
+            Some(deadline) => {
+                kv_store
+                    .set_with_opts(
+                        &key,
+                        value,
+                        Some(Expiry::UnixMilliseconds(deadline)),
+                        SetOptions::default(),
+                    )
+                    .await?;
+            }
+        },
+        Operation::KVExpireAt { key, expires_at_ms } => {
+            if expires_at_ms <= now_ms() {
+                kv_store.delete(&key).await?;
+            } else {
+                kv_store.expire_at(&key, expires_at_ms).await?;
             }
         }
 
         // ── Queue ───────────────────────────────────────────────────────────
+        // Records written before phase24 carry no creation time; the message
+        // keeps its ID and every other field.
         Operation::QueuePublish { queue, message } => {
-            if let Some(qm) = queue_manager
-                && qm.create_queue(&queue, None).await.is_ok()
-            {
-                qm.publish(
-                    &queue,
-                    (*message.payload).clone(),
-                    Some(message.priority),
-                    Some(message.max_retries),
-                )
-                .await?;
+            if let Some(qm) = queue_manager {
+                restore_published(qm, &queue, message).await?;
+            }
+        }
+        Operation::QueuePublishFull { queue, message } => {
+            if let Some(qm) = queue_manager {
+                restore_published(qm, &queue, message.into()).await?;
             }
         }
         Operation::QueueAck { queue, message_id } => {
             if let Some(qm) = queue_manager {
-                let _ = qm.ack(&queue, &message_id).await;
+                tolerate_not_found(qm.replay_ack(&queue, &message_id).await)?;
             }
         }
         Operation::QueueNack {
@@ -152,7 +274,22 @@ pub async fn apply_operation(op: Operation, stores: StoreRefs<'_>) -> Result<(),
             requeue,
         } => {
             if let Some(qm) = queue_manager {
-                let _ = qm.nack(&queue, &message_id, requeue).await;
+                tolerate_not_found(qm.replay_nack(&queue, &message_id, requeue).await)?;
+            }
+        }
+        Operation::QueueCreate { queue, config } => {
+            if let Some(qm) = queue_manager {
+                qm.create_queue(&queue, Some(config)).await?;
+            }
+        }
+        Operation::QueueDelete { queue } => {
+            if let Some(qm) = queue_manager {
+                qm.delete_queue(&queue).await?;
+            }
+        }
+        Operation::QueuePurge { queue, message_ids } => {
+            if let Some(qm) = queue_manager {
+                tolerate_not_found(qm.remove_messages(&queue, &message_ids).await.map(|_| ()))?;
             }
         }
 
@@ -365,6 +502,198 @@ pub async fn apply_operation(op: Operation, stores: StoreRefs<'_>) -> Result<(),
                 let _ = z.zdiffstore(&destination, &key_refs);
             }
         }
+
+        // ── HyperLogLog ─────────────────────────────────────────────────────
+        Operation::HllAdd { key, elements, ttl } => {
+            if let Some(h) = hyperloglog_store {
+                h.pfadd(&key, elements, ttl)?;
+            }
+        }
+        Operation::HllMerge {
+            destination,
+            sources,
+        } => {
+            if let Some(h) = hyperloglog_store {
+                h.pfmerge(&destination, sources)?;
+            }
+        }
+        Operation::HllAddAt {
+            key,
+            elements,
+            expires_at_ms,
+        } => {
+            if let Some(h) = hyperloglog_store {
+                h.pfadd_until(&key, elements, expires_at_ms)?;
+            }
+        }
+
+        // ── Bitmap ──────────────────────────────────────────────────────────
+        Operation::BitmapSetBit { key, offset, value } => {
+            if let Some(b) = bitmap_store {
+                b.setbit(&key, offset as usize, value)?;
+            }
+        }
+        Operation::BitmapOp {
+            operation,
+            destination,
+            sources,
+        } => {
+            if let Some(b) = bitmap_store {
+                let op: BitmapOperation = operation.parse()?;
+                b.bitop(op, &destination, &sources)?;
+            }
+        }
+        Operation::BitmapField { key, writes } => {
+            if let Some(b) = bitmap_store {
+                let ops: Vec<BitfieldOperation> = writes
+                    .into_iter()
+                    .map(|w| BitfieldOperation::Set {
+                        offset: w.offset as usize,
+                        width: w.width as usize,
+                        signed: w.signed,
+                        value: w.value,
+                    })
+                    .collect();
+                b.bitfield(&key, &ops)?;
+            }
+        }
+
+        // Only reachable through a nested record, which `apply_transaction`
+        // rejects up front.
+        Operation::Transaction { .. } => return Err(nested_transaction_error()),
+    }
+    Ok(())
+}
+
+/// Insert a replayed publish with its original ID and metadata. The queue is
+/// created with the default configuration when it does not exist: queues
+/// created before phase24 have no creation record.
+async fn restore_published(
+    qm: &QueueManager,
+    queue: &str,
+    message: QueueMessage,
+) -> Result<(), SynapError> {
+    qm.create_queue(queue, None).await?;
+    qm.restore_message(queue, message).await
+}
+
+/// A replayed ACK, NACK or purge whose message (or queue) is gone is expected:
+/// a snapshot taken after the message was settled no longer holds it. Any
+/// other error is returned.
+fn tolerate_not_found(result: Result<(), SynapError>) -> Result<(), SynapError> {
+    match result {
+        Err(SynapError::MessageNotFound(_) | SynapError::QueueNotFound(_)) => Ok(()),
+        other => other,
+    }
+}
+
+/// Whether `key` holds a value in any keyed store present in `stores`.
+async fn key_exists(stores: StoreRefs<'_>, key: &str) -> Result<bool, SynapError> {
+    if stores.kv_store.exists(key).await? {
+        return Ok(true);
+    }
+    Ok(stores
+        .hash_store
+        .is_some_and(|h| h.hlen(key).unwrap_or(0) > 0)
+        || stores
+            .list_store
+            .is_some_and(|l| l.llen(key).unwrap_or(0) > 0)
+        || stores
+            .set_store
+            .is_some_and(|s| s.scard(key).unwrap_or(0) > 0)
+        || stores.sorted_set_store.is_some_and(|z| z.zcard(key) > 0))
+}
+
+/// Remove `key` from every keyed store present in `stores`.
+async fn delete_everywhere(stores: StoreRefs<'_>, key: &str) -> Result<(), SynapError> {
+    stores.kv_store.delete(key).await?;
+    if let Some(h) = stores.hash_store {
+        let fields = h.hkeys(key).unwrap_or_default();
+        if !fields.is_empty() {
+            h.hdel(key, &fields)?;
+        }
+    }
+    if let Some(l) = stores.list_store {
+        l.delete(key)?;
+    }
+    if let Some(s) = stores.set_store {
+        s.delete(key)?;
+    }
+    if let Some(z) = stores.sorted_set_store {
+        z.delete(key);
+    }
+    Ok(())
+}
+
+/// Replay a RENAME (`remove_source`) or COPY of `source` onto `destination`,
+/// in whichever store holds `source`, the way `KeyManager` performed it: the
+/// destination is replaced, KV keep their remaining TTL. A missing source is
+/// a no-op, as it was when the operation was recorded after a failed lookup.
+async fn transfer_key(
+    stores: StoreRefs<'_>,
+    source: &str,
+    destination: &str,
+    remove_source: bool,
+) -> Result<(), SynapError> {
+    if source == destination || !key_exists(stores, source).await? {
+        return Ok(());
+    }
+    let kv = stores.kv_store;
+    if let Some(data) = kv.get(source).await? {
+        let ttl = kv.ttl(source).await?;
+        delete_everywhere(stores, destination).await?;
+        kv.set(destination, data, ttl).await?;
+        if remove_source {
+            kv.delete(source).await?;
+        }
+        return Ok(());
+    }
+    if let Some(h) = stores.hash_store
+        && let Ok(fields) = h.hgetall(source)
+        && !fields.is_empty()
+    {
+        delete_everywhere(stores, destination).await?;
+        h.hmset(destination, fields)?;
+        if remove_source {
+            let names = h.hkeys(source)?;
+            h.hdel(source, &names)?;
+        }
+        return Ok(());
+    }
+    if let Some(l) = stores.list_store
+        && let Ok(values) = l.lrange(source, 0, -1)
+        && !values.is_empty()
+    {
+        delete_everywhere(stores, destination).await?;
+        l.rpush(destination, values, false)?;
+        if remove_source {
+            l.delete(source)?;
+        }
+        return Ok(());
+    }
+    if let Some(s) = stores.set_store
+        && let Ok(members) = s.smembers(source)
+        && !members.is_empty()
+    {
+        delete_everywhere(stores, destination).await?;
+        s.sadd(destination, members)?;
+        if remove_source {
+            s.delete(source)?;
+        }
+        return Ok(());
+    }
+    if let Some(z) = stores.sorted_set_store {
+        let members = z.zrange(source, 0, -1, true);
+        if !members.is_empty() {
+            delete_everywhere(stores, destination).await?;
+            let opts = ZAddOptions::default();
+            for m in members {
+                z.zadd(destination, m.member, m.score, &opts);
+            }
+            if remove_source {
+                z.delete(source);
+            }
+        }
     }
     Ok(())
 }
@@ -392,6 +721,8 @@ mod tests {
         zset: SortedSetStore,
         queue: QueueManager,
         stream: StreamManager,
+        hll: HyperLogLogStore,
+        bitmap: BitmapStore,
     }
 
     fn stores() -> Stores {
@@ -403,6 +734,8 @@ mod tests {
             zset: SortedSetStore::new(),
             queue: QueueManager::new(QueueConfig::default()),
             stream: StreamManager::new(StreamConfig::default()),
+            hll: HyperLogLogStore::new(),
+            bitmap: BitmapStore::new(),
         }
     }
 
@@ -418,6 +751,8 @@ mod tests {
                 sorted_set_store: Some(&s.zset),
                 queue_manager: Some(&s.queue),
                 stream_manager: Some(&s.stream),
+                hyperloglog_store: Some(&s.hll),
+                bitmap_store: Some(&s.bitmap),
             },
         )
         .await
@@ -785,6 +1120,119 @@ mod tests {
         assert!(s.stream.list_rooms().await.contains(&"r".to_string()));
     }
 
+    /// Queue records keep message identity: a publish (legacy or full) is
+    /// restored with its ID and metadata, an ACK or NACK replayed on the
+    /// ready message settles it by ID, and lifecycle records apply.
+    #[tokio::test]
+    async fn queue_replay_keeps_identity_and_settles_by_id() {
+        use crate::persistence::types::QueueMessageRecord;
+        let s = stores();
+        apply(
+            &s,
+            Operation::QueueCreate {
+                queue: "q".into(),
+                config: QueueConfig {
+                    max_depth: 4,
+                    ..QueueConfig::default()
+                },
+            },
+        )
+        .await;
+        let mut full = crate::core::queue::QueueMessage::new(b"full".to_vec(), 9, 3);
+        full.created_at = 1_600_000_000;
+        full.retry_count = 2;
+        let legacy = crate::core::queue::QueueMessage::new(b"legacy".to_vec(), 1, 3);
+        let acked = crate::core::queue::QueueMessage::new(b"acked".to_vec(), 5, 3);
+        apply(
+            &s,
+            Operation::QueuePublishFull {
+                queue: "q".into(),
+                message: QueueMessageRecord::from(&full),
+            },
+        )
+        .await;
+        for message in [&legacy, &acked] {
+            apply(
+                &s,
+                Operation::QueuePublish {
+                    queue: "q".into(),
+                    message: message.clone(),
+                },
+            )
+            .await;
+        }
+        // Delivered on the master, ready here: the ACK removes it by ID.
+        apply(
+            &s,
+            Operation::QueueAck {
+                queue: "q".into(),
+                message_id: acked.id.clone(),
+            },
+        )
+        .await;
+        apply(
+            &s,
+            Operation::QueueNack {
+                queue: "q".into(),
+                message_id: full.id.clone(),
+                requeue: true,
+            },
+        )
+        .await;
+
+        let state = s.queue.dump_state().remove("q").unwrap();
+        assert_eq!(state.config.max_depth, 4);
+        let ready: Vec<(&str, u32, u32)> = state
+            .ready
+            .iter()
+            .map(|m| (m.id.as_str(), m.retry_count, m.created_at))
+            .collect();
+        assert_eq!(
+            ready,
+            vec![
+                (legacy.id.as_str(), 0, state.ready[0].created_at),
+                (full.id.as_str(), 3, 1_600_000_000),
+            ]
+        );
+
+        apply(
+            &s,
+            Operation::QueuePurge {
+                queue: "q".into(),
+                message_ids: vec![legacy.id.clone()],
+            },
+        )
+        .await;
+        assert_eq!(s.queue.dump_state()["q"].ready.len(), 1);
+        apply(&s, Operation::QueueDelete { queue: "q".into() }).await;
+        assert!(s.queue.list_queues().await.unwrap().is_empty());
+        // Settling records for a queue or message that is gone are tolerated.
+        apply(
+            &s,
+            Operation::QueuePurge {
+                queue: "q".into(),
+                message_ids: vec![full.id.clone()],
+            },
+        )
+        .await;
+    }
+
+    /// Only a missing message or queue is tolerated on replay; any other
+    /// error is returned, so recovery fails instead of hiding it.
+    #[test]
+    fn only_not_found_is_tolerated() {
+        assert!(tolerate_not_found(Err(SynapError::MessageNotFound("m".into()))).is_ok());
+        assert!(tolerate_not_found(Err(SynapError::QueueNotFound("q".into()))).is_ok());
+        assert!(matches!(
+            tolerate_not_found(Err(SynapError::QueueFull("q".into()))),
+            Err(SynapError::QueueFull(_))
+        ));
+        assert!(matches!(
+            tolerate_not_found(Err(SynapError::InternalError("disk".into()))),
+            Err(SynapError::InternalError(_))
+        ));
+    }
+
     /// With `stream_manager = None` (WAL recovery), a StreamPublish is skipped.
     #[tokio::test]
     async fn stream_publish_skipped_without_manager() {
@@ -803,11 +1251,204 @@ mod tests {
                 sorted_set_store: None,
                 queue_manager: None,
                 stream_manager: None,
+                hyperloglog_store: None,
+                bitmap_store: None,
             },
         )
         .await
         .unwrap();
         assert!(s.stream.list_rooms().await.is_empty());
+    }
+
+    /// A transaction record applies every operation it holds, across stores.
+    #[tokio::test]
+    async fn applies_every_operation_of_a_transaction() {
+        let s = stores();
+        apply(
+            &s,
+            Operation::Transaction {
+                operations: vec![
+                    Operation::KVSet {
+                        key: "tk".into(),
+                        value: b"tv".to_vec(),
+                        ttl: None,
+                    },
+                    Operation::HashSet {
+                        key: "th".into(),
+                        field: "f".into(),
+                        value: b"hv".to_vec(),
+                    },
+                    Operation::SetAdd {
+                        key: "ts".into(),
+                        members: vec![b"m".to_vec()],
+                    },
+                ],
+            },
+        )
+        .await;
+        assert_eq!(s.kv.get("tk").await.unwrap(), Some(b"tv".to_vec()));
+        assert_eq!(s.hash.hget("th", "f").unwrap(), Some(b"hv".to_vec()));
+        assert!(s.set.sismember("ts", b"m".to_vec()).unwrap());
+    }
+
+    /// A record nesting another transaction is rejected before any of its
+    /// operations is applied.
+    #[tokio::test]
+    async fn nested_transaction_record_applies_nothing() {
+        let s = stores();
+        let err = apply_operation(
+            Operation::Transaction {
+                operations: vec![
+                    Operation::KVSet {
+                        key: "outer".into(),
+                        value: b"v".to_vec(),
+                        ttl: None,
+                    },
+                    Operation::Transaction { operations: vec![] },
+                ],
+            },
+            StoreRefs::kv_only(&s.kv),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("cannot contain another transaction")
+        );
+        assert_eq!(s.kv.get("outer").await.unwrap(), None);
+    }
+
+    /// The phase21 variants (expiry, flush, copy, HyperLogLog, bitmap) and the
+    /// cross-type RENAME replay to the state the command produced.
+    #[tokio::test]
+    async fn applies_phase21_operations() {
+        let s = stores();
+        apply(
+            &s,
+            Operation::KVSet {
+                key: "k".into(),
+                value: b"v".to_vec(),
+                ttl: None,
+            },
+        )
+        .await;
+        apply(
+            &s,
+            Operation::KVExpire {
+                key: "k".into(),
+                ttl: Some(100),
+            },
+        )
+        .await;
+        assert!(matches!(s.kv.ttl("k").await, Ok(Some(t)) if t > 0));
+        apply(
+            &s,
+            Operation::KVExpire {
+                key: "k".into(),
+                ttl: None,
+            },
+        )
+        .await;
+        assert_eq!(s.kv.ttl("k").await.unwrap(), None);
+
+        // COPY and RENAME of a hash, across stores.
+        s.hash.hset("h", "f", b"1".to_vec()).unwrap();
+        apply(
+            &s,
+            Operation::KeyCopy {
+                source: "h".into(),
+                destination: "h2".into(),
+                replace: false,
+            },
+        )
+        .await;
+        assert_eq!(s.hash.hget("h2", "f").unwrap(), Some(b"1".to_vec()));
+        apply(
+            &s,
+            Operation::KVRename {
+                source: "h".into(),
+                destination: "h3".into(),
+            },
+        )
+        .await;
+        assert_eq!(s.hash.hget("h3", "f").unwrap(), Some(b"1".to_vec()));
+        assert_eq!(s.hash.hlen("h").unwrap_or(0), 0);
+
+        apply(
+            &s,
+            Operation::HllAdd {
+                key: "p1".into(),
+                elements: vec![b"a".to_vec(), b"b".to_vec()],
+                ttl: None,
+            },
+        )
+        .await;
+        apply(
+            &s,
+            Operation::HllAdd {
+                key: "p2".into(),
+                elements: vec![b"c".to_vec()],
+                ttl: None,
+            },
+        )
+        .await;
+        apply(
+            &s,
+            Operation::HllMerge {
+                destination: "pd".into(),
+                sources: vec!["p1".into(), "p2".into()],
+            },
+        )
+        .await;
+        assert_eq!(s.hll.pfcount("pd").unwrap(), 3);
+
+        apply(
+            &s,
+            Operation::BitmapSetBit {
+                key: "b1".into(),
+                offset: 3,
+                value: 1,
+            },
+        )
+        .await;
+        apply(
+            &s,
+            Operation::BitmapOp {
+                operation: "OR".into(),
+                destination: "bd".into(),
+                sources: vec!["b1".into()],
+            },
+        )
+        .await;
+        apply(
+            &s,
+            Operation::BitmapField {
+                key: "bf".into(),
+                writes: vec![crate::persistence::types::BitfieldWrite {
+                    offset: 0,
+                    width: 8,
+                    signed: false,
+                    value: 200,
+                }],
+            },
+        )
+        .await;
+        assert_eq!(s.bitmap.getbit("bd", 3).unwrap(), 1);
+        let read = s
+            .bitmap
+            .bitfield(
+                "bf",
+                &[BitfieldOperation::Get {
+                    offset: 0,
+                    width: 8,
+                    signed: false,
+                }],
+            )
+            .unwrap();
+        assert_eq!(read[0].value, 200);
+
+        apply(&s, Operation::KVFlush).await;
+        assert_eq!(s.kv.get("k").await.unwrap(), None);
     }
 
     #[test]
@@ -816,5 +1457,84 @@ mod tests {
         assert!(matches!(parse_aggregate("MAX"), Aggregate::Max));
         assert!(matches!(parse_aggregate("sum"), Aggregate::Sum));
         assert!(matches!(parse_aggregate("other"), Aggregate::Sum));
+    }
+
+    /// phase23: absolute deadlines apply as is; a deadline already passed
+    /// removes the key (KV and HyperLogLog) instead of resurrecting it.
+    #[tokio::test]
+    async fn applies_absolute_expiry() {
+        let s = stores();
+        let now = now_ms();
+        apply(
+            &s,
+            Operation::KVSetAt {
+                key: "k".into(),
+                value: b"v".to_vec(),
+                expires_at_ms: Some(now + 60_000),
+            },
+        )
+        .await;
+        assert!(matches!(s.kv.ttl("k").await, Ok(Some(t)) if (55..=60).contains(&t)));
+        apply(
+            &s,
+            Operation::KVExpireAt {
+                key: "k".into(),
+                expires_at_ms: now + 20_000,
+            },
+        )
+        .await;
+        assert!(matches!(s.kv.ttl("k").await, Ok(Some(t)) if (15..=20).contains(&t)));
+        apply(
+            &s,
+            Operation::KVExpireAt {
+                key: "k".into(),
+                expires_at_ms: now - 1,
+            },
+        )
+        .await;
+        assert!(!s.kv.exists("k").await.unwrap());
+
+        s.kv.set("p", b"old".to_vec(), None).await.unwrap();
+        apply(
+            &s,
+            Operation::KVSetAt {
+                key: "p".into(),
+                value: b"new".to_vec(),
+                expires_at_ms: Some(now - 1),
+            },
+        )
+        .await;
+        assert!(!s.kv.exists("p").await.unwrap());
+        apply(
+            &s,
+            Operation::KVSetAt {
+                key: "p".into(),
+                value: b"v".to_vec(),
+                expires_at_ms: None,
+            },
+        )
+        .await;
+        assert_eq!(s.kv.ttl("p").await.unwrap(), None);
+
+        apply(
+            &s,
+            Operation::HllAddAt {
+                key: "h".into(),
+                elements: vec![b"a".to_vec()],
+                expires_at_ms: now + 30_000,
+            },
+        )
+        .await;
+        assert_eq!(s.hll.pfcount("h").unwrap(), 1);
+        apply(
+            &s,
+            Operation::HllAddAt {
+                key: "h".into(),
+                elements: vec![b"b".to_vec()],
+                expires_at_ms: now - 1_000,
+            },
+        )
+        .await;
+        assert!(s.hll.pfcount("h").is_err());
     }
 }

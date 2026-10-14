@@ -4,8 +4,33 @@
 //! `SynapValue` result.  Mirrors the RESP3 command dispatcher but operates on
 //! the binary `SynapValue` type instead of `Resp3Value`.
 
+use std::borrow::Cow;
+
 use super::{Request, Response, SynapValue};
+use crate::auth::{CommandArgs, OperationContext};
 use crate::server::handlers::AppState;
+
+/// A SynapRPC command's arguments as seen by the authorization classifier.
+/// Every scalar renders as text — lossily for non-UTF-8 bytes — so a key is
+/// never skipped just because a handler would reject its type.
+pub struct RpcArgs<'a>(pub &'a [SynapValue]);
+
+impl CommandArgs for RpcArgs<'_> {
+    fn arg_count(&self) -> usize {
+        self.0.len()
+    }
+
+    fn arg(&self, index: usize) -> Option<Cow<'_, str>> {
+        match self.0.get(index)? {
+            SynapValue::Str(s) => Some(Cow::Borrowed(s)),
+            SynapValue::Bytes(b) => Some(String::from_utf8_lossy(b)),
+            SynapValue::Int(i) => Some(Cow::Owned(i.to_string())),
+            SynapValue::Float(f) => Some(Cow::Owned(f.to_string())),
+            SynapValue::Bool(b) => Some(Cow::Owned(b.to_string())),
+            SynapValue::Null | SynapValue::Array(_) | SynapValue::Map(_) => None,
+        }
+    }
+}
 
 mod advanced;
 mod collections;
@@ -16,8 +41,8 @@ mod tests;
 
 /// Dispatch one `Request` and return a `Response`.
 #[tracing::instrument(name = "rpc.dispatch", skip(state, req), fields(cmd = %req.command, id = req.id))]
-pub async fn dispatch(state: &AppState, req: Request) -> Response {
-    let result = run(state, &req.command, req.args).await;
+pub async fn dispatch(state: &AppState, caller: &OperationContext, req: Request) -> Response {
+    let result = run(state, caller, &req.command, req.args).await;
     match result {
         Ok(v) => Response::ok(req.id, v),
         Err(e) => Response::err(req.id, e),
@@ -27,16 +52,24 @@ pub async fn dispatch(state: &AppState, req: Request) -> Response {
 /// Run one command — the entry point Thunder's `Dispatch` implementation calls.
 ///
 /// Frame-level concerns (ids, encoding, error rendering) belong to Thunder, so
-/// this hands back the bare `Result` rather than a `Response`.
+/// this hands back the bare `Result` rather than a `Response`. The caller has
+/// already authorized the command against `caller`, which is passed on to
+/// scripts so each `redis.call` is authorized too.
 pub async fn run_command(
     state: &AppState,
+    caller: &OperationContext,
     command: &str,
     args: Vec<SynapValue>,
 ) -> Result<SynapValue, String> {
-    run(state, command, args).await
+    run(state, caller, command, args).await
 }
 
-async fn run(state: &AppState, command: &str, args: Vec<SynapValue>) -> Result<SynapValue, String> {
+async fn run(
+    state: &AppState,
+    caller: &OperationContext,
+    command: &str,
+    args: Vec<SynapValue>,
+) -> Result<SynapValue, String> {
     // Uppercase into a stack buffer instead of allocating a `String` per command.
     let mut buf = [0u8; 32];
     let cmd: &str = if command.len() <= buf.len() {
@@ -63,7 +96,7 @@ async fn run(state: &AppState, command: &str, args: Vec<SynapValue>) -> Result<S
         | "HSCAN" | "SSCAN" | "ZSCAN" | "BLPOP" | "BRPOP" | "BRPOPLPUSH" | "BZPOPMIN"
         | "BZPOPMAX" => collections::run(state, cmd, args).await,
 
-        _ => advanced::run(state, cmd, args).await,
+        _ => advanced::run(state, caller, cmd, args).await,
     }
 }
 

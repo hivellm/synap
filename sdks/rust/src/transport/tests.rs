@@ -233,6 +233,75 @@ fn map_command_kv_incr() {
 }
 
 #[test]
+fn map_command_ping_is_protocol_ping() {
+    let (cmd, args) = map_command("ping", &json!({})).unwrap();
+    assert_eq!(cmd, "PING");
+    assert!(args.is_empty());
+    // Native PING answers "PONG", the same payload the HTTP envelope returns.
+    assert_eq!(
+        map_response("ping", WireValue::Str("PONG".into())),
+        json!("PONG")
+    );
+}
+
+#[test]
+fn map_command_kv_incr_with_amount_is_incrby() {
+    let payload = json!({"key": "counter", "amount": 10});
+    let (cmd, args) = map_command("kv.incr", &payload).unwrap();
+    assert_eq!(cmd, "INCRBY");
+    assert_eq!(
+        args,
+        vec![WireValue::Str("counter".into()), WireValue::Int(10)]
+    );
+}
+
+#[test]
+fn map_command_kv_incr_with_zero_and_negative_amounts() {
+    for amount in [0i64, -7, i64::MIN, i64::MAX] {
+        let payload = json!({"key": "c", "amount": amount});
+        let (cmd, args) = map_command("kv.incr", &payload).unwrap();
+        assert_eq!(cmd, "INCRBY", "amount {amount}");
+        assert_eq!(args[1], WireValue::Int(amount), "amount {amount}");
+    }
+}
+
+#[test]
+fn map_command_kv_incr_null_amount_stays_incr() {
+    let payload = json!({"key": "c", "amount": null});
+    let (cmd, args) = map_command("kv.incr", &payload).unwrap();
+    assert_eq!(cmd, "INCR");
+    assert_eq!(args, vec![WireValue::Str("c".into())]);
+}
+
+#[test]
+fn map_command_kv_decr_with_and_without_amount() {
+    let (cmd, args) = map_command("kv.decr", &json!({"key": "c"})).unwrap();
+    assert_eq!(cmd, "DECR");
+    assert_eq!(args, vec![WireValue::Str("c".into())]);
+
+    let (cmd, args) = map_command("kv.decr", &json!({"key": "c", "amount": 4})).unwrap();
+    assert_eq!(cmd, "DECRBY");
+    assert_eq!(args, vec![WireValue::Str("c".into()), WireValue::Int(4)]);
+}
+
+#[test]
+fn map_command_kv_incr_non_integer_amount_travels_as_json_text() {
+    // The server must refuse these exactly as the HTTP envelope does, so the
+    // SDK forwards the JSON text instead of coercing it into a number.
+    for (amount, text) in [
+        (json!("10"), "\"10\""),
+        (json!(1.5), "1.5"),
+        (json!(true), "true"),
+        (json!(u64::MAX), "18446744073709551615"),
+    ] {
+        let payload = json!({"key": "c", "amount": amount});
+        let (cmd, args) = map_command("kv.incr", &payload).unwrap();
+        assert_eq!(cmd, "INCRBY");
+        assert_eq!(args[1], WireValue::Str(text.into()));
+    }
+}
+
+#[test]
 fn map_command_hash_get() {
     let payload = json!({"key": "myhash", "field": "f1"});
     let (cmd, args) = map_command("hash.get", &payload).unwrap();

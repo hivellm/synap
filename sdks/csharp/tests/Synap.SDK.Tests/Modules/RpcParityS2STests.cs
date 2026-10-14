@@ -40,7 +40,7 @@ public sealed class RpcParityS2STests : IDisposable
 
     // ── Queue tests ──────────────────────────────────────────────────────────
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Queue_RoundTrip_Http()
     {
         if (!S2SEnabled) return;
@@ -48,7 +48,7 @@ public sealed class RpcParityS2STests : IDisposable
         await QueueRoundTrip(client);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Queue_RoundTrip_Rpc()
     {
         if (!S2SEnabled) return;
@@ -56,7 +56,7 @@ public sealed class RpcParityS2STests : IDisposable
         await QueueRoundTrip(client);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Queue_RoundTrip_Resp3()
     {
         if (!S2SEnabled) return;
@@ -74,12 +74,14 @@ public sealed class RpcParityS2STests : IDisposable
 
         var msg = await client.Queue.ConsumeAsync(name, "worker-1");
         Assert.NotNull(msg);
+        Assert.Equal(msgId, msg.Id);
         Assert.Equal(5, msg.Priority);
+        Assert.Equal("hello", msg.Payload?.GetProperty("data").GetString());
 
         await client.Queue.AckAsync(name, msg.Id);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Queue_EmptyReturnsNull_Http()
     {
         if (!S2SEnabled) return;
@@ -90,7 +92,7 @@ public sealed class RpcParityS2STests : IDisposable
         Assert.Null(msg);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Queue_List_Http()
     {
         if (!S2SEnabled) return;
@@ -103,7 +105,7 @@ public sealed class RpcParityS2STests : IDisposable
 
     // ── Stream tests ─────────────────────────────────────────────────────────
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Stream_RoundTrip_Http()
     {
         if (!S2SEnabled) return;
@@ -111,7 +113,7 @@ public sealed class RpcParityS2STests : IDisposable
         await StreamRoundTrip(client);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Stream_RoundTrip_Rpc()
     {
         if (!S2SEnabled) return;
@@ -119,7 +121,7 @@ public sealed class RpcParityS2STests : IDisposable
         await StreamRoundTrip(client);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Stream_RoundTrip_Resp3()
     {
         if (!S2SEnabled) return;
@@ -142,7 +144,7 @@ public sealed class RpcParityS2STests : IDisposable
         Assert.Equal("user.updated", events[1].Event);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Stream_ListRooms_Http()
     {
         if (!S2SEnabled) return;
@@ -155,7 +157,7 @@ public sealed class RpcParityS2STests : IDisposable
 
     // ── Pub/Sub tests ────────────────────────────────────────────────────────
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task PubSub_Publish_Http()
     {
         if (!S2SEnabled) return;
@@ -164,7 +166,7 @@ public sealed class RpcParityS2STests : IDisposable
         Assert.True(count >= 0);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task PubSub_Publish_Rpc()
     {
         if (!S2SEnabled) return;
@@ -173,7 +175,7 @@ public sealed class RpcParityS2STests : IDisposable
         Assert.True(count >= 0);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task PubSub_Publish_Resp3()
     {
         if (!S2SEnabled) return;
@@ -184,7 +186,7 @@ public sealed class RpcParityS2STests : IDisposable
 
     // ── Transaction tests ────────────────────────────────────────────────────
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Transaction_MultiExec_Http()
     {
         if (!S2SEnabled) return;
@@ -192,7 +194,7 @@ public sealed class RpcParityS2STests : IDisposable
         await TransactionRoundTrip(client);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Transaction_MultiExec_Rpc()
     {
         if (!S2SEnabled) return;
@@ -219,7 +221,7 @@ public sealed class RpcParityS2STests : IDisposable
 
     // ── Script tests ─────────────────────────────────────────────────────────
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Script_Eval_Http()
     {
         if (!S2SEnabled) return;
@@ -227,7 +229,7 @@ public sealed class RpcParityS2STests : IDisposable
         await ScriptEval(client);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Script_Eval_Rpc()
     {
         if (!S2SEnabled) return;
@@ -247,36 +249,80 @@ public sealed class RpcParityS2STests : IDisposable
         Assert.NotNull(response);
     }
 
-    // ── UnsupportedCommandException regression ──────────────────────────────
+    // ── Bitmap on the native transports ─────────────────────────────────────
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
-    public async Task Rpc_Raises_UnsupportedCommandException_ForBitmap()
+    [S2SFact]
+    public async Task Bitmap_SetBitGetBit_Rpc()
+    {
+        if (!S2SEnabled) return;
+        using var client = RpcClient();
+        await BitmapRoundTrip(client);
+    }
+
+    [S2SFact]
+    public async Task Bitmap_SetBitGetBit_Resp3()
+    {
+        if (!S2SEnabled) return;
+        using var client = Resp3Client();
+        await BitmapRoundTrip(client);
+    }
+
+    // SETBIT, GETBIT and BITCOUNT have native commands, and the manager reads
+    // the same fields from them as from the HTTP payload.
+    private static async Task BitmapRoundTrip(SynapClient client)
+    {
+        var key = $"bm:{Uid()}";
+        Assert.Equal(0, await client.Bitmap.SetBitAsync(key, 7, 1));
+        Assert.Equal(1, await client.Bitmap.SetBitAsync(key, 7, 1));
+        Assert.Equal(1, await client.Bitmap.GetBitAsync(key, 7));
+        Assert.Equal(0, await client.Bitmap.GetBitAsync(key, 6));
+        Assert.Equal(1, await client.Bitmap.BitCountAsync(key));
+    }
+
+    // ── UnsupportedCommandException regression ──────────────────────────────
+    // An operation with no native mapping must raise on SynapRPC and RESP3,
+    // never fall back to HTTP silently. BITFIELD has no native command.
+
+    [S2SFact]
+    public async Task Rpc_Raises_UnsupportedCommandException_ForBitfield()
     {
         if (!S2SEnabled) return;
         using var client = RpcClient();
         await Assert.ThrowsAsync<UnsupportedCommandException>(() =>
-            client.SendCommandAsync("bitmap.setbit",
-                new Dictionary<string, object?> { ["key"] = "bm", ["offset"] = 7L, ["value"] = 1L }));
+            client.SendCommandAsync("bitmap.bitfield", BitfieldPayload()));
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
-    public async Task Resp3_Raises_UnsupportedCommandException_ForBitmap()
+    [S2SFact]
+    public async Task Resp3_Raises_UnsupportedCommandException_ForBitfield()
     {
         if (!S2SEnabled) return;
         using var client = Resp3Client();
         await Assert.ThrowsAsync<UnsupportedCommandException>(() =>
-            client.SendCommandAsync("bitmap.setbit",
-                new Dictionary<string, object?> { ["key"] = "bm", ["offset"] = 7L, ["value"] = 1L }));
+            client.SendCommandAsync("bitmap.bitfield", BitfieldPayload()));
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
-    public async Task Http_DoesNotRaise_UnsupportedCommandException_ForBitmap()
+    [S2SFact]
+    public async Task Http_Runs_Bitfield()
     {
         if (!S2SEnabled) return;
         using var client = HttpClient();
-        var ex = await Record.ExceptionAsync(() =>
-            client.SendCommandAsync("bitmap.setbit",
-                new Dictionary<string, object?> { ["key"] = $"bm:{Uid()}", ["offset"] = 7L, ["value"] = 1L }));
-        Assert.IsNotType<UnsupportedCommandException>(ex);
+        using var response = await client.SendCommandAsync("bitmap.bitfield", BitfieldPayload());
+        Assert.Equal(1, response.RootElement.GetProperty("results").GetArrayLength());
     }
+
+    private static Dictionary<string, object?> BitfieldPayload() => new()
+    {
+        ["key"] = $"bf:{Uid()}",
+        ["operations"] = new object?[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["operation"] = "SET",
+                ["offset"] = 0L,
+                ["width"] = 8L,
+                ["signed"] = false,
+                ["value"] = 5L,
+            },
+        },
+    };
 }

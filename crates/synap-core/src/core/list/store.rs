@@ -4,16 +4,17 @@
 //! `ListValue`/`ListRepr` and the packed-encoding thresholds live in the
 //! parent module; this file holds only the store-level, sharded API.
 use super::ListValue;
+use crate::core::blocking::BlockingKeys;
 use crate::core::error::{Result, SynapError};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::future::Future;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use tokio::sync::broadcast;
 use tokio::time::timeout;
 
 const SHARD_COUNT: usize = 64;
@@ -88,12 +89,9 @@ impl AtomicListStats {
 pub struct ListStore {
     shards: Vec<Arc<RwLock<HashMap<String, ListValue>>>>,
     stats: Arc<AtomicListStats>,
-    /// Broadcast channel for notifying blocked waiters
-    /// Key: list key
-    notify_tx: Arc<RwLock<HashMap<String, broadcast::Sender<()>>>>,
-    /// Number of keys with a notify channel — lets `notify_waiters` skip the
-    /// map entirely when no blocking pop has ever registered (the common case).
-    notify_channels: AtomicU64,
+    /// Clients blocked in BLPOP/BRPOP/BRPOPLPUSH, queued on every key they
+    /// wait on; pushes wake them.
+    blocked: BlockingKeys,
     /// Shared cross-datatype memory budget (audit M-018).
     mem: Option<crate::core::GlobalMemory>,
     mem_bytes: Arc<std::sync::atomic::AtomicI64>,
@@ -120,6 +118,15 @@ impl ListStore {
         out
     }
 
+    /// Remove every list, e.g. before a replica loads a full-sync image.
+    /// Blocked poppers keep waiting; the memory contribution is recomputed.
+    pub fn clear(&self) {
+        for shard in self.shards.iter() {
+            shard.write().clear();
+        }
+        self.refresh_memory();
+    }
+
     /// Create new list store
     pub fn new() -> Self {
         let mut shards = Vec::with_capacity(SHARD_COUNT);
@@ -130,8 +137,7 @@ impl ListStore {
         Self {
             shards,
             stats: Arc::new(AtomicListStats::default()),
-            notify_tx: Arc::new(RwLock::new(HashMap::new())),
-            notify_channels: AtomicU64::new(0),
+            blocked: BlockingKeys::new(),
             mem: None,
             mem_bytes: Arc::new(std::sync::atomic::AtomicI64::new(0)),
             keyspace_notifier: None,
@@ -207,28 +213,18 @@ impl ListStore {
         &self.shards[self.shard_index(key)]
     }
 
-    /// Notify blocked waiters on a key.
-    ///
-    /// Fast path: when no blocking pop has ever registered a channel
-    /// (`notify_channels == 0` — the common case for non-blocking workloads),
-    /// skip the lock + hash lookup entirely, so LPUSH/RPUSH never touch the map.
-    fn notify_waiters(&self, key: &str) {
-        if self.notify_channels.load(Ordering::Relaxed) == 0 {
-            return;
-        }
-        if let Some(tx) = self.notify_tx.read().get(key) {
-            let _ = tx.send(());
-        }
+    /// Whether `key` holds an element a blocking pop could take now.
+    fn has_elements(&self, key: &str) -> bool {
+        self.shard(key)
+            .read()
+            .get(key)
+            .is_some_and(|list| !list.is_empty() && !list.is_expired())
     }
 
-    /// Create or get broadcast channel for a key
-    fn get_or_create_channel(&self, key: &str) -> broadcast::Receiver<()> {
-        let mut notify = self.notify_tx.write();
-        let tx = notify.entry(key.to_string()).or_insert_with(|| {
-            self.notify_channels.fetch_add(1, Ordering::Relaxed);
-            broadcast::channel(100).0
-        });
-        tx.subscribe()
+    /// Clients currently queued on `key` by a blocking pop.
+    #[cfg(test)]
+    pub(crate) fn blocked_clients(&self, key: &str) -> usize {
+        self.blocked.queued(key)
     }
 
     /// LPUSH - Push element(s) to left (front)
@@ -253,6 +249,7 @@ impl ListStore {
         }
 
         // Push all values
+        let pushed = values.len();
         for value in values {
             list.lpush(value);
         }
@@ -260,9 +257,9 @@ impl ListStore {
         let len = list.len();
         self.stats.lpush_count.fetch_add(1, Ordering::Relaxed);
 
-        // Notify blocked waiters
+        // Wake one blocked client per element, oldest first
         drop(map);
-        self.notify_waiters(key);
+        self.blocked.wake(key, pushed);
         self.notify_keyspace("lpush", key);
 
         Ok(len)
@@ -290,6 +287,7 @@ impl ListStore {
         }
 
         // Push all values
+        let pushed = values.len();
         for value in values {
             list.rpush(value);
         }
@@ -297,9 +295,9 @@ impl ListStore {
         let len = list.len();
         self.stats.rpush_count.fetch_add(1, Ordering::Relaxed);
 
-        // Notify blocked waiters
+        // Wake one blocked client per element, oldest first
         drop(map);
-        self.notify_waiters(key);
+        self.blocked.wake(key, pushed);
         self.notify_keyspace("rpush", key);
 
         Ok(len)
@@ -579,7 +577,7 @@ impl ListStore {
             self.stats.rpoplpush_count.fetch_add(1, Ordering::Relaxed);
 
             drop(map);
-            self.notify_waiters(destination);
+            self.blocked.wake(destination, 1);
 
             return Ok(value);
         }
@@ -636,7 +634,7 @@ impl ListStore {
 
         drop(first_map);
         drop(second_map);
-        self.notify_waiters(destination);
+        self.blocked.wake(destination, 1);
 
         Ok(value)
     }
@@ -647,72 +645,133 @@ impl ListStore {
         keys: Vec<String>,
         timeout_secs: Option<u64>,
     ) -> Result<(String, Vec<u8>)> {
+        let (key, value, ()) = self.blpop_guarded(keys, timeout_secs, || async {}).await?;
+        Ok((key, value))
+    }
+
+    /// BLPOP whose every pop attempt runs while holding the guard `lock`
+    /// returns. A successful attempt hands that guard back with the popped
+    /// value, so the caller can record the pop before releasing it; waiting
+    /// for a push happens without the guard. The persistence layer passes its
+    /// per-key ordering lock here so a blocking pop reaches the WAL in the same
+    /// order as the pushes it races with.
+    pub async fn blpop_guarded<G, F, Fut>(
+        &self,
+        keys: Vec<String>,
+        timeout_secs: Option<u64>,
+        lock: F,
+    ) -> Result<(String, Vec<u8>, G)>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = G>,
+    {
+        let popped = self
+            .blocking_pop_guarded(keys, timeout_secs, true, lock)
+            .await?;
+        self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
+        Ok(popped)
+    }
+
+    /// BRPOP - Blocking pop from right with timeout
+    pub async fn brpop(
+        &self,
+        keys: Vec<String>,
+        timeout_secs: Option<u64>,
+    ) -> Result<(String, Vec<u8>)> {
+        let (key, value, ()) = self.brpop_guarded(keys, timeout_secs, || async {}).await?;
+        Ok((key, value))
+    }
+
+    /// BRPOP with a guard around every pop attempt; see
+    /// [`blpop_guarded`](Self::blpop_guarded).
+    pub async fn brpop_guarded<G, F, Fut>(
+        &self,
+        keys: Vec<String>,
+        timeout_secs: Option<u64>,
+        lock: F,
+    ) -> Result<(String, Vec<u8>, G)>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = G>,
+    {
+        let popped = self
+            .blocking_pop_guarded(keys, timeout_secs, false, lock)
+            .await?;
+        self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
+        Ok(popped)
+    }
+
+    /// Shared body of BLPOP/BRPOP: try every key in order under the guard,
+    /// then wait for a push to any of them and retry until `timeout_secs`
+    /// (`None` = forever).
+    ///
+    /// The client is queued on all keys at once (see [`crate::core::blocking`])
+    /// before the attempt that precedes each wait, so a push to any key wakes
+    /// it and a push between "every key was empty" and "waiting" is not lost.
+    /// The guard is held only inside each attempt, never while waiting.
+    async fn blocking_pop_guarded<G, F, Fut>(
+        &self,
+        keys: Vec<String>,
+        timeout_secs: Option<u64>,
+        left: bool,
+        mut lock: F,
+    ) -> Result<(String, Vec<u8>, G)>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = G>,
+    {
         // Try immediate pop first
-        for key in &keys {
-            if let Ok(mut values) = self.lpop(key, Some(1))
+        if let Some(popped) = self.try_pop_any(&keys, left, &mut lock).await {
+            return Ok(popped);
+        }
+
+        // No immediate result: queue on every key, then retry after each wake
+        let has_data = |key: &str| self.has_elements(key);
+        let registration = self.blocked.register(&keys, &has_data);
+        let wait = async {
+            loop {
+                if let Some(popped) = self.try_pop_any(&keys, left, &mut lock).await {
+                    return popped;
+                }
+                registration.woken().await;
+            }
+        };
+
+        // Dropping `registration` on return (pop, timeout or cancellation)
+        // leaves the queues and hands an unused wake-up to the next client.
+        match timeout_secs {
+            Some(timeout_secs) => timeout(Duration::from_secs(timeout_secs), wait)
+                .await
+                .map_err(|_| SynapError::Timeout),
+            None => Ok(wait.await),
+        }
+    }
+
+    /// One pop attempt over `keys`, in order, while holding `lock`'s guard.
+    async fn try_pop_any<G, F, Fut>(
+        &self,
+        keys: &[String],
+        left: bool,
+        lock: &mut F,
+    ) -> Option<(String, Vec<u8>, G)>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = G>,
+    {
+        let guard = lock().await;
+        for key in keys {
+            let popped = if left {
+                self.lpop(key, Some(1))
+            } else {
+                self.rpop(key, Some(1))
+            };
+            if let Ok(mut values) = popped
                 && !values.is_empty()
             {
-                self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
-                return Ok((key.clone(), values.remove(0)));
+                return Some((key.clone(), values.remove(0), guard));
             }
         }
-
-        // No immediate result, wait for notification
-        if let Some(timeout_secs) = timeout_secs {
-            // Create receivers for all keys
-            let mut receivers: Vec<_> =
-                keys.iter().map(|k| self.get_or_create_channel(k)).collect();
-
-            let duration = Duration::from_secs(timeout_secs);
-            let result = timeout(duration, async {
-                loop {
-                    // Wait for any notification
-                    for rx in &mut receivers {
-                        let _ = rx.recv().await;
-                    }
-
-                    // Try to pop from any key
-                    for key in &keys {
-                        if let Ok(mut values) = self.lpop(key, Some(1))
-                            && !values.is_empty()
-                        {
-                            return Ok((key.clone(), values.remove(0)));
-                        }
-                    }
-                }
-            })
-            .await;
-
-            match result {
-                Ok(Ok(value)) => {
-                    self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
-                    Ok(value)
-                }
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(SynapError::Timeout),
-            }
-        } else {
-            // Wait indefinitely
-            let mut receivers: Vec<_> =
-                keys.iter().map(|k| self.get_or_create_channel(k)).collect();
-
-            loop {
-                // Wait for any notification
-                for rx in &mut receivers {
-                    let _ = rx.recv().await;
-                }
-
-                // Try to pop from any key
-                for key in &keys {
-                    if let Ok(mut values) = self.lpop(key, Some(1))
-                        && !values.is_empty()
-                    {
-                        self.stats.blpop_count.fetch_add(1, Ordering::Relaxed);
-                        return Ok((key.clone(), values.remove(0)));
-                    }
-                }
-            }
-        }
+        None
     }
 
     /// BRPOPLPUSH - Blocking RPOPLPUSH with timeout
@@ -722,112 +781,54 @@ impl ListStore {
         destination: &str,
         timeout_secs: Option<u64>,
     ) -> Result<Vec<u8>> {
-        // Try immediate operation first
-        if let Ok(value) = self.rpoplpush(source, destination) {
-            return Ok(value);
-        }
-
-        // No immediate result, wait for notification
-        let rx = self.get_or_create_channel(source);
-
-        if let Some(timeout_secs) = timeout_secs {
-            let duration = Duration::from_secs(timeout_secs);
-            let result = timeout(duration, async {
-                let mut receiver = rx;
-                loop {
-                    let _ = receiver.recv().await;
-
-                    // Try operation after notification
-                    if let Ok(value) = self.rpoplpush(source, destination) {
-                        return Ok(value);
-                    }
-                }
-            })
-            .await;
-
-            match result {
-                Ok(Ok(value)) => Ok(value),
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(SynapError::Timeout),
-            }
-        } else {
-            // Wait indefinitely
-            let mut receiver = rx;
-            loop {
-                let _ = receiver.recv().await;
-
-                if let Ok(value) = self.rpoplpush(source, destination) {
-                    return Ok(value);
-                }
-            }
-        }
+        let (value, ()) = self
+            .brpoplpush_guarded(source, destination, timeout_secs, || async {})
+            .await?;
+        Ok(value)
     }
 
-    /// BRPOP - Blocking pop from right with timeout
-    pub async fn brpop(
+    /// BRPOPLPUSH with a guard around every attempt; see
+    /// [`blpop_guarded`](Self::blpop_guarded).
+    pub async fn brpoplpush_guarded<G, F, Fut>(
         &self,
-        keys: Vec<String>,
+        source: &str,
+        destination: &str,
         timeout_secs: Option<u64>,
-    ) -> Result<(String, Vec<u8>)> {
-        // Try immediate pop first
-        for key in &keys {
-            if let Ok(mut values) = self.rpop(key, Some(1))
-                && !values.is_empty()
-            {
-                self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
-                return Ok((key.clone(), values.remove(0)));
+        mut lock: F,
+    ) -> Result<(Vec<u8>, G)>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = G>,
+    {
+        // Try immediate operation first
+        {
+            let guard = lock().await;
+            if let Ok(value) = self.rpoplpush(source, destination) {
+                return Ok((value, guard));
             }
         }
 
-        // No immediate result, wait for notification
-        if let Some(timeout_secs) = timeout_secs {
-            let mut receivers: Vec<_> =
-                keys.iter().map(|k| self.get_or_create_channel(k)).collect();
-
-            let duration = Duration::from_secs(timeout_secs);
-            let result = timeout(duration, async {
-                loop {
-                    for rx in &mut receivers {
-                        let _ = rx.recv().await;
-                    }
-
-                    for key in &keys {
-                        if let Ok(mut values) = self.rpop(key, Some(1))
-                            && !values.is_empty()
-                        {
-                            return Ok((key.clone(), values.remove(0)));
-                        }
-                    }
-                }
-            })
-            .await;
-
-            match result {
-                Ok(Ok(value)) => {
-                    self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
-                    Ok(value)
-                }
-                Ok(Err(e)) => Err(e),
-                Err(_) => Err(SynapError::Timeout),
-            }
-        } else {
-            let mut receivers: Vec<_> =
-                keys.iter().map(|k| self.get_or_create_channel(k)).collect();
-
+        // No immediate result: queue on the source, then retry after each wake
+        let has_data = |key: &str| self.has_elements(key);
+        let sources = [source.to_owned()];
+        let registration = self.blocked.register(&sources, &has_data);
+        let wait = async {
             loop {
-                for rx in &mut receivers {
-                    let _ = rx.recv().await;
-                }
-
-                for key in &keys {
-                    if let Ok(mut values) = self.rpop(key, Some(1))
-                        && !values.is_empty()
-                    {
-                        self.stats.brpop_count.fetch_add(1, Ordering::Relaxed);
-                        return Ok((key.clone(), values.remove(0)));
+                {
+                    let guard = lock().await;
+                    if let Ok(value) = self.rpoplpush(source, destination) {
+                        return (value, guard);
                     }
                 }
+                registration.woken().await;
             }
+        };
+
+        match timeout_secs {
+            Some(timeout_secs) => timeout(Duration::from_secs(timeout_secs), wait)
+                .await
+                .map_err(|_| SynapError::Timeout),
+            None => Ok(wait.await),
         }
     }
 

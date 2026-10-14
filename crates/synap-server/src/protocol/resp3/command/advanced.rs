@@ -1,5 +1,7 @@
 use super::{AppState, Resp3Value, arg_bytes, arg_f64, arg_i64, arg_str, arg_u64, err_wrong_args};
+use crate::auth::OperationContext;
 use crate::core::geospatial::{DistanceUnit, GeoQueryOptions, GeoSearchParams};
+use crate::persistence::durable;
 use crate::scripting::ScriptExecContext;
 
 // ── Queue commands (3.1) ──────────────────────────────────────────────────────
@@ -16,7 +18,7 @@ pub(super) async fn cmd_qcreate(state: &AppState, args: &[Resp3Value]) -> Resp3V
         Some(qm) => qm,
         None => return Resp3Value::Error("ERR queue subsystem not enabled".into()),
     };
-    match qm.create_queue(&name, None).await {
+    match durable::queue_create(state.persistence.as_deref(), qm, &name, None).await {
         Ok(()) => Resp3Value::SimpleString("OK".into()),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -34,7 +36,7 @@ pub(super) async fn cmd_qdelete(state: &AppState, args: &[Resp3Value]) -> Resp3V
         Some(qm) => qm,
         None => return Resp3Value::Error("ERR queue subsystem not enabled".into()),
     };
-    match qm.delete_queue(&name).await {
+    match durable::queue_delete(state.persistence.as_deref(), qm, &name).await {
         Ok(true) => Resp3Value::Integer(1),
         Ok(false) => Resp3Value::Integer(0),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
@@ -82,8 +84,17 @@ pub(super) async fn cmd_qpublish(state: &AppState, args: &[Resp3Value]) -> Resp3
         Some(qm) => qm,
         None => return Resp3Value::Error("ERR queue subsystem not enabled".into()),
     };
-    match qm.publish(&name, payload, priority, None).await {
-        Ok(id) => Resp3Value::BulkString(id.into_bytes()),
+    match durable::queue_publish(
+        state.persistence.as_deref(),
+        qm,
+        &name,
+        payload,
+        priority,
+        None,
+    )
+    .await
+    {
+        Ok(message) => Resp3Value::BulkString(message.id.into_bytes()),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
 }
@@ -129,7 +140,7 @@ pub(super) async fn cmd_qack(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         Some(qm) => qm,
         None => return Resp3Value::Error("ERR queue subsystem not enabled".into()),
     };
-    match qm.ack(&name, &msg_id).await {
+    match durable::queue_ack(state.persistence.as_deref(), qm, &name, &msg_id).await {
         Ok(()) => Resp3Value::SimpleString("OK".into()),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -160,7 +171,7 @@ pub(super) async fn cmd_qnack(state: &AppState, args: &[Resp3Value]) -> Resp3Val
         Some(qm) => qm,
         None => return Resp3Value::Error("ERR queue subsystem not enabled".into()),
     };
-    match qm.nack(&name, &msg_id, requeue).await {
+    match durable::queue_nack(state.persistence.as_deref(), qm, &name, &msg_id, requeue).await {
         Ok(()) => Resp3Value::SimpleString("OK".into()),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -211,7 +222,7 @@ pub(super) async fn cmd_qpurge(state: &AppState, args: &[Resp3Value]) -> Resp3Va
         Some(qm) => qm,
         None => return Resp3Value::Error("ERR queue subsystem not enabled".into()),
     };
-    match qm.purge(&name).await {
+    match durable::queue_purge(state.persistence.as_deref(), qm, &name).await {
         Ok(count) => Resp3Value::Integer(count as i64),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
@@ -653,7 +664,10 @@ pub(super) async fn cmd_txqueue(state: &AppState, args: &[Resp3Value]) -> Resp3V
                 },
             };
             let delta = if inner.starts_with("DECR") {
-                -magnitude
+                match magnitude.checked_neg() {
+                    Some(d) => d,
+                    None => return Resp3Value::Error("ERR Integer overflow on INCR/DECR".into()),
+                }
             } else {
                 magnitude
             };
@@ -768,22 +782,27 @@ pub(super) async fn cmd_exec(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         Some(id) => id,
         None => return Resp3Value::Error("ERR client_id must be a string".into()),
     };
-    match state.transaction_manager.exec(&client_id).await {
-        Ok(Some((results, writes))) => {
-            // Persist + replicate the whole transaction atomically (audit M-010).
-            if let Some(ref persistence) = state.persistence
-                && let Err(e) = persistence.log_transaction(&writes).await
-            {
-                tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
-            }
-            Resp3Value::Array(
-                results
-                    .into_iter()
-                    .map(|v| Resp3Value::BulkString(v.to_string().into_bytes()))
-                    .collect(),
-            )
-        }
+    // Persist + replicate the whole transaction atomically (audit M-010),
+    // ordered against plain writers and snapshots (phase23). A commit that
+    // could not be logged is not durable: report it.
+    match crate::persistence::durable::exec(
+        state.persistence.as_deref(),
+        &state.transaction_manager,
+        &client_id,
+    )
+    .await
+    {
+        Ok(Some((results, _writes))) => Resp3Value::Array(
+            results
+                .into_iter()
+                .map(|v| Resp3Value::BulkString(v.to_string().into_bytes()))
+                .collect(),
+        ),
         Ok(None) => Resp3Value::Null,
+        Err(e @ crate::persistence::durable::ExecError::NotDurable(_)) => {
+            tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
+            Resp3Value::Error(format!("ERR {e}"))
+        }
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }
 }
@@ -840,7 +859,11 @@ pub(super) async fn cmd_unwatch(state: &AppState, args: &[Resp3Value]) -> Resp3V
 // ── Script commands (3.5) ─────────────────────────────────────────────────────
 
 /// `EVAL <script> <numkeys> [key ...] [arg ...]`
-pub(super) async fn cmd_eval(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+pub(super) async fn cmd_eval(
+    state: &AppState,
+    caller: &OperationContext,
+    args: &[Resp3Value],
+) -> Resp3Value {
     if args.len() < 3 {
         return err_wrong_args("EVAL");
     }
@@ -863,6 +886,8 @@ pub(super) async fn cmd_eval(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
         list_store: state.list_store.clone(),
         set_store: state.set_store.clone(),
         sorted_set_store: state.sorted_set_store.clone(),
+        persistence: state.persistence.clone(),
+        caller: std::sync::Arc::new(caller.clone()),
     };
     match state
         .script_manager
@@ -875,7 +900,11 @@ pub(super) async fn cmd_eval(state: &AppState, args: &[Resp3Value]) -> Resp3Valu
 }
 
 /// `EVALSHA <sha> <numkeys> [key ...] [arg ...]`
-pub(super) async fn cmd_evalsha(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+pub(super) async fn cmd_evalsha(
+    state: &AppState,
+    caller: &OperationContext,
+    args: &[Resp3Value],
+) -> Resp3Value {
     if args.len() < 3 {
         return err_wrong_args("EVALSHA");
     }
@@ -898,6 +927,8 @@ pub(super) async fn cmd_evalsha(state: &AppState, args: &[Resp3Value]) -> Resp3V
         list_store: state.list_store.clone(),
         set_store: state.set_store.clone(),
         sorted_set_store: state.sorted_set_store.clone(),
+        persistence: state.persistence.clone(),
+        caller: std::sync::Arc::new(caller.clone()),
     };
     match state
         .script_manager
@@ -1047,7 +1078,17 @@ pub(super) async fn cmd_geoadd(state: &AppState, args: &[Resp3Value]) -> Resp3Va
         locations.push((lat, lon, member));
         pos += 3;
     }
-    match state.geospatial_store.geoadd(&key, locations, nx, xx, ch) {
+    match durable::geoadd(
+        state.persistence.as_deref(),
+        &state.geospatial_store,
+        &key,
+        locations,
+        nx,
+        xx,
+        ch,
+    )
+    .await
+    {
         Ok(added) => Resp3Value::Integer(added as i64),
         Err(e) => Resp3Value::Error(format!("ERR {e}")),
     }

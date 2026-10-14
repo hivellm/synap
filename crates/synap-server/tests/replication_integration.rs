@@ -58,7 +58,7 @@ async fn create_replica(
     let mut config = ReplicationConfig::default();
     config.enabled = true;
     config.role = NodeRole::Replica;
-    config.master_address = Some(master_addr);
+    config.master_address = Some(master_addr.into());
     config.auto_reconnect = auto_reconnect;
     config.reconnect_delay_ms = 100; // Fast reconnect for testing
 

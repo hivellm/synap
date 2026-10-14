@@ -1,5 +1,17 @@
 # KV `SET` Deep Dive — Every Issue in the Hot Path
 
+> **Historical analysis.** Written on 2026-04-07 against the flat
+> `synap-server/` layout (workspace version 0.9.1, between releases v0.9.1 and
+> v0.11.0); first committed in `2c3d487`. Its links point at the former
+> monolithic `synap-server/src/server/handlers.rs`, since split into
+> `crates/synap-server/src/server/handlers/`. The code has moved since: paths,
+> line numbers and findings describe that revision, not the current tree.
+> Current behavior: [1.4.0 guarantees](../../operations/guarantees.md). Current
+> design: [persistence](../../specs/PERSISTENCE.md),
+> [transports](../../protocol/transports.md),
+> [KV store internals](../../internals/kv-store.md) and the
+> [documentation index](../../INDEX.md).
+
 This document catalogs **every problem** found in the KV `SET` code path, from the HTTP handler down to the shard insert. The user reports this as the #1 pain point in real Synap deployments. Each issue has: location (file:line), description, impact, and proposed fix.
 
 The full SET path under analysis:

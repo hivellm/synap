@@ -1,5 +1,4 @@
-use super::super::{Request, SynapValue};
-use super::dispatch;
+use super::super::{Request, Response, SynapValue};
 use crate::core::types::KVConfig;
 use crate::core::{GeospatialStore, HashStore, HyperLogLogStore, KVStore, SortedSetStore};
 use crate::monitoring::{ClientListManager, MonitoringManager};
@@ -7,6 +6,13 @@ use crate::scripting::ScriptManager;
 use crate::server::handlers::AppState;
 use std::sync::Arc;
 use std::time::Duration;
+
+/// These tests exercise command behaviour, not authorization, so they dispatch
+/// as an unrestricted caller (authentication disabled).
+async fn dispatch(state: &AppState, req: Request) -> Response {
+    super::dispatch(state, &crate::auth::OperationContext::unrestricted(), req).await
+}
+
 fn make_state() -> AppState {
     let kv_store = Arc::new(KVStore::new(KVConfig::default()));
     let hash_store = Arc::new(HashStore::new());
@@ -58,6 +64,7 @@ fn make_state() -> AppState {
         user_manager: None,
         require_auth: false,
         replication: None,
+        server_config: None,
     }
 }
 
@@ -345,7 +352,9 @@ async fn test_bitcount_after_setbit() {
 }
 
 #[tokio::test]
-async fn test_flushall_returns_ok() {
+async fn test_flushall_refused_by_config_is_an_error() {
+    // `allow_flush_commands` defaults to false: the flush is refused, and the
+    // reply says so instead of an "OK" for a flush that never happened.
     let state = make_state();
     dispatch(
         &state,
@@ -353,7 +362,7 @@ async fn test_flushall_returns_ok() {
     )
     .await;
     let resp = dispatch(&state, req(2, "FLUSHALL", vec![])).await;
-    assert_eq!(resp.result, Ok(SynapValue::Str("OK".into())));
+    assert!(matches!(resp.result, Err(ref e) if e.contains("disabled")));
 }
 
 #[tokio::test]
@@ -1862,4 +1871,36 @@ async fn test_stream_sstats_exposes_room_generation() {
         "generation must move after a wipe: {:?}",
         after.result
     );
+}
+
+/// EXEC over SynapRPC returns an error saying the commit is not durable when
+/// the WAL cannot log the transaction.
+#[tokio::test]
+async fn test_exec_reports_a_transaction_the_wal_could_not_log() {
+    let mut state = make_state();
+    let (layer, faults) = crate::persistence::layer::test_support::faulty_layer("rpc_exec").await;
+    state.persistence = Some(layer);
+    let cid = "wal_fail_rpc";
+    dispatch(&state, req(1, "MULTI", vec![str_arg(cid)])).await;
+    dispatch(
+        &state,
+        req(
+            2,
+            "TXQUEUE",
+            vec![
+                str_arg(cid),
+                str_arg("SET"),
+                str_arg("wal:rk"),
+                bytes_arg(b"v"),
+            ],
+        ),
+    )
+    .await;
+
+    faults.fail_next_flush();
+    let resp = dispatch(&state, req(3, "EXEC", vec![str_arg(cid)])).await;
+    match resp.result {
+        Err(message) => assert!(message.contains("not durable"), "{message}"),
+        Ok(value) => panic!("EXEC must fail when the WAL rejects it, got {value:?}"),
+    }
 }

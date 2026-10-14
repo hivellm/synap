@@ -1,5 +1,16 @@
 # Synap vs Redis — Competitive Analysis
 
+> **Historical analysis.** Written on 2026-04-07 against the flat
+> `synap-server/` layout (workspace version 0.9.1, between releases v0.9.1 and
+> v0.11.0); first committed in `2c3d487`. The v1.0 status note below was added
+> in `75f4cff` (2026-07-09). The code has moved since: paths, line numbers and
+> findings describe that revision, not the current tree. Current behavior:
+> [1.4.0 guarantees](../../operations/guarantees.md). Current design:
+> [persistence](../../specs/PERSISTENCE.md),
+> [transports](../../protocol/transports.md),
+> [KV store internals](../../internals/kv-store.md) and the
+> [documentation index](../../INDEX.md).
+
 **Date**: 2026-04-07
 **Scope**: Synap in-memory KV/cache subsystem compared to Redis on performance, features, and reliability.
 **Goal**: Identify actionable gaps to make Synap competitive with Redis.

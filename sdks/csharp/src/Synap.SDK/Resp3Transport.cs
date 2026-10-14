@@ -105,11 +105,17 @@ internal sealed class Resp3Transport : ITransport
         }
     }
 
+    private static readonly UTF8Encoding StrictUtf8 = new(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true);
+
     private static string ToResp3String(object? v) => v switch
     {
         null => string.Empty,
         bool b => b ? "1" : "0",
         string s => s,
+        // Frames are written as UTF-8 text, so bytes travel as their text and
+        // bytes that are not UTF-8 throw here, where ToString() would have
+        // sent "System.Byte[]".
+        byte[] bytes => StrictUtf8.GetString(bytes),
         double d => d.ToString(System.Globalization.CultureInfo.InvariantCulture),
         float f => f.ToString(System.Globalization.CultureInfo.InvariantCulture),
         long l => l.ToString(System.Globalization.CultureInfo.InvariantCulture),

@@ -6,12 +6,31 @@
 use std::borrow::Cow;
 
 use super::naming::ResourceNaming;
+use crate::core::error::SynapError;
 use uuid::Uuid;
 
 /// Multi-tenant resource scoping helper
 pub struct MultiTenant;
 
 impl MultiTenant {
+    /// The tenant a request's resources must be scoped to.
+    ///
+    /// Outside Hub mode there is none and names are used as given. In Hub mode
+    /// a request without a tenant is refused: scoping fails closed instead of
+    /// falling back to the raw, shared name.
+    pub fn required_tenant(
+        hub_mode: bool,
+        tenant: Option<&Uuid>,
+    ) -> Result<Option<&Uuid>, SynapError> {
+        match (hub_mode, tenant) {
+            (false, _) => Ok(None),
+            (true, Some(tenant)) => Ok(Some(tenant)),
+            (true, None) => Err(SynapError::Forbidden(
+                "Hub mode: the request carries no Hub tenant".to_string(),
+            )),
+        }
+    }
+
     /// Scope a queue name by user ID (in Hub mode)
     ///
     /// Format: `user_{user_id}:{queue_name}`
@@ -135,6 +154,24 @@ impl MultiTenant {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hub_mode_without_a_tenant_is_refused() {
+        let user_id = Uuid::new_v4();
+        assert_eq!(MultiTenant::required_tenant(false, None).unwrap(), None);
+        assert_eq!(
+            MultiTenant::required_tenant(false, Some(&user_id)).unwrap(),
+            None
+        );
+        assert_eq!(
+            MultiTenant::required_tenant(true, Some(&user_id)).unwrap(),
+            Some(&user_id)
+        );
+        assert!(matches!(
+            MultiTenant::required_tenant(true, None),
+            Err(SynapError::Forbidden(_))
+        ));
+    }
 
     #[test]
     fn test_scope_queue_name_with_user() {

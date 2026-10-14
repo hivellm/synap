@@ -19,7 +19,7 @@ pub mod replication_log;
 pub mod sync;
 pub mod types;
 
-pub use config::ReplicationConfig;
+pub use config::{MASTER_ADDRESS_ENV, MasterAddress, ReplicationConfig};
 pub use failover::FailoverManager;
 pub use master::MasterNode;
 pub use replica::ReplicaNode;

@@ -1,4 +1,5 @@
 use super::{AppState, SynapValue, arg_bytes, arg_int, arg_shared, arg_str, shared_to_value};
+use crate::persistence::durable;
 
 pub(super) async fn run(
     state: &AppState,
@@ -18,12 +19,16 @@ pub(super) async fn run(
             // Refcount bump of the deserialized Bytes arg — no value copy.
             let value = arg_shared(args, 1)?;
             let ttl: Option<u64> = args.get(2).and_then(|v| v.as_int()).map(|n| n as u64);
-            state
-                .kv_store
-                .set(key, value, ttl)
-                .await
-                .map(|()| SynapValue::Str("OK".into()))
-                .map_err(|e| e.to_string())
+            durable::kv_set(
+                state.persistence.as_deref(),
+                &state.kv_store,
+                key,
+                value,
+                ttl,
+            )
+            .await
+            .map(|()| SynapValue::Str("OK".into()))
+            .map_err(|e| e.to_string())
         }
         "GET" => {
             let key = arg_str(args, 0)?;
@@ -38,7 +43,8 @@ pub(super) async fn run(
             let mut deleted = 0i64;
             for v in args {
                 if let Some(k) = v.as_str() {
-                    match state.kv_store.delete(k).await {
+                    match durable::kv_delete(state.persistence.as_deref(), &state.kv_store, k).await
+                    {
                         Ok(true) => deleted += 1,
                         Ok(false) => {}
                         Err(e) => return Err(e.to_string()),
@@ -59,9 +65,7 @@ pub(super) async fn run(
         "EXPIRE" => {
             let key = arg_str(args, 0)?;
             let secs = arg_int(args, 1)? as u64;
-            state
-                .kv_store
-                .expire(&key, secs)
+            durable::kv_expire(state.persistence.as_deref(), &state.kv_store, &key, secs)
                 .await
                 .map(SynapValue::Bool)
                 .map_err(|e| e.to_string())
@@ -77,18 +81,14 @@ pub(super) async fn run(
         }
         "PERSIST" => {
             let key = arg_str(args, 0)?;
-            state
-                .kv_store
-                .persist(&key)
+            durable::kv_persist(state.persistence.as_deref(), &state.kv_store, &key)
                 .await
                 .map(SynapValue::Bool)
                 .map_err(|e| e.to_string())
         }
         "INCR" => {
             let key = arg_str(args, 0)?;
-            state
-                .kv_store
-                .incr(&key, 1)
+            durable::kv_incr(state.persistence.as_deref(), &state.kv_store, &key, 1)
                 .await
                 .map(SynapValue::Int)
                 .map_err(|e| e.to_string())
@@ -96,18 +96,14 @@ pub(super) async fn run(
         "INCRBY" => {
             let key = arg_str(args, 0)?;
             let by = arg_int(args, 1)?;
-            state
-                .kv_store
-                .incr(&key, by)
+            durable::kv_incr(state.persistence.as_deref(), &state.kv_store, &key, by)
                 .await
                 .map(SynapValue::Int)
                 .map_err(|e| e.to_string())
         }
         "DECR" => {
             let key = arg_str(args, 0)?;
-            state
-                .kv_store
-                .decr(&key, 1)
+            durable::kv_decr(state.persistence.as_deref(), &state.kv_store, &key, 1)
                 .await
                 .map(SynapValue::Int)
                 .map_err(|e| e.to_string())
@@ -115,9 +111,7 @@ pub(super) async fn run(
         "DECRBY" => {
             let key = arg_str(args, 0)?;
             let by = arg_int(args, 1)?;
-            state
-                .kv_store
-                .decr(&key, by)
+            durable::kv_decr(state.persistence.as_deref(), &state.kv_store, &key, by)
                 .await
                 .map(SynapValue::Int)
                 .map_err(|e| e.to_string())
@@ -132,9 +126,7 @@ pub(super) async fn run(
                 pairs.push((arg_str(args, i)?, arg_bytes(args, i + 1)?));
                 i += 2;
             }
-            state
-                .kv_store
-                .mset(pairs)
+            durable::kv_mset(state.persistence.as_deref(), &state.kv_store, pairs)
                 .await
                 .map(|()| SynapValue::Str("OK".into()))
                 .map_err(|e| e.to_string())
@@ -185,11 +177,16 @@ pub(super) async fn run(
             let key = arg_str(args, 0)?;
             let offset = arg_int(args, 1)? as usize;
             let bit = arg_int(args, 2)? as u8 & 1;
-            state
-                .bitmap_store
-                .setbit(&key, offset, bit)
-                .map(|prev| SynapValue::Int(prev as i64))
-                .map_err(|e| e.to_string())
+            durable::setbit(
+                state.persistence.as_deref(),
+                &state.bitmap_store,
+                &key,
+                offset,
+                bit,
+            )
+            .await
+            .map(|prev| SynapValue::Int(prev as i64))
+            .map_err(|e| e.to_string())
         }
         "GETBIT" => {
             let key = arg_str(args, 0)?;
@@ -219,9 +216,7 @@ pub(super) async fn run(
         "APPEND" => {
             let key = arg_str(args, 0)?;
             let value = arg_bytes(args, 1)?;
-            state
-                .kv_store
-                .append(&key, value)
+            durable::kv_append(state.persistence.as_deref(), &state.kv_store, &key, value)
                 .await
                 .map(|n| SynapValue::Int(n as i64))
                 .map_err(|e| e.to_string())
@@ -241,12 +236,16 @@ pub(super) async fn run(
             let key = arg_str(args, 0)?;
             let offset = arg_int(args, 1)? as usize;
             let value = arg_bytes(args, 2)?;
-            state
-                .kv_store
-                .setrange(&key, offset, value)
-                .await
-                .map(|n| SynapValue::Int(n as i64))
-                .map_err(|e| e.to_string())
+            durable::kv_setrange(
+                state.persistence.as_deref(),
+                &state.kv_store,
+                &key,
+                offset,
+                value,
+            )
+            .await
+            .map(|n| SynapValue::Int(n as i64))
+            .map_err(|e| e.to_string())
         }
         "STRLEN" => {
             let key = arg_str(args, 0)?;
@@ -260,9 +259,7 @@ pub(super) async fn run(
         "GETSET" => {
             let key = arg_str(args, 0)?;
             let value = arg_bytes(args, 1)?;
-            state
-                .kv_store
-                .getset(&key, value)
+            durable::kv_getset(state.persistence.as_deref(), &state.kv_store, &key, value)
                 .await
                 .map(|opt| opt.map(SynapValue::from).unwrap_or(SynapValue::Null))
                 .map_err(|e| e.to_string())
@@ -277,9 +274,7 @@ pub(super) async fn run(
                 pairs.push((arg_str(args, i)?, arg_bytes(args, i + 1)?));
                 i += 2;
             }
-            state
-                .kv_store
-                .msetnx(pairs)
+            durable::kv_msetnx(state.persistence.as_deref(), &state.kv_store, pairs)
                 .await
                 .map(SynapValue::Bool)
                 .map_err(|e| e.to_string())
@@ -326,8 +321,13 @@ pub(super) async fn run(
 
         // ── Misc ──────────────────────────────────────────────────────────────
         "FLUSHALL" | "FLUSHDB" => {
-            let _ = state.kv_store.flushall().await;
-            Ok(SynapValue::Str("OK".into()))
+            // A refused flush (`allow_flush_commands: false`) or one that could
+            // not be logged is an error, not an "OK" for a flush that did not
+            // happen durably.
+            durable::kv_flushall(state.persistence.as_deref(), &state.kv_store)
+                .await
+                .map(|_| SynapValue::Str("OK".into()))
+                .map_err(|e| format!("ERR {e}"))
         }
 
         _ => Err(format!("ERR unknown command '{command}'")),

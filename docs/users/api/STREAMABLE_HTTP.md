@@ -176,6 +176,23 @@ curl -X POST http://localhost:15500/api/v1 \
 - `pubsub.publish` - Publish to topic
 - `pubsub.subscribe` - Subscribe to topics
 
+### Key Inspection Commands
+
+- `key.type` - Type of a key: `{"key": "k", "type": "hash"}`; `type` is one of
+  `string`, `hash`, `list`, `set`, `zset`, or `none` when the key does not exist
+- `memory.usage` - Memory used by a key: `{"key": "k", "bytes": 120, "human": "120B"}`;
+  an error when the key does not exist
+
+### Administrative Commands
+
+- `admin.config` - The effective server configuration (config file plus
+  environment and command-line overrides), admin-only (`admin:*`). Answers
+  `{"config": {...}, "yaml": "..."}`. Every field whose name marks a secret
+  (`password`, `secret`, `token`, `credential`, `api_key`, `access_key`,
+  `private_key`, `key`, or a name ending in `_key`/`_keys`) is replaced by
+  `"[redacted]"`; an unset (`null` or empty) secret is left as is. Read-only:
+  there is no command that changes the configuration. Refused in Hub mode.
+
 ## WebSocket Upgrade
 
 ### Upgrade to WebSocket

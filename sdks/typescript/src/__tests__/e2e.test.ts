@@ -293,6 +293,15 @@ async function runKvSuite(synap: Synap, prefix: string): Promise<void> {
   const v2 = await synap.kv.incr(counter);
   const v3 = await synap.kv.incr(counter);
   expect([v1, v2, v3]).toEqual([1, 2, 3]);
+
+  // An explicit amount has to reach the server on every transport: the native
+  // command maps send INCRBY/DECRBY for it, never a one-argument INCR/DECR,
+  // which would count by 1 over SynapRPC and RESP3 while HTTP counted by 10.
+  expect(await synap.kv.incr(counter, 10)).toBe(13);
+  expect(await synap.kv.decr(counter, 4)).toBe(9);
+  expect(await synap.kv.incr(counter, -3)).toBe(6);
+  expect(await synap.kv.decr(counter)).toBe(5);
+  expect(String(await synap.kv.get(counter))).toBe('5');
   await synap.kv.del(counter);
 }
 

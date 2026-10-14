@@ -1,0 +1,20 @@
+{
+  "id": "replay-settles-by-id-in-any-state-when-transitions-are-not-logged",
+  "type": "pattern",
+  "title": "Replay settles by ID in any state when some transitions are not logged",
+  "category": "persistence",
+  "description": "When deliveries are not logged, a replayed or replicated message is still ready when its ACK arrives. Restore published messages exactly (original ID and all fields, via a persisted record type if the API serde form drops one), apply replayed ACK/NACK by ID on ready or pending messages, record bulk removals (purge) by the IDs they removed, tolerate only not-found on replay, and record unlogged background transitions that change metadata (ACK-deadline requeues) as the equivalent operation (NACK) under the ordering stripe.",
+  "example": "see replay-settles-by-id-in-any-state-when-transitions-are-not-logged.md",
+  "whenToUse": "Logs or replication streams that skip some transitions while later records address entities by identity.",
+  "whenNotToUse": "Logs that record every transition, or key-addressed state where re-applying the value suffices.",
+  "createdAt": "2026-10-13T22:00:00.000Z",
+  "tags": [
+    "persistence",
+    "wal",
+    "replication",
+    "queue",
+    "identity",
+    "phase24"
+  ],
+  "source": "manual"
+}

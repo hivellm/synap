@@ -32,6 +32,8 @@ docs/
 │
 ├── benchmarks/                   # Performance data and comparisons
 │   ├── README.md
+│   ├── BASELINE_1_4_0.md
+│   ├── reports/                  # Raw perf-baseline reports (JSON)
 │   ├── BENCHMARK_RESULTS_EXTENDED.md
 │   ├── COMPRESSION_BENCHMARKS.md
 │   ├── PERSISTENCE_BENCHMARKS.md

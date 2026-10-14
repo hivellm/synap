@@ -1,24 +1,44 @@
-//! Rate Limiting Middleware for Synap
+//! Per-client HTTP rate limiting.
 //!
-//! Token bucket rate limiting with:
-//! - Per-user rate limiting (Hub mode) - uses Plan-based limits
-//! - Per-IP rate limiting (standalone mode or fallback)
-//! - Configurable requests per second
-//! - Burst capacity
+//! A token bucket per client: `burst_size` tokens, refilled at
+//! `requests_per_second`, one token per request. When `rate_limit.enabled`, the
+//! router installs two layers over every route:
+//!
+//! - [`limit_by_peer`], outside authentication: every request spends a token
+//!   from the bucket of its TCP peer address. `X-Forwarded-For` and similar
+//!   headers are ignored, since the client writes them. Running before
+//!   authentication is what bounds credential checks (bcrypt for passwords),
+//!   failed or not.
+//! - [`limit_by_principal`], inside authentication: a request that
+//!   authenticated also spends a token from the bucket of its principal (the
+//!   user, else the API key; `hub:<uuid>` for a Hub tenant), so one principal
+//!   is bounded across every address it connects from.
+//!
+//! A limited request answers 429 with `Retry-After` (whole seconds until the
+//! bucket holds a token again). `/health` and `/metrics` are exempt: probes and
+//! scrapers must not be throttled into reporting an outage.
 
-use axum::{extract::ConnectInfo, http::StatusCode, middleware::Next, response::Response};
+use axum::{
+    Json,
+    extract::{ConnectInfo, Request},
+    http::{HeaderValue, StatusCode, header::RETRY_AFTER},
+    middleware::Next,
+    response::{IntoResponse, Response},
+};
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
+use crate::auth::AuthContext;
 use crate::config::RateLimitConfig;
 
-use crate::hub::{
-    HubUserContext,
-    restrictions::{HubSaaSRestrictions, Plan},
-};
+use crate::hub::restrictions::{HubSaaSRestrictions, Plan};
+
+/// Buckets kept before the full ones are pruned (see `RateLimiter::prune`).
+const PRUNE_ABOVE: usize = 10_000;
 
 /// Rate limit check result with metadata for response headers
 #[derive(Debug, Clone)]
@@ -69,12 +89,34 @@ impl TokenBucket {
             false
         }
     }
+
+    /// Time until the bucket holds `tokens`, as of its last refill; zero when
+    /// it already does. A bucket that never refills never will.
+    fn time_until(&self, tokens: f64) -> Duration {
+        let missing = tokens - self.tokens;
+        if missing <= 0.0 {
+            return Duration::ZERO;
+        }
+        Duration::try_from_secs_f64(missing / self.refill_rate).unwrap_or(Duration::MAX)
+    }
+
+    /// Whether the bucket has refilled to capacity by `now`. A full bucket
+    /// holds nothing a fresh one would not, so dropping it loses no state.
+    fn is_full_at(&self, now: Instant) -> bool {
+        let elapsed = now
+            .saturating_duration_since(self.last_refill)
+            .as_secs_f64();
+        self.tokens + elapsed * self.refill_rate >= self.capacity
+    }
 }
 
 /// Rate limiter state
 pub struct RateLimiter {
-    /// Buckets keyed by: "user:{user_id}" or "ip:{ip_address}"
+    /// Buckets keyed by client: "ip:{address}", "principal:{user_id}",
+    /// "api-key:{key_id}", or "user:{user_id}" for Hub plan limits.
     buckets: Arc<RwLock<HashMap<String, TokenBucket>>>,
+    /// Bucket count at which the next new client triggers a prune.
+    prune_above: Arc<AtomicUsize>,
     config: RateLimitConfig,
 }
 
@@ -82,20 +124,53 @@ impl RateLimiter {
     pub fn new(config: RateLimitConfig) -> Self {
         Self {
             buckets: Arc::new(RwLock::new(HashMap::new())),
+            prune_above: Arc::new(AtomicUsize::new(PRUNE_ABOVE)),
             config,
         }
     }
 
     /// Check rate limit for IP address (standalone mode or fallback)
     pub fn check_rate_limit(&self, ip: &str) -> bool {
-        let mut buckets = self.buckets.write();
+        self.check_key(&format!("ip:{}", ip)).allowed
+    }
 
-        let key = format!("ip:{}", ip);
-        let bucket = buckets.entry(key).or_insert_with(|| {
+    /// Spend one token from the bucket of client `key`, created full with the
+    /// configured `burst_size` and `requests_per_second` on first use.
+    ///
+    /// `reset_in` is how long until the bucket holds a token again: zero while
+    /// it still has one, the wait a limited client must observe otherwise.
+    pub fn check_key(&self, key: &str) -> RateLimitResult {
+        let now = Instant::now();
+        let mut buckets = self.buckets.write();
+        if !buckets.contains_key(key) {
+            self.prune(&mut buckets, now);
+        }
+        let bucket = buckets.entry(key.to_owned()).or_insert_with(|| {
             TokenBucket::new(self.config.burst_size, self.config.requests_per_second)
         });
+        let allowed = bucket.try_consume(1.0);
+        RateLimitResult {
+            allowed,
+            limit: self.config.requests_per_second,
+            remaining: bucket.tokens.floor() as u64,
+            reset_in: bucket.time_until(1.0),
+        }
+    }
 
-        bucket.try_consume(1.0)
+    /// Drop the buckets that have refilled to capacity once there are many.
+    ///
+    /// One bucket per client address would otherwise grow without bound under
+    /// address churn. Pruning only full buckets is lossless: a client that
+    /// returns gets a fresh, full bucket, exactly what it had. Buckets still
+    /// in use survive, and the next prune waits until the map has doubled past
+    /// them, so the scan costs amortized O(1) per new client.
+    fn prune(&self, buckets: &mut HashMap<String, TokenBucket>, now: Instant) {
+        if buckets.len() < self.prune_above.load(Ordering::Relaxed) {
+            return;
+        }
+        buckets.retain(|_, bucket| !bucket.is_full_at(now));
+        self.prune_above
+            .store((buckets.len() * 2).max(PRUNE_ABOVE), Ordering::Relaxed);
     }
 
     /// Check rate limit for authenticated user (Hub mode)
@@ -138,125 +213,85 @@ impl Clone for RateLimiter {
     fn clone(&self) -> Self {
         Self {
             buckets: Arc::clone(&self.buckets),
+            prune_above: Arc::clone(&self.prune_above),
             config: self.config.clone(),
         }
     }
 }
 
-/// Rate limit middleware
+/// Rate limit by peer address. Installed outside authentication, so it bounds
+/// every request a client host sends, credential checks included.
 ///
-/// Uses per-user rate limiting in Hub mode (with Plan-based limits)
-/// Falls back to IP-based rate limiting in standalone mode
-pub async fn rate_limit_middleware(
-    limiter: Arc<RateLimiter>,
-    mut request: axum::extract::Request,
-    next: Next,
-) -> Result<Response, StatusCode> {
-    {
-        // Try to get Hub user context
-        if let Some(hub_ctx) = request.extensions().get::<HubUserContext>().cloned() {
-            // Use per-user rate limiting with Plan-based limits
-            let user_id = hub_ctx.user_id.to_string();
-            let result = limiter.check_user_rate_limit(&user_id, hub_ctx.plan);
-
-            if !result.allowed {
-                tracing::warn!(
-                    "Rate limit exceeded for user {}: {} req/s limit ({:?} plan)",
-                    hub_ctx.user_id,
-                    result.limit,
-                    hub_ctx.plan
-                );
-                return Err(StatusCode::TOO_MANY_REQUESTS);
-            }
-
-            // Store rate limit info in request extensions for response headers
-            request.extensions_mut().insert(result);
-
-            let mut response = next.run(request).await;
-
-            // Add rate limit headers to response (Task 5.4)
-            add_rate_limit_headers(&mut response, &limiter, Some(&user_id), Some(hub_ctx.plan));
-
-            return Ok(response);
-        }
+/// The peer is the TCP peer from `ConnectInfo`, never a forwarding header. A
+/// router served without connection info has no peer to tell clients apart
+/// by, so all its clients share one bucket rather than going unlimited.
+pub async fn limit_by_peer(limiter: Arc<RateLimiter>, request: Request, next: Next) -> Response {
+    if super::router::is_public_path(request.uri().path()) {
+        return next.run(request).await;
     }
-
-    // Fallback to IP-based rate limiting (standalone mode or no Hub context)
-    let ip = request
-        .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|ConnectInfo(addr)| addr.ip().to_string())
-        .unwrap_or_else(|| "unknown".to_string());
-
-    if !limiter.check_rate_limit(&ip) {
-        tracing::warn!("Rate limit exceeded for IP: {}", ip);
-        return Err(StatusCode::TOO_MANY_REQUESTS);
-    }
-
-    let mut response = next.run(request).await;
-
-    // Add basic rate limit headers for IP-based limiting
-    add_rate_limit_headers(&mut response, &limiter, None, None);
-
-    Ok(response)
+    let key = match request.extensions().get::<ConnectInfo<SocketAddr>>() {
+        Some(ConnectInfo(addr)) => format!("ip:{}", addr.ip()),
+        None => "ip:unknown".to_string(),
+    };
+    admit(&limiter, &key, request, next).await
 }
 
-/// Add rate limit headers to response (Task 5.4)
-///
-/// Headers follow standard conventions:
-/// - X-RateLimit-Limit: Requests per second allowed
-/// - X-RateLimit-Remaining: Remaining requests in current window
-/// - X-RateLimit-Reset: Seconds until rate limit resets
-fn add_rate_limit_headers(
-    response: &mut Response,
-    limiter: &RateLimiter,
-    user_id: Option<&str>,
-    plan: Option<Plan>,
-) {
-    if let (Some(uid), Some(p)) = (user_id, plan) {
-        // Get plan-specific limits
-        let requests_per_second = HubSaaSRestrictions::max_requests_per_second(p) as u64;
-
-        // Get current bucket state
-        let buckets = limiter.buckets.read();
-        let key = format!("user:{}", uid);
-
-        if let Some(bucket) = buckets.get(&key) {
-            let remaining = bucket.tokens.floor() as u64;
-
-            response.headers_mut().insert(
-                "X-RateLimit-Limit",
-                requests_per_second
-                    .to_string()
-                    .parse()
-                    .expect("a numeric string is a valid header value"),
-            );
-            response.headers_mut().insert(
-                "X-RateLimit-Remaining",
-                remaining
-                    .to_string()
-                    .parse()
-                    .expect("a numeric string is a valid header value"),
-            );
-            response.headers_mut().insert(
-                "X-RateLimit-Reset",
-                "1".parse().expect("\"1\" is a valid header value"), // Refills every 1 second
-            );
-
-            return;
-        }
+/// Rate limit by authenticated principal. Installed inside authentication,
+/// where the `AuthContext` of the request names it: the user when there is
+/// one, else the API key. Anonymous requests pass; the peer limit already
+/// bounds them.
+pub async fn limit_by_principal(
+    limiter: Arc<RateLimiter>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let principal = request.extensions().get::<AuthContext>().and_then(|ctx| {
+        ctx.user_id
+            .as_ref()
+            .map(|user| format!("principal:{user}"))
+            .or_else(|| ctx.api_key_id.as_ref().map(|key| format!("api-key:{key}")))
+    });
+    match principal {
+        Some(key) => admit(&limiter, &key, request, next).await,
+        None => next.run(request).await,
     }
+}
 
-    // Fallback: Add global config-based headers
-    response.headers_mut().insert(
-        "X-RateLimit-Limit",
-        limiter
-            .config
-            .requests_per_second
-            .to_string()
-            .parse()
-            .expect("a numeric string is a valid header value"),
-    );
+/// Run the request if client `key` has a token, else answer 429.
+async fn admit(limiter: &RateLimiter, key: &str, request: Request, next: Next) -> Response {
+    let result = limiter.check_key(key);
+    if result.allowed {
+        return next.run(request).await;
+    }
+    // Debug, not warn: a client hammering the limit would otherwise turn
+    // every rejected request into a log line.
+    tracing::debug!("Rate limit exceeded for {}", key);
+    too_many_requests(result.reset_in)
+}
+
+/// 429 with `Retry-After` set to the whole seconds until a token is back.
+fn too_many_requests(wait: Duration) -> Response {
+    let retry_after = retry_after_secs(wait);
+    let mut response = (
+        StatusCode::TOO_MANY_REQUESTS,
+        Json(serde_json::json!({
+            "error": format!("Rate limit exceeded; retry after {retry_after} s"),
+            "code": 429,
+        })),
+    )
+        .into_response();
+    response
+        .headers_mut()
+        .insert(RETRY_AFTER, HeaderValue::from(retry_after));
+    response
+}
+
+/// `Retry-After` carries whole seconds: round up, and never say 0, which would
+/// invite an immediate retry that is still refused.
+fn retry_after_secs(wait: Duration) -> u64 {
+    wait.as_secs()
+        .saturating_add(u64::from(wait.subsec_nanos() > 0))
+        .max(1)
 }
 
 #[cfg(test)]
@@ -348,6 +383,67 @@ mod tests {
         let user_id2 = "user-456";
         let result = limiter.check_user_rate_limit(user_id2, Plan::Free);
         assert!(result.allowed, "Different user should have own bucket");
+    }
+
+    fn limiter(requests_per_second: u64, burst_size: u64) -> RateLimiter {
+        RateLimiter::new(RateLimitConfig {
+            enabled: true,
+            requests_per_second,
+            burst_size,
+        })
+    }
+
+    #[test]
+    fn a_limited_key_learns_when_a_token_is_back() {
+        let limiter = limiter(10, 2);
+        assert_eq!(limiter.check_key("ip:a").reset_in, Duration::ZERO);
+        assert!(limiter.check_key("ip:a").allowed);
+        let limited = limiter.check_key("ip:a");
+        assert!(!limited.allowed);
+        // One token at 10/s is at most 100 ms away.
+        assert!(limited.reset_in > Duration::ZERO);
+        assert!(limited.reset_in <= Duration::from_millis(100));
+        assert!(limiter.check_key("ip:b").allowed, "keys are independent");
+    }
+
+    #[test]
+    fn retry_after_rounds_up_to_whole_seconds() {
+        assert_eq!(retry_after_secs(Duration::ZERO), 1);
+        assert_eq!(retry_after_secs(Duration::from_millis(100)), 1);
+        assert_eq!(retry_after_secs(Duration::from_secs(1)), 1);
+        assert_eq!(retry_after_secs(Duration::from_millis(1001)), 2);
+        assert_eq!(retry_after_secs(Duration::MAX), u64::MAX);
+    }
+
+    #[test]
+    fn a_bucket_that_never_refills_reports_an_unbounded_wait() {
+        let mut bucket = TokenBucket::new(1, 0);
+        assert!(bucket.try_consume(1.0));
+        assert!(!bucket.try_consume(1.0));
+        assert_eq!(bucket.time_until(1.0), Duration::MAX);
+    }
+
+    #[test]
+    fn pruning_drops_only_full_buckets() {
+        let limiter = limiter(1, 2);
+        for client in 0..PRUNE_ABOVE {
+            // A full bucket is indistinguishable from a fresh one.
+            limiter
+                .buckets
+                .write()
+                .insert(format!("ip:idle-{client}"), TokenBucket::new(2, 1));
+        }
+        // A new client triggers the prune; its own bucket is not full.
+        assert!(limiter.check_key("ip:active").allowed);
+        {
+            let buckets = limiter.buckets.read();
+            assert_eq!(buckets.len(), 1, "every full bucket was pruned");
+            assert!(buckets.contains_key("ip:active"));
+        }
+        // The next prune waits until the map grows back to the floor.
+        assert_eq!(limiter.prune_above.load(Ordering::Relaxed), PRUNE_ABOVE);
+        assert!(limiter.check_key("ip:active").allowed, "its state was kept");
+        assert!(!limiter.check_key("ip:active").allowed);
     }
 
     #[test]

@@ -166,21 +166,31 @@ tracing::info!("Deleted {} keys", deleted);
 ### INCR/DECR - Atomic Increment
 
 ```rust
-async fn kv_incr(&self, key: &str, amount: i64) -> Result<i64>
-async fn kv_decr(&self, key: &str, amount: i64) -> Result<i64>
+async fn incr(&self, key: K) -> Result<i64>   // client.kv()
+async fn decr(&self, key: K) -> Result<i64>
 ```
 
 **Example**:
 ```rust
 // Increment page views
-let views = client.kv_incr("article:123:views", 1).await?;
+let views = client.kv().incr("article:123:views").await?;
+
+// Increment by a given amount (raw command)
+let reply = client
+    .send_command("kv.incr", serde_json::json!({"key": "counter", "amount": 5}))
+    .await?;
 
 // Decrement inventory
-let remaining = client.kv_decr("inventory:item:42", 1).await?;
+let remaining = client.kv().decr("inventory:item:42").await?;
 if remaining <= 0 {
     tracing::info!("Out of stock!");
 }
 ```
+
+An amount behaves the same on every transport: HTTP applies it in the
+`kv.incr`/`kv.decr` envelope, SynapRPC and RESP3 send `INCRBY`/`DECRBY`.
+Zero and negative amounts apply as given, a non-integer amount is refused,
+and a change past the 64-bit range fails and leaves the counter unchanged.
 
 ### SCAN - Scan Keys
 

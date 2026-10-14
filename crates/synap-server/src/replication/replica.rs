@@ -1,11 +1,10 @@
-use super::config::ReplicationConfig;
+use super::config::{MasterAddress, ReplicationConfig};
 use super::types::{
     ReplicationCommand, ReplicationError, ReplicationOperation, ReplicationResult, ReplicationStats,
 };
 use crate::core::{
     HashStore, KVStore, ListStore, QueueManager, SetStore, SortedSetStore, StreamManager,
 };
-use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -33,6 +32,8 @@ pub struct ReplicaNode {
     set_store: Option<Arc<SetStore>>,
     sorted_set_store: Option<Arc<SortedSetStore>>,
     queue_manager: Option<Arc<QueueManager>>,
+    hyperloglog_store: Option<Arc<crate::core::HyperLogLogStore>>,
+    bitmap_store: Option<Arc<crate::core::BitmapStore>>,
 
     /// Current offset (last applied operation)
     current_offset: Arc<AtomicU64>,
@@ -74,6 +75,8 @@ impl ReplicaNode {
             set_store: stores.set_store,
             sorted_set_store: stores.sorted_set_store,
             queue_manager: stores.queue_manager,
+            hyperloglog_store: stores.hyperloglog_store,
+            bitmap_store: stores.bitmap_store,
             current_offset: Arc::new(AtomicU64::new(0)),
             master_offset: Arc::new(AtomicU64::new(0)),
             last_heartbeat: Arc::new(AtomicU64::new(0)),
@@ -98,6 +101,7 @@ impl ReplicaNode {
         let master_addr = self
             .config
             .master_address
+            .clone()
             .expect("replica is only started with a configured master_address");
         let reconnect_delay = Duration::from_millis(self.config.reconnect_delay_ms);
 
@@ -109,7 +113,7 @@ impl ReplicaNode {
         loop {
             info!("[REPLICA] Connecting to master at {}", master_addr);
 
-            match self.connect_and_sync(master_addr).await {
+            match self.connect_and_sync(&master_addr).await {
                 Ok(_) => {
                     info!("[REPLICA] Replication connection closed normally");
                 }
@@ -132,11 +136,14 @@ impl ReplicaNode {
     }
 
     /// Connect to master and start synchronization
-    async fn connect_and_sync(&self, master_addr: SocketAddr) -> ReplicationResult<()> {
+    async fn connect_and_sync(&self, master_addr: &MasterAddress) -> ReplicationResult<()> {
         info!("[REPLICA] TCP connecting to {}...", master_addr);
 
-        // Connect to master
-        let mut stream = TcpStream::connect(master_addr).await.map_err(|e| {
+        // Connect to master. Passing the unresolved host makes the connector
+        // look the name up on every attempt and try each address it returns,
+        // so a service whose IP changed is found again on reconnect.
+        let target = (master_addr.host(), master_addr.port());
+        let mut stream = TcpStream::connect(target).await.map_err(|e| {
             info!("[REPLICA] TCP connection failed: {}", e);
             ReplicationError::ConnectionFailed(e.to_string())
         })?;
@@ -181,30 +188,50 @@ impl ReplicaNode {
         info!("Received sync command");
 
         match cmd {
+            ReplicationCommand::FullSyncImage {
+                version,
+                offset,
+                checksum,
+                image,
+            } => {
+                info!(
+                    "Receiving full sync, version {}, offset: {}, {} bytes",
+                    version,
+                    offset,
+                    image.len()
+                );
+                // Check and decode the whole image before touching a store:
+                // a bad or unsupported image leaves the replica as it was.
+                let data =
+                    super::sync::decode_full_sync(version, checksum, &image).map_err(|e| {
+                        error!("Rejected full sync: {}", e);
+                        e
+                    })?;
+                drop(image);
+                let loaded = super::sync::load_full_sync(data, self.stores()).await;
+                self.finish_full_sync(loaded.map_err(|e| e.to_string()), offset)?;
+            }
             ReplicationCommand::FullSync {
                 snapshot_data,
                 offset,
             } => {
                 info!(
-                    "Receiving full sync, offset: {}, {} bytes",
+                    "Receiving 1.3.x full sync (KV + streams), offset: {}, {} bytes",
                     offset,
                     snapshot_data.len()
                 );
-
-                // Apply snapshot with stream support
-                super::sync::apply_snapshot_with_streams(
+                let (_, operations) =
+                    super::sync::decode_legacy_snapshot(&snapshot_data).map_err(|e| {
+                        error!("Rejected full sync: {}", e);
+                        ReplicationError::SerializationError(e)
+                    })?;
+                super::sync::load_legacy_full_sync(
                     &self.kv_store,
-                    self.stream_manager.as_ref().map(|s| s.as_ref()),
-                    &snapshot_data,
+                    self.stream_manager.as_deref(),
+                    operations,
                 )
-                .await
-                .map_err(|e| {
-                    error!("Failed to apply snapshot: {}", e);
-                    ReplicationError::SerializationError(e)
-                })?;
-
-                self.current_offset.store(offset, Ordering::SeqCst);
-                info!("Full sync completed, data restored at offset {}", offset);
+                .await;
+                self.finish_full_sync(Ok(()), offset)?;
             }
             ReplicationCommand::PartialSync {
                 from_offset,
@@ -231,7 +258,51 @@ impl ReplicaNode {
         Ok(())
     }
 
-    /// Read command with length prefix
+    /// Record the outcome of loading a full-sync image taken at `offset`.
+    ///
+    /// On success the replica continues from `offset`. A load that failed
+    /// part way (the stores were already cleared) resets the offset to 0, so
+    /// the next connection asks for, and gets, a full sync again instead of
+    /// replaying records on top of a partial image.
+    fn finish_full_sync(&self, loaded: Result<(), String>, offset: u64) -> ReplicationResult<()> {
+        match loaded {
+            Ok(()) => {
+                self.current_offset.store(offset, Ordering::SeqCst);
+                info!("Full sync completed, data restored at offset {}", offset);
+                Ok(())
+            }
+            Err(e) => {
+                self.current_offset.store(0, Ordering::SeqCst);
+                error!("Failed to load full sync: {}", e);
+                Err(ReplicationError::FullSync(format!(
+                    "loading the image: {e}"
+                )))
+            }
+        }
+    }
+
+    /// Every store this replica converges.
+    fn stores(&self) -> crate::persistence::apply::StoreRefs<'_> {
+        crate::persistence::apply::StoreRefs {
+            kv_store: &self.kv_store,
+            hash_store: self.hash_store.as_deref(),
+            list_store: self.list_store.as_deref(),
+            set_store: self.set_store.as_deref(),
+            sorted_set_store: self.sorted_set_store.as_deref(),
+            queue_manager: self.queue_manager.as_deref(),
+            stream_manager: self.stream_manager.as_deref(),
+            hyperloglog_store: self.hyperloglog_store.as_deref(),
+            bitmap_store: self.bitmap_store.as_deref(),
+        }
+    }
+
+    /// Read one length-prefixed command.
+    ///
+    /// Nothing is decoded until every byte of the command has arrived, so a
+    /// connection that drops mid-command applies none of it. This is what makes
+    /// a transaction record (one `Operation::Transaction` per command) reach
+    /// the replica whole or not at all; the offset is not advanced, so the
+    /// resync after reconnecting delivers the whole record again.
     async fn read_command(stream: &mut TcpStream) -> ReplicationResult<ReplicationCommand> {
         // Read length prefix (4 bytes)
         let mut len_buf = [0u8; 4];
@@ -310,19 +381,8 @@ impl ReplicaNode {
         // Apply via the shared applier so the replica converges to the master
         // for EVERY datatype, not just KV + stream (audit M-005 completion,
         // phase6j). Streams are applied on the replica (Some(stream_manager)).
-        if let Err(e) = crate::persistence::apply::apply_operation(
-            op.operation.clone(),
-            crate::persistence::apply::StoreRefs {
-                kv_store: &self.kv_store,
-                hash_store: self.hash_store.as_deref(),
-                list_store: self.list_store.as_deref(),
-                set_store: self.set_store.as_deref(),
-                sorted_set_store: self.sorted_set_store.as_deref(),
-                queue_manager: self.queue_manager.as_deref(),
-                stream_manager: self.stream_manager.as_deref(),
-            },
-        )
-        .await
+        if let Err(e) =
+            crate::persistence::apply::apply_operation(op.operation.clone(), self.stores()).await
         {
             warn!(
                 "Failed to apply replicated operation at offset {}: {}",

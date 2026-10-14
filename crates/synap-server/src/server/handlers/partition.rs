@@ -60,9 +60,12 @@ impl From<RetentionPolicyRequest> for crate::core::RetentionPolicy {
 
 pub async fn create_partitioned_topic(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(topic): Path<String>,
     Json(req): Json<CreateTopicRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "stream:", &topic, Action::Configure)?;
+
     let partition_manager = state
         .partition_manager
         .as_ref()
@@ -105,9 +108,12 @@ pub struct PartitionPublishRequest {
 /// Publish to partitioned topic
 pub async fn publish_to_partition(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(topic): Path<String>,
     Json(req): Json<PartitionPublishRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "stream:", &topic, Action::Write)?;
+
     let partition_manager = state
         .partition_manager
         .as_ref()
@@ -139,9 +145,12 @@ pub struct ConsumePartitionRequest {
 /// Consume from specific partition
 pub async fn consume_from_partition(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((topic, partition_id)): Path<(String, usize)>,
     Json(req): Json<ConsumePartitionRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "stream:", &topic, Action::Read)?;
+
     let partition_manager = state
         .partition_manager
         .as_ref()
@@ -169,8 +178,11 @@ pub async fn consume_from_partition(
 /// Get topic stats
 pub async fn get_topic_stats(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(topic): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "stream:", &topic, Action::Read)?;
+
     let partition_manager = state
         .partition_manager
         .as_ref()
@@ -190,7 +202,10 @@ pub async fn get_topic_stats(
 /// List all topics
 pub async fn list_topics(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_permission(&ctx, "stream:*", Action::Read)?;
+
     let partition_manager = state
         .partition_manager
         .as_ref()
@@ -207,8 +222,11 @@ pub async fn list_topics(
 /// Delete topic
 pub async fn delete_topic(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(topic): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "stream:", &topic, Action::Delete)?;
+
     let partition_manager = state
         .partition_manager
         .as_ref()
@@ -240,9 +258,13 @@ pub struct CreateConsumerGroupRequest {
 /// Create consumer group
 pub async fn create_consumer_group(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(group_id): Path<String>,
     Json(req): Json<CreateConsumerGroupRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "stream:group:", &group_id, Action::Configure)?;
+    require_resource_permission(&ctx, "stream:", &req.topic, Action::Read)?;
+
     let consumer_group_manager = state
         .consumer_group_manager
         .as_ref()
@@ -287,9 +309,12 @@ pub struct JoinGroupRequest {
 /// Join consumer group
 pub async fn join_consumer_group(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(group_id): Path<String>,
     Json(req): Json<JoinGroupRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "stream:group:", &group_id, Action::Write)?;
+
     let consumer_group_manager = state
         .consumer_group_manager
         .as_ref()
@@ -314,8 +339,11 @@ pub async fn join_consumer_group(
 /// Leave consumer group
 pub async fn leave_consumer_group(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((group_id, member_id)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "stream:group:", &group_id, Action::Write)?;
+
     let consumer_group_manager = state
         .consumer_group_manager
         .as_ref()
@@ -338,8 +366,11 @@ pub async fn leave_consumer_group(
 /// Get partition assignment
 pub async fn get_partition_assignment(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((group_id, member_id)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "stream:group:", &group_id, Action::Read)?;
+
     let consumer_group_manager = state
         .consumer_group_manager
         .as_ref()
@@ -366,9 +397,12 @@ pub struct CommitOffsetRequest {
 /// Commit offset
 pub async fn commit_offset(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(group_id): Path<String>,
     Json(req): Json<CommitOffsetRequest>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "stream:group:", &group_id, Action::Write)?;
+
     let consumer_group_manager = state
         .consumer_group_manager
         .as_ref()
@@ -389,8 +423,11 @@ pub async fn commit_offset(
 /// Get committed offset
 pub async fn get_committed_offset(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((group_id, partition_id)): Path<(String, usize)>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "stream:group:", &group_id, Action::Read)?;
+
     let consumer_group_manager = state
         .consumer_group_manager
         .as_ref()
@@ -411,8 +448,11 @@ pub async fn get_committed_offset(
 /// Get consumer group stats
 pub async fn get_consumer_group_stats(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path(group_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "stream:group:", &group_id, Action::Read)?;
+
     let consumer_group_manager = state
         .consumer_group_manager
         .as_ref()
@@ -431,7 +471,10 @@ pub async fn get_consumer_group_stats(
 /// List consumer groups
 pub async fn list_consumer_groups(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_permission(&ctx, "stream:group:*", Action::Read)?;
+
     let consumer_group_manager = state
         .consumer_group_manager
         .as_ref()
@@ -448,8 +491,11 @@ pub async fn list_consumer_groups(
 /// Heartbeat from consumer
 pub async fn consumer_heartbeat(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
     Path((group_id, member_id)): Path<(String, String)>,
 ) -> Result<Json<serde_json::Value>, SynapError> {
+    require_resource_permission(&ctx, "stream:group:", &group_id, Action::Write)?;
+
     let consumer_group_manager = state
         .consumer_group_manager
         .as_ref()

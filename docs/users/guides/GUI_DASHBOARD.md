@@ -16,7 +16,7 @@ Complete guide to Synap Desktop - the graphical user interface for monitoring an
 Synap Desktop is an Electron-based graphical user interface that provides:
 - **Real-time Monitoring**: Live metrics and performance graphs
 - **Multi-instance Management**: Monitor multiple Synap servers
-- **Configuration Editor**: Visual configuration management
+- **Configuration Viewer**: The server's effective configuration, secrets redacted
 - **Performance Analytics**: CPU, memory, throughput, latency tracking
 - **Log Viewer**: Real-time log streaming and filtering
 
@@ -115,13 +115,20 @@ The dashboard shows:
 - Sync status
 - Failover controls
 
-### Configuration Editor
+### Data Structures Inspector
 
-- Visual YAML editor
-- Syntax highlighting
-- Validation
-- Apply changes with preview
-- Rollback support
+- Hash, list, set and sorted set contents
+- Key type and memory usage of the inspected key
+- Missing keys and keys of another type are reported, not shown as empty
+
+### Configuration Viewer
+
+- The configuration the server runs with, overrides applied (`admin.config`)
+- Passwords, API keys and the Hub service key shown as `[redacted]`
+- Copy or download as YAML
+- Read-only: change settings in the server's config file and restart it
+- Needs an API key with admin permission; otherwise the server's permission
+  error is shown and no configuration
 
 ### Log Viewer
 

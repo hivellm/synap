@@ -77,6 +77,7 @@ How the engine works inside — for contributors and the curious:
 
 ## Benchmarks
 
+- **[1.4.0 Performance Baseline](benchmarks/BASELINE_1_4_0.md)** - 1.4.0 vs 1.3.2 per durability mode, protocol and workload
 - **[Benchmark Results](benchmarks/BENCHMARK_RESULTS_EXTENDED.md)** - Extended performance benchmarks
 - **[Persistence Benchmarks](benchmarks/PERSISTENCE_BENCHMARKS.md)** - WAL and snapshot performance
 - **[Compression Benchmarks](benchmarks/COMPRESSION_BENCHMARKS.md)** - LZ4/Zstd throughput and ratios
@@ -95,12 +96,14 @@ How the engine works inside — for contributors and the curious:
 
 Running a server in production:
 
+- **[Guarantees (1.4.0)](operations/guarantees.md)** - Durability per fsync mode, authorization per transport, Hub mode, limits, replication, and what an error reply means
 - **[Observability](operations/observability.md)** - Metrics, logs and tracing
 - **[Network Limits](operations/network-limits.md)** - Connection, frame and memory caps
 - **[Configuration](specs/CONFIGURATION.md)** - Configuration reference
 - **[Deployment](specs/DEPLOYMENT.md)** - Deployment guide
 - **[Packaging & Distribution](specs/PACKAGING_AND_DISTRIBUTION.md)** - Build installers for all platforms
 - **[Admin Guide](guides/ADMIN_GUIDE.md)** - Day-to-day administration
+- **[Upgrading to 1.4.0](users/guides/UPGRADING_TO_1_4.md)** - Backup step, no-downgrade rule and breaking changes from 1.3.x
 
 ## Development
 
@@ -108,6 +111,7 @@ Working on Synap itself:
 
 - **[Build Guide](development/BUILD.md)** - Build instructions
 - **[Testing](development/TESTING.md)** - Testing guide
+- **[CI Gates](development/CI_GATES.md)** - Pull-request, coverage and release gates; lockfile and toolchain policy
 - **[Release Process](development/RELEASE_PROCESS.md)** - How a release is cut
 - **[OpenSpec Workflow](development/OPENSPEC_WORKFLOW.md)** - Spec-driven development
 - **[Rust target/ Hygiene](development/rust-target-hygiene.md)** - Keeping build artifacts in check
@@ -234,8 +238,8 @@ Where each directory lives and how much is in it (2026-07-19):
 | `features/` | 7 | User-visible capabilities |
 | `guides/` | 7 | Using Synap (user/admin how-to) |
 | `protocol/` | 7 | Wire protocols and transports |
-| `benchmarks/` | 7 | Performance data and comparisons |
-| `development/` | 5 | Working on Synap (build, test, release) |
+| `benchmarks/` | 8 | Performance data and comparisons |
+| `development/` | 6 | Working on Synap (build, test, release) |
 | `internals/` | 5 | How the engine works inside |
 | `project/` | 5 | Project meta and dated status snapshots |
 | `diagrams/` | 4 | Mermaid architecture diagrams |
@@ -244,7 +248,7 @@ Where each directory lives and how much is in it (2026-07-19):
 | `sdks/` | 3 | Per-language SDK documentation |
 | `operations/` | 2 | Running a server in production |
 
-**Total**: 179 documents. See
+**Total**: 180 documents. See
 **[Documentation Organization](project/ORGANIZATION.md)** for the rules on where
 new documentation belongs.
 

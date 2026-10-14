@@ -1,4 +1,5 @@
 pub mod bitmap;
+pub(crate) mod blocking;
 pub mod cache;
 pub mod consumer_group;
 pub mod error;
@@ -33,6 +34,7 @@ pub use consumer_group::{
 pub use error::SynapError;
 pub use geospatial::{
     Coordinate, DistanceUnit, GeoQueryOptions, GeoSearchParams, GeospatialStats, GeospatialStore,
+    coordinate_to_score,
 };
 pub use glob::glob_match;
 pub use hash::{HashStats, HashStore, HashValue};
@@ -50,13 +52,18 @@ pub use partition::{
 pub use pubsub::{
     Message, MessageSender, PubSubRouter, PubSubStats, PublishResult, SubscribeResult, TopicInfo,
 };
-pub use queue::{QueueConfig, QueueManager, QueueMessage, QueueStats};
+pub use queue::{QueueConfig, QueueManager, QueueMessage, QueueState, QueueStats};
 pub use set::{SetStats, SetStore, SetValue};
 pub use sorted_set::{
     Aggregate, OrderedFloat, ScoredMember, SortedSetStats, SortedSetStore, SortedSetValue,
     ZAddOptions,
 };
 pub use stream::{RoomStats, StreamConfig, StreamEvent, StreamManager};
-pub use transaction::{CommittedWrite, Transaction, TransactionCommand, TransactionManager};
-pub use types::{EvictionPolicy, Expiry, KVConfig, KVStats, SetOptions, SetResult, StoredValue};
+pub use transaction::{
+    CommittedWrite, ExecOutcome, Transaction, TransactionCommand, TransactionManager,
+};
+pub use types::{
+    EvictionPolicy, Expiry, KVConfig, KVStats, SetOptions, SetResult, StoredValue, StringWrite,
+    ttl_secs_from_deadline,
+};
 pub use watch::{DEFAULT_INLINE_VALUE_CAP, KeyWatchNotifier, WatchEvent};

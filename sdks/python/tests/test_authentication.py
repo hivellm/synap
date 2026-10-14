@@ -10,9 +10,25 @@ SYNAP_URL = os.getenv("SYNAP_URL", "http://localhost:15500")
 TEST_USERNAME = os.getenv("SYNAP_TEST_USERNAME", "root")
 TEST_PASSWORD = os.getenv("SYNAP_TEST_PASSWORD", "root")
 
+# Server-to-server, like the *_s2s suites: they run with SYNAP_S2S=true. The
+# rejection tests also need a server that requires authentication and skip
+# against one with auth off.
+SKIP_S2S = os.getenv("SYNAP_S2S") != "true"
+
+
+async def _server_requires_auth() -> bool:
+    """Whether the server refuses an unauthenticated write."""
+    async with SynapClient(SynapConfig.create(SYNAP_URL)) as client:
+        try:
+            await client.kv.set("auth:probe", "x")
+        except Exception:
+            return True
+        await client.kv.delete("auth:probe")
+        return False
+
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="S2S test - requires running Synap server")
+@pytest.mark.skipif(SKIP_S2S, reason="S2S tests disabled (set SYNAP_S2S=true to enable)")
 class TestBasicAuth:
     """Tests for Basic Auth authentication."""
 
@@ -34,17 +50,23 @@ class TestBasicAuth:
 
     async def test_basic_auth_invalid_credentials(self):
         """Test authentication failure with invalid credentials."""
+        if not await _server_requires_auth():
+            pytest.skip("the server does not require authentication")
         config = SynapConfig.create(SYNAP_URL).with_basic_auth("invalid", "invalid")
         async with SynapClient(config) as client:
-            with pytest.raises(Exception):  # Should raise connection or auth error
-                await client.health()
+            # /health answers without credentials by design; a command does not.
+            with pytest.raises(Exception):
+                await client.kv.get("auth:probe")
 
     async def test_basic_auth_missing_password(self):
         """Test authentication failure with missing password."""
+        if not await _server_requires_auth():
+            pytest.skip("the server does not require authentication")
         config = SynapConfig.create(SYNAP_URL).with_basic_auth(TEST_USERNAME, "")
         async with SynapClient(config) as client:
+            # /health answers without credentials by design; a command does not.
             with pytest.raises(Exception):
-                await client.health()
+                await client.kv.get("auth:probe")
 
     async def test_basic_auth_config_validation(self):
         """Test that config prevents using both auth_token and Basic Auth."""
@@ -58,7 +80,7 @@ class TestBasicAuth:
 
 
 @pytest.mark.asyncio
-@pytest.mark.skip(reason="S2S test - requires running Synap server")
+@pytest.mark.skipif(SKIP_S2S, reason="S2S tests disabled (set SYNAP_S2S=true to enable)")
 class TestApiKeyAuth:
     """Tests for API Key authentication."""
 
@@ -86,17 +108,23 @@ class TestApiKeyAuth:
 
     async def test_api_key_auth_invalid_key(self):
         """Test authentication failure with invalid API key."""
+        if not await _server_requires_auth():
+            pytest.skip("the server does not require authentication")
         config = SynapConfig.create(SYNAP_URL).with_auth_token("invalid-api-key-12345")
         async with SynapClient(config) as client:
+            # /health answers without credentials by design; a command does not.
             with pytest.raises(Exception):
-                await client.health()
+                await client.kv.get("auth:probe")
 
     async def test_api_key_auth_empty_key(self):
         """Test authentication failure with empty API key."""
+        if not await _server_requires_auth():
+            pytest.skip("the server does not require authentication")
         config = SynapConfig.create(SYNAP_URL).with_auth_token("")
         async with SynapClient(config) as client:
+            # /health answers without credentials by design; a command does not.
             with pytest.raises(Exception):
-                await client.health()
+                await client.kv.get("auth:probe")
 
 
 @pytest.mark.asyncio

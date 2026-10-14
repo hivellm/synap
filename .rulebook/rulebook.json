@@ -1,7 +1,7 @@
 {
-  "version": "6.0.0",
+  "version": "7.4.0",
   "installedAt": "2026-07-08T15:40:26.585Z",
-  "updatedAt": "2026-07-08T15:40:26.585Z",
+  "updatedAt": "2026-10-13T05:54:35.675Z",
   "projectId": "Synap",
   "mode": "full",
   "features": {
@@ -23,5 +23,12 @@
     "cliResponse": 180000,
     "testRun": 600000
   },
-  "agentsMode": "lean"
+  "gitPushMode": "manual",
+  "agentsMode": "lean",
+  "integrations": {
+    "typesafe": {
+      "enabled": true,
+      "askedAt": "2026-10-13T05:54:35.623Z"
+    }
+  }
 }

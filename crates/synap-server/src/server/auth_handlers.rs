@@ -18,6 +18,9 @@ use tracing::debug;
 pub struct AuthState {
     pub user_manager: Arc<UserManager>,
     pub api_key_manager: Arc<ApiKeyManager>,
+    /// Whether authentication is enabled; when it is, issuing an API key
+    /// requires an authenticated caller.
+    pub auth_enabled: bool,
 }
 
 // ==================== Authentication Endpoints ====================
@@ -145,32 +148,87 @@ pub async fn auth_create_key(
 ) -> Result<Json<CreateKeyResponse>, SynapError> {
     debug!("Creating API key: {}", req.name);
 
-    // Convert permission requests to Permission objects
-    let permissions: Vec<Permission> = req
-        .permissions
-        .unwrap_or_default()
-        .into_iter()
-        .map(|p| {
-            let action = match p.action.as_str() {
-                "read" => Action::Read,
-                "write" => Action::Write,
-                "delete" => Action::Delete,
-                "configure" => Action::Configure,
-                "admin" => Action::Admin,
-                "all" => Action::All,
-                _ => Action::Read,
-            };
-            Permission::new(p.resource, action)
-        })
-        .collect();
+    if state.auth_enabled && !auth_context.is_authenticated() {
+        return Err(SynapError::Unauthorized(
+            "creating an API key requires authentication".to_string(),
+        ));
+    }
 
-    // Parse allowed IPs
-    let allowed_ips: Vec<IpAddr> = req
-        .allowed_ips
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|ip_str| ip_str.parse().ok())
-        .collect();
+    // Parse every grant strictly: an unknown action or an empty resource is a
+    // client error, never a silent downgrade to read access.
+    let mut permissions = Vec::new();
+    for p in req.permissions.unwrap_or_default() {
+        let action = match p.action.as_str() {
+            "read" => Action::Read,
+            "write" => Action::Write,
+            "delete" => Action::Delete,
+            "configure" => Action::Configure,
+            "admin" => Action::Admin,
+            "all" => Action::All,
+            other => {
+                return Err(SynapError::InvalidRequest(format!(
+                    "unknown permission action `{other}`"
+                )));
+            }
+        };
+        if p.resource.is_empty() {
+            return Err(SynapError::InvalidRequest(
+                "permission resource must not be empty".to_string(),
+            ));
+        }
+        permissions.push(Permission::new(p.resource, action));
+    }
+
+    // Dropping an unparsable entry would widen the key's network scope (an
+    // empty list allows every address), so reject it instead.
+    let mut allowed_ips = Vec::new();
+    for ip in req.allowed_ips.unwrap_or_default() {
+        let parsed: IpAddr = ip
+            .parse()
+            .map_err(|_| SynapError::InvalidRequest(format!("invalid allowed_ips entry `{ip}`")))?;
+        allowed_ips.push(parsed);
+    }
+
+    // A key never carries more than its issuer holds. Admins may grant
+    // anything; everyone else needs one held permission covering each grant.
+    if !auth_context.is_admin
+        && let Some(denied) = permissions.iter().find(|wanted| {
+            !auth_context
+                .permissions
+                .iter()
+                .any(|held| held.covers(wanted))
+        })
+    {
+        return Err(SynapError::Forbidden(format!(
+            "cannot grant `{}` on `{}`: the issuer does not hold it",
+            denied.action.as_str(),
+            denied.resource_pattern
+        )));
+    }
+
+    // A key minted with a temporary API key cannot outlive it.
+    if let Some(issuer_expiry) = auth_context
+        .api_key_id
+        .as_deref()
+        .and_then(|id| state.api_key_manager.get(id))
+        .and_then(|issuer| issuer.expires_at)
+    {
+        let outlives = match req.expires_in_seconds {
+            None => true,
+            Some(ttl) => {
+                let ttl = chrono::Duration::seconds(i64::try_from(ttl).unwrap_or(i64::MAX));
+                chrono::Utc::now()
+                    .checked_add_signed(ttl)
+                    .is_none_or(|expiry| expiry > issuer_expiry)
+            }
+        };
+        if outlives {
+            return Err(SynapError::Forbidden(format!(
+                "a key created with a temporary API key must expire by {}",
+                issuer_expiry.to_rfc3339()
+            )));
+        }
+    }
 
     // Get username from auth context
     let username = auth_context.user_id.clone();

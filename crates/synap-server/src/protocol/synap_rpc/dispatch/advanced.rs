@@ -1,4 +1,6 @@
 use super::{AppState, SynapValue, arg_bytes, arg_float, arg_int, arg_str};
+use crate::auth::OperationContext;
+use crate::persistence::durable;
 
 /// Serialize a `Vec<GeospatialRadiusResult>` — `(member, dist?, coord?)` — to a
 /// `SynapValue::Array`.  Each element is an Array:
@@ -35,6 +37,7 @@ fn geo_results_to_value(
 
 pub(super) async fn run(
     state: &AppState,
+    caller: &OperationContext,
     command: &str,
     args: &[SynapValue],
 ) -> Result<SynapValue, String> {
@@ -83,11 +86,18 @@ pub(super) async fn run(
                 locations.push((lat, lon, member));
                 pos += 3;
             }
-            state
-                .geospatial_store
-                .geoadd(&key, locations, nx, xx, ch)
-                .map(|n| SynapValue::Int(n as i64))
-                .map_err(|e| e.to_string())
+            durable::geoadd(
+                state.persistence.as_deref(),
+                &state.geospatial_store,
+                &key,
+                locations,
+                nx,
+                xx,
+                ch,
+            )
+            .await
+            .map(|n| SynapValue::Int(n as i64))
+            .map_err(|e| e.to_string())
         }
         "GEOPOS" => {
             // GEOPOS key member [member ...]
@@ -400,7 +410,7 @@ pub(super) async fn run(
                 .queue_manager
                 .as_deref()
                 .ok_or_else(|| "ERR queue subsystem not enabled".to_string())?;
-            qm.create_queue(&name, None)
+            durable::queue_create(state.persistence.as_deref(), qm, &name, None)
                 .await
                 .map(|()| SynapValue::Str("OK".into()))
                 .map_err(|e| e.to_string())
@@ -411,7 +421,7 @@ pub(super) async fn run(
                 .queue_manager
                 .as_deref()
                 .ok_or_else(|| "ERR queue subsystem not enabled".to_string())?;
-            qm.delete_queue(&name)
+            durable::queue_delete(state.persistence.as_deref(), qm, &name)
                 .await
                 .map(SynapValue::Bool)
                 .map_err(|e| e.to_string())
@@ -436,10 +446,17 @@ pub(super) async fn run(
                 .queue_manager
                 .as_deref()
                 .ok_or_else(|| "ERR queue subsystem not enabled".to_string())?;
-            qm.publish(&name, payload, priority, max_retries)
-                .await
-                .map(SynapValue::Str)
-                .map_err(|e| e.to_string())
+            durable::queue_publish(
+                state.persistence.as_deref(),
+                qm,
+                &name,
+                payload,
+                priority,
+                max_retries,
+            )
+            .await
+            .map(|message| SynapValue::Str(message.id))
+            .map_err(|e| e.to_string())
         }
         "QCONSUME" => {
             // QCONSUME queue consumer_id
@@ -481,7 +498,7 @@ pub(super) async fn run(
                 .queue_manager
                 .as_deref()
                 .ok_or_else(|| "ERR queue subsystem not enabled".to_string())?;
-            qm.ack(&name, &message_id)
+            durable::queue_ack(state.persistence.as_deref(), qm, &name, &message_id)
                 .await
                 .map(|()| SynapValue::Str("OK".into()))
                 .map_err(|e| e.to_string())
@@ -502,10 +519,16 @@ pub(super) async fn run(
                 .queue_manager
                 .as_deref()
                 .ok_or_else(|| "ERR queue subsystem not enabled".to_string())?;
-            qm.nack(&name, &message_id, requeue)
-                .await
-                .map(|()| SynapValue::Str("OK".into()))
-                .map_err(|e| e.to_string())
+            durable::queue_nack(
+                state.persistence.as_deref(),
+                qm,
+                &name,
+                &message_id,
+                requeue,
+            )
+            .await
+            .map(|()| SynapValue::Str("OK".into()))
+            .map_err(|e| e.to_string())
         }
         "QSTATS" => {
             let name = arg_str(args, 0)?;
@@ -555,7 +578,7 @@ pub(super) async fn run(
                 .queue_manager
                 .as_deref()
                 .ok_or_else(|| "ERR queue subsystem not enabled".to_string())?;
-            qm.purge(&name)
+            durable::queue_purge(state.persistence.as_deref(), qm, &name)
                 .await
                 .map(|n| SynapValue::Int(n as i64))
                 .map_err(|e| e.to_string())
@@ -926,7 +949,9 @@ pub(super) async fn run(
                         _ => arg_int(args, 3)?,
                     };
                     let delta = if inner.starts_with("DECR") {
-                        -magnitude
+                        magnitude
+                            .checked_neg()
+                            .ok_or("ERR Integer overflow on INCR/DECR")?
                     } else {
                         magnitude
                     };
@@ -1010,22 +1035,27 @@ pub(super) async fn run(
         "EXEC" => {
             // EXEC client_id
             let client_id = arg_str(args, 0)?;
-            match state.transaction_manager.exec(&client_id).await {
+            // Persist + replicate the whole transaction atomically (M-010),
+            // ordered against plain writers and snapshots (phase23). A
+            // commit that could not be logged is not durable: report it.
+            match crate::persistence::durable::exec(
+                state.persistence.as_deref(),
+                &state.transaction_manager,
+                &client_id,
+            )
+            .await
+            {
                 // watched key changed — transaction aborted
                 Ok(None) => Ok(SynapValue::Null),
-                Ok(Some((results, writes))) => {
-                    // Persist + replicate the whole transaction atomically (M-010).
-                    if let Some(ref persistence) = state.persistence
-                        && let Err(e) = persistence.log_transaction(&writes).await
-                    {
-                        tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
-                    }
-                    Ok(SynapValue::Array(
-                        results
-                            .into_iter()
-                            .map(|v| SynapValue::Str(serde_json::to_string(&v).unwrap_or_default()))
-                            .collect(),
-                    ))
+                Ok(Some((results, _writes))) => Ok(SynapValue::Array(
+                    results
+                        .into_iter()
+                        .map(|v| SynapValue::Str(serde_json::to_string(&v).unwrap_or_default()))
+                        .collect(),
+                )),
+                Err(e @ crate::persistence::durable::ExecError::NotDurable(_)) => {
+                    tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
+                    Err(format!("ERR {e}"))
                 }
                 Err(e) => Err(e.to_string()),
             }
@@ -1085,6 +1115,8 @@ pub(super) async fn run(
                 list_store: state.list_store.clone(),
                 set_store: state.set_store.clone(),
                 sorted_set_store: state.sorted_set_store.clone(),
+                persistence: state.persistence.clone(),
+                caller: std::sync::Arc::new(caller.clone()),
             };
             state
                 .script_manager
@@ -1112,6 +1144,8 @@ pub(super) async fn run(
                 list_store: state.list_store.clone(),
                 set_store: state.set_store.clone(),
                 sorted_set_store: state.sorted_set_store.clone(),
+                persistence: state.persistence.clone(),
+                caller: std::sync::Arc::new(caller.clone()),
             };
             state
                 .script_manager

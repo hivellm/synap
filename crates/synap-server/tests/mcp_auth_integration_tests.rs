@@ -79,6 +79,7 @@ async fn spawn_test_server_with_mcp_auth(
         user_manager: None,
         require_auth: false,
         replication: None,
+        server_config: None,
     };
 
     // Create user manager and API key manager
@@ -272,7 +273,7 @@ async fn test_mcp_require_auth_rejects_anonymous() {
 
 #[tokio::test]
 async fn test_mcp_permission_check_read_only() {
-    use synap_server::auth::{Action, set_auth_context};
+    use synap_server::auth::{Action, OperationContext};
     use synap_server::server::mcp_handlers::handle_mcp_tool;
 
     let config = synap_server::ServerConfig::default();
@@ -325,6 +326,7 @@ async fn test_mcp_permission_check_read_only() {
         user_manager: None,
         require_auth: false,
         replication: None,
+        server_config: None,
     });
 
     // Set a value first
@@ -343,10 +345,10 @@ async fn test_mcp_permission_check_read_only() {
     };
 
     // Test read operation (should succeed)
-    set_auth_context(read_only_ctx.clone());
+    let caller = OperationContext::from_auth_context(&read_only_ctx);
     let read_request = CallToolRequestParams::new("synap_kv_get")
         .with_arguments(json!({"key": "test_key"}).as_object().cloned().unwrap());
-    let read_result = handle_mcp_tool(read_request, state.clone()).await;
+    let read_result = handle_mcp_tool(read_request, state.clone(), &caller).await;
     assert!(read_result.is_ok(), "Read operation should succeed");
 
     // Test write operation (should fail)
@@ -359,19 +361,16 @@ async fn test_mcp_permission_check_read_only() {
         .cloned()
         .unwrap(),
     );
-    let write_result = handle_mcp_tool(write_request, state.clone()).await;
+    let write_result = handle_mcp_tool(write_request, state.clone(), &caller).await;
     assert!(
         write_result.is_err(),
         "Write operation should fail for read-only user"
     );
-
-    // Clean up
-    synap_server::auth::clear_auth_context();
 }
 
 #[tokio::test]
 async fn test_mcp_permission_check_write_allowed() {
-    use synap_server::auth::{Action, set_auth_context};
+    use synap_server::auth::{Action, OperationContext};
     use synap_server::server::mcp_handlers::handle_mcp_tool;
 
     let config = synap_server::ServerConfig::default();
@@ -424,6 +423,7 @@ async fn test_mcp_permission_check_write_allowed() {
         user_manager: None,
         require_auth: false,
         replication: None,
+        server_config: None,
     });
 
     // Create write-enabled auth context
@@ -436,7 +436,7 @@ async fn test_mcp_permission_check_write_allowed() {
     };
 
     // Test write operation (should succeed)
-    set_auth_context(write_ctx.clone());
+    let caller = OperationContext::from_auth_context(&write_ctx);
     let write_request = CallToolRequestParams::new("synap_kv_set").with_arguments(
         json!({
             "key": "test_write_key",
@@ -446,16 +446,13 @@ async fn test_mcp_permission_check_write_allowed() {
         .cloned()
         .unwrap(),
     );
-    let write_result = handle_mcp_tool(write_request, state.clone()).await;
+    let write_result = handle_mcp_tool(write_request, state.clone(), &caller).await;
     assert!(write_result.is_ok(), "Write operation should succeed");
-
-    // Clean up
-    synap_server::auth::clear_auth_context();
 }
 
 #[tokio::test]
 async fn test_mcp_admin_bypass_permissions() {
-    use synap_server::auth::set_auth_context;
+    use synap_server::auth::OperationContext;
     use synap_server::server::mcp_handlers::handle_mcp_tool;
 
     let config = synap_server::ServerConfig::default();
@@ -508,6 +505,7 @@ async fn test_mcp_admin_bypass_permissions() {
         user_manager: None,
         require_auth: false,
         replication: None,
+        server_config: None,
     });
 
     // Create admin auth context (no specific permissions needed)
@@ -520,7 +518,7 @@ async fn test_mcp_admin_bypass_permissions() {
     };
 
     // Test all operations (should succeed for admin)
-    set_auth_context(admin_ctx.clone());
+    let caller = OperationContext::from_auth_context(&admin_ctx);
 
     // Write operation
     let write_request = CallToolRequestParams::new("synap_kv_set").with_arguments(
@@ -532,21 +530,18 @@ async fn test_mcp_admin_bypass_permissions() {
         .cloned()
         .unwrap(),
     );
-    let write_result = handle_mcp_tool(write_request, state.clone()).await;
+    let write_result = handle_mcp_tool(write_request, state.clone(), &caller).await;
     assert!(write_result.is_ok(), "Admin should be able to write");
 
     // Read operation
     let read_request = CallToolRequestParams::new("synap_kv_get")
         .with_arguments(json!({"key": "admin_key"}).as_object().cloned().unwrap());
-    let read_result = handle_mcp_tool(read_request, state.clone()).await;
+    let read_result = handle_mcp_tool(read_request, state.clone(), &caller).await;
     assert!(read_result.is_ok(), "Admin should be able to read");
 
     // Delete operation
     let delete_request = CallToolRequestParams::new("synap_kv_delete")
         .with_arguments(json!({"key": "admin_key"}).as_object().cloned().unwrap());
-    let delete_result = handle_mcp_tool(delete_request, state.clone()).await;
+    let delete_result = handle_mcp_tool(delete_request, state.clone(), &caller).await;
     assert!(delete_result.is_ok(), "Admin should be able to delete");
-
-    // Clean up
-    synap_server::auth::clear_auth_context();
 }

@@ -142,11 +142,34 @@ pub struct QueueSystemConfig {
     pub prefetch_limit: usize,
 }
 
+/// Per-client HTTP rate limiting (`docs/users/configuration/RATE_LIMITING.md`).
+///
+/// When enabled, every client gets a token bucket of `burst_size` tokens
+/// refilled at `requests_per_second`; see `server::rate_limit` for how clients
+/// are identified.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RateLimitConfig {
     pub enabled: bool,
     pub requests_per_second: u64,
     pub burst_size: u64,
+}
+
+impl RateLimitConfig {
+    /// Refuse an enabled limiter that could never admit a request: a bucket
+    /// with no capacity rejects everything, and one that never refills locks a
+    /// client out for good after its first burst.
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.enabled {
+            return Ok(());
+        }
+        if self.requests_per_second == 0 || self.burst_size == 0 {
+            return Err(format!(
+                "rate_limit.enabled is true but requests_per_second ({}) and burst_size ({})                  must both be at least 1",
+                self.requests_per_second, self.burst_size
+            ));
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -203,6 +226,20 @@ pub struct McpConfig {
     /// Enable Transaction tools (synap_transaction_multi, synap_transaction_exec)
     #[serde(default)]
     pub enable_transaction_tools: bool,
+
+    /// Largest UMICP request body (`POST /umicp`) the server reads, in bytes.
+    /// A larger body answers 413: a declared `Content-Length` above it is
+    /// refused before any of the body is read, and a chunked body stops being
+    /// read once it passes the limit.
+    #[serde(default = "default_umicp_max_body_bytes")]
+    pub umicp_max_body_bytes: usize,
+}
+
+/// Default UMICP body limit: 16 MiB.
+pub const DEFAULT_UMICP_MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+fn default_umicp_max_body_bytes() -> usize {
+    DEFAULT_UMICP_MAX_BODY_BYTES
 }
 
 fn default_true() -> bool {
@@ -283,6 +320,7 @@ impl Default for McpConfig {
             enable_queue_tools: true,        // Essential - enabled by default
             enable_sortedset_tools: false,   // Optional
             enable_transaction_tools: false, // Optional
+            umicp_max_body_bytes: DEFAULT_UMICP_MAX_BODY_BYTES,
         }
     }
 }
@@ -446,11 +484,182 @@ impl ServerConfig {
     pub fn server_addr(&self) -> String {
         format!("{}:{}", self.server.host, self.server.port)
     }
+
+    /// The configuration as JSON with every secret replaced by [`REDACTED`]:
+    /// what the `admin.config` command reports. See [`redact_secrets`] for
+    /// which fields count as secrets.
+    pub fn redacted(&self) -> Result<serde_json::Value, serde_json::Error> {
+        let mut value = serde_json::to_value(self)?;
+        redact_secrets(&mut value);
+        Ok(value)
+    }
+
+    /// Refuse Hub mode alongside a listener that has no tenant authentication.
+    ///
+    /// Hub mode confines every tenant to its own namespace on the HTTP
+    /// transports, which authenticate a Hub access key per request. The RESP3
+    /// and SynapRPC listeners authenticate local users only, so they would
+    /// serve every tenant's data unscoped; the error names each enabled one.
+    pub fn validate_hub_listeners(&self) -> Result<(), String> {
+        if !self.hub.enabled {
+            return Ok(());
+        }
+        let mut listeners = Vec::new();
+        if self.resp3.enabled {
+            listeners.push("RESP3 (resp3.enabled)");
+        }
+        if self.synap_rpc.enabled {
+            listeners.push("SynapRPC (synap_rpc.enabled)");
+        }
+        if listeners.is_empty() {
+            return Ok(());
+        }
+        Err(format!(
+            "Hub mode (hub.enabled: true) cannot start with the {} listener enabled: \
+             it has no Hub tenant authentication and would serve every tenant's data \
+             unscoped. Disable it to run in Hub mode.",
+            listeners.join(" and ")
+        ))
+    }
+}
+
+/// What a secret configuration value is replaced with in [`ServerConfig::redacted`].
+pub const REDACTED: &str = "[redacted]";
+
+/// Field-name fragments that mark a configuration value as a secret.
+const SECRET_FIELD_MARKERS: &[&str] = &[
+    "password",
+    "passwd",
+    "secret",
+    "token",
+    "credential",
+    "api_key",
+    "access_key",
+    "private_key",
+];
+
+/// Whether a configuration field holds a secret, judged by its name: any name
+/// containing a [`SECRET_FIELD_MARKERS`] fragment, plus `key` itself and any
+/// name ending in `_key`/`_keys` (`hub.service_api_key`, a TLS `key`).
+/// `default_key_ttl` and other names that merely mention keys are not secrets.
+fn is_secret_field(name: &str) -> bool {
+    let name = name.to_ascii_lowercase().replace('-', "_");
+    name == "key"
+        || name == "keys"
+        || name.ends_with("_key")
+        || name.ends_with("_keys")
+        || SECRET_FIELD_MARKERS
+            .iter()
+            .any(|marker| name.contains(marker))
+}
+
+/// Replace, anywhere in `value`, the value of every secret field (see
+/// [`is_secret_field`]) with [`REDACTED`], whatever its shape — a string, a
+/// number, a list of keys or a whole credentials object. `null` and an empty
+/// string are kept: they say a secret is not configured and reveal nothing.
+pub fn redact_secrets(value: &mut serde_json::Value) {
+    use serde_json::Value;
+    match value {
+        Value::Object(fields) => {
+            for (name, field) in fields.iter_mut() {
+                if !is_secret_field(name) {
+                    redact_secrets(field);
+                    continue;
+                }
+                let unset = match field {
+                    Value::Null => true,
+                    Value::String(s) => s.is_empty(),
+                    _ => false,
+                };
+                if !unset {
+                    *field = Value::String(REDACTED.to_string());
+                }
+            }
+        }
+        Value::Array(items) => items.iter_mut().for_each(redact_secrets),
+        _ => {}
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redacted_config_hides_every_secret_and_still_loads() {
+        let mut config = ServerConfig::default();
+        config.auth.enabled = true;
+        config.auth.root.password = "root-pass-7f3a".to_string();
+        config.hub.service_api_key = "hub-key-91c2".to_string();
+
+        let redacted = config.redacted().unwrap();
+        let text = redacted.to_string();
+        assert!(!text.contains("root-pass-7f3a"), "{text}");
+        assert!(!text.contains("hub-key-91c2"), "{text}");
+        assert_eq!(redacted["auth"]["root"]["password"], REDACTED);
+        assert_eq!(redacted["hub"]["service_api_key"], REDACTED);
+        // Non-secret values are reported as configured.
+        assert_eq!(redacted["auth"]["root"]["username"], "root");
+        assert_eq!(redacted["auth"]["default_key_ttl"], 3600);
+        assert_eq!(redacted["server"]["port"], 15500);
+
+        // The YAML form loads back as a configuration, secrets still hidden.
+        let yaml = serde_saphyr::to_string(&redacted).unwrap();
+        assert!(!yaml.contains("root-pass-7f3a") && !yaml.contains("hub-key-91c2"));
+        let reloaded: ServerConfig = serde_saphyr::from_str(&yaml).unwrap();
+        assert_eq!(reloaded.auth.root.password, REDACTED);
+        assert_eq!(reloaded.server.port, 15500);
+    }
+
+    #[test]
+    fn redaction_covers_secrets_of_any_shape_and_keeps_unset_ones() {
+        let mut value = serde_json::json!({
+            "hub": {"service_api_key": "", "api_url": "http://hub"},
+            "auth": {
+                "users": [{"username": "ana", "password": "p1"}],
+                "api_keys": ["k1", "k2"],
+                "default_key_ttl": 60
+            },
+            "tls": {"cert": "/c.pem", "key": "/k.pem", "private-key": "pem"},
+            "replication": {"auth_token": 42, "credentials": {"user": "u", "pass": "x"}},
+            "secret": null
+        });
+        redact_secrets(&mut value);
+        assert_eq!(value["hub"]["service_api_key"], "", "unset stays visible");
+        assert_eq!(value["hub"]["api_url"], "http://hub");
+        assert_eq!(value["auth"]["users"][0]["password"], REDACTED);
+        assert_eq!(value["auth"]["users"][0]["username"], "ana");
+        assert_eq!(value["auth"]["api_keys"], REDACTED);
+        assert_eq!(value["auth"]["default_key_ttl"], 60);
+        assert_eq!(value["tls"]["cert"], "/c.pem");
+        assert_eq!(value["tls"]["key"], REDACTED);
+        assert_eq!(value["tls"]["private-key"], REDACTED);
+        assert_eq!(value["replication"]["auth_token"], REDACTED);
+        assert_eq!(value["replication"]["credentials"], REDACTED);
+        assert!(value["secret"].is_null());
+    }
+
+    #[test]
+    fn hub_mode_refuses_listeners_without_tenant_auth() {
+        let mut config = ServerConfig::default();
+        assert!(config.validate_hub_listeners().is_ok(), "standalone");
+
+        config.hub.enabled = true;
+        let err = config.validate_hub_listeners().unwrap_err();
+        assert!(err.contains("RESP3") && err.contains("SynapRPC"), "{err}");
+
+        config.synap_rpc.enabled = false;
+        let err = config.validate_hub_listeners().unwrap_err();
+        assert!(err.contains("RESP3") && !err.contains("SynapRPC"), "{err}");
+
+        config.resp3.enabled = false;
+        config.synap_rpc.enabled = true;
+        let err = config.validate_hub_listeners().unwrap_err();
+        assert!(err.contains("SynapRPC") && !err.contains("RESP3"), "{err}");
+
+        config.synap_rpc.enabled = false;
+        assert!(config.validate_hub_listeners().is_ok());
+    }
 
     #[test]
     fn resp3_enabled_default_is_consistent() {
@@ -482,6 +691,48 @@ mod tests {
         let partial: NetworkConfig = serde_saphyr::from_str("max_connections: 50").unwrap();
         assert_eq!(partial.max_connections, 50);
         assert_eq!(partial.idle_timeout_secs, 300); // default preserved
+    }
+
+    #[test]
+    fn umicp_body_limit_defaults_when_omitted() {
+        let from_empty: McpConfig = serde_saphyr::from_str("{}").unwrap();
+        assert_eq!(
+            from_empty.umicp_max_body_bytes,
+            DEFAULT_UMICP_MAX_BODY_BYTES
+        );
+        assert_eq!(
+            McpConfig::default().umicp_max_body_bytes,
+            DEFAULT_UMICP_MAX_BODY_BYTES
+        );
+        let set: McpConfig = serde_saphyr::from_str("umicp_max_body_bytes: 1048576").unwrap();
+        assert_eq!(set.umicp_max_body_bytes, 1_048_576);
+    }
+
+    #[test]
+    fn an_enabled_rate_limit_needs_capacity_and_refill() {
+        let mut config = RateLimitConfig {
+            enabled: false,
+            requests_per_second: 0,
+            burst_size: 0,
+        };
+        assert!(
+            config.validate().is_ok(),
+            "a disabled limiter is not checked"
+        );
+
+        config.enabled = true;
+        assert!(config.validate().is_err());
+        config.requests_per_second = 10;
+        assert!(config.validate().unwrap_err().contains("burst_size (0)"));
+        config.burst_size = 5;
+        assert!(config.validate().is_ok());
+        config.requests_per_second = 0;
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .contains("requests_per_second (0)")
+        );
     }
 
     #[test]

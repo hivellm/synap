@@ -117,7 +117,7 @@ impl FailoverManager {
         let replica_config = ReplicationConfig {
             enabled: true,
             role: NodeRole::Replica,
-            master_address: Some(new_master_addr),
+            master_address: Some(new_master_addr.into()),
             auto_reconnect: true,
             ..Default::default()
         };

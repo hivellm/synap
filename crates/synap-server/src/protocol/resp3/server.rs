@@ -97,9 +97,10 @@ async fn handle_connection(
 ) -> std::io::Result<()> {
     use tokio::io::BufReader;
 
-    use super::command::dispatch;
+    use super::command::{Resp3Args, dispatch};
     use super::parser::{Resp3Value, parse_from_reader, parse_inline};
     use super::writer::Resp3Writer;
+    use crate::auth::OperationContext;
 
     let peer = stream.peer_addr()?;
     // Disable Nagle's algorithm (like Redis). A bulk reply is written as several
@@ -117,10 +118,11 @@ async fn handle_connection(
     let mut writer = Resp3Writer::new(tokio::io::BufWriter::new(write_half));
 
     // When auth is required the connection starts unauthenticated and must issue
-    // a successful AUTH before any command is accepted. `auth_user` holds the
-    // resolved user once authenticated, for per-command ACL (phase6h).
+    // a successful AUTH before any command is accepted. `caller` is the
+    // identity every command is authorized against: anonymous (no permissions)
+    // until AUTH succeeds, unrestricted when authentication is disabled.
     let mut authenticated = !state.require_auth;
-    let mut auth_user: Option<crate::auth::User> = None;
+    let mut caller = OperationContext::for_user(state.user_manager.as_deref(), None);
 
     loop {
         // Read the next frame, bounded by the idle timeout (slow-loris
@@ -201,7 +203,8 @@ async fn handle_connection(
             match creds {
                 Some((user, password)) => match check_auth(&state, user, password).await {
                     Some(u) => {
-                        auth_user = Some(u);
+                        caller =
+                            OperationContext::for_user(state.user_manager.as_deref(), Some(&u));
                         authenticated = true;
                         writer.write_ok().await?;
                     }
@@ -256,24 +259,26 @@ async fn handle_connection(
             continue;
         }
 
-        // Per-command ACL (phase6h): destructive/admin commands require an admin
-        // user when auth is enforced. With auth disabled the binary port is
-        // trusted (loopback by default), so no restriction is applied.
-        if state.require_auth && crate::auth::command_requires_admin(cmd_upper) {
-            let is_admin = auth_user.as_ref().map(|u| u.is_admin).unwrap_or(false);
-            if !is_admin {
-                writer
-                    .write_error("NOPERM this command requires admin privileges")
-                    .await?;
-                writer.flush().await?;
-                continue;
+        // Authorize the command for this connection's identity with the same
+        // resource/action policy as REST and the envelope; admin-only commands
+        // need an admin. A refused TXQUEUE aborts its transaction so the EXEC
+        // applies nothing.
+        if let Err(denied) = caller.authorize_native(cmd_upper, &Resp3Args(&args)) {
+            if cmd_upper == "TXQUEUE"
+                && let Some(client_id) = args.get(1).and_then(|a| a.as_str())
+            {
+                state.transaction_manager.abort(client_id, denied.message());
             }
+            // `-NOPERM ...`, the Redis error code clients recognise.
+            writer.write(&Resp3Value::Error(denied.to_string())).await?;
+            writer.flush().await?;
+            continue;
         }
 
         // ── Dispatch with timing ─────────────────────────────────────────────
         let start = Instant::now();
         let cmd_span = tracing::debug_span!("resp3.cmd", cmd = %cmd_upper, peer = %peer);
-        let response = dispatch(&state, &args).instrument(cmd_span).await;
+        let response = dispatch(&state, &caller, &args).instrument(cmd_span).await;
         let elapsed = start.elapsed().as_secs_f64();
 
         // Write response and measure bytes.

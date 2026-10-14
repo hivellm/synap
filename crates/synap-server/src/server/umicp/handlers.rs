@@ -17,6 +17,7 @@ use crate::core::error::SynapError;
 pub async fn handle_umicp_request(
     state: UmicpState,
     envelope: Envelope,
+    caller: &crate::auth::OperationContext,
 ) -> Result<Envelope, SynapError> {
     debug!("📦 Processing UMICP envelope: {:?}", envelope.operation());
 
@@ -40,7 +41,8 @@ pub async fn handle_umicp_request(
 
     // Call existing MCP handler
     let mcp_result =
-        crate::server::mcp_handlers::handle_mcp_tool(mcp_request, state.app_state.clone()).await;
+        crate::server::mcp_handlers::handle_mcp_tool(mcp_request, state.app_state.clone(), caller)
+            .await;
 
     // Convert MCP result back to UMICP Envelope
     let response = match mcp_result {

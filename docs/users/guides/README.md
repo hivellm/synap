@@ -76,6 +76,15 @@ Migrating from other systems:
 - Kafka migration
 - Data migration strategies
 
+### [Upgrading to 1.4.0](./UPGRADING_TO_1_4.md)
+
+Moving a 1.3.x deployment to 1.4.0:
+
+- Backup step and no-downgrade rule
+- WAL and snapshot formats
+- Authorization on every transport
+- Replication upgrade order, Hub mode, rate limiting
+
 ### [Security Guide](./SECURITY.md)
 
 Security best practices:

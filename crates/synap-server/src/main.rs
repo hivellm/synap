@@ -14,7 +14,8 @@ use std::time::Duration;
 use synap_server::auth::{ApiKeyManager, UserManager};
 use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
 use synap_server::monitoring::{ClientListManager, MonitoringManager};
-use synap_server::persistence::{PersistenceLayer, recover};
+use synap_server::persistence::types::StreamEvent;
+use synap_server::persistence::{PersistenceLayer, recover_all, restore_streams};
 use synap_server::replication::NodeRole;
 use synap_server::{
     AppState, ConsumerGroupConfig, ConsumerGroupManager, KVStore, PartitionConfig,
@@ -43,7 +44,7 @@ struct Args {
     #[arg(long, value_parser = ["master", "replica", "standalone"])]
     role: Option<String>,
 
-    /// Master address for replica nodes (e.g., "127.0.0.1:5500")
+    /// Master address for replica nodes, as host:port (e.g., "master:15600")
     #[arg(long)]
     master_address: Option<String>,
 
@@ -167,6 +168,18 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Override the replica's master address (docker-compose sets it per
+    // replica service). A malformed value stops startup instead of leaving the
+    // replica without a master.
+    config
+        .replication
+        .apply_master_address_override(
+            std::env::var(synap_server::replication::MASTER_ADDRESS_ENV)
+                .ok()
+                .as_deref(),
+        )
+        .map_err(anyhow::Error::msg)?;
+
     // Configure replication from CLI args
     if let Some(role_str) = &args.role {
         config.replication.enabled = role_str != "standalone";
@@ -177,7 +190,11 @@ async fn main() -> Result<()> {
         };
 
         if let Some(master_addr) = &args.master_address {
-            config.replication.master_address = master_addr.parse().ok();
+            config.replication.master_address = Some(
+                master_addr
+                    .parse()
+                    .map_err(|e| anyhow::anyhow!("--master-address: {e}"))?,
+            );
         }
 
         if let Some(replica_listen) = &args.replica_listen {
@@ -227,6 +244,17 @@ async fn main() -> Result<()> {
         "Log format: {}, level: {}",
         config.logging.format, config.logging.level
     );
+
+    // Hub mode isolates tenants only on transports that authenticate a Hub
+    // access key: refuse to start with a listener that would bypass it.
+    if let Err(e) = config.validate_hub_listeners() {
+        error!("{}", e);
+        return Err(anyhow::Error::msg(e));
+    }
+    if let Err(e) = config.rate_limit.validate() {
+        error!("{}", e);
+        return Err(anyhow::Error::msg(e));
+    }
 
     // Recover from persistence or create fresh
     let kv_config = config.to_kv_config();
@@ -302,20 +330,38 @@ async fn main() -> Result<()> {
         Option<Arc<SetStore>>,
         Option<Arc<SortedSetStore>>,
         Option<Arc<QueueManager>>,
+        Option<Arc<synap_server::core::HyperLogLogStore>>,
+        Option<Arc<synap_server::core::BitmapStore>>,
+        std::collections::HashMap<String, Vec<StreamEvent>>,
         u64,
     );
     let (
         kv_store,
         hash_store_recovered,
         list_store_recovered,
-        _set_store_recovered,
-        _sorted_set_store_recovered,
+        set_store_recovered,
+        sorted_set_store_recovered,
         queue_manager,
-        _wal_offset,
+        hyperloglog_store_recovered,
+        bitmap_store_recovered,
+        recovered_streams,
+        recovered_wal_offset,
     ): RecoveredStores = if config.persistence.enabled {
         info!("Persistence enabled, attempting recovery...");
-        match recover(&config.persistence, kv_config.clone(), queue_config.clone()).await {
-            Ok((kv, hs, ls, ss, zs, qm, offset)) => {
+        match recover_all(&config.persistence, kv_config.clone(), queue_config.clone()).await {
+            Ok(recovered) => {
+                let synap_server::persistence::RecoveredStores {
+                    kv_store: kv,
+                    hash_store: hs,
+                    list_store: ls,
+                    set_store: ss,
+                    sorted_set_store: zs,
+                    queue_manager: qm,
+                    hyperloglog_store,
+                    bitmap_store,
+                    streams,
+                    wal_offset: offset,
+                } = recovered;
                 info!("Recovery successful, WAL offset: {}", offset);
                 (
                     Arc::new(
@@ -349,8 +395,19 @@ async fn main() -> Result<()> {
                         )
                     }),
                     qm.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
+                    Some(Arc::new(hyperloglog_store)),
+                    Some(Arc::new(bitmap_store)),
+                    streams,
                     offset,
                 )
+            }
+            // Interior WAL corruption, a damaged header, a WAL written by a
+            // newer format or holding a record this release cannot decode:
+            // starting fresh would hide acknowledged history and append after
+            // it. Refuse to start instead.
+            Err(e) if e.refuses_startup() => {
+                error!("Recovery failed: {}", e);
+                return Err(anyhow::anyhow!("refusing to start: {e}"));
             }
             Err(e) => {
                 warn!("Recovery failed: {}, starting fresh", e);
@@ -378,6 +435,9 @@ async fn main() -> Result<()> {
                     } else {
                         None
                     },
+                    None,
+                    None,
+                    Default::default(),
                     0,
                 )
             }
@@ -419,6 +479,9 @@ async fn main() -> Result<()> {
             } else {
                 None
             },
+            None,
+            None,
+            Default::default(),
             0,
         )
     };
@@ -426,19 +489,24 @@ async fn main() -> Result<()> {
     // Start TTL cleanup task
     kv_store.start_ttl_cleanup();
 
-    // Start queue deadline checker if queue enabled
-    if let Some(ref qm) = queue_manager {
-        qm.start_deadline_checker();
+    // The queue deadline checker starts once the persistence layer exists
+    // (below), so the requeues it performs are recorded.
+    if queue_manager.is_some() {
         info!("Queue system enabled");
     } else {
         info!("Queue system disabled");
     }
 
-    // Initialize stream manager (enabled by default for now)
+    // Initialize stream manager (enabled by default for now) with the rooms of
+    // the recovered snapshot; compaction then applies retention to them.
     let stream_manager = {
         let stream_mgr = Arc::new(
             StreamManager::new(StreamConfig::default()).with_global_memory(global_mem.clone()),
         );
+        let restored = restore_streams(&stream_mgr, recovered_streams).await;
+        if restored > 0 {
+            info!("Restored {} stream rooms from the snapshot", restored);
+        }
         stream_mgr.clone().start_compaction_task();
         info!("Event Stream system enabled");
         Some(stream_mgr)
@@ -466,17 +534,82 @@ async fn main() -> Result<()> {
         Some(pubsub_router_inner)
     };
 
+    // Use recovered hash store (fallback shares the cross-datatype budget too).
+    let hash_store: Arc<synap_server::core::HashStore> =
+        hash_store_recovered.unwrap_or_else(|| {
+            Arc::new(
+                synap_server::core::HashStore::new()
+                    .with_global_memory(global_mem.clone())
+                    .with_keyspace_notifier(keyspace_notifier.clone()),
+            )
+        });
+    info!("Hash store initialized");
+
+    // Use recovered list store
+    let list_store: Arc<synap_server::core::ListStore> =
+        list_store_recovered.unwrap_or_else(|| {
+            Arc::new(
+                synap_server::core::ListStore::new()
+                    .with_global_memory(global_mem.clone())
+                    .with_keyspace_notifier(keyspace_notifier.clone()),
+            )
+        });
+    info!("List store initialized");
+
+    // Use the recovered set store. It used to be replaced by a fresh one here,
+    // which threw away every set the WAL had just replayed.
+    let set_store = set_store_recovered.unwrap_or_else(|| {
+        Arc::new(
+            synap_server::core::SetStore::new()
+                .with_global_memory(global_mem.clone())
+                .with_keyspace_notifier(keyspace_notifier.clone()),
+        )
+    });
+    info!("Set store initialized");
+
+    // Use sorted set store (fresh or recovered)
+    let sorted_set_store = sorted_set_store_recovered.unwrap_or_else(|| {
+        Arc::new(
+            synap_server::core::SortedSetStore::new()
+                .with_global_memory(global_mem.clone())
+                .with_keyspace_notifier(keyspace_notifier.clone()),
+        )
+    });
+    info!("Sorted set store initialized");
+
+    // HyperLogLog and bitmap stores (recovered from the WAL when persistence
+    // is on). Built before the snapshot task and the replica node so both see
+    // them.
+    use synap_server::core::{BitmapStore, HyperLogLogStore};
+    let hyperloglog_store =
+        hyperloglog_store_recovered.unwrap_or_else(|| Arc::new(HyperLogLogStore::new()));
+    info!("HyperLogLog store initialized");
+    let bitmap_store = bitmap_store_recovered.unwrap_or_else(|| Arc::new(BitmapStore::new()));
+    info!("Bitmap store initialized");
+
     // Start the replication node (self-runs on construction). The master is
     // handed to the persistence layer so every logged write is propagated to
     // replicas; the replica keeps itself alive via its own background loop.
+    // The master is built after every datatype store exists, so its full
+    // sync ships all of them from the first replica on (phase31), and the
+    // persistence layer below shares its write-order lock.
     let replication_master = if config.replication.enabled {
         use synap_server::replication::MasterNode;
         match config.replication.role {
             NodeRole::Master if config.replication.replica_listen_address.is_some() => {
-                match MasterNode::new(
+                match MasterNode::with_stores(
                     config.replication.clone(),
-                    kv_store.clone(),
-                    stream_manager.clone(),
+                    synap_server::persistence::StoreArcs {
+                        kv_store: kv_store.clone(),
+                        hash_store: Some(hash_store.clone()),
+                        list_store: Some(list_store.clone()),
+                        set_store: Some(set_store.clone()),
+                        sorted_set_store: Some(sorted_set_store.clone()),
+                        queue_manager: queue_manager.clone(),
+                        stream_manager: stream_manager.clone(),
+                        hyperloglog_store: Some(hyperloglog_store.clone()),
+                        bitmap_store: Some(bitmap_store.clone()),
+                    },
                 )
                 .await
                 {
@@ -523,9 +656,16 @@ async fn main() -> Result<()> {
         {
             Ok(layer) => {
                 info!("Persistence layer initialized (WAL + Snapshots)");
+                // New WAL records continue after everything recovery saw,
+                // never below the loaded snapshot's cutoff.
+                layer.continue_wal_at(recovered_wal_offset);
                 // The background snapshot task is started later, once every
                 // store (hash/list/set/sorted-set) has been constructed.
                 Some(Arc::new(layer))
+            }
+            Err(e) if e.refuses_startup() => {
+                error!("Failed to initialize persistence: {}", e);
+                return Err(anyhow::anyhow!("refusing to start: {e}"));
             }
             Err(e) => {
                 warn!("Failed to initialize persistence: {}", e);
@@ -536,45 +676,14 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Use recovered hash store (fallback shares the cross-datatype budget too).
-    let hash_store: Arc<synap_server::core::HashStore> =
-        hash_store_recovered.unwrap_or_else(|| {
-            Arc::new(
-                synap_server::core::HashStore::new()
-                    .with_global_memory(global_mem.clone())
-                    .with_keyspace_notifier(keyspace_notifier.clone()),
-            )
-        });
-    info!("Hash store initialized");
-
-    // Use recovered list store
-    let list_store: Arc<synap_server::core::ListStore> =
-        list_store_recovered.unwrap_or_else(|| {
-            Arc::new(
-                synap_server::core::ListStore::new()
-                    .with_global_memory(global_mem.clone())
-                    .with_keyspace_notifier(keyspace_notifier.clone()),
-            )
-        });
-    info!("List store initialized");
-
-    // Create set store (always fresh here — wire the shared budget).
-    let set_store = Arc::new(
-        synap_server::core::SetStore::new()
-            .with_global_memory(global_mem.clone())
-            .with_keyspace_notifier(keyspace_notifier.clone()),
-    );
-    info!("Set store initialized");
-
-    // Use sorted set store (fresh or recovered)
-    let sorted_set_store = _sorted_set_store_recovered.unwrap_or_else(|| {
-        Arc::new(
-            synap_server::core::SortedSetStore::new()
-                .with_global_memory(global_mem.clone())
-                .with_keyspace_notifier(keyspace_notifier.clone()),
-        )
-    });
-    info!("Sorted set store initialized");
+    // Requeue in-flight queue messages whose ACK deadline passed, recording
+    // each requeue as a NACK so recovery and replicas count the same retries.
+    if let Some(ref qm) = queue_manager {
+        synap_server::persistence::durable::spawn_queue_deadline_checker(
+            persistence.clone(),
+            qm.clone(),
+        );
+    }
 
     // Periodically recompute collection/broker memory into the shared budget so
     // `maxmemory` reflects all datatypes (audit M-018). KV updates its counter
@@ -618,6 +727,8 @@ async fn main() -> Result<()> {
                 sorted_set_store: Some(sorted_set_store.clone()),
                 queue_manager: queue_manager.clone(),
                 stream_manager: stream_manager.clone(),
+                hyperloglog_store: Some(hyperloglog_store.clone()),
+                bitmap_store: Some(bitmap_store.clone()),
             });
     }
 
@@ -638,6 +749,8 @@ async fn main() -> Result<()> {
                 sorted_set_store: Some(sorted_set_store.clone()),
                 queue_manager: queue_manager.clone(),
                 stream_manager: stream_manager.clone(),
+                hyperloglog_store: Some(hyperloglog_store.clone()),
+                bitmap_store: Some(bitmap_store.clone()),
             },
         )
         .await
@@ -655,16 +768,6 @@ async fn main() -> Result<()> {
             }
         }
     }
-
-    // Create HyperLogLog store
-    use synap_server::core::HyperLogLogStore;
-    let hyperloglog_store = Arc::new(HyperLogLogStore::new());
-    info!("HyperLogLog store initialized");
-
-    // Create Bitmap store
-    use synap_server::core::BitmapStore;
-    let bitmap_store = Arc::new(BitmapStore::new());
-    info!("Bitmap store initialized");
 
     // Create Geospatial store (depends on sorted_set_store)
     use synap_server::core::GeospatialStore;
@@ -812,6 +915,16 @@ async fn main() -> Result<()> {
         None
     };
 
+    // What `admin.config` reports: the configuration after every override,
+    // secrets redacted once here so the shared state never carries them.
+    let redacted_config = config.redacted().map_err(|e| {
+        error!("Cannot serialize the configuration for admin.config: {}", e);
+        anyhow::anyhow!("cannot serialize the configuration: {e}")
+    })?;
+
+    // Kept for the graceful-shutdown WAL drain after the router owns the state.
+    let shutdown_persistence = persistence.clone();
+
     // Create application state with persistence and streams
     let app_state = AppState {
         kv_store,
@@ -843,6 +956,7 @@ async fn main() -> Result<()> {
         },
         require_auth: config.auth.enabled && config.auth.require_auth,
         replication: replication_handle,
+        server_config: Some(Arc::new(redacted_config)),
     };
 
     // Initialize Prometheus metrics
@@ -881,7 +995,8 @@ async fn main() -> Result<()> {
         None
     };
 
-    // Create router with rate limiting and authentication
+    // Create router with rate limiting and authentication. The router logs
+    // whether rate limiting is enforced, since it is what installs the limiter.
     let app = create_router(
         app_state,
         config.rate_limit.clone(),
@@ -892,20 +1007,90 @@ async fn main() -> Result<()> {
         config.auth.require_auth,
     );
 
-    if config.rate_limit.enabled {
-        info!(
-            "Rate limiting enabled: {} req/s (burst: {})",
-            config.rate_limit.requests_per_second, config.rate_limit.burst_size
-        );
-    }
-
     // Bind server
     let addr: SocketAddr = config.server_addr().parse()?;
     info!("Listening on http://{}", addr);
 
-    // Start server
+    // Start server. On SIGINT/SIGTERM stop accepting, let in-flight HTTP
+    // requests finish (bounded by SHUTDOWN_DRAIN_TIMEOUT so a long-lived
+    // connection cannot block exit), then drain and fsync the WAL.
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    let signalled = Arc::new(tokio::sync::Notify::new());
+    // Connection info gives every request its TCP peer address: the rate
+    // limiter keys clients by it, authentication records it as the client IP,
+    // and the WebSocket handlers extract it.
+    let server = axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown({
+        let signalled = Arc::clone(&signalled);
+        async move {
+            shutdown_signal().await;
+            signalled.notify_one();
+        }
+    })
+    .into_future();
+    let served = tokio::select! {
+        result = server => result,
+        _ = async {
+            signalled.notified().await;
+            tokio::time::sleep(SHUTDOWN_DRAIN_TIMEOUT).await;
+        } => {
+            warn!(
+                "HTTP connections still open {:?} after the shutdown signal; closing the WAL anyway",
+                SHUTDOWN_DRAIN_TIMEOUT
+            );
+            Ok(())
+        }
+    };
+
+    // Drain the WAL whatever the HTTP server's outcome.
+    if let Some(layer) = shutdown_persistence {
+        layer.shutdown().await.map_err(|e| {
+            error!("WAL shutdown drain failed: {}", e);
+            anyhow::anyhow!("WAL shutdown drain failed: {e}")
+        })?;
+        info!("WAL flushed and fsynced");
+    }
+    served?;
+    info!("Synap server stopped");
 
     Ok(())
+}
+
+/// How long graceful shutdown waits for in-flight HTTP requests before it
+/// drains the WAL regardless.
+const SHUTDOWN_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Resolve on SIGINT (Ctrl-C) or, on Unix, SIGTERM.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            error!("Cannot listen for Ctrl-C: {}", e);
+            std::future::pending::<()>().await;
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        use tokio::signal::unix::{SignalKind, signal};
+        match signal(SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                sigterm.recv().await;
+            }
+            Err(e) => {
+                error!("Cannot listen for SIGTERM: {}", e);
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {}
+        _ = terminate => {}
+    }
+    info!("Shutdown signal received, draining connections and the WAL");
 }

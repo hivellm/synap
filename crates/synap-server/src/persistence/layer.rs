@@ -1,8 +1,13 @@
 use super::apply::{StoreArcs, StoreRefs};
-use super::types::{FsyncMode, Operation, PersistenceConfig};
+use super::order::{StripeGuards, WriteOrder};
+use super::snapshot::SnapshotImage;
+use super::types::{FsyncMode, Operation, PersistenceConfig, PersistenceError};
+use super::wal_async::WalAck;
 use super::{AsyncWAL, SnapshotManager};
 use crate::core::sorted_set::ZAddOptions;
 use parking_lot::RwLock;
+use std::future::Future;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tracing::info;
@@ -22,6 +27,68 @@ pub struct PersistenceLayer {
     /// connected replicas (audit M-005). Propagation is decoupled from the WAL
     /// so a master replicates even when persistence is disabled (phase6j).
     replication_master: Option<Arc<crate::replication::MasterNode>>,
+    /// Per-key ordering lock and snapshot barrier (phase23): writers hold
+    /// their keys' stripes from applying a write until its record is queued,
+    /// a snapshot holds every stripe while it records its cutoff and copies
+    /// the stores. With a replication master it is the master's lock, so the
+    /// full sync uses the same barrier (phase31).
+    order: Arc<WriteOrder>,
+    /// Serializes snapshots, so a later snapshot always has a later (or
+    /// equal) cutoff and a higher file sequence number.
+    snapshot_serial: tokio::sync::Mutex<()>,
+}
+
+/// A record handed to replication and to the WAL writer queue, not yet
+/// durable. [`Submitted::wait`] waits for the WAL group commit.
+#[must_use = "a submitted record is durable only once `wait` succeeds"]
+pub struct Submitted {
+    ack: Option<WalAck>,
+}
+
+impl Submitted {
+    /// Wait until the record reached the WAL (and the disk, per the fsync
+    /// mode). Immediate without a WAL.
+    pub async fn wait(self) -> super::types::Result<()> {
+        match self.ack {
+            Some(ack) => ack.wait().await.map(|_| ()),
+            None => Ok(()),
+        }
+    }
+}
+
+/// The ordering stripes of one write's keys, held from before the write is
+/// applied until its record is queued (see [`PersistenceLayer::order`]).
+pub struct Ordered<'a> {
+    layer: &'a PersistenceLayer,
+    _stripes: StripeGuards<'a>,
+}
+
+impl Ordered<'_> {
+    /// Queue `operation` while the stripes are still held, release them, then
+    /// wait for the record to be durable.
+    pub async fn commit(self, operation: Operation) -> super::types::Result<()> {
+        let submitted = self.layer.submit(operation, 1)?;
+        drop(self);
+        submitted.wait().await
+    }
+
+    /// [`commit`](Self::commit) for a command that produced several effects:
+    /// they are queued as ONE record (see [`PersistenceLayer::log_operations`]).
+    pub async fn commit_all(self, operations: Vec<Operation>) -> super::types::Result<()> {
+        let submitted = self.layer.submit_all(operations)?;
+        drop(self);
+        submitted.wait().await
+    }
+
+    /// [`commit`](Self::commit) for a committed MULTI/EXEC transaction.
+    pub async fn commit_transaction(
+        self,
+        writes: &[crate::core::CommittedWrite],
+    ) -> super::types::Result<()> {
+        let submitted = self.layer.submit_transaction(writes)?;
+        drop(self);
+        submitted.wait().await
+    }
 }
 
 impl PersistenceLayer {
@@ -41,20 +108,73 @@ impl PersistenceLayer {
         replication_master: Option<Arc<crate::replication::MasterNode>>,
     ) -> super::types::Result<Self> {
         let wal = if config.enabled && config.wal.enabled {
-            Some(Arc::new(AsyncWAL::open(config.wal.clone()).await?))
+            Some(AsyncWAL::open(config.wal.clone()).await?)
         } else {
             None
         };
-        let snapshot_mgr = SnapshotManager::new(config.snapshot.clone());
+        Ok(Self::with_wal(config, wal, replication_master))
+    }
 
-        Ok(Self {
-            wal,
+    /// Build a layer around an already-open WAL (or none). This is the seam for
+    /// a WAL opened with [`AsyncWAL::open_with_sink`], e.g. to inject flush and
+    /// fsync failures in tests.
+    pub fn with_wal(
+        config: PersistenceConfig,
+        wal: Option<AsyncWAL>,
+        replication_master: Option<Arc<crate::replication::MasterNode>>,
+    ) -> Self {
+        let snapshot_mgr = SnapshotManager::new(config.snapshot.clone());
+        let order = replication_master
+            .as_ref()
+            .map(|master| master.write_order())
+            .unwrap_or_default();
+
+        Self {
+            wal: wal.map(Arc::new),
             snapshot_mgr: Arc::new(snapshot_mgr),
             config,
             last_snapshot: Arc::new(RwLock::new(Instant::now())),
             operations_since_snapshot: Arc::new(RwLock::new(0)),
             replication_master,
-        })
+            order,
+            snapshot_serial: tokio::sync::Mutex::new(()),
+        }
+    }
+
+    /// Make the next WAL record get offset `next_offset` or a later one.
+    ///
+    /// Call it at startup with [`RecoveredStores::wal_offset`](super::RecoveredStores::wal_offset),
+    /// before any write: when the WAL lost records a snapshot holds (power
+    /// loss right after a snapshot taken by an earlier release), new records
+    /// would otherwise reuse offsets below the snapshot's cutoff and the next
+    /// recovery from that snapshot would skip them. A no-op without a WAL.
+    pub fn continue_wal_at(&self, next_offset: u64) {
+        if let Some(wal) = &self.wal {
+            wal.continue_at(next_offset);
+        }
+    }
+
+    /// Lock the ordering stripes of `keys` for one write.
+    ///
+    /// Take this BEFORE applying the write and finish with
+    /// [`Ordered::commit`]: the record is then queued for replication and the
+    /// WAL before any later write to the same keys, so both see writes to a
+    /// key in the order memory applied them, and a snapshot can never capture
+    /// the write's effect while its record lands after the snapshot's cutoff.
+    pub async fn order<'k>(&self, keys: impl IntoIterator<Item = &'k str>) -> Ordered<'_> {
+        Ordered {
+            layer: self,
+            _stripes: self.order.lock(keys).await,
+        }
+    }
+
+    /// Lock every ordering stripe for a write that touches every key (FLUSHDB):
+    /// it is ordered against all writers and against snapshots as a whole.
+    pub async fn order_all(&self) -> Ordered<'_> {
+        Ordered {
+            layer: self,
+            _stripes: self.order.lock_all().await,
+        }
     }
 
     /// Propagate an operation to connected replicas when running as master.
@@ -72,58 +192,103 @@ impl PersistenceLayer {
     /// persistence being enabled (phase6j); WAL logging follows when durable
     /// persistence is active.
     async fn record(&self, operation: Operation) -> super::types::Result<()> {
-        self.maybe_replicate(&operation);
-
-        if let Some(wal) = &self.wal {
-            wal.append(operation).await?;
-            *self.operations_since_snapshot.write() += 1;
-        }
-
-        Ok(())
+        self.submit(operation, 1)?.wait().await
     }
 
-    /// Log an entire committed transaction as one atomic unit (audit M-010).
+    /// Hand one record (standing for `count` operations) to replication and to
+    /// the WAL writer queue, synchronously, without waiting for durability.
+    fn submit(&self, operation: Operation, count: usize) -> super::types::Result<Submitted> {
+        self.maybe_replicate(&operation);
+        let ack = match &self.wal {
+            Some(wal) => {
+                let ack = wal.enqueue(operation)?;
+                *self.operations_since_snapshot.write() += count;
+                Some(ack)
+            }
+            None => None,
+        };
+        Ok(Submitted { ack })
+    }
+
+    /// Submit the effects of one command: several operations become ONE
+    /// [`Operation::Transaction`] record; one operation is submitted as itself.
+    fn submit_all(&self, mut operations: Vec<Operation>) -> super::types::Result<Submitted> {
+        match operations.len() {
+            0 => Ok(Submitted { ack: None }),
+            1 => self.submit(operations.remove(0), 1),
+            count => self.submit(Operation::Transaction { operations }, count),
+        }
+    }
+
+    /// Submit a committed transaction as ONE [`Operation::Transaction`] record.
+    fn submit_transaction(
+        &self,
+        writes: &[crate::core::CommittedWrite],
+    ) -> super::types::Result<Submitted> {
+        if writes.is_empty() {
+            return Ok(Submitted { ack: None });
+        }
+        let operations: Vec<Operation> = writes
+            .iter()
+            .map(Self::committed_write_to_operation)
+            .collect();
+        self.submit(Operation::Transaction { operations }, writes.len())
+    }
+
+    /// Record the effect of one write that has already been applied in memory:
+    /// propagate it to replicas and append it to the WAL. This is what the
+    /// shared mutation path ([`super::durable`]) calls for every transport.
+    pub async fn log_operation(&self, operation: Operation) -> super::types::Result<()> {
+        self.record(operation).await
+    }
+
+    /// Record the effects of one command that produced several operations
+    /// (MSET, HMSET, GEOADD, ...) as ONE [`Operation::Transaction`] record, so
+    /// replicas and WAL replay apply the command whole or not at all. A single
+    /// operation is recorded as itself.
+    pub async fn log_operations(&self, operations: Vec<Operation>) -> super::types::Result<()> {
+        self.submit_all(operations)?.wait().await
+    }
+
+    /// Log an entire committed transaction as one atomic unit (audit M-010,
+    /// phase22).
     ///
     /// Each [`CommittedWrite`](crate::core::CommittedWrite) is mapped to its
-    /// persistence [`Operation`], every op is propagated to replicas (so the
-    /// transaction is replicated, decoupled from the WAL), and the whole set is
-    /// appended to the WAL as a single atomic batch — so a MULTI/EXEC survives a
-    /// crash all-or-nothing rather than as interleavable single appends. With
-    /// persistence disabled the ops are still replicated (no WAL append).
+    /// persistence [`Operation`] and the set is wrapped in ONE
+    /// [`Operation::Transaction`] record. That record is propagated to replicas
+    /// as a single replication command with a single offset (decoupled from the
+    /// WAL), so a replica applies the transaction whole or not at all, and is
+    /// appended to the WAL as a single frame under one checksum, so a crash
+    /// recovers every effect or none. With persistence disabled the record is
+    /// still replicated (no WAL append).
     pub async fn log_transaction(
         &self,
         writes: &[crate::core::CommittedWrite],
     ) -> super::types::Result<()> {
-        if writes.is_empty() {
-            return Ok(());
-        }
-
-        let ops: Vec<Operation> = writes
-            .iter()
-            .map(Self::committed_write_to_operation)
-            .collect();
-
-        // Propagate to replicas first (decoupled from the WAL, phase6j).
-        for op in &ops {
-            self.maybe_replicate(op);
-        }
-
-        if let Some(wal) = &self.wal {
-            wal.append_batch(ops).await?;
-            *self.operations_since_snapshot.write() += writes.len();
-        }
-
-        Ok(())
+        self.submit_transaction(writes)?.wait().await
     }
 
     /// Map a committed transaction effect to its durable persistence operation.
     fn committed_write_to_operation(write: &crate::core::CommittedWrite) -> Operation {
         use crate::core::CommittedWrite as Cw;
         match write {
-            Cw::KvSet { key, value, ttl } => Operation::KVSet {
+            Cw::KvSet {
+                key,
+                value,
+                expires_at_ms: None,
+            } => Operation::KVSet {
                 key: key.clone(),
                 value: value.clone(),
-                ttl: *ttl,
+                ttl: None,
+            },
+            Cw::KvSet {
+                key,
+                value,
+                expires_at_ms,
+            } => Operation::KVSetAt {
+                key: key.clone(),
+                value: value.clone(),
+                expires_at_ms: *expires_at_ms,
             },
             Cw::KvDel { keys } => Operation::KVDel { keys: keys.clone() },
             Cw::HashSet { key, field, value } => Operation::HashSet {
@@ -325,14 +490,19 @@ impl PersistenceLayer {
         .await
     }
 
-    /// Log a Queue PUBLISH operation
+    /// Log a Queue PUBLISH operation with the whole message (creation time
+    /// included), so recovery and replicas restore it with its original ID
+    /// and metadata.
     pub async fn log_queue_publish(
         &self,
         queue: String,
         message: crate::core::queue::QueueMessage,
     ) -> super::types::Result<()> {
-        self.record(Operation::QueuePublish { queue, message })
-            .await
+        self.record(Operation::QueuePublishFull {
+            queue,
+            message: super::types::QueueMessageRecord::from(&message),
+        })
+        .await
     }
 
     /// Log a Queue ACK operation
@@ -394,20 +564,76 @@ impl PersistenceLayer {
 
         if should_snapshot {
             info!("Creating periodic snapshot");
-
-            // A WAL-less layer (persistence disabled) has no offset to record.
-            let wal_offset = self.wal.as_ref().map(|w| w.current_offset()).unwrap_or(0);
-
-            self.snapshot_mgr
-                .create_snapshot(stores, wal_offset)
-                .await?;
-
-            // Reset counters
-            *self.last_snapshot.write() = Instant::now();
-            *self.operations_since_snapshot.write() = 0;
+            self.snapshot(stores).await?;
         }
 
         Ok(())
+    }
+
+    /// Write a snapshot now, paired exactly with its WAL cutoff.
+    ///
+    /// Under the write barrier (every ordering stripe held, so no write is
+    /// between being applied and being queued) it places a mark in the WAL
+    /// queue and copies the stores; then it releases the barrier, learns the
+    /// cutoff from the mark, and serializes outside the barrier. Every write
+    /// is either in the image (queued before the mark, offset below the
+    /// cutoff, not replayed) or after the cutoff (not in the image, replayed),
+    /// never both. Without a WAL the cutoff is 0.
+    ///
+    /// Before the file is published the WAL is fsynced up to the cutoff,
+    /// whatever its fsync mode, and the file itself is written to a temporary
+    /// name, fsynced and renamed (see [`SnapshotManager::write_image`]).
+    /// Snapshots run one at a time.
+    pub async fn snapshot(&self, stores: StoreRefs<'_>) -> super::types::Result<PathBuf> {
+        self.snapshot_with_pause(stores, std::future::ready(()))
+            .await
+    }
+
+    /// [`snapshot`](Self::snapshot) that awaits `at_cutoff` while the barrier
+    /// holds, right after the cutoff is recorded and before the stores are
+    /// copied. A test seam: writers issued meanwhile wait for the barrier, so
+    /// they land after the cutoff and outside the image.
+    pub async fn snapshot_with_pause(
+        &self,
+        stores: StoreRefs<'_>,
+        at_cutoff: impl Future<Output = ()>,
+    ) -> super::types::Result<PathBuf> {
+        let _serial = self.snapshot_serial.lock().await;
+        let started = Instant::now();
+        let (image, mark) = {
+            let _barrier = self.order.lock_all().await;
+            let mark = self.wal.as_ref().map(|wal| wal.mark()).transpose()?;
+            at_cutoff.await;
+            let image = SnapshotImage::capture(stores).await?;
+            *self.operations_since_snapshot.write() = 0;
+            (image, mark)
+        };
+        let barrier_held = started.elapsed();
+        let wal_offset = match mark {
+            Some(mark) => mark.offset().await?,
+            None => 0,
+        };
+        // The WAL must durably hold every record below the cutoff before a
+        // snapshot that skips them exists: otherwise a power loss could keep
+        // the snapshot but drop those records, and the WAL would hand their
+        // offsets out again to writes the next recovery from this snapshot
+        // skips.
+        if let Some(wal) = &self.wal {
+            wal.sync().await?;
+        }
+        let path = self
+            .snapshot_mgr
+            .write_image(image, stores.stream_manager, wal_offset)
+            .await?;
+        *self.last_snapshot.write() = Instant::now();
+        info!(
+            "Snapshot {:?} at WAL offset {} (writes paused {:?}, total {:?})",
+            path,
+            wal_offset,
+            barrier_held,
+            started.elapsed()
+        );
+        Ok(path)
     }
 
     /// Start background snapshot task
@@ -596,10 +822,81 @@ impl PersistenceLayer {
             .await
     }
 
-    /// No explicit flush needed with AsyncWAL (group commit handles it)
+    /// Wait until every operation logged before this call has reached the OS,
+    /// and stable storage too unless the fsync mode is `Never`. Fails when the
+    /// WAL is poisoned. A no-op without a WAL.
     pub async fn flush(&self) -> super::types::Result<()> {
-        // AsyncWAL handles batching and flushing automatically
-        Ok(())
+        match &self.wal {
+            Some(wal) => wal.flush().await,
+            None => Ok(()),
+        }
+    }
+
+    /// Graceful-shutdown drain: flush and fsync every logged operation, then
+    /// stop the WAL writer so nothing logged afterwards is acknowledged.
+    /// A no-op without a WAL.
+    pub async fn shutdown(&self) -> super::types::Result<()> {
+        match &self.wal {
+            Some(wal) => wal.shutdown().await,
+            None => Ok(()),
+        }
+    }
+
+    /// Why the WAL writer is poisoned (a write, flush or fsync failed), or
+    /// `None` while it is healthy or there is no WAL. A poisoned WAL refuses
+    /// every write until the server restarts.
+    pub fn wal_poison_reason(&self) -> Option<String> {
+        self.wal.as_ref().and_then(|wal| wal.poison_reason())
+    }
+
+    /// Whether this layer writes a WAL (persistence and WAL both enabled).
+    pub fn has_wal(&self) -> bool {
+        self.wal.is_some()
+    }
+}
+
+/// Error text every EXEC entry point returns when the committed transaction
+/// could not be logged. The effects are already applied in memory and are not
+/// rolled back; the message says so, because the commit is not durable.
+pub fn exec_not_durable_message(err: &PersistenceError) -> String {
+    format!(
+        "transaction applied in memory but could not be logged to the WAL, so the commit is not durable and the effects are not rolled back: {err}"
+    )
+}
+
+/// Error text every transport returns when a single write could not be
+/// recorded. The write is already applied in memory and is not rolled back;
+/// the message says so, because it is not durable.
+pub fn write_not_durable_message(err: &PersistenceError) -> String {
+    format!(
+        "write applied in memory but could not be logged to the WAL, so it is not durable and is not rolled back: {err}"
+    )
+}
+
+/// Shared test helpers for code that needs a WAL that fails on demand.
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use crate::persistence::wal_async::fault::Faults;
+    use std::path::PathBuf;
+
+    /// An Always-mode, WAL-backed layer whose sink fails the next flush or
+    /// fsync when told to through the returned [`Faults`].
+    pub(crate) async fn faulty_layer(name: &str) -> (Arc<PersistenceLayer>, Faults) {
+        let dir = format!("./target/faulty_layer_{name}");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut config = PersistenceConfig::default();
+        config.wal.fsync_mode = FsyncMode::Always;
+        config.wal.path = PathBuf::from(format!("{dir}/wal.log"));
+        config.snapshot.enabled = false;
+        config.snapshot.directory = PathBuf::from(format!("{dir}/snap"));
+        let faults = Faults::default();
+        let wrap = faults.clone();
+        let wal = AsyncWAL::open_with_sink(config.wal.clone(), move |sink| wrap.wrap(sink))
+            .await
+            .unwrap();
+        let layer = PersistenceLayer::with_wal(config, Some(wal), None);
+        (Arc::new(layer), faults)
     }
 }
 
@@ -614,7 +911,7 @@ mod tests {
             CommittedWrite::KvSet {
                 key: "k".into(),
                 value: b"v".to_vec(),
-                ttl: Some(60),
+                expires_at_ms: Some(4_102_444_800_000),
             },
             CommittedWrite::KvDel {
                 keys: vec!["k2".into()],
@@ -801,6 +1098,52 @@ mod tests {
             .unwrap();
     }
 
+    /// A transaction whose WAL flush fails returns an error, poisons the WAL,
+    /// and every later log call fails too.
+    #[tokio::test]
+    async fn log_transaction_fails_when_the_wal_flush_fails() {
+        let (layer, faults) = test_support::faulty_layer("txn_flush_fail").await;
+
+        faults.fail_next_flush();
+        let err = layer
+            .log_transaction(&all_committed_writes())
+            .await
+            .unwrap_err();
+        assert!(exec_not_durable_message(&err).contains("not durable"));
+        assert!(layer.wal_poison_reason().unwrap().contains("flush failed"));
+        assert!(
+            layer
+                .log_kv_set("k".into(), b"v".to_vec(), None)
+                .await
+                .is_err()
+        );
+        assert!(layer.flush().await.is_err());
+    }
+
+    /// A master ships a transaction as ONE replication unit: one record at one
+    /// replication offset, holding every operation in order.
+    #[tokio::test]
+    async fn log_transaction_replicates_one_unit() {
+        use crate::replication::{MasterNode, NodeRole, ReplicationConfig};
+
+        let mut repl = ReplicationConfig::default();
+        repl.enabled = true;
+        repl.role = NodeRole::Master;
+        repl.replica_listen_address = Some("127.0.0.1:0".parse().unwrap());
+        let kv = Arc::new(crate::core::KVStore::new(KVConfig::default()));
+        let master = Arc::new(MasterNode::new(repl, kv, None).await.unwrap());
+
+        let mut config = PersistenceConfig::default();
+        config.enabled = false;
+        let layer = PersistenceLayer::new_with_replication(config, Some(Arc::clone(&master)))
+            .await
+            .unwrap();
+        let writes = all_committed_writes();
+        layer.log_transaction(&writes).await.unwrap();
+
+        assert_eq!(master.replication_offset(), 1);
+    }
+
     /// A transaction logged with WAL enabled is recovered as its effects.
     #[tokio::test]
     async fn log_transaction_is_durable_and_recovers() {
@@ -823,7 +1166,7 @@ mod tests {
                     CommittedWrite::KvSet {
                         key: "tk".into(),
                         value: b"tv".to_vec(),
-                        ttl: None,
+                        expires_at_ms: None,
                     },
                     CommittedWrite::HashSet {
                         key: "th".into(),
@@ -845,5 +1188,64 @@ mod tests {
         assert_eq!(hash.unwrap().hget("th", "f").unwrap(), Some(b"hv".to_vec()));
 
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Layer over a Never-mode WAL whose fsyncs are counted.
+    async fn never_mode_layer(
+        name: &str,
+    ) -> (
+        PersistenceLayer,
+        crate::persistence::wal_async::fault::Faults,
+    ) {
+        let dir = format!("./target/layer_{name}");
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut config = PersistenceConfig::default();
+        config.wal.fsync_mode = FsyncMode::Never;
+        config.wal.path = PathBuf::from(format!("{dir}/wal.log"));
+        config.snapshot.directory = PathBuf::from(format!("{dir}/snap"));
+        let faults = crate::persistence::wal_async::fault::Faults::default();
+        let wrap = faults.clone();
+        let wal = AsyncWAL::open_with_sink(config.wal.clone(), move |sink| wrap.wrap(sink))
+            .await
+            .unwrap();
+        (PersistenceLayer::with_wal(config, Some(wal), None), faults)
+    }
+
+    /// A snapshot fsyncs the WAL up to its cutoff before it is published,
+    /// even when the WAL itself never fsyncs.
+    #[tokio::test]
+    async fn snapshot_fsyncs_the_wal_before_publishing_in_never_mode() {
+        let (layer, faults) = never_mode_layer("snapshot_wal_sync").await;
+        let kv = crate::core::KVStore::new(KVConfig::default());
+        layer
+            .log_kv_set("k".into(), b"v".to_vec(), None)
+            .await
+            .unwrap();
+        assert_eq!(faults.syncs(), 0, "Never mode does not fsync writes");
+
+        layer.snapshot(StoreRefs::kv_only(&kv)).await.unwrap();
+        assert_eq!(faults.syncs(), 1, "the snapshot fsynced the WAL");
+    }
+
+    /// The WAL continues at the offset recovery hands over, never below it,
+    /// and never moves backwards.
+    #[tokio::test]
+    async fn continue_wal_at_raises_the_next_offset_only() {
+        let (layer, _faults) = never_mode_layer("continue_wal_at").await;
+        layer.continue_wal_at(100);
+        layer.continue_wal_at(5);
+        layer
+            .log_kv_set("k".into(), b"v".to_vec(), None)
+            .await
+            .unwrap();
+        layer.shutdown().await.unwrap();
+
+        let mut offsets = Vec::new();
+        crate::persistence::wal_frame::scan(
+            &PathBuf::from("./target/layer_continue_wal_at/wal.log"),
+            |entry| offsets.push(entry.offset),
+        )
+        .unwrap();
+        assert_eq!(offsets, vec![100]);
     }
 }

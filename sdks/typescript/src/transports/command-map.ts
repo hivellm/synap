@@ -73,6 +73,19 @@ export function mapCommand(
     typeof v === 'string' || v instanceof Uint8Array || Buffer.isBuffer(v)
       ? v
       : JSON.stringify(v ?? null);
+  /**
+   * The `amount` of `kv.incr` / `kv.decr` as its JSON text — the exact text the
+   * HTTP envelope receives — or `null` when absent. The server accepts it only
+   * when it is an integer, so a malformed amount fails on every transport
+   * instead of turning into a different number on one of them.
+   */
+  const amount = (): string | null =>
+    payload['amount'] == null ? null : JSON.stringify(payload['amount']);
+  /** INCR/DECR without an amount, INCRBY/DECRBY with one. */
+  const counter = (plain: string, by: string): MappedCommand => {
+    const a = amount();
+    return a === null ? { rawCmd: plain, args: [s('key')] } : { rawCmd: by, args: [s('key'), a] };
+  };
 
   switch (cmd) {
     // ── KV ────────────────────────────────────────────────────────────────────
@@ -87,8 +100,8 @@ export function mapCommand(
 
     case 'kv.del':    return { rawCmd: 'DEL',    args: [s('key')] };
     case 'kv.exists': return { rawCmd: 'EXISTS', args: [s('key')] };
-    case 'kv.incr':   return { rawCmd: 'INCR',   args: [s('key')] };
-    case 'kv.decr':   return { rawCmd: 'DECR',   args: [s('key')] };
+    case 'kv.incr':   return counter('INCR', 'INCRBY');
+    case 'kv.decr':   return counter('DECR', 'DECRBY');
 
     case 'kv.keys': {
       const prefix = String(payload['prefix'] ?? '');

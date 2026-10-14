@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Consumer of the packed HiveLLM.Synap.SDK .nupkg. run.py copies this
+       project to a scratch directory, next to a nuget.config whose only source
+       for HiveLLM.Synap.SDK is the directory holding the package under test,
+       and passes the package version as SynapSdkVersion. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>12</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="HiveLLM.Synap.SDK" Version="$(SynapSdkVersion)" />
+  </ItemGroup>
+
+</Project>

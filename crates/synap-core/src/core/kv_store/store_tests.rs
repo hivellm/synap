@@ -235,6 +235,17 @@ async fn test_decr() {
 }
 
 #[tokio::test]
+async fn test_decr_by_i64_min_overflows_without_mutation() {
+    let store = KVStore::new(KVConfig::default());
+    store.set("counter", b"0".to_vec(), None).await.unwrap();
+
+    // -i64::MIN does not fit in an i64: the decrement must fail, not wrap
+    // into an increment by i64::MIN.
+    assert!(store.decr("counter", i64::MIN).await.is_err());
+    assert_eq!(store.incr("counter", 0).await.unwrap(), 0);
+}
+
+#[tokio::test]
 async fn test_mset_mget() {
     let store = KVStore::new(KVConfig::default());
 
@@ -1636,5 +1647,57 @@ mod watch {
             store.get("k").await.expect("get succeeds").as_deref(),
             Some(b"v".as_slice())
         );
+    }
+}
+
+/// phase23: the deadline-returning write paths report exactly what the
+/// store stored, and `dump_with_expiry` exports it.
+mod absolute_expiry {
+    use super::*;
+
+    fn now_ms() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+    }
+
+    #[tokio::test]
+    async fn deadlines_are_returned_and_dumped() {
+        let store = KVStore::new(KVConfig::default());
+        let before = now_ms();
+        let deadline = store
+            .set_returning_deadline("t", b"v".to_vec(), Some(100))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(deadline >= before + 100_000 && deadline <= now_ms() + 100_000);
+        assert_eq!(
+            store
+                .set_returning_deadline("p", b"v".to_vec(), None)
+                .await
+                .unwrap(),
+            None
+        );
+
+        let expired = store.expire_returning_deadline("p", 50).await.unwrap();
+        assert!(expired.is_some_and(|d| d > now_ms() + 45_000));
+        assert_eq!(
+            store.expire_returning_deadline("missing", 5).await.unwrap(),
+            None
+        );
+
+        let at = now_ms() + 30_000;
+        assert!(store.expire_at("t", at).await.unwrap());
+        assert!(!store.expire_at("missing", at).await.unwrap());
+
+        let mut dump = store.dump_with_expiry().await.unwrap();
+        dump.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(dump.len(), 2);
+        assert_eq!(dump[0].0, "p");
+        assert_eq!(dump[0].2, expired);
+        assert_eq!(dump[1].0, "t");
+        assert_eq!(&*dump[1].1, b"v");
+        assert_eq!(dump[1].2, Some(at));
     }
 }

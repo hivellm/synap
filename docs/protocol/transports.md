@@ -199,6 +199,12 @@ Legend: ✅ implemented · ❌ not yet · N/A not applicable
 | LRANGE/LLEN | ✅ | ✅ | ✅ |
 | LINDEX/LSET/LTRIM/LREM | ✅ | ❌ | ❌ |
 | LINSERT/LPUSHX/RPUSHX | ✅ | ❌ | ❌ |
+| BLPOP/BRPOP/BRPOPLPUSH | ❌ | ✅ | ✅ |
+
+Blocking pops on several keys wake on whichever key receives data first and
+pop from the first non-empty key in argument order; clients blocked on one key
+are served in the order they blocked. A timeout of `0` blocks until data
+arrives; otherwise the reply is Null when it expires.
 
 A ❌ here means the command has no native dispatcher, so an SDK on `synap://`
 or `resp3://` refuses it up front (`UnsupportedCommandError`) rather than
@@ -222,6 +228,7 @@ sending a name the server would reject. Use the HTTP transport for these.
 | ZRANK/ZREVRANK/ZREVRANGE | ✅ | ❌ | ❌ |
 | ZCOUNT/ZRANGEBYSCORE | ✅ | ❌ | ❌ |
 | ZPOPMIN/ZPOPMAX | ✅ | ❌ | ❌ |
+| BZPOPMIN/BZPOPMAX | ❌ | ✅ | ✅ |
 
 ### HyperLogLog
 

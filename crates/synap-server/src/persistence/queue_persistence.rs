@@ -102,16 +102,8 @@ impl QueuePersistence {
                     // Recreate queue if doesn't exist
                     let _ = queue_manager.create_queue(&queue, None).await;
 
-                    // Republish message
-                    queue_manager
-                        .publish(
-                            &queue,
-                            message.payload.to_vec(),
-                            Some(message.priority),
-                            Some(message.max_retries),
-                        )
-                        .await
-                        .ok();
+                    // Restore the message with its original ID and metadata
+                    queue_manager.restore_message(&queue, message).await.ok();
 
                     recovered_count += 1;
                 }

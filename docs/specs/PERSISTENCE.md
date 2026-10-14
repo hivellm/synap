@@ -34,14 +34,21 @@ Periodic snapshots reduce WAL replay time on restart.
 Every N minutes OR M operations:
     │
     ▼
-Create Snapshot (full state dump)
+Capture the stores under the write barrier, record the WAL cutoff
     │
     ▼
-Truncate WAL (remove old entries)
+Fsync the WAL up to the cutoff (whatever fsync_mode is)
     │
     ▼
-Keep last K snapshots
+Write snapshot-v5-<sequence>.bin.tmp, fsync, rename, fsync the directory
+    │
+    ▼
+Keep the last K snapshots (never the one just written)
 ```
+
+The server never truncates the WAL: recovery can always fall back from a
+damaged snapshot to an older one (or to the whole WAL) as long as nobody cut
+the WAL by hand. See "Snapshot Files and Crash Safety" below.
 
 ## Data Structure
 
@@ -353,6 +360,15 @@ pub async fn auto_snapshot_task(
 
 ### WAL Truncation
 
+The server does not truncate or rotate the WAL; `WriteAheadLog::truncate`
+exists as an API but nothing in the server calls it. A caller that does
+must only cut below the cutoff of a snapshot that is already durable (it
+was published by `SnapshotManager::write_image`, which fsyncs and renames
+before returning) and verified (`SnapshotManager::load` succeeds). After a
+cut, recovery refuses to fall back to a snapshot older than the cut (see
+"Snapshot Files and Crash Safety"). The sketch below is the historical
+design; the current implementation also keeps every entry's original offset.
+
 ```rust
 impl WriteAheadLog {
     pub async fn truncate(&mut self, up_to_offset: u64) -> Result<()> {
@@ -506,9 +522,9 @@ WAL (always):      10K ops/sec  (98% reduction)
 │   └── synap.wal              # Write-ahead log
 │
 ├── snapshots/
-│   ├── snapshot-1697410800.bin
-│   ├── snapshot-1697411100.bin
-│   └── snapshot-1697411400.bin
+│   ├── snapshot-v5-00000000000000000041.bin
+│   ├── snapshot-v5-00000000000000000042.bin
+│   └── snapshot-v5-00000000000000000043.bin
 │
 └── metadata/
     └── recovery.json          # Recovery metadata
@@ -516,45 +532,77 @@ WAL (always):      10K ops/sec  (98% reduction)
 
 ## Queue Persistence
 
-### Queue State
+Queue writes go through `persistence::durable` on every transport (REST,
+envelope, RESP3, SynapRPC, MCP) and lock the queue name's ordering stripe like
+any key, so they are ordered against snapshots like every other write.
 
-Persisted queue state includes:
-- Messages in queue (VecDeque)
-- Pending messages (HashMap)
-- Consumer state
-- Dead letter queue
+### What is recorded
 
-```rust
-pub struct QueueSnapshot {
-    pub queued: Vec<QueueMessage>,
-    pub pending: Vec<PendingMessage>,
-    pub dead_letter: Vec<DeadLetteredMessage>,
-    pub stats: QueueStats,
-}
-```
+| Write | Record | Replay |
+|---|---|---|
+| QCREATE | `QueueCreate { queue, config }` (only when the queue is new) | create with that configuration |
+| QPUBLISH | `QueuePublishFull { queue, message }` — every field, `created_at` included | insert the message with its original ID and metadata (`restore_message`) |
+| QACK | `QueueAck { queue, message_id }` | remove the message by ID, ready or pending |
+| QNACK | `QueueNack { queue, message_id, requeue }` | by ID, ready or pending: retry counter +1, then requeue at the back, dead-letter or drop |
+| ACK deadline expiry | `QueueNack { requeue: true }` per expired delivery | as a NACK |
+| QPURGE | `QueuePurge { queue, message_ids }` (the ready messages it removed) | remove exactly those IDs |
+| QDELETE | `QueueDelete { queue }` (only when the queue existed) | delete the queue |
 
-### ACK Durability
+Deliveries (CONSUME) are not recorded. During a replay, and on a replica, a
+delivered message is therefore ready until its ACK or NACK is applied; that is
+why ACK, NACK and purge act by message ID in either state. `QueuePublish`
+records from older WALs carry no creation time; they are restored with their
+ID and every other field.
 
-```rust
-impl Queue {
-    pub async fn ack_with_persistence(
-        &mut self,
-        message_id: &MessageId,
-        wal: &mut WriteAheadLog,
-    ) -> Result<()> {
-        // 1. Write to WAL
-        wal.append(Operation::QueueAck {
-            queue: self.name.clone(),
-            message_id: message_id.clone(),
-        }).await?;
-        
-        // 2. Remove from pending
-        self.pending.remove(message_id);
-        
-        Ok(())
-    }
-}
-```
+A replayed ACK, NACK or purge whose message (or queue) is already gone is
+expected — a snapshot taken after the message was settled no longer holds it —
+and is skipped. Any other replay error fails recovery.
+
+### Queue state in snapshots
+
+Snapshot v5 stores each queue whole: its configuration and its ready,
+in-flight and dead-lettered messages with their full metadata (see
+`docs/internals/persistence-snapshot-format.md`). On restart, in-flight
+messages become ready again for redelivery (no consumer survives a restart),
+each ahead of the waiting messages of the same or lower priority, in the order
+they were delivered.
+
+### Guarantees after a restart
+
+- An acknowledged message is never deliverable again, whether recovery used
+  the WAL alone or a snapshot plus the WAL tail.
+- Every unacknowledged message keeps its ID, payload, priority, retry
+  counters, creation time and headers.
+- A message that was delivered but not acknowledged is delivered again
+  (at-least-once). An ACK sent after the restart for such a message returns
+  not-found, because the server no longer considers it delivered.
+- Queue configuration, purges and deletions survive the restart. Queues
+  created before 1.4.0 have no creation record and come back with the
+  server's default configuration.
+- The redelivery order of messages that were in flight at the restart can
+  differ between a WAL-only recovery (they stay where they were published)
+  and a snapshot recovery (they go ahead of waiting messages of the same or
+  lower priority).
+
+## Stream Persistence
+
+Stream publishes are not written to the WAL. Every snapshot holds each room's
+buffered events in its stream section, and startup restores those rooms
+(`recovery::restore_streams`, called by `main.rs` once the stream manager
+exists):
+
+- every event comes back with its ID, offset, type, data and timestamp, so a
+  consumer resumes at the offset it had, and the next publish gets the offset
+  after the last restored event;
+- events published after the newest snapshot are lost, and their offsets are
+  given to new events; each restored room is therefore a new incarnation and
+  reports a new `generation`;
+- retention applies to restored events as to any other: compaction removes
+  the oldest while they are older than `retention_secs` (none when it is 0,
+  which keeps events regardless of age), and only the newest
+  `max_buffer_size` events of a room are kept;
+- a room whose recorded offsets are not contiguous is skipped with a warning
+  naming it; the other rooms and every other store still come back.
 
 ## Recovery Scenarios
 
@@ -570,23 +618,193 @@ Time: 1-5 seconds
 ### Crash Recovery
 
 ```
-1. Detect incomplete WAL entry
-2. Load latest valid snapshot
-3. Replay WAL up to last valid entry
-4. Discard incomplete entry
-5. Resume operations
+1. Read the file header: "SYNAPWAL" + format version (u32 BE). No header means
+   a 1.3.x file (format version 1, frames from byte 0); a version newer than
+   the server reads fails startup naming both versions
+2. Scan the WAL: verify each frame's length (must fit in the file) and CRC32
+3. First invalid frame that is a complete record whose checksum matches but
+   which does not decode: fail startup, naming the WAL, the record's byte
+   position and that a newer release may have written it, and leave the file
+   unchanged, whatever follows it
+4. First invalid frame with no intact frame (complete, matching its
+   checksum) after it (torn tail): truncate the file to the last valid frame
+   before anything is appended
+5. First invalid frame followed by an intact frame, whether or not its record
+   decodes (interior corruption): fail startup with the byte position of the
+   bad frame and leave the file unchanged
+6. Write the header of a new file, or upgrade a 1.3.x file in place
+   (temp file with header + unchanged frames, fsync, rename)
+7. Load the newest valid snapshot; a damaged newer one is skipped only when
+   the WAL still covers the older snapshot (see "Corrupted Snapshot")
+8. Replay WAL from the snapshot offset; a transaction record applies every
+   operation it holds
+9. New WAL records continue at or above the snapshot's cutoff
+10. Resume operations
 Time: 1-10 seconds
 ```
 
+The scanner lives in `persistence/wal_frame.rs` and is shared by the async WAL
+and the recovery WAL. A corrupt length that hides the next frame boundary is
+handled by searching the rest of the file byte by byte for an intact frame.
+The scan also reports what the first invalid frame is (`TailKind`): cut short,
+failing its checksum, blank (zero fill reads as empty frames whose checksum
+matches), or a complete record whose checksum matches but which this release
+cannot decode, such as a record type a newer release added. A crash leaves
+only the first three, which startup truncates when no intact frame follows
+them; startup (`PersistenceError::WALUnreadableRecord`) and `synap-migrate`
+both refuse the last instead of dropping an acknowledged write. Such a record
+also counts as intact after a damaged frame, so the damage is interior
+corruption rather than a tail that would be truncated with the record.
+
+### Transaction Records
+
+A committed MULTI/EXEC is logged as ONE `Operation::Transaction { operations }`
+record: one frame, one CRC32, one WAL offset. A crash at any byte of it leaves
+a torn tail that step 4 discards whole, so recovery holds all of the
+transaction's effects or none. Replication ships the same record as one
+command at one replication offset; a replica decodes a command only once all
+of its bytes arrived, so a dropped connection applies nothing and the resync
+delivers the whole record. The variant is the last in `Operation`, so the
+bincode variant indices of every older operation, and therefore 1.3.x frames,
+are unchanged. Format version 2 files may contain it; 1.3.x binaries cannot
+read them (no downgrade).
+
+### Snapshot Consistency
+
+A snapshot is paired exactly with its WAL position (phase23). Every
+persisted write, on every transport, goes through `persistence::durable`,
+which locks the ordering stripes of the keys it touches (1024 striped
+`tokio::sync::Mutex`es, `persistence/order.rs`), applies the write, queues its
+record for replication and the WAL, and only then releases the stripes;
+durability (group commit, fsync) is awaited afterwards. A snapshot locks
+every stripe, places a mark in the WAL writer queue and copies the stores in
+memory, releases the stripes, and serializes the copy outside that barrier.
+The mark resolves to the offset of the first record queued after it: the
+snapshot's cutoff. Every write is therefore either in the image (queued
+before the mark, not replayed) or after the cutoff (not in the image,
+replayed) — never both, so recovery applies non-idempotent writes such as
+LPUSH and HINCRBY exactly once, and multi-key commands and MULTI/EXEC
+transactions land wholly on one side.
+
+The same stripes order writes to one key: their records reach the WAL and
+the replication stream in the order memory applied them, so replaying
+resulting-value records (APPEND, INCR, SETRANGE) ends on the value the key
+held. Blocking pops hold the stripes only while they pop, not while they
+wait: a blocked client is queued on every key it waits on
+(`synap-core` `core/blocking.rs`) and takes the stripes again for each pop
+attempt after a push wakes it.
+
+Writers pause while the snapshot copies the stores (measured: ~58 ms for
+160,000 KV keys plus 10,000 ten-field hashes in a release build; KV values
+are shared buffers, collections are cloned). Serialization and fsync happen
+after the barrier is released. With persistence and replication both
+disabled no stripe is taken.
+
+### Expiry Across Restarts
+
+Expiry is stored as an absolute Unix-millisecond deadline everywhere it is
+persisted:
+
+- Snapshots (v4 and later) store each KV key's deadline (`0` = persistent) and the
+  HyperLogLog and bitmap values, which carry `created_at + ttl_secs`.
+- WAL records that set or change expiry carry the deadline the store stored:
+  `KVSetAt { key, value, expires_at_ms }` (SET EX/PX/EXAT/PXAT/KEEPTTL, and
+  INCR/APPEND/SETRANGE on an expiring key), `KVExpireAt { key, expires_at_ms }`
+  (EXPIRE) and `HllAddAt { key, elements, expires_at_ms }` (PFADD with a TTL).
+  Writes that leave no expiry keep `KVSet { ttl: None }`, `KVExpire { ttl:
+  None }` (PERSIST) and `HllAdd { ttl: None }`.
+- Records written before 1.4.0 hold TTLs relative to when they were written;
+  recovery anchors them at the WAL entry's timestamp (whole seconds), so a
+  1.3.2 record setting `k` with a 100 s TTL at time T leaves `k` at most 60 s
+  to live when recovered at T + 40 s.
+
+Recovery leaves out every key whose deadline has passed (a write whose
+deadline is already past deletes the key), so keys that expired while the
+server was down do not come back, and keys that had time left keep exactly
+the time they had. Replicas receive the same deadlines, in streamed records
+and in the full-sync image (`KVSetAt`).
+
+### Downgrade
+
+1.4.0 reads v2 and v3 snapshots and 1.3.x WALs. 1.3.x cannot read a v4
+snapshot (unknown magic) nor a version-2 WAL, so downgrading after 1.4.0 has
+written either is not supported; keep a copy of the 1.3.x data directory
+before upgrading if a rollback may be needed.
+
+### WAL Write Failures
+
+A failed write, flush or fsync fails every acknowledgement in its group commit
+and poisons the async WAL writer: every later append fails until restart, and
+`GET /health` answers 503 with `"wal": "poisoned"`. Every EXEC entry point
+returns an error when its transaction could not be logged; the in-memory
+effects are not rolled back.
+
+### Graceful Shutdown
+
+SIGINT/SIGTERM stop the HTTP listener, wait up to 5 seconds for in-flight
+requests, then flush and fsync the WAL and stop its writer, so nothing logged
+afterwards is acknowledged. `PersistenceLayer::flush` is an awaited barrier:
+it returns once every earlier entry reached the OS (and the disk unless
+`fsync_mode` is `never`).
+
+### Snapshot Files and Crash Safety
+
+A snapshot is written to `snapshot-v5-<20-digit sequence>.bin.tmp` in the
+snapshot directory (named after its format version), fsynced, renamed to
+`snapshot-v5-<sequence>.bin`, and the
+directory is fsynced (Unix). On Windows the directory cannot be fsynced; NTFS
+renames are atomic and journaled in order, so after a crash the new name
+either exists with the complete, already-flushed file or does not exist,
+and the retention deletes that follow cannot survive without it. A crash at
+any byte of the write therefore leaves the previous snapshots untouched plus,
+at most, a temporary file: recovery never lists temporary files and the next
+snapshot removes them.
+
+The sequence is one past the highest sequence in the directory and snapshots
+run one at a time, so two snapshots in the same second get different names
+and a later name always has a later (or equal) WAL cutoff. Recovery orders
+files by that sequence, not by the clock. Files named by earlier releases
+(`snapshot-v<N>-<unix seconds>.bin`) still load and count as older than every
+sequenced file.
+
+Before a snapshot is published the WAL is fsynced up to its cutoff, even with
+`fsync_mode: never`, so the WAL never ends below a published snapshot's
+cutoff. If it does anyway (a power loss right after a snapshot taken by an
+earlier release), recovery logs it and new WAL records continue at the
+snapshot's cutoff instead of reusing offsets the next recovery would skip.
+
+### Snapshot Retention
+
+After the new snapshot is durable, the oldest files beyond `max_snapshots` are
+removed. At least one snapshot is always kept and the one just written is
+never removed (`max_snapshots: 0` keeps one). A failed removal is logged as a
+warning; the snapshot itself succeeded.
+
 ### Corrupted Snapshot
 
+Recovery tries snapshots newest first. A file that is truncated, fails its
+CRC64, has an unknown magic, or holds a record that does not decode is
+damaged; every length in the file is checked against the file size before
+it is read, so a damaged length cannot trigger a huge allocation.
+
 ```
-1. Skip corrupted snapshot
-2. Try previous snapshot
-3. If all snapshots corrupted, replay full WAL
-4. Create new snapshot
-Time: 10-60 seconds
+1. Skip a damaged snapshot and try the previous one (or none)
+2. Fall back only if the WAL still holds every record after that snapshot's
+   cutoff (the whole history when no valid snapshot is left):
+   - the WAL is enabled,
+   - its first record is at or before the cutoff (offsets start at 1),
+   - its offsets have no break after the cutoff,
+   - it holds records if that snapshot was taken after some were written
+3. Otherwise refuse to start, naming the damaged files and the reason
+4. Replay the WAL from the chosen snapshot's cutoff
 ```
+
+A snapshot that cannot be read for another reason (permissions, device
+errors) also refuses startup, since the file may be intact. Before 1.4.0
+recovery read only the newest file; when it was damaged the server started
+with empty stores, and the next snapshot and retention deleted the older
+data. To accept a loss deliberately, restore the damaged file from a backup
+or move it out of the snapshot directory before starting the server.
 
 ## Replication with Persistence
 
@@ -669,19 +887,15 @@ systemctl restart synap
 
 ### Snapshot Binary Format
 
+Streamed sections ending in a CRC64 digest; the current layout is v5 (magic
+`SYNAP005`), described byte by byte in
+[`docs/internals/persistence-snapshot-format.md`](../internals/persistence-snapshot-format.md):
+
 ```
-┌────────────────────────────────────┐
-│  Checksum (u64, 8 bytes)           │
-├────────────────────────────────────┤
-│  Compressed Data (zstd)            │
-│  └─ Serialized Snapshot (bincode)  │
-│      ├─ version (u32)              │
-│      ├─ timestamp (u64)            │
-│      ├─ wal_offset (u64)           │
-│      ├─ kv_data (HashMap)          │
-│      ├─ queues (HashMap)           │
-│      └─ checksum (u64)             │
-└────────────────────────────────────┘
+magic + version + timestamp + wal_offset (the cutoff)
+KV (key, value, absolute expiry ms) · queues · streams
+hashes · lists · sets · sorted sets · HyperLogLogs · bitmaps
+CRC64
 ```
 
 ## Error Handling
@@ -689,7 +903,7 @@ systemctl restart synap
 ```rust
 pub enum PersistenceError {
     WALCorrupted { offset: u64, reason: String },
-    SnapshotCorrupted { path: PathBuf },
+    SnapshotCorrupted { path: PathBuf, reason: String },
     ChecksumMismatch { expected: u64, actual: u64 },
     IOError(std::io::Error),
     SerializationError(bincode::Error),

@@ -1,4 +1,5 @@
 use super::*;
+use crate::persistence::durable;
 
 // ==================== Hash REST Endpoints ====================
 
@@ -96,7 +97,14 @@ pub async fn hash_set(
     let value = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize value: {}", e)))?;
 
-    let created = state.hash_store.hset(&scoped_key, &req.field, value)?;
+    let created = durable::hset(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        &scoped_key,
+        &req.field,
+        value,
+    )
+    .await?;
 
     Ok(Json(HashSetResponse {
         created,
@@ -304,7 +312,13 @@ pub async fn hash_mset(
         }
     };
 
-    state.hash_store.hmset(&scoped_key, fields_map)?;
+    durable::hmset(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        &scoped_key,
+        fields_map,
+    )
+    .await?;
 
     Ok(Json(json!({ "success": true, "key": key })))
 }
@@ -363,7 +377,13 @@ pub async fn hash_del(
     let scoped_key =
         crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
 
-    let deleted = state.hash_store.hdel(&scoped_key, &req.fields)?;
+    let deleted = durable::hdel(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        &scoped_key,
+        &req.fields,
+    )
+    .await?;
 
     Ok(Json(HashDelResponse { deleted, key }))
 }
@@ -413,9 +433,14 @@ pub async fn hash_incrby(
     let scoped_key =
         crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
 
-    let new_value = state
-        .hash_store
-        .hincrby(&scoped_key, &req.field, req.increment)?;
+    let new_value = durable::hincrby(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        &scoped_key,
+        &req.field,
+        req.increment,
+    )
+    .await?;
 
     Ok(Json(json!({ "value": new_value })))
 }
@@ -442,9 +467,14 @@ pub async fn hash_incrbyfloat(
     let scoped_key =
         crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
 
-    let new_value = state
-        .hash_store
-        .hincrbyfloat(&scoped_key, &req.field, req.increment)?;
+    let new_value = durable::hincrbyfloat(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        &scoped_key,
+        &req.field,
+        req.increment,
+    )
+    .await?;
 
     Ok(Json(json!({ "value": new_value })))
 }
@@ -471,7 +501,14 @@ pub async fn hash_setnx(
     let value = serde_json::to_vec(&req.value)
         .map_err(|e| SynapError::InvalidValue(format!("Failed to serialize value: {}", e)))?;
 
-    let created = state.hash_store.hsetnx(&scoped_key, &req.field, value)?;
+    let created = durable::hsetnx(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        &scoped_key,
+        &req.field,
+        value,
+    )
+    .await?;
 
     Ok(Json(
         json!({ "created": created, "key": key, "field": req.field }),
@@ -549,7 +586,14 @@ pub(super) async fn handle_hash_set_cmd(
     }
 
     // No active transaction, execute immediately
-    let created = state.hash_store.hset(key, field, value_bytes)?;
+    let created = durable::hset(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        key,
+        field,
+        value_bytes,
+    )
+    .await?;
 
     // Update key version for WATCH (optimistic locking)
     state.transaction_manager.update_key_version(key);
@@ -662,7 +706,13 @@ pub(super) async fn handle_hash_del_cmd(
     }
 
     // No active transaction, execute immediately
-    let deleted = state.hash_store.hdel(key, &fields)?;
+    let deleted = durable::hdel(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        key,
+        &fields,
+    )
+    .await?;
 
     // Update key version for WATCH (optimistic locking) if deleted
     if deleted > 0 {
@@ -773,7 +823,7 @@ pub(super) async fn handle_hash_mset_cmd(
         })
         .collect::<Result<HashMap<_, _>, SynapError>>()?;
 
-    state.hash_store.hmset(key, fields)?;
+    durable::hmset(state.persistence.as_deref(), &state.hash_store, key, fields).await?;
 
     Ok(serde_json::json!({ "success": true }))
 }
@@ -859,7 +909,14 @@ pub(super) async fn handle_hash_incrby_cmd(
     }
 
     // No active transaction, execute immediately
-    let new_value = state.hash_store.hincrby(key, field, increment)?;
+    let new_value = durable::hincrby(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        key,
+        field,
+        increment,
+    )
+    .await?;
 
     // Update key version for WATCH (optimistic locking)
     state.transaction_manager.update_key_version(key);
@@ -889,7 +946,14 @@ pub(super) async fn handle_hash_incrbyfloat_cmd(
         .and_then(|v| v.as_f64())
         .ok_or_else(|| SynapError::InvalidRequest("Missing 'increment' field".to_string()))?;
 
-    let new_value = state.hash_store.hincrbyfloat(key, field, increment)?;
+    let new_value = durable::hincrbyfloat(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        key,
+        field,
+        increment,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "value": new_value }))
 }
@@ -918,7 +982,14 @@ pub(super) async fn handle_hash_setnx_cmd(
     let value_bytes =
         serde_json::to_vec(value).map_err(|e| SynapError::SerializationError(e.to_string()))?;
 
-    let created = state.hash_store.hsetnx(key, field, value_bytes)?;
+    let created = durable::hsetnx(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        key,
+        field,
+        value_bytes,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "created": created }))
 }

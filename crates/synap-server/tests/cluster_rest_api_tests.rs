@@ -67,6 +67,7 @@ async fn spawn_test_server_with_cluster() -> String {
         user_manager: None,
         require_auth: false,
         replication: None,
+        server_config: None,
     };
 
     let user_manager = Arc::new(UserManager::new());

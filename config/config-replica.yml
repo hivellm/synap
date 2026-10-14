@@ -83,11 +83,11 @@ replication:
   enabled: true
   role: "replica"
 
-  # Master node address to sync from (port 15600 = replication, not SynapRPC)
-  # Must be an IP:port: hostnames are not resolved, and the
-  # SYNAP_MASTER_ADDRESS variable docker-compose.yml sets is not read yet, so
-  # the compose replicas cannot reach `master` (phase14_replica-master-hostname).
-  master_address: "10.0.0.10:15600"
+  # Master node address to sync from (port 15600 = replication, not SynapRPC).
+  # host:port, where host is an IP or a DNS name such as the docker-compose
+  # service `master`; the name is resolved again on every reconnect.
+  # SYNAP_MASTER_ADDRESS overrides this value.
+  master_address: "master:15600"
   
   # Performance tuning
   heartbeat_interval_ms: 1000

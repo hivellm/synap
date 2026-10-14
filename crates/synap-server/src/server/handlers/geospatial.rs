@@ -1,4 +1,5 @@
 use super::*;
+use crate::persistence::durable;
 
 #[derive(Debug, Serialize)]
 pub struct GeospatialDistResponse {
@@ -90,9 +91,17 @@ pub struct GeospatialSearchRequest {
 /// POST /geospatial/:key/geoadd - Add geospatial locations
 pub async fn geospatial_geoadd(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<GeospatialAddRequest>,
 ) -> Result<Json<GeospatialAddResponse>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Write)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     debug!(
         "REST GEOADD key={} locations={} nx={} xx={} ch={}",
         key,
@@ -108,9 +117,16 @@ pub async fn geospatial_geoadd(
         .map(|loc| (loc.lat, loc.lon, loc.member.into_bytes()))
         .collect();
 
-    let added = state
-        .geospatial_store
-        .geoadd(&key, locations, req.nx, req.xx, req.ch)?;
+    let added = durable::geoadd(
+        state.persistence.as_deref(),
+        &state.geospatial_store,
+        &scoped_key,
+        locations,
+        req.nx,
+        req.xx,
+        req.ch,
+    )
+    .await?;
 
     Ok(Json(GeospatialAddResponse { key, added }))
 }
@@ -118,9 +134,17 @@ pub async fn geospatial_geoadd(
 /// GET /geospatial/:key/geodist/:member1/:member2 - Calculate distance
 pub async fn geospatial_geodist(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((key, member1, member2)): Path<(String, String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<GeospatialDistResponse>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     let unit_str = params
         .get("unit")
         .cloned()
@@ -132,10 +156,12 @@ pub async fn geospatial_geodist(
         key, member1, member2, unit
     );
 
-    let distance =
-        state
-            .geospatial_store
-            .geodist(&key, member1.as_bytes(), member2.as_bytes(), unit)?;
+    let distance = state.geospatial_store.geodist(
+        &scoped_key,
+        member1.as_bytes(),
+        member2.as_bytes(),
+        unit,
+    )?;
 
     Ok(Json(GeospatialDistResponse {
         key,
@@ -147,9 +173,17 @@ pub async fn geospatial_geodist(
 /// GET /geospatial/:key/georadius - Query within radius
 pub async fn geospatial_georadius(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<GeospatialRadiusResponse>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     let center_lat: f64 = params
         .get("lat")
         .and_then(|s| s.parse().ok())
@@ -181,7 +215,7 @@ pub async fn geospatial_georadius(
     );
 
     let results = state.geospatial_store.georadius(
-        &key,
+        &scoped_key,
         center_lat,
         center_lon,
         radius,
@@ -219,9 +253,17 @@ pub async fn geospatial_georadius(
 /// GET /geospatial/:key/georadiusbymember/:member - Query within radius of member
 pub async fn geospatial_georadiusbymember(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path((key, member)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<GeospatialRadiusResponse>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     let radius: f64 = params
         .get("radius")
         .and_then(|s| s.parse().ok())
@@ -245,7 +287,7 @@ pub async fn geospatial_georadiusbymember(
     );
 
     let results = state.geospatial_store.georadiusbymember(
-        &key,
+        &scoped_key,
         member.as_bytes(),
         radius,
         unit,
@@ -282,14 +324,22 @@ pub async fn geospatial_georadiusbymember(
 /// POST /geospatial/:key/geopos - Get coordinates of members
 pub async fn geospatial_geopos(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<GeospatialPosRequest>,
 ) -> Result<Json<GeospatialPosResponse>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     debug!("REST GEOPOS key={} members={:?}", key, req.members);
 
     let members: Vec<Vec<u8>> = req.members.into_iter().map(|m| m.into_bytes()).collect();
 
-    let coordinates = state.geospatial_store.geopos(&key, &members)?;
+    let coordinates = state.geospatial_store.geopos(&scoped_key, &members)?;
 
     let response_coords: Vec<Option<GeospatialCoord>> = coordinates
         .into_iter()
@@ -310,14 +360,22 @@ pub async fn geospatial_geopos(
 /// POST /geospatial/:key/geohash - Get geohash strings
 pub async fn geospatial_geohash(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<GeospatialPosRequest>,
 ) -> Result<Json<GeospatialHashResponse>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     debug!("REST GEOHASH key={} members={:?}", key, req.members);
 
     let members: Vec<Vec<u8>> = req.members.into_iter().map(|m| m.into_bytes()).collect();
 
-    let geohashes = state.geospatial_store.geohash(&key, &members)?;
+    let geohashes = state.geospatial_store.geohash(&scoped_key, &members)?;
 
     Ok(Json(GeospatialHashResponse { key, geohashes }))
 }
@@ -325,9 +383,17 @@ pub async fn geospatial_geohash(
 /// POST /geospatial/:key/geosearch - Advanced geospatial search
 pub async fn geospatial_geosearch(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
+    crate::hub::HubContextExtractor(hub_ctx): crate::hub::HubContextExtractor,
     Path(key): Path<String>,
     Json(req): Json<GeospatialSearchRequest>,
 ) -> Result<Json<GeospatialRadiusResponse>, SynapError> {
+    require_resource_permission(&ctx, "sortedset:", &key, Action::Read)?;
+
+    // Apply multi-tenant scoping if Hub mode is active
+    let scoped_key =
+        crate::hub::MultiTenant::scope_kv_key(hub_ctx.as_ref().map(|c| c.user_id()), &key);
+
     debug!(
         "REST GEOSEARCH key={} from_member={:?} from_lonlat={:?}",
         key, req.from_member, req.from_lonlat
@@ -351,7 +417,7 @@ pub async fn geospatial_geosearch(
     });
 
     let results = state.geospatial_store.geosearch(
-        &key,
+        &scoped_key,
         crate::core::GeoSearchParams {
             from_member,
             from_lonlat,
@@ -392,7 +458,10 @@ pub async fn geospatial_geosearch(
 /// GET /geospatial/stats - Retrieve geospatial statistics
 pub async fn geospatial_stats(
     State(state): State<AppState>,
+    AuthContextExtractor(ctx): AuthContextExtractor,
 ) -> Result<Json<crate::core::GeospatialStats>, SynapError> {
+    require_permission(&ctx, "sortedset:*", Action::Read)?;
+
     debug!("REST GEOSPATIAL STATS");
 
     let stats = state.geospatial_store.stats();
@@ -452,7 +521,16 @@ pub(super) async fn handle_geospatial_geoadd_cmd(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let added = state.geospatial_store.geoadd(key, locations, nx, xx, ch)?;
+    let added = durable::geoadd(
+        state.persistence.as_deref(),
+        &state.geospatial_store,
+        key,
+        locations,
+        nx,
+        xx,
+        ch,
+    )
+    .await?;
 
     Ok(serde_json::json!({ "key": key, "added": added }))
 }

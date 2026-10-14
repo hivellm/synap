@@ -101,6 +101,13 @@ COPY crates/synap-cli/src ./crates/synap-cli/src
 COPY crates/synap-migrate/src ./crates/synap-migrate/src
 COPY sdks/rust/src ./sdks/rust/src
 
+# The manifests declare every integration test as a [[test]] target gated on
+# the `full-tests` feature, and cargo refuses to parse a manifest whose target
+# file is missing — even for `--bins`. The tests are never built here.
+COPY crates/synap-server/tests ./crates/synap-server/tests
+COPY crates/synap-cli/tests ./crates/synap-cli/tests
+COPY sdks/rust/tests ./sdks/rust/tests
+
 # Remove benchmark declarations from Cargo.toml for Docker build
 # (benchmarks are not needed for production image)
 RUN sed -i '/^# Configure benchmarks to use Criterion/,/^$/d' crates/synap-server/Cargo.toml && \
@@ -111,11 +118,13 @@ RUN sed -i '/^# Configure benchmarks to use Criterion/,/^$/d' crates/synap-serve
 # - LTO + strip for smallest binary
 # - --bins flag skips benches/examples/tests
 # - BuildKit cache mounts for incremental compilation
-# The toolchain is installed *inside this step*, not in a layer of its own.
-# `rust-toolchain.toml` pins the channel to plain `nightly`, so rustup re-syncs
-# it whenever the published nightly is newer than the installed one — and that
-# sync renames files out of a directory baked into an earlier layer, which
-# overlayfs answers with EXDEV:
+# The toolchain is the one `rust-toolchain.toml` pins (a dated nightly), and
+# `--locked` builds exactly the committed Cargo.lock, so the image is built
+# with the same compiler and dependency graph as CI and the release binaries.
+# It is installed *inside this step*, not in a layer of its own. When the
+# channel was a moving `nightly`, rustup re-synced it whenever a newer nightly
+# was published — and that sync renamed files out of a directory baked into an
+# earlier layer, which overlayfs answers with EXDEV:
 #
 #   error: could not rename 'component' file from
 #   '/usr/local/rustup/toolchains/nightly-…/share/zsh/site-functions'
@@ -134,9 +143,10 @@ RUN --mount=type=cache,target=/usr/local/rustup,id=rustup-${TARGETARCH} \
     arm64) TARGET_TRIPLE=aarch64-unknown-linux-musl ;; \
     *) TARGET_TRIPLE=x86_64-unknown-linux-musl ;; \
     esac && \
-    rustup toolchain install nightly --profile minimal --target ${TARGET_TRIPLE} && \
-    rustup default nightly && \
-    cargo build --release --bins \
+    TOOLCHAIN=$(sed -n 's/^channel *= *"\([^"]*\)".*/\1/p' rust-toolchain.toml) && \
+    test -n "$TOOLCHAIN" && \
+    rustup toolchain install "$TOOLCHAIN" --profile minimal --target ${TARGET_TRIPLE} && \
+    cargo build --release --bins --locked \
     --target ${TARGET_TRIPLE} && \
     strip /usr/src/synap/target/${TARGET_TRIPLE}/release/synap-server && \
     cp /usr/src/synap/target/${TARGET_TRIPLE}/release/synap-server /usr/src/synap/synap-server-binary

@@ -5,7 +5,404 @@ All notable changes to Synap will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.0] - 2026-10-14
+
+A hardening release built from the 2026-10-12 next-release review
+(`docs/analysis/next-release-review-2026-10-12/`): authorization that holds on
+every transport, writes that survive restarts and reach replicas, and client
+tooling that tells the truth. 1.4.0 reads data written by 1.3.x; see the
+migration notes before upgrading.
+
+### Security
+
+- **An API key can no longer carry more than its issuer holds** (review
+  finding S-01). `POST /auth/keys` stored whatever permissions the caller
+  asked for, so a read-only user could mint a `*`/`all` key and use it to write
+  and delete. Every requested grant must now be covered by one permission the
+  issuer holds (action included, pattern contained); admins may grant
+  anything. With authentication enabled, anonymous issuance answers 401 even
+  when `require_auth` is off. A key minted with a temporary API key is bounded
+  by that key's permissions and must expire no later than it. Unknown actions
+  and unparsable `allowed_ips` entries answer 400 instead of silently becoming
+  `read` or being dropped (an empty list allows every address).
+- **One authorization policy on every transport** (review findings S-02 and
+  S-05). `POST /api/v1/command` never authorized individual commands, so a
+  read-only user could run `kv.flushall`; RESP3 and SynapRPC only gated a
+  handful of admin commands, so any authenticated user could read and write any
+  key; and 49 REST handlers (sorted sets, geospatial, partitions and consumer
+  groups, scripts, queue ACK/NACK, slow log, client list, snapshots) checked
+  nothing. Every command on REST, the envelope, RESP3, SynapRPC and inside
+  scripts is now authorized against the same `(resource, action)` pairs, named
+  as the REST handlers name them, and a command without a policy is denied; a
+  test walks every dispatcher's command table to keep it that way. Scripts run
+  with their caller's permissions, a refused command aborts its transaction
+  (`EXECABORT`), subscribing to the internal `__watch@`/`__keyspace@`/
+  `__keyevent@` channels (or a wildcard that matches them) needs the matching
+  `kv` permission, and the KV, queue, stream and pub/sub WebSockets are
+  authorized too. With authentication enabled but not required, an
+  unauthenticated RESP3 or SynapRPC connection now holds no permissions, as an
+  anonymous REST request already did. `INFO`, the slow log and the client list
+  are admin-only on every transport. RESP3 reports denials with the Redis
+  `-NOPERM` error code.
+- **MCP and UMICP tools run with their caller's permissions** (review finding
+  S-04). MCP read the caller from a thread-local that rmcp's own session tasks
+  never saw, and a missing identity allowed the call, so in authenticated
+  mode tool permissions were effectively not enforced; UMICP never passed the
+  identity at all. Each tool call now takes the identity of its own HTTP
+  request from the parts rmcp hands the handler (UMICP from its request) and
+  is authorized with the policy of the matching `/api/v1/command` command, so
+  all 24 tools are checked (11 were before). A call without an identity is
+  refused in authenticated mode, and a legacy MCP session can no longer be
+  used under credentials other than those that initialized it (`403`).
+- **Hub mode isolates tenants, and fails closed** (review finding S-03). The
+  production router never installed Hub authentication, so tenants with
+  different access keys read and wrote the same unscoped keys. With
+  `hub.enabled: true`, Hub authentication now replaces local authentication on
+  every route except `/health` and `/metrics`: a missing or rejected key answers
+  401 and local users and API keys are no longer accepted. Each tenant runs
+  with data-type permissions only and its names are scoped to `user_<id>:` on
+  REST (sorted sets, geospatial and queue stats included), `/api/v1/command`,
+  MCP, UMICP and the KV-watch, pub/sub, queue and stream WebSockets; envelope,
+  MCP and UMICP commands that cannot be confined to one tenant (keyspace-wide,
+  admin, scripting, transactions without a `client_id`) are refused, and
+  routes that are not tenant-isolated (stats, `/info`, `/slowlog`, `/clients`,
+  `/memory`, `/snapshot`, `/script/*`, REST `/transaction/*`, partitioned topics,
+  consumer groups, `/cluster/*`, `/auth/*`) answer 403. HiveHub cannot validate
+  access keys yet (hivellm/synap#230), so until it can every keyed Hub request
+  answers 503 and the server logs a startup warning. **Breaking:** the server
+  refuses to start in Hub mode while RESP3 or SynapRPC is enabled (both are on
+  by default), naming the listener, because neither authenticates tenants.
+
+- **Every acknowledged write is persisted and replicated, on every transport**
+  (finding N-01, found while turning the review into tasks, and review finding
+  D-08). Writes over RESP3, SynapRPC, scripts (`redis.call`), MCP, the
+  WebSocket queue ACK/NACK and most REST and envelope data-type endpoints
+  (hashes, lists, sets, sorted sets, geospatial, HyperLogLog, bitmaps) were
+  applied in memory but never written to the WAL or sent to replicas, so they
+  vanished on restart and never reached a replica. Every transport now goes
+  through one mutation path that applies a write and records its effect; a
+  write that cannot be recorded fails, in every fsync mode, with an error
+  saying it is applied in memory but not durable. Derived writes are recorded
+  as their result: APPEND/SETRANGE (which logged an empty value) record the
+  exact resulting bytes and remaining TTL read under the key's shard lock,
+  INCR/HINCRBY/ZINCRBY their resulting values, pops the members removed.
+  HyperLogLog and bitmap writes gain WAL records and replication; RENAME
+  replays for every key type; COPY, EXPIRE/PERSIST and FLUSH are logged.
+  Recovery no longer discards the recovered set store, and REST SET logs its
+  real TTL. RESP3/SynapRPC FLUSHALL report a disabled flush as an error instead
+  of replying OK, and envelope `kv.append`/`kv.setrange`/`kv.getset` store
+  strings as raw UTF-8 like `kv.set`.
+- **Snapshots match their WAL position, and writes to one key keep their
+  order** (review findings D-04, D-08). A snapshot recorded its WAL cutoff
+  before dumping the stores, so a write that landed between the two was
+  applied twice on recovery (duplicate LPUSH elements, double HINCRBY), and
+  concurrent writes to one key could reach the WAL in the opposite order from
+  memory, so APPEND/INCR/SETRANGE replayed to the wrong value. Writers now hold
+  a per-key ordering lock (striped by key hash) from applying a write until
+  its record is queued; a snapshot holds every stripe only while it records its
+  cutoff and copies the stores, then serializes outside the barrier. Recovery
+  applies every write exactly once, including multi-key commands and
+  MULTI/EXEC, and blocking pops are ordered against the pushes they race. No
+  cost with persistence off; about 69 ns per write with it on, and writers
+  pause only for the in-memory copy (about 58 ms for 160k keys).
+- **Expiry survives restarts as an absolute deadline** (review finding D-07).
+  Snapshots dropped expiry (keys came back permanent) and WAL replay restarted
+  TTLs from boot time (keys that expired during downtime came back). Snapshot
+  format v4 and the new `KVSetAt`, `KVExpireAt` and `HllAddAt` WAL records
+  store the Unix-ms deadline the store actually used; records from before 1.4
+  count their TTL from their entry timestamp, keys already expired are not
+  restored, and replicas keep the master's deadlines. Snapshot v4 also carries
+  HyperLogLog and bitmap sections, so that data now survives a snapshot
+  restart; v3 and v2 snapshots still load. **Breaking (downgrade only):** 1.3.x
+  cannot read v4 snapshots.
+- **Transactions are crash-atomic** (review finding D-03). A committed
+  MULTI/EXEC is written to the WAL as one record under one checksum, so a crash
+  at any byte recovers all of its effects or none (a crash between two
+  operations used to recover a prefix), and replication ships it as one unit at
+  one offset: a replica whose connection drops mid-transaction applies none of
+  it and receives it whole on resync. A replica still applies the operations of
+  a transaction one after another, so a reader there can observe it half-applied.
+- **Queue messages keep their identity across restarts and replicas** (review
+  finding D-05). WAL replay, snapshot restore and replicas re-published every
+  message under a fresh ID, so a replayed ACK missed it and acknowledged
+  messages came back deliverable after a restart, and master and replica IDs
+  diverged. Messages are now restored with their original ID, priority, retry
+  counters, creation time and headers; replayed ACK/NACK settle by ID whether
+  the message is ready or pending, tolerating only "not found" and failing
+  recovery on any other error. QCREATE (with its configuration), QDELETE and
+  QPURGE are persisted and replicated on every transport (a purge replays
+  exactly the messages it removed), and ACK-deadline requeues are recorded as
+  NACKs so retry counters and dead-lettering match after a restart. Snapshot
+  format v5 stores each queue whole (in-flight messages come back ready for
+  redelivery); v4, v3 and v2 still load. Replica full sync carries whole queue
+  state, so a new replica holds the master's IDs, in-flight messages, dead
+  letters and configuration. Delivery stays at-least-once: an ACK sent after a
+  restart for a message delivered before it answers not-found and the message
+  is delivered again. **Breaking (downgrade only):** 1.3.x cannot read v5
+  snapshots.
+- **Replica full sync carries every datatype, exactly.** A new or resyncing
+  replica received only KV keys and stream events; it now receives hashes,
+  lists, sets, sorted sets (geo), HyperLogLogs, bitmaps and queues too, with KV
+  keys keeping their absolute expiry. The master captures the image under the
+  same write barrier as snapshots, paired with its replication offset, so
+  writes made during a full sync apply once on the replica (they could apply
+  twice or be lost). The replica verifies the whole image (version, CRC32)
+  before clearing and loading, so keys deleted on the master while it was away
+  are gone; a failed load forces a full sync on reconnect. A full sync is sent
+  whenever the replica lacks usable history: offset 0, an offset older than
+  the log, or one beyond the master's offset (a fresh replica connecting after
+  the master's first write used to get a partial sync and miss everything
+  recovered at boot). Records now reach replicas in offset order: concurrent
+  writers to different keys could queue offset N+1 before N, and the replica
+  dropped N. **Breaking (mixed versions):** the full sync uses a new versioned
+  command a 1.3.x replica cannot decode, so upgrade replicas before the
+  master; 1.4.0 replicas still accept a 1.3.x master's full sync.
+- **Counter amounts behave the same on every transport** (review finding
+  E-04). The SDK native maps (Rust, TypeScript, Python, C#, PHP, Go) send
+  `INCRBY`/`DECRBY` when `kv.incr`/`kv.decr` carries an `amount` and keep
+  `INCR`/`DECR` without one, so `INCR count 10` adds 10 over HTTP, SynapRPC
+  and RESP3 alike. The C# and PHP SDKs sent the step as `delta` and the Python
+  SDK as `kv.incrby`, which the HTTP API never read (so they always added 1);
+  all send `amount` now. The HTTP API refuses a malformed `amount` instead of
+  treating it as 1, and decrementing by `i64::MIN` fails as an overflow instead
+  of wrapping into an increment.
+- **The Rust SDK's RESP3 transport times out requests**, not only connects, so
+  a server that accepts a connection and never answers no longer hangs the
+  client; an empty-body HTTP error now names its status code.
+
+### Changed
+
+- **`synap-cli PING` reports failures** (review finding E-05, breaking for
+  scripts). It uses a real protocol ping and exits 1 with the reason on stderr
+  when the connection is refused, times out or the credentials are rejected; it
+  used to print "Server unreachable" and exit 0. A malformed INCR/DECR amount
+  is refused before anything is sent, and errors go to stderr. New flags:
+  `--user`, `--password`, `--timeout`. The `/api/v1/command` endpoint gains a
+  `ping` command, which requires credentials when authentication is on.
+- **The WAL has a versioned header** (`SYNAPWAL` + format version 2). WALs
+  written by 1.3.x replay as before and are upgraded in place on first start
+  (temporary file, fsync, rename). Startup refuses a WAL of a newer format,
+  naming both versions, or one with a damaged header, instead of starting with
+  empty data. **Breaking (downgrade):** 1.3.x cannot read a WAL written or
+  upgraded by 1.4.0 — back up the WAL and snapshot directories before
+  upgrading — and replicas must be upgraded before the master, since a 1.3.x
+  replica cannot decode the new transaction record.
+- **A WAL with interior corruption stops startup.** A bad frame followed by
+  valid ones used to end the scan silently and lose the history after it;
+  startup now fails with the byte position so an operator can decide.
+
+- **Reproducible builds and contract gates on pull requests** (review finding
+  E-06). `Cargo.lock` is committed and CI, release builds, SDK publishing and
+  the Docker image build with `--locked`; `rust-toolchain.toml` pins
+  `nightly-2026-07-23`, which every workflow and the Dockerfile install from
+  the file. Pull requests now run the TypeScript, Python, C# and PHP SDK
+  tests, GUI type-check, lint, build and contract tests, the SDK E2E and S2S
+  suites against a release build, and the cross-language interop matrix in a
+  new `--strict` mode where a cell that cannot run fails. Per-component
+  coverage floors (`.github/coverage-floors.json`, enforced by
+  `scripts/ci/coverage_gate.py`) stop coverage from dropping; every component
+  is still below the 95% policy and the gap is documented in
+  `docs/development/CI_GATES.md`. SDK publishing installs each packed artifact
+  and runs it against a server built from the release tag before publishing.
+  GUI lint works again under ESLint 9 (flat config), with the existing
+  findings baselined as bulk suppressions. The Docker build, broken by a new
+  CLI test target, copies `crates/synap-cli/tests` again.
+
+### Performance
+
+- **One credential check per MCP request.** `/mcp` carried its own
+  authentication layer inside the main router's, so every MCP request with a
+  password paid bcrypt twice; the duplicate layer is gone.
+- **Writes with the WAL on cost more, because they are now durable.** 1.3.2
+  never logged plain RESP3 or SynapRPC writes, so it answered them at
+  in-memory speed and a crash lost them. 1.4.0 acknowledges a write only after
+  its WAL group commit: on the reference machine single in-flight writes are
+  about 30-37% slower with fsync `never`/`periodic`, `always` is bound by one
+  fsync per group (about 1.2k ops/s with 4 clients), and RESP3 pipelines wait
+  for each write's commit in turn (about -89% for pipelined `SET` in
+  `never`/`periodic`; SynapRPC pipelines share group commits). Reads, and
+  every operation with persistence off, match 1.3.2. Full numbers, method and
+  two identified avoidable overheads in `docs/benchmarks/BASELINE_1_4_0.md`.
+
+### Added
+
+- **`admin.config` command.** Admin-only command on `/api/v1/command` that
+  returns the server's effective configuration (every file, environment and
+  command-line override applied) as JSON and YAML, with passwords, API keys,
+  the Hub service key and any other secret-named field replaced by
+  `[redacted]`. Refused in Hub mode.
+- **1.4.0 upgrade guide and guarantees document.**
+  `docs/users/guides/UPGRADING_TO_1_4.md` lists every breaking change with who
+  is affected and what to do, the backup step and the no-downgrade rule;
+  `docs/operations/guarantees.md` states what 1.4.0 guarantees per fsync mode,
+  per transport, in Hub mode and under limits, and what an error reply means
+  for in-memory state. Both were fact-checked claim by claim against the code.
+  Historical analyses under `docs/analysis/` carry a banner naming the
+  revision they describe.
+- **Recorded performance baseline.** `scripts/bench/perf_baseline.py` runs a
+  real `synap-server` over RESP3 and SynapRPC (KV get/set, lists, pipelined
+  writes) with persistence off and WAL fsync never/periodic/always, and
+  records throughput, p50/p95/p99 latency, server memory, build and hardware
+  as JSON plus a summary, with median and spread over repeated runs;
+  `--server-bin` measures another release the same way. The
+  `perf-baseline.yml` workflow runs it weekly and on demand on the runner
+  named by the `PERF_BENCH_RUNNER` variable (a labeled smoke run on shared
+  runners otherwise), with no latency gate.
+- **Upgrade test from a real 1.3.2 data directory.** `upgrade_from_1_3_2_tests`
+  starts the 1.4.0 binary on data written by a real 1.3.2 server and checks the
+  in-place WAL upgrade, recovery against what 1.3.2 served, writes surviving
+  restarts, and the first v5 snapshot. `scripts/bench/perf_baseline.py --merge`
+  and `examples/wal_ack_probe.rs` support the recorded baseline.
+- **GUI tests.** `npm test` in `gui/` runs Vitest contract tests of the API
+  client and a smoke test of the structure inspector against a real
+  `synap-server`.
+
+### Fixed
+
+- **The GUI shows the server's real state** (review findings E-02, E-03). The
+  Configuration view displayed a built-in sample as the server's configuration
+  (its loader called a command the server never had) and its Save never
+  reached the server; it now loads the real configuration through
+  `admin.config`, read-only with copy and download, and shows load or
+  permission errors instead of sample data. The Data Structures inspector
+  called `kv.type`/`kv.memory` and REST routes that do not exist, so it cleared
+  itself for every structure; it now uses `key.type`, `memory.usage` and the
+  envelope structure commands, shows type and memory, and reports missing or
+  mismatched keys.
+- **Configured rate limits are enforced** (review finding S-06, breaking for
+  deployments with `rate_limit.enabled: true`, which was logged as enabled but
+  never installed). Each client gets a token bucket (`burst_size`, refilled at
+  `requests_per_second`), keyed by TCP peer address before authentication —
+  so password and API-key checks are bounded — and by authenticated principal
+  (user, API key or Hub tenant) after it. A limited request answers `429` with
+  `Retry-After`; `/health` and `/metrics` are exempt. The startup log says
+  whether limiting is enforced, and an enabled limiter with a zero rate or burst
+  refuses to start.
+- **UMICP request bodies are bounded** (review finding S-07): `POST /umicp`
+  reads at most `mcp.umicp_max_body_bytes` (default 16 MiB) and answers `413`
+  above it, refusing an oversized `Content-Length` before reading and stopping
+  a chunked body at the limit.
+- **The HTTP server passes the real client address to handlers.** It was not
+  served with connection info, so authentication saw every client as
+  127.0.0.1 and the WebSocket handlers, which read the client address, could
+  not extract it.
+- **The WAL keeps what it acknowledges** (review findings D-01, D-02, D-06).
+  - Periodic fsync mode now syncs on its own interval even when the server is
+    idle, and every group of writes reaches the OS before it is acknowledged;
+    Never mode no longer leaves acknowledged writes in the application buffer.
+  - Graceful shutdown (SIGINT/SIGTERM) stops the HTTP server, then drains and
+    fsyncs the WAL before exiting; `PersistenceLayer::flush` is a real awaited
+    barrier instead of a no-op.
+  - A failed WAL write, flush or fsync fails every acknowledgement in its
+    group and poisons the WAL until restart; `GET /health` answers 503 with
+    `"wal": "poisoned"`. `EXEC` over REST, the envelope, MCP, RESP3 and
+    SynapRPC returns an error saying the commit is not durable when its
+    transaction could not be logged (the in-memory effects are not rolled
+    back).
+  - Startup verifies frame checksums and lengths and truncates a torn tail
+    before appending, so writes made after a crash stay recoverable; a corrupt
+    length can no longer trigger a huge allocation.
+- **Snapshots are crash-safe and never cost acknowledged data.**
+  - A damaged newest snapshot (truncated or corrupt) made recovery fail and the
+    server start with empty stores, keep appending to the old WAL, and on the
+    next snapshot let retention delete the older valid ones, losing every write
+    acknowledged before the crash. Recovery now falls back to an older snapshot
+    only when the WAL provably still covers it (from its cutoff on, with no
+    gaps), and otherwise refuses to start with an error naming the damaged
+    files.
+  - Snapshots are written to a temporary file, fsynced, renamed and the
+    directory fsynced (Unix; NTFS renames are atomic), so a crash mid-snapshot
+    no longer leaves a truncated newest file. Files are named
+    `snapshot-v<format>-<sequence>.bin` and loaded in sequence order, so two snapshots
+    in the same second no longer overwrite each other; old timestamp names
+    still load, as older. Every length read from a snapshot is bounded by the
+    file size.
+  - Each snapshot fsyncs the WAL up to its cutoff before it is published, and
+    after a restart new WAL records continue at or above the loaded snapshot's
+    cutoff, so a power loss right after a snapshot no longer makes later writes
+    invisible to the next recovery.
+  - Retention runs only once the new snapshot is durable, never removes the
+    snapshot just written (`max_snapshots: 0` keeps one) and logs failed
+    removals as warnings. Restore snapshots and WAL together (see
+    `docs/users/operations/BACKUP.md`).
+- **Replicas can reach the master by hostname.** `replication.master_address`
+  accepted only `IP:port`, so the docker-compose replicas could not point at
+  the `master` service. It now takes `host:port` with an IP or a DNS name,
+  resolves the name on every connection attempt (a container's IP can change),
+  and still rejects a malformed value at config load with an error naming
+  `replication.master_address`. `SYNAP_MASTER_ADDRESS`, which the compose file
+  already set on each replica, is now read as an override, and
+  `--master-address` fails loudly on a malformed value instead of silently
+  leaving the replica without a master. `config/config-replica.yml` points at
+  `master:15600` again.
+- **docker-compose health checks work on the scratch image.** They called
+  `wget`, which the `FROM scratch` runtime image does not contain, so the
+  master never turned healthy and the replicas, which wait for it, never
+  started. They now run `synap-server --health-check`, as the image's own
+  `HEALTHCHECK` does.
+- **The Docker image builds again.** 1.3.2 declared every integration test as a
+  `[[test]]` target gated on `full-tests`, but the Dockerfile did not copy the
+  `tests/` directories, and cargo refuses to parse a manifest whose test file
+  is missing, even for `cargo build --bins`. The builder stage now copies them;
+  they are never compiled into the image.
+- **`synap-migrate` reads what the server writes** (review finding). It only
+  looked for `snapshot-v2-*` files, decoded integers little-endian where the
+  server writes big-endian, and wrote snapshots without the checksum the server
+  requires, so standalone-to-Hub migration was broken. It now uses the server's
+  own snapshot and WAL codecs (it depends on the `synap-server` library):
+  every snapshot format the server loads (v2 to v5, timestamp and sequenced
+  names), both WAL formats, and the WAL tail after the snapshot, rebuilt the
+  way startup recovery does. Every persisted structure is scoped for Hub mode
+  with the server's own `MultiTenant` functions, keeping absolute expiry,
+  whole queue state and stream events. A complete WAL record this release
+  cannot decode is refused instead of being dropped as a torn tail, and
+  standalone names that merely look Hub-scoped no longer block a migration
+  (`--allow-scoped-names` for input whose names all look scoped). Tests
+  migrate data directories written by real 1.3.2 and 1.4.0 servers and read
+  them back through a Hub-mode server. **Breaking (CLI):** `migrate` takes
+  `--output`, writes only to a new or empty directory outside the source after
+  verifying the whole input, and the `backup`/`rollback` commands are gone:
+  the untouched source directory is the rollback.
+- **Stream rooms come back after a restart.** Snapshots always contained the
+  stream events, but startup never read them back and started with empty
+  streams. Each room is now restored from the newest snapshot as a new
+  generation, keeping event IDs, offsets, types, data and timestamps, and the
+  next publish continues after the last offset. Live stream publishes are
+  still neither logged in the WAL nor replicated as they happen, so events
+  published after the newest snapshot are lost on restart; partitioned topics
+  and consumer groups stay memory-only.
+- **Startup no longer deletes a WAL record it cannot decode.** A complete,
+  checksum-valid record this release cannot decode (for example one written by
+  a newer release) was truncated as if it were a torn tail, at the end of the
+  file or behind a damaged frame. The server now refuses to start with
+  `WALUnreadableRecord`, naming the WAL path and byte position, and leaves the
+  file unchanged. Real crash leftovers (cut-short frames, checksum mismatches,
+  zero fill) are still truncated.
+- **Stream retention `0` keeps events, as documented.** Every compaction
+  emptied rooms with `retention_secs: 0`, including rooms just restored from a
+  snapshot. Compaction now removes expired events from the oldest end only and
+  keeps the room's earliest offset and statistics correct: once every event
+  had expired, newly published events could not be read at their offsets.
+- **SDK fixes found by the release test run.** The C# SDK read results from a
+  `payload` field the HTTP transport had already unwrapped, so bitmap,
+  HyperLogLog, geospatial and transaction results over HTTP were silent
+  defaults; it published with `PPUBLISH`, a command the server never had;
+  queue payloads, EXEC aborts and `WATCH` keys were mishandled on some
+  transports. The C# and Python SDKs reported a body-less 401 as success, so a
+  wrong password made `kv.set` look successful without writing. The C# S2S
+  suite, which had never run, now runs in CI.
+- **Multi-key blocking pops wake on whichever key gets data.** BLPOP, BRPOP,
+  BZPOPMIN and BZPOPMAX on several keys waited for each key's notification in
+  turn, so a push to a later key went unnoticed until the earlier keys were
+  pushed or the timeout expired, and a push landing between the last emptiness
+  check and the start of the wait could be missed. A blocked client now waits
+  on all its keys at once and pops from the first non-empty key in argument
+  order; clients blocked on one key are served in the order they blocked, and
+  a woken client that times out, disconnects or pops another key passes its
+  wake-up on. ZINCRBY, ZINTERSTORE, ZUNIONSTORE and ZDIFFSTORE now also wake
+  BZPOPMIN/BZPOPMAX clients (only ZADD did). Applies to RESP3 and SynapRPC,
+  with or without persistence; the per-key wake-up channels, whose map never
+  shrank, are replaced by one waiter registry.
 
 ## [1.3.2] - 2026-10-13
 

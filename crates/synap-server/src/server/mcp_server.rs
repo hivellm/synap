@@ -1,5 +1,7 @@
 use super::{AppState, get_mcp_tools, handle_mcp_tool};
+use crate::auth::{AuthContext, OperationContext};
 use crate::config::McpConfig;
+use crate::hub::HubUserContext;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, ErrorData, Implementation, ProtocolVersion,
     ServerCapabilities, ServerConfig,
@@ -11,6 +13,35 @@ use std::sync::Arc;
 pub struct SynapMcpService {
     pub state: Arc<AppState>,
     pub mcp_config: McpConfig,
+    /// Whether authentication is enabled: then a request that reaches a tool
+    /// without an identity is denied instead of running unrestricted.
+    pub auth_enabled: bool,
+}
+
+impl SynapMcpService {
+    /// The identity of the HTTP request behind this MCP call. rmcp hands every
+    /// request's `http::request::Parts` to the handler, and the `/mcp` auth
+    /// layer put the request's `AuthContext` (and, in Hub mode, its
+    /// `HubUserContext`) in their extensions, so each call is judged and
+    /// scoped by its own credentials — never by ambient state.
+    fn caller(
+        &self,
+        context: &rmcp::service::RequestContext<rmcp::RoleServer>,
+    ) -> Result<OperationContext, ErrorData> {
+        let parts = context.extensions.get::<axum::http::request::Parts>();
+        let auth = parts.and_then(|parts| parts.extensions.get::<AuthContext>());
+        let tenant = parts
+            .and_then(|parts| parts.extensions.get::<HubUserContext>())
+            .map(|hub| hub.user_id);
+        match auth {
+            Some(auth) => Ok(OperationContext::from_auth_context(auth).with_tenant(tenant)),
+            None if !self.auth_enabled => Ok(OperationContext::unrestricted()),
+            None => Err(ErrorData::invalid_request(
+                "NOPERM the request carries no identity",
+                None,
+            )),
+        }
+    }
 }
 
 impl rmcp::ServerHandler for SynapMcpService {
@@ -44,11 +75,12 @@ impl rmcp::ServerHandler for SynapMcpService {
     async fn call_tool(
         &self,
         request: CallToolRequestParams,
-        _context: rmcp::service::RequestContext<rmcp::RoleServer>,
+        context: rmcp::service::RequestContext<rmcp::RoleServer>,
     ) -> Result<CallToolResponse, ErrorData> {
+        let caller = self.caller(&context)?;
         // Synap tools always run to completion in-process: no elicitation, no
         // long-running task handles, so every reply is a `Complete` response.
-        handle_mcp_tool(request, self.state.clone())
+        handle_mcp_tool(request, self.state.clone(), &caller)
             .await
             .map(CallToolResponse::from)
     }

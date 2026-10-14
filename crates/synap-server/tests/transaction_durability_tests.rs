@@ -180,7 +180,7 @@ async fn committed_transaction_reaches_replica() {
     let replica_cfg = ReplicationConfig {
         enabled: true,
         role: NodeRole::Replica,
-        master_address: Some(addr),
+        master_address: Some(addr.into()),
         auto_reconnect: true,
         reconnect_delay_ms: 100,
         ..Default::default()
@@ -201,6 +201,8 @@ async fn committed_transaction_reaches_replica() {
             sorted_set_store: Some(Arc::clone(&r_zset)),
             queue_manager: None,
             stream_manager: Some(Arc::clone(&r_stream)),
+            hyperloglog_store: None,
+            bitmap_store: None,
         },
     )
     .await
@@ -212,7 +214,7 @@ async fn committed_transaction_reaches_replica() {
         CommittedWrite::KvSet {
             key: "tk".to_string(),
             value: b"tv".to_vec(),
-            ttl: None,
+            expires_at_ms: None,
         },
         CommittedWrite::HashSet {
             key: "th".to_string(),

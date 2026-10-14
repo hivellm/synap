@@ -2,8 +2,11 @@ use super::auth_handlers;
 use super::handlers::{self, AppState};
 use super::mcp_server::SynapMcpService;
 use crate::auth::{ApiKeyManager, AuthMiddleware, UserManager};
+use crate::core::SynapError;
+use crate::hub::{HubClient, HubUserContext, extract_access_key};
 use axum::{
-    Router,
+    Json, Router,
+    response::{IntoResponse, Response},
     routing::{delete, get, post},
 };
 use std::sync::Arc;
@@ -12,7 +15,7 @@ use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
 };
-use tracing::debug;
+use tracing::{debug, warn};
 
 /// Create the Axum router with all endpoints
 /// Paths that must answer without credentials.
@@ -20,8 +23,98 @@ use tracing::debug;
 /// A liveness probe that requires authentication is not a liveness probe: the
 /// container HEALTHCHECK, Kubernetes, and any load balancer all probe
 /// unauthenticated. `/metrics` is the same contract — a scraper is not a user.
-fn is_public_path(path: &str) -> bool {
+/// The rate limiter exempts them for the same reason.
+pub(crate) fn is_public_path(path: &str) -> bool {
     matches!(path, "/health" | "/metrics")
+}
+
+/// Whether a Hub tenant may call `path`. An allow-list of the routes whose
+/// handlers confine every resource they touch to the caller's tenant (or
+/// filter what they list by it); a route added later is refused in Hub mode
+/// until it is reviewed for scoping. Everything else answers 403 there:
+/// keyspace-wide statistics, server introspection (`/info`, `/slowlog`,
+/// `/clients`, `/memory`), `/snapshot`, scripts, the REST transaction (one id
+/// shared by every caller), partitioned topics and consumer groups, cluster
+/// management and local user and key management.
+fn is_tenant_route(path: &str) -> bool {
+    let segments: Vec<&str> = path.strip_prefix('/').unwrap_or(path).split('/').collect();
+    match segments.as_slice() {
+        // Confined per command or tool call.
+        ["api", "v1", "command"] | ["mcp"] | ["umicp"] | ["umicp", "discover"] => true,
+        ["hub", "quota"] => true,
+        [
+            "hash" | "set" | "sortedset" | "list" | "hyperloglog" | "bitmap" | "geospatial"
+            | "pubsub",
+            "stats",
+        ] => false,
+        ["kv", "ws" | "set" | "msetnx"] | ["kv", "get" | "del", _] => true,
+        [
+            "kv",
+            _,
+            "append" | "getrange" | "setrange" | "strlen" | "getset",
+        ] => true,
+        ["key", "randomkey"] | ["key", _, "type" | "exists" | "rename" | "renamenx" | "copy"] => {
+            true
+        }
+        [
+            "hash" | "set" | "sortedset" | "list" | "hyperloglog" | "bitmap" | "geospatial"
+            | "stream" | "queue" | "pubsub",
+            _,
+            ..,
+        ] => true,
+        _ => false,
+    }
+}
+
+/// Hub mode's authentication layer, installed instead of local
+/// authentication. Every route but `/health` and `/metrics` needs a valid Hub
+/// access key (`x-hub-access-key`, or `Authorization: Bearer`): without one, or
+/// with one the Hub rejects, the answer is 401, and local credentials are not
+/// accepted. Only tenant routes ([`is_tenant_route`]) answer; the rest are 403.
+/// The request then runs as the key's tenant: a [`HubUserContext`] that scopes
+/// its resources and the tenant's `AuthContext` that authorizes them.
+async fn hub_gate(
+    hub: &HubClient,
+    mut req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    let client_ip = AuthMiddleware::get_client_ip(&req);
+    if is_public_path(req.uri().path()) {
+        req.extensions_mut()
+            .insert(crate::auth::AuthContext::anonymous(client_ip));
+        return next.run(req).await;
+    }
+
+    let Some(access_key) = extract_access_key(req.headers()) else {
+        return SynapError::Unauthorized("Hub mode: a Hub access key is required".to_string())
+            .into_response();
+    };
+    let (user_id, plan) = match hub.validate_access_key(&access_key).await {
+        Ok(owner) => owner,
+        Err(SynapError::Unauthorized(reason)) => {
+            debug!("Hub access key refused: {}", reason);
+            return SynapError::Unauthorized("Invalid or expired Hub access key".to_string())
+                .into_response();
+        }
+        Err(e) => {
+            warn!("Hub access key could not be validated: {}", e);
+            return (
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "error": e.to_string(), "code": 503 })),
+            )
+                .into_response();
+        }
+    };
+
+    if !is_tenant_route(req.uri().path()) {
+        return SynapError::Forbidden(format!("{} is not available in Hub mode", req.uri().path()))
+            .into_response();
+    }
+
+    let tenant = HubUserContext::new(user_id, plan, access_key);
+    req.extensions_mut().insert(tenant.auth_context(client_ip));
+    req.extensions_mut().insert(tenant);
+    next.run(req).await
 }
 
 pub fn create_router(
@@ -43,6 +136,7 @@ pub fn create_router(
     let auth_state = auth_handlers::AuthState {
         user_manager: user_manager.clone(),
         api_key_manager: api_key_manager.clone(),
+        auth_enabled,
     };
 
     // Create authentication middleware
@@ -56,16 +150,12 @@ pub fn create_router(
         None
     };
 
+    // Hub mode authenticates with Hub access keys instead of local credentials.
+    let hub_client = state.hub_client.clone();
+
     // Create MCP router (stateless)
     let state_arc = Arc::new(state.clone());
-    let mcp_router = create_mcp_router(
-        state_arc.clone(),
-        mcp_config.clone(),
-        user_manager.clone(),
-        api_key_manager.clone(),
-        auth_enabled,
-        require_auth,
-    );
+    let mcp_router = create_mcp_router(state_arc.clone(), mcp_config.clone(), auth_enabled);
 
     // Create UMICP router
     let umicp_router = create_umicp_router(state_arc.clone(), mcp_config.clone());
@@ -454,8 +544,34 @@ pub fn create_router(
         .merge(auth_router) // Authentication endpoints
         .merge(api_router); // Main API endpoints
 
-    // Apply authentication middleware (always apply, but behavior depends on auth_enabled)
-    if let Some(auth) = auth_middleware {
+    // Rate limiting (`server::rate_limit`): the principal layer goes on first
+    // so it runs inside authentication, where the principal is known; the
+    // peer-address layer goes on after it so it runs before authentication.
+    let rate_limiter = rate_limit_config.enabled.then(|| {
+        Arc::new(super::rate_limit::RateLimiter::new(
+            rate_limit_config.clone(),
+        ))
+    });
+    if let Some(limiter) = &rate_limiter {
+        let limiter = Arc::clone(limiter);
+        router = router.layer(axum::middleware::from_fn(
+            move |req: axum::extract::Request, next: axum::middleware::Next| {
+                let limiter = Arc::clone(&limiter);
+                async move { super::rate_limit::limit_by_principal(limiter, req, next).await }
+            },
+        ));
+    }
+
+    // Apply authentication middleware: Hub authentication in Hub mode, local
+    // authentication otherwise (its behavior depends on auth_enabled).
+    if let Some(hub) = hub_client {
+        router = router.layer(axum::middleware::from_fn(
+            move |req: axum::extract::Request, next: axum::middleware::Next| {
+                let hub = Arc::clone(&hub);
+                async move { hub_gate(&hub, req, next).await }
+            },
+        ));
+    } else if let Some(auth) = auth_middleware {
         let auth_clone = auth.clone();
         router = router.layer(axum::middleware::from_fn(
             move |mut req: axum::extract::Request, next: axum::middleware::Next| {
@@ -544,161 +660,191 @@ pub fn create_router(
         ));
     }
 
-    router = router
-        .layer(CompressionLayer::new()) // Gzip compression for responses
-        .layer(TraceLayer::new_for_http())
-        .layer(cors);
-
-    // NOTE: Rate limiting implementation available but disabled by default
-    // The rate_limit::RateLimiter is fully implemented with token bucket algorithm
-    // To enable, set rate_limit.enabled = true in config.yml
-    // Implementation details in src/server/rate_limit.rs
-
-    if rate_limit_config.enabled {
-        tracing::warn!(
-            "Rate limiting configured ({} req/s, burst: {}) but not active - requires middleware integration",
+    // Outside authentication: limited clients are refused before their
+    // credentials are checked.
+    if let Some(limiter) = rate_limiter {
+        router = router.layer(axum::middleware::from_fn(
+            move |req: axum::extract::Request, next: axum::middleware::Next| {
+                let limiter = Arc::clone(&limiter);
+                async move { super::rate_limit::limit_by_peer(limiter, req, next).await }
+            },
+        ));
+        tracing::info!(
+            "Rate limiting enforced: {} req/s, burst {}, per client address before \
+             authentication and per authenticated principal (/health and /metrics exempt)",
             rate_limit_config.requests_per_second,
             rate_limit_config.burst_size
         );
     } else {
-        tracing::info!("Rate limiting disabled (default)");
+        tracing::info!("Rate limiting disabled: requests are not rate limited");
     }
 
     router
+        .layer(CompressionLayer::new()) // Gzip compression for responses
+        .layer(TraceLayer::new_for_http())
+        .layer(cors)
+}
+
+/// The credentials behind an MCP request: the authenticated user and, when it
+/// came through one, the API key. A session is bound to exactly these.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct McpPrincipal {
+    user: Option<String>,
+    api_key: Option<String>,
+}
+
+impl McpPrincipal {
+    fn of(req: &axum::extract::Request) -> Option<Self> {
+        req.extensions()
+            .get::<crate::auth::AuthContext>()
+            .map(|ctx| Self {
+                user: ctx.user_id.clone(),
+                api_key: ctx.api_key_id.clone(),
+            })
+    }
+}
+
+/// Owner of every live legacy MCP session (`mcp-session-id` → principal).
+#[derive(Clone, Default)]
+struct McpSessionBindings {
+    owners: Arc<parking_lot::Mutex<std::collections::HashMap<String, Option<McpPrincipal>>>>,
+}
+
+impl McpSessionBindings {
+    /// Bindings kept before dead sessions are pruned.
+    const PRUNE_ABOVE: usize = 10_000;
+
+    /// Whether `principal` may use session `id`. A session not seen yet is
+    /// bound to its first user.
+    fn admit(&self, id: &str, principal: &Option<McpPrincipal>) -> bool {
+        let mut owners = self.owners.lock();
+        match owners.get(id) {
+            Some(owner) => owner == principal,
+            None => {
+                owners.insert(id.to_owned(), principal.clone());
+                true
+            }
+        }
+    }
+
+    /// Record the owner of a session the server just created, pruning the
+    /// bindings of sessions that ended without a `DELETE` once there are many.
+    async fn bind(
+        &self,
+        id: &str,
+        principal: Option<McpPrincipal>,
+        sessions: &rmcp::transport::streamable_http_server::session::local::LocalSessionManager,
+    ) {
+        use rmcp::transport::streamable_http_server::session::SessionManager;
+
+        let known: Vec<String> = {
+            let mut owners = self.owners.lock();
+            owners.entry(id.to_owned()).or_insert(principal);
+            if owners.len() <= Self::PRUNE_ABOVE {
+                return;
+            }
+            owners.keys().cloned().collect()
+        };
+        let mut dead = Vec::new();
+        for session in known {
+            if !matches!(
+                sessions.has_session(&session.as_str().into()).await,
+                Ok(true)
+            ) {
+                dead.push(session);
+            }
+        }
+        let mut owners = self.owners.lock();
+        for session in dead {
+            owners.remove(&session);
+        }
+    }
+
+    fn forget(&self, id: &str) {
+        self.owners.lock().remove(id);
+    }
 }
 
 /// Create MCP router with StreamableHTTP service and authentication
 fn create_mcp_router(
     state: Arc<AppState>,
     mcp_config: crate::config::McpConfig,
-    user_manager: Arc<UserManager>,
-    api_key_manager: Arc<ApiKeyManager>,
     auth_enabled: bool,
-    require_auth: bool,
 ) -> Router {
     use hyper_util::service::TowerToHyperService;
     use rmcp::transport::streamable_http_server::StreamableHttpService;
     use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 
-    // Create authentication middleware for MCP
-    let auth_middleware = if auth_enabled {
-        Some(AuthMiddleware::new(
-            (*user_manager).clone(),
-            (*api_key_manager).clone(),
-            require_auth,
-        ))
-    } else {
-        None
-    };
-
-    // Create StreamableHTTP service
+    // Create StreamableHTTP service. Each tool call reads its own request's
+    // identity from the HTTP parts rmcp hands the handler (`SynapMcpService::
+    // caller`), so nothing here passes identity through ambient state.
+    let session_manager = Arc::new(LocalSessionManager::default());
     let streamable_service = StreamableHttpService::new(
         move || {
             Ok(SynapMcpService {
                 state: state.clone(),
                 mcp_config: mcp_config.clone(),
+                auth_enabled,
             })
         },
-        LocalSessionManager::default().into(),
+        Arc::clone(&session_manager),
         Default::default(),
     );
 
     // Convert to hyper service
     let hyper_service = TowerToHyperService::new(streamable_service);
 
+    // A legacy MCP session belongs to the identity that initialized it: a
+    // request carrying its `mcp-session-id` under other credentials is refused.
+    let bindings = McpSessionBindings::default();
+
     // Create router with the MCP endpoint
-    let mut router = Router::new().route(
+    let router = Router::new().route(
         "/mcp",
         axum::routing::any(move |req: axum::extract::Request| {
             use hyper::service::Service;
             let service = hyper_service.clone();
+            let bindings = bindings.clone();
+            let session_manager = Arc::clone(&session_manager);
             async move {
-                // Extract AuthContext from request extensions before passing to hyper service
-                let auth_context = req.extensions().get::<crate::auth::AuthContext>().cloned();
-
-                // Set auth context in thread-local storage for MCP handlers
-                if let Some(ctx) = auth_context {
-                    crate::auth::set_auth_context(ctx);
+                let principal = McpPrincipal::of(&req);
+                let session = req
+                    .headers()
+                    .get("mcp-session-id")
+                    .and_then(|v| v.to_str().ok())
+                    .map(str::to_owned);
+                if let Some(id) = &session
+                    && !bindings.admit(id, &principal)
+                {
+                    debug!("MCP: session {} reused under another identity", id);
+                    return Err(axum::http::StatusCode::FORBIDDEN);
                 }
+                let closing = req.method() == axum::http::Method::DELETE;
 
-                // Forward request to hyper service
-                let result = match service.call(req).await {
-                    Ok(response) => Ok(response),
-                    Err(_) => Err(axum::http::StatusCode::INTERNAL_SERVER_ERROR),
-                };
+                let response = service
+                    .call(req)
+                    .await
+                    .map_err(|_| axum::http::StatusCode::INTERNAL_SERVER_ERROR)?;
 
-                // Clear auth context after request processing
-                crate::auth::clear_auth_context();
-
-                result
+                // The request that created a session (initialize) owns it.
+                if let Some(created) = response
+                    .headers()
+                    .get("mcp-session-id")
+                    .and_then(|v| v.to_str().ok())
+                {
+                    bindings.bind(created, principal, &session_manager).await;
+                }
+                if closing && let Some(id) = session {
+                    bindings.forget(&id);
+                }
+                Ok(response)
             }
         }),
     );
 
-    // Apply authentication middleware if enabled
-    if let Some(auth) = auth_middleware {
-        let auth_clone = auth.clone();
-        router = router.layer(axum::middleware::from_fn(
-            move |mut req: axum::extract::Request, next: axum::middleware::Next| {
-                let auth = auth_clone.clone();
-                async move {
-                    let client_ip = AuthMiddleware::get_client_ip(&req);
-                    debug!("MCP: Processing authentication for IP: {}", client_ip);
-
-                    // Try API Key authentication first
-                    match AuthMiddleware::authenticate_api_key(&auth, &req, client_ip) {
-                        Ok(Some(auth_context)) => {
-                            req.extensions_mut().insert(auth_context);
-                            return Ok(next.run(req).await);
-                        }
-                        Err(_) => {
-                            debug!("MCP: Invalid API key provided");
-                            return Err(axum::http::StatusCode::UNAUTHORIZED);
-                        }
-                        Ok(None) => {}
-                    }
-
-                    // Try Basic Auth
-                    match AuthMiddleware::authenticate_basic(&auth, &req, client_ip) {
-                        Ok(Some(auth_context)) => {
-                            req.extensions_mut().insert(auth_context);
-                            return Ok(next.run(req).await);
-                        }
-                        Err(_) => {
-                            debug!("MCP: Invalid Basic Auth credentials");
-                            return Err(axum::http::StatusCode::UNAUTHORIZED);
-                        }
-                        Ok(None) => {}
-                    }
-
-                    // No authentication provided
-                    if auth.require_auth {
-                        debug!("MCP: Authentication required but not provided");
-                        return Err(axum::http::StatusCode::UNAUTHORIZED);
-                    }
-
-                    // Allow anonymous access
-                    req.extensions_mut()
-                        .insert(crate::auth::AuthContext::anonymous(client_ip));
-                    Ok(next.run(req).await)
-                }
-            },
-        ));
-    } else {
-        // Auth disabled - insert anonymous context
-        router = router.layer(axum::middleware::from_fn(
-            move |mut req: axum::extract::Request, next: axum::middleware::Next| {
-                async move {
-                    let client_ip = AuthMiddleware::get_client_ip(&req);
-                    let mut anonymous_ctx = crate::auth::AuthContext::anonymous(client_ip);
-                    anonymous_ctx.is_admin = true; // Grant all permissions when auth is disabled
-                    req.extensions_mut().insert(anonymous_ctx);
-                    next.run(req).await
-                }
-            },
-        ));
-    }
-
+    // Authentication is the main router's layer, which covers `/mcp` like
+    // every other route; a second layer here would verify each credential
+    // twice (bcrypt included) per MCP request.
     router
 }
 
@@ -715,4 +861,81 @@ fn create_umicp_router(state: Arc<AppState>, mcp_config: crate::config::McpConfi
         .route("/umicp", post(transport::umicp_handler))
         .route("/umicp/discover", get(transport::umicp_discover_handler))
         .with_state(umicp_state)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hub_mode_allows_tenant_routes_only() {
+        for path in [
+            "/api/v1/command",
+            "/mcp",
+            "/umicp",
+            "/umicp/discover",
+            "/hub/quota",
+            "/kv/set",
+            "/kv/get/config",
+            "/kv/del/config",
+            "/kv/ws",
+            "/kv/config/append",
+            "/kv/msetnx",
+            "/key/config/rename",
+            "/key/randomkey",
+            "/hash/h/set",
+            "/hash/h/field",
+            "/set/a/move/b",
+            "/set/inter",
+            "/sortedset/z/zadd",
+            "/sortedset/zunionstore",
+            "/list/l/rpoplpush/m",
+            "/hyperloglog/h/pfmerge",
+            "/bitmap/d/bitop",
+            "/geospatial/g/geoadd",
+            "/stream/room",
+            "/stream/room/ws/sub",
+            "/stream/list",
+            "/queue/jobs",
+            "/queue/jobs/stats",
+            "/queue/jobs/ws/c1",
+            "/queue/list",
+            "/pubsub/ws",
+            "/pubsub/news/publish",
+            "/pubsub/topics",
+        ] {
+            assert!(is_tenant_route(path), "{path} should be a tenant route");
+        }
+        for path in [
+            "/kv/stats",
+            "/hash/stats",
+            "/set/stats",
+            "/sortedset/stats",
+            "/list/stats",
+            "/hyperloglog/stats",
+            "/bitmap/stats",
+            "/geospatial/stats",
+            "/pubsub/stats",
+            "/info",
+            "/slowlog",
+            "/clients",
+            "/memory/config/usage",
+            "/snapshot",
+            "/transaction/multi",
+            "/transaction/exec",
+            "/script/eval",
+            "/script/flush",
+            "/topics",
+            "/topics/t/publish",
+            "/consumer-groups/g/join",
+            "/cluster/info",
+            "/cluster/nodes",
+            "/auth/login",
+            "/auth/users",
+            "/health/extra",
+            "/",
+        ] {
+            assert!(!is_tenant_route(path), "{path} must be refused in Hub mode");
+        }
+    }
 }

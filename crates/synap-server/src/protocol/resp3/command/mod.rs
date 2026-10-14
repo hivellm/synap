@@ -4,25 +4,58 @@
 //! appropriate store method and returns a `Resp3Value` response.
 //! Reuses the same store handles as the HTTP handlers — no logic duplication.
 
+use std::borrow::Cow;
 use std::str;
 
 use super::parser::Resp3Value;
+use crate::auth::{CommandArgs, OperationContext};
 use crate::server::handlers::AppState;
 
 pub mod advanced;
 pub mod collections;
 pub mod kv;
 
+/// A RESP3 command's arguments (`args[1..]`) as seen by the authorization
+/// classifier. Every scalar renders as text — lossily for non-UTF-8 bulk
+/// strings — so a key is never skipped just because a handler would reject it.
+pub struct Resp3Args<'a>(pub &'a [Resp3Value]);
+
+impl CommandArgs for Resp3Args<'_> {
+    fn arg_count(&self) -> usize {
+        self.0.len().saturating_sub(1)
+    }
+
+    fn arg(&self, index: usize) -> Option<Cow<'_, str>> {
+        match self.0.get(index + 1)? {
+            Resp3Value::SimpleString(s) | Resp3Value::BigNumber(s) => Some(Cow::Borrowed(s)),
+            Resp3Value::BulkString(b) | Resp3Value::Verbatim(_, b) => {
+                Some(String::from_utf8_lossy(b))
+            }
+            Resp3Value::BulkShared(b) => Some(String::from_utf8_lossy(b)),
+            Resp3Value::Integer(i) => Some(Cow::Owned(i.to_string())),
+            Resp3Value::Double(d) => Some(Cow::Owned(d.to_string())),
+            Resp3Value::Boolean(b) => Some(Cow::Owned(b.to_string())),
+            Resp3Value::Error(_)
+            | Resp3Value::Null
+            | Resp3Value::Array(_)
+            | Resp3Value::Set(_)
+            | Resp3Value::Map(_) => None,
+        }
+    }
+}
+
 /// Dispatch one parsed RESP3 command array and return the response value.
 ///
 /// `args[0]` is the command name (case-insensitive).
-/// `args[1..]` are the positional arguments.
+/// `args[1..]` are the positional arguments. The caller authorizes the
+/// command against `ctx` first; `ctx` is passed on to scripts, whose
+/// `redis.call`s are authorized one by one.
 #[tracing::instrument(
     name = "resp3.dispatch",
     skip(state, args),
     fields(cmd = args.first().and_then(|a| a.as_str()).unwrap_or("?"))
 )]
-pub async fn dispatch(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+pub async fn dispatch(state: &AppState, ctx: &OperationContext, args: &[Resp3Value]) -> Resp3Value {
     if args.is_empty() {
         return Resp3Value::Error("ERR empty command".into());
     }
@@ -156,8 +189,8 @@ pub async fn dispatch(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
         "UNWATCH" => advanced::cmd_unwatch(state, args).await,
 
         // ── Scripts (3.5) ────────────────────────────────────────────────────────
-        "EVAL" => advanced::cmd_eval(state, args).await,
-        "EVALSHA" => advanced::cmd_evalsha(state, args).await,
+        "EVAL" => advanced::cmd_eval(state, ctx, args).await,
+        "EVALSHA" => advanced::cmd_evalsha(state, ctx, args).await,
         "SCRIPT" => advanced::cmd_script(state, args).await,
 
         // ── HyperLogLog (3.6) ────────────────────────────────────────────────────

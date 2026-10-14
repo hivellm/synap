@@ -1,0 +1,19 @@
+{
+  "id": "wal-startup-scan-classifies-torn-tail-vs-interior-corruption-and-poisons-on-io-failure",
+  "type": "pattern",
+  "title": "WAL startup scan classifies torn tail vs interior corruption; I/O failure poisons the writer",
+  "category": "persistence",
+  "description": "Before the first append, verify every WAL frame (length within remaining bytes, CRC32, decodable payload). First invalid frame with no valid frame after it = torn tail: truncate to the last valid frame. Invalid frame followed by a valid one = interior corruption: fail startup with the byte position. On the write side, a failed write/flush/fsync fails every ack in the group and poisons the writer until restart; health reports it. A WalSink trait over the file lets tests inject flush/fsync failures.",
+  "example": "see wal-startup-scan-classifies-torn-tail-vs-interior-corruption-and-poisons-on-io-failure.md",
+  "whenToUse": "Append-only logs reopened after a crash; group-commit writers that acknowledge callers.",
+  "whenNotToUse": "Files replaced atomically via temp file + rename (snapshots).",
+  "createdAt": "2026-10-13T12:00:00.000Z",
+  "tags": [
+    "persistence",
+    "wal",
+    "fsync",
+    "durability",
+    "phase20"
+  ],
+  "source": "manual"
+}

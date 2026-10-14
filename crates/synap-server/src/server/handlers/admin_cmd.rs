@@ -59,6 +59,22 @@ pub(super) async fn handle_info_cmd(
     Ok(response)
 }
 
+/// `admin.config`: the configuration the server runs with, every override
+/// applied and every secret redacted, as the JSON object `config` and as the
+/// YAML text `yaml` (the same YAML parser loads it back). Admin-only; read-only
+/// by design — the configuration is changed in the file the server starts from.
+pub(super) async fn handle_admin_config_cmd(
+    state: &AppState,
+    _request: &Request,
+) -> Result<serde_json::Value, SynapError> {
+    let config = state.server_config.as_deref().ok_or_else(|| {
+        SynapError::InternalError("this server exposes no configuration snapshot".to_string())
+    })?;
+    let yaml = serde_saphyr::to_string(config)
+        .map_err(|e| SynapError::SerializationError(e.to_string()))?;
+    Ok(serde_json::json!({ "config": config, "yaml": yaml }))
+}
+
 pub(super) async fn handle_slowlog_get_cmd(
     state: AppState,
     request: &Request,
@@ -273,19 +289,28 @@ pub(super) async fn handle_transaction_exec_cmd(
         .unwrap_or(&request.request_id);
 
     debug!("StreamableHTTP EXEC client_id={}", client_id);
-    match state.transaction_manager.exec(client_id).await? {
-        Some((results, writes)) => {
-            // Persist + replicate the whole transaction atomically (audit M-010).
-            if let Some(ref persistence) = state.persistence
-                && let Err(e) = persistence.log_transaction(&writes).await
-            {
-                error!("Failed to log EXEC transaction to WAL: {}", e);
-            }
-            Ok(serde_json::json!({
-                "success": true,
-                "results": results
-            }))
+    // Persist + replicate the whole transaction atomically (audit M-010),
+    // ordered against plain writers and snapshots (phase23). A commit that
+    // could not be logged is not durable: report it.
+    let outcome = match crate::persistence::durable::exec(
+        state.persistence.as_deref(),
+        &state.transaction_manager,
+        client_id,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(crate::persistence::durable::ExecError::Failed(e)) => return Err(e),
+        Err(e @ crate::persistence::durable::ExecError::NotDurable(_)) => {
+            error!("Failed to log EXEC transaction to WAL: {}", e);
+            return Err(SynapError::InternalError(e.to_string()));
         }
+    };
+    match outcome {
+        Some((results, _writes)) => Ok(serde_json::json!({
+            "success": true,
+            "results": results
+        })),
         None => Ok(serde_json::json!({
             "aborted": true,
             "message": "Transaction aborted: watched keys changed"

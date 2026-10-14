@@ -1,37 +1,99 @@
+use crate::persistence::durable;
 use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock, ErrorData};
 use serde_json::json;
 use std::sync::Arc;
 use uuid::Uuid;
 
-use crate::auth::{Action, get_auth_context};
+use crate::auth::OperationContext;
 use crate::server::AppState;
 
-/// Check if the current MCP request has permission for the given resource and action
-fn check_mcp_permission(resource: &str, action: Action) -> Result<(), ErrorData> {
-    if let Some(auth_context) = get_auth_context() {
-        if auth_context.has_permission(resource, action) {
-            Ok(())
-        } else {
-            Err(ErrorData::invalid_request(
-                format!(
-                    "Insufficient permissions for resource: {}, action: {}",
-                    resource,
-                    action.as_str()
-                ),
-                None,
-            ))
-        }
-    } else {
-        // No auth context - allow if auth is disabled (anonymous access)
-        // If auth is required, middleware should have rejected the request
-        Ok(())
-    }
+/// The `/api/v1/command` command each tool performs. Tools are authorized
+/// through the envelope classifier with their own arguments (which use the
+/// envelope's field names), so a tool needs exactly the permissions its
+/// envelope command needs on any other transport.
+pub fn tool_command(tool: &str) -> Option<&'static str> {
+    Some(match tool {
+        "synap_kv_get" => "kv.get",
+        "synap_kv_set" => "kv.set",
+        "synap_kv_delete" => "kv.del",
+        "synap_kv_append" => "kv.append",
+        "synap_kv_getrange" => "kv.getrange",
+        "synap_kv_strlen" => "kv.strlen",
+        "synap_key_type" => "key.type",
+        "synap_key_exists" => "key.exists",
+        "synap_key_rename" => "key.rename",
+        "synap_hash_set" => "hash.set",
+        "synap_hash_get" => "hash.get",
+        "synap_hash_getall" => "hash.getall",
+        "synap_list_push" => "list.lpush",
+        "synap_list_pop" => "list.lpop",
+        "synap_list_range" => "list.lrange",
+        "synap_set_add" => "set.add",
+        "synap_set_members" => "set.members",
+        "synap_set_inter" => "set.inter",
+        "synap_queue_publish" => "queue.publish",
+        "synap_sortedset_zadd" => "sortedset.zadd",
+        "synap_sortedset_zrange" => "sortedset.zrange",
+        "synap_sortedset_zrank" => "sortedset.zrank",
+        "synap_transaction_multi" => "transaction.multi",
+        "synap_transaction_exec" => "transaction.exec",
+        _ => return None,
+    })
 }
 
+/// Authorize a tool call for `caller`; a tool without a policy is denied.
+fn authorize_tool(
+    caller: &OperationContext,
+    request: &CallToolRequestParams,
+) -> Result<(), ErrorData> {
+    if caller.is_unrestricted() {
+        return Ok(());
+    }
+    let arguments = request
+        .arguments
+        .clone()
+        .map(serde_json::Value::Object)
+        .unwrap_or(serde_json::Value::Null);
+    // An unknown tool maps to a name no classifier knows, which is denied.
+    let command = tool_command(&request.name).unwrap_or("mcp.unknown-tool");
+    caller
+        .authorize_envelope(command, &arguments)
+        .map_err(|denied| ErrorData::invalid_request(denied.to_string(), None))
+}
+
+/// In Hub mode, confine a tool call's arguments to the caller's tenant exactly
+/// as the envelope command the tool performs is confined; a caller without a
+/// tenant is refused there.
+fn confine_tool(
+    caller: &OperationContext,
+    hub_mode: bool,
+    request: &mut CallToolRequestParams,
+) -> Result<(), ErrorData> {
+    let refuse = |denied: crate::auth::Denied| ErrorData::invalid_request(denied.to_string(), None);
+    let Some(tenant) = caller.tenant_scope(hub_mode).map_err(refuse)? else {
+        return Ok(());
+    };
+    let command = tool_command(&request.name).unwrap_or("mcp.unknown-tool");
+    let mut arguments = serde_json::Value::Object(request.arguments.take().unwrap_or_default());
+    crate::auth::scope_envelope(command, &mut arguments, tenant).map_err(refuse)?;
+    request.arguments = match arguments {
+        serde_json::Value::Object(fields) => Some(fields),
+        _ => None,
+    };
+    Ok(())
+}
+
+/// Run one MCP tool for `caller`, whose identity the transport (MCP or UMICP)
+/// carried with the request. The call is authorized, and in Hub mode confined
+/// to the caller's tenant, before any tool code runs.
 pub async fn handle_mcp_tool(
-    request: CallToolRequestParams,
+    mut request: CallToolRequestParams,
     state: Arc<AppState>,
+    caller: &OperationContext,
 ) -> Result<CallToolResult, ErrorData> {
+    authorize_tool(caller, &request)?;
+    confine_tool(caller, state.hub_client.is_some(), &mut request)?;
+
     match request.name.as_ref() {
         // Essential KV tools (3)
         "synap_kv_get" => handle_kv_get(request, state).await,
@@ -84,9 +146,6 @@ async fn handle_kv_get(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
 
-    // Check permission for kv:key read operation
-    check_mcp_permission(&format!("kv:{}", key), Action::Read)?;
-
     let return_type = args
         .get("type")
         .and_then(|v| v.as_str())
@@ -129,9 +188,6 @@ async fn handle_kv_set(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
 
-    // Check permission for kv:key write operation
-    check_mcp_permission(&format!("kv:{}", key), Action::Write)?;
-
     let value_str = args
         .get("value")
         .and_then(|v| v.as_str())
@@ -141,20 +197,15 @@ async fn handle_kv_set(
 
     let value_bytes = value_str.as_bytes().to_vec();
 
-    state
-        .kv_store
-        .set(key, value_bytes.clone(), ttl)
-        .await
-        .map_err(|e| ErrorData::internal_error(format!("Set failed: {}", e), None))?;
-
-    // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence
-            .log_kv_set(key.to_string(), value_bytes, ttl)
-            .await
-    {
-        tracing::error!("Failed to log KV SET to WAL (MCP): {}", e);
-    }
+    durable::kv_set(
+        state.persistence.as_deref(),
+        &state.kv_store,
+        key,
+        value_bytes,
+        ttl,
+    )
+    .await
+    .map_err(|e| ErrorData::internal_error(format!("Set failed: {}", e), None))?;
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"success": true}).to_string(),
@@ -175,22 +226,9 @@ async fn handle_kv_delete(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
 
-    // Check permission for kv:key delete operation
-    check_mcp_permission(&format!("kv:{}", key), Action::Delete)?;
-
-    let deleted = state
-        .kv_store
-        .delete(key)
+    let deleted = durable::kv_delete(state.persistence.as_deref(), &state.kv_store, key)
         .await
         .map_err(|e| ErrorData::internal_error(format!("Delete failed: {}", e), None))?;
-
-    // Log to WAL if deleted
-    if deleted
-        && let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence.log_kv_del(vec![key.to_string()]).await
-    {
-        tracing::error!("Failed to log KV DELETE to WAL (MCP): {}", e);
-    }
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"deleted": deleted}).to_string(),
@@ -220,20 +258,15 @@ async fn handle_kv_append(
 
     let value_bytes = value_str.as_bytes().to_vec();
 
-    let length = state
-        .kv_store
-        .append(key, value_bytes.clone())
-        .await
-        .map_err(|e| ErrorData::internal_error(format!("APPEND failed: {}", e), None))?;
-
-    // Log to WAL (async, non-blocking)
-    if let Some(ref persistence) = state.persistence
-        && let Err(e) = persistence
-            .log_kv_set(key.to_string(), value_bytes, None)
-            .await
-    {
-        tracing::error!("Failed to log KV APPEND to WAL (MCP): {}", e);
-    }
+    // Recorded as the whole resulting value and its expiry, not the operand.
+    let length = durable::kv_append(
+        state.persistence.as_deref(),
+        &state.kv_store,
+        key,
+        value_bytes,
+    )
+    .await
+    .map_err(|e| ErrorData::internal_error(format!("APPEND failed: {}", e), None))?;
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"length": length, "key": key}).to_string(),
@@ -395,8 +428,7 @@ async fn handle_key_rename(
         state.sorted_set_store.clone(),
     );
 
-    manager
-        .rename(source, destination)
+    durable::key_rename(state.persistence.as_deref(), &manager, source, destination)
         .await
         .map_err(|e| ErrorData::internal_error(format!("RENAME failed: {}", e), None))?;
 
@@ -426,9 +458,6 @@ async fn handle_hash_set(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing field", None))?;
 
-    // Check permission for hash:key write operation
-    check_mcp_permission(&format!("hash:{}", key), Action::Write)?;
-
     let value = args
         .get("value")
         .ok_or_else(|| ErrorData::invalid_params("Missing value", None))?;
@@ -436,10 +465,15 @@ async fn handle_hash_set(
     let value_bytes = serde_json::to_vec(value)
         .map_err(|e| ErrorData::internal_error(format!("Serialization failed: {}", e), None))?;
 
-    let created = state
-        .hash_store
-        .hset(key, field, value_bytes)
-        .map_err(|e| ErrorData::internal_error(format!("HSET failed: {}", e), None))?;
+    let created = durable::hset(
+        state.persistence.as_deref(),
+        &state.hash_store,
+        key,
+        field,
+        value_bytes,
+    )
+    .await
+    .map_err(|e| ErrorData::internal_error(format!("HSET failed: {}", e), None))?;
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"created": created, "key": key, "field": field}).to_string(),
@@ -464,9 +498,6 @@ async fn handle_hash_get(
         .get("field")
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing field", None))?;
-
-    // Check permission for hash:key read operation
-    check_mcp_permission(&format!("hash:{}", key), Action::Read)?;
 
     let value_bytes = state
         .hash_store
@@ -534,9 +565,6 @@ async fn handle_list_push(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
 
-    // Check permission for list:key write operation
-    check_mcp_permission(&format!("list:{}", key), Action::Write)?;
-
     let values_array = args
         .get("values")
         .and_then(|v| v.as_array())
@@ -558,9 +586,23 @@ async fn handle_list_push(
         .collect::<Result<Vec<_>, _>>()?;
 
     let length = if direction == "left" {
-        state.list_store.lpush(key, values, only_if_exists)
+        durable::lpush(
+            state.persistence.as_deref(),
+            &state.list_store,
+            key,
+            values,
+            only_if_exists,
+        )
+        .await
     } else {
-        state.list_store.rpush(key, values, only_if_exists)
+        durable::rpush(
+            state.persistence.as_deref(),
+            &state.list_store,
+            key,
+            values,
+            only_if_exists,
+        )
+        .await
     }
     .map_err(|e| ErrorData::internal_error(format!("Push failed: {}", e), None))?;
 
@@ -583,9 +625,6 @@ async fn handle_list_pop(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
 
-    // Check permission for list:key write operation
-    check_mcp_permission(&format!("list:{}", key), Action::Write)?;
-
     let direction = args
         .get("direction")
         .and_then(|v| v.as_str())
@@ -597,9 +636,9 @@ async fn handle_list_pop(
         .map(|c| c as usize);
 
     let values = if direction == "left" {
-        state.list_store.lpop(key, count)
+        durable::lpop(state.persistence.as_deref(), &state.list_store, key, count).await
     } else {
-        state.list_store.rpop(key, count)
+        durable::rpop(state.persistence.as_deref(), &state.list_store, key, count).await
     }
     .map_err(|e| ErrorData::internal_error(format!("Pop failed: {}", e), None))?;
 
@@ -630,9 +669,6 @@ async fn handle_list_range(
         .get("key")
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
-
-    // Check permission for list:key read operation
-    check_mcp_permission(&format!("list:{}", key), Action::Read)?;
 
     let start = args.get("start").and_then(|v| v.as_i64()).unwrap_or(0);
 
@@ -676,9 +712,6 @@ async fn handle_queue_publish(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing queue name", None))?;
 
-    // Check permission for queue:name write operation
-    check_mcp_permission(&format!("queue:{}", queue_name), Action::Write)?;
-
     let queue = queue_name;
     let message = args
         .get("message")
@@ -690,10 +723,17 @@ async fn handle_queue_publish(
         .and_then(|v| v.as_u64())
         .map(|p| p as u8);
 
-    let message_id = queue_manager
-        .publish(queue, message.as_bytes().to_vec(), priority, None)
-        .await
-        .map_err(|e| ErrorData::internal_error(format!("Publish failed: {}", e), None))?;
+    let message_id = durable::queue_publish(
+        state.persistence.as_deref(),
+        queue_manager,
+        queue,
+        message.as_bytes().to_vec(),
+        priority,
+        None,
+    )
+    .await
+    .map(|message| message.id)
+    .map_err(|e| ErrorData::internal_error(format!("Publish failed: {}", e), None))?;
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"message_id": message_id}).to_string(),
@@ -715,9 +755,6 @@ async fn handle_set_add(
         .and_then(|v| v.as_str())
         .ok_or_else(|| ErrorData::invalid_params("Missing key", None))?;
 
-    // Check permission for set:key write operation
-    check_mcp_permission(&format!("set:{}", key), Action::Write)?;
-
     let members = args
         .get("members")
         .and_then(|v| v.as_array())
@@ -728,10 +765,14 @@ async fn handle_set_add(
         .map(|v| serde_json::to_vec(v).unwrap_or_default())
         .collect();
 
-    let added = state
-        .set_store
-        .sadd(key, member_bytes)
-        .map_err(|e| ErrorData::internal_error(format!("SADD failed: {}", e), None))?;
+    let added = durable::sadd(
+        state.persistence.as_deref(),
+        &state.set_store,
+        key,
+        member_bytes,
+    )
+    .await
+    .map_err(|e| ErrorData::internal_error(format!("SADD failed: {}", e), None))?;
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"added": added, "key": key}).to_string(),
@@ -832,7 +873,16 @@ async fn handle_sortedset_zadd(
     let member_bytes = member.as_bytes().to_vec();
     let opts = crate::core::ZAddOptions::default();
 
-    let (added, _) = state.sorted_set_store.zadd(key, member_bytes, score, &opts);
+    let (added, _) = durable::zadd(
+        state.persistence.as_deref(),
+        &state.sorted_set_store,
+        key,
+        member_bytes,
+        score,
+        &opts,
+    )
+    .await
+    .map_err(|e| ErrorData::internal_error(format!("ZADD failed: {}", e), None))?;
 
     Ok(CallToolResult::success(vec![ContentBlock::text(
         json!({"added": added > 0, "key": key, "member": member, "score": score}).to_string(),
@@ -957,27 +1007,36 @@ async fn handle_transaction_exec(
         .ok_or_else(|| ErrorData::invalid_params("Missing client_id", None))?
         .to_string();
 
-    match state
-        .transaction_manager
-        .exec(&client_id)
-        .await
-        .map_err(|e| ErrorData::internal_error(format!("Transaction exec failed: {}", e), None))?
+    // Persist + replicate the whole transaction atomically (audit M-010),
+    // ordered against plain writers and snapshots (phase23). A commit that
+    // could not be logged is not durable: report it.
+    let outcome = match crate::persistence::durable::exec(
+        state.persistence.as_deref(),
+        &state.transaction_manager,
+        &client_id,
+    )
+    .await
     {
-        Some((results, writes)) => {
-            // Persist + replicate the whole transaction atomically (audit M-010).
-            if let Some(ref persistence) = state.persistence
-                && let Err(e) = persistence.log_transaction(&writes).await
-            {
-                tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
-            }
-            Ok(CallToolResult::success(vec![ContentBlock::text(
-                json!({
-                    "success": true,
-                    "results": results
-                })
-                .to_string(),
-            )]))
+        Ok(outcome) => outcome,
+        Err(crate::persistence::durable::ExecError::Failed(e)) => {
+            return Err(ErrorData::internal_error(
+                format!("Transaction exec failed: {}", e),
+                None,
+            ));
         }
+        Err(e @ crate::persistence::durable::ExecError::NotDurable(_)) => {
+            tracing::error!("Failed to log EXEC transaction to WAL: {}", e);
+            return Err(ErrorData::internal_error(e.to_string(), None));
+        }
+    };
+    match outcome {
+        Some((results, _writes)) => Ok(CallToolResult::success(vec![ContentBlock::text(
+            json!({
+                "success": true,
+                "results": results
+            })
+            .to_string(),
+        )])),
         None => Ok(CallToolResult::success(vec![ContentBlock::text(
             json!({
                 "aborted": true,
@@ -985,5 +1044,165 @@ async fn handle_transaction_exec(
             })
             .to_string(),
         )])),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::{Action, AuthContext, Permission};
+    use crate::config::McpConfig;
+
+    /// The MCP EXEC tool fails, saying the commit is not durable, when the WAL
+    /// cannot log the transaction.
+    #[tokio::test]
+    async fn exec_tool_reports_a_transaction_the_wal_could_not_log() {
+        let mut state = crate::server::handlers::test_app_state();
+        let (layer, faults) =
+            crate::persistence::layer::test_support::faulty_layer("mcp_exec").await;
+        state.persistence = Some(layer);
+        state
+            .transaction_manager
+            .multi("mcp_client".to_string())
+            .unwrap();
+        state
+            .transaction_manager
+            .queue_command_if_transaction(
+                "mcp_client",
+                crate::core::TransactionCommand::KVSet {
+                    key: "mcp:k".into(),
+                    value: b"v".to_vec(),
+                    ttl: None,
+                },
+            )
+            .unwrap();
+
+        faults.fail_next_flush();
+        let request = CallToolRequestParams::new("synap_transaction_exec").with_arguments(
+            json!({"client_id": "mcp_client"})
+                .as_object()
+                .cloned()
+                .unwrap_or_default(),
+        );
+        match handle_transaction_exec(request, Arc::new(state)).await {
+            Err(error) => assert!(error.message.contains("not durable"), "{error:?}"),
+            Ok(result) => panic!("EXEC must fail when the WAL rejects it, got {result:?}"),
+        }
+    }
+
+    fn every_tool() -> Vec<String> {
+        let config = McpConfig {
+            enable_kv_tools: true,
+            enable_hash_tools: true,
+            enable_list_tools: true,
+            enable_set_tools: true,
+            enable_queue_tools: true,
+            enable_sortedset_tools: true,
+            enable_transaction_tools: true,
+            ..McpConfig::default()
+        };
+        crate::server::get_mcp_tools(&config)
+            .into_iter()
+            .map(|tool| tool.name.to_string())
+            .collect()
+    }
+
+    /// Every tool the server can expose maps to an envelope command the
+    /// classifier knows, so no tool runs without an access policy.
+    #[test]
+    fn every_tool_has_an_access_policy() {
+        let tools = every_tool();
+        assert!(tools.len() >= 24, "only {} tools listed", tools.len());
+        for tool in tools {
+            let command = tool_command(&tool)
+                .unwrap_or_else(|| panic!("tool `{tool}` has no envelope command"));
+            assert!(
+                crate::auth::classify_envelope(command, &serde_json::json!({})).is_some(),
+                "tool `{tool}` maps to unclassified `{command}`"
+            );
+        }
+    }
+
+    #[test]
+    fn tools_are_authorized_with_their_arguments() {
+        let reader = OperationContext::from_auth_context(&AuthContext {
+            user_id: Some("reader".into()),
+            api_key_id: None,
+            client_ip: std::net::IpAddr::from([127, 0, 0, 1]),
+            permissions: vec![Permission::new("kv:*", Action::Read)],
+            is_admin: false,
+        });
+        let call = |tool: &str, args: serde_json::Value| {
+            CallToolRequestParams::new(tool.to_string())
+                .with_arguments(args.as_object().cloned().unwrap_or_default())
+        };
+
+        assert!(
+            authorize_tool(
+                &reader,
+                &call("synap_kv_get", serde_json::json!({"key": "a"}))
+            )
+            .is_ok()
+        );
+        let denied = authorize_tool(
+            &reader,
+            &call(
+                "synap_kv_set",
+                serde_json::json!({"key": "a", "value": "1"}),
+            ),
+        )
+        .unwrap_err();
+        assert!(denied.message.contains("kv:a"), "{}", denied.message);
+        assert!(authorize_tool(&reader, &call("synap_unknown", serde_json::json!({}))).is_err());
+        assert!(
+            authorize_tool(
+                &OperationContext::unrestricted(),
+                &call(
+                    "synap_kv_set",
+                    serde_json::json!({"key": "a", "value": "1"})
+                )
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    fn hub_tools_are_confined_to_the_callers_tenant() {
+        let tenant = Uuid::parse_str("550e8400-e29b-41d4-a716-446655440000").unwrap();
+        let caller = OperationContext::unrestricted().with_tenant(Some(tenant));
+        let call = |tool: &str, args: serde_json::Value| {
+            CallToolRequestParams::new(tool.to_string())
+                .with_arguments(args.as_object().cloned().unwrap_or_default())
+        };
+
+        let mut set = call(
+            "synap_kv_set",
+            serde_json::json!({"key": "a", "value": "1"}),
+        );
+        confine_tool(&caller, true, &mut set).unwrap();
+        let arguments = set.arguments.unwrap();
+        assert_eq!(arguments["key"], "user_550e8400e29b41d4a716446655440000:a");
+        assert_eq!(arguments["value"], "1");
+
+        let mut untouched = call("synap_kv_set", serde_json::json!({"key": "a"}));
+        confine_tool(&caller, false, &mut untouched).unwrap();
+        assert_eq!(untouched.arguments.unwrap()["key"], "a");
+
+        let mut no_tenant = call("synap_kv_get", serde_json::json!({"key": "a"}));
+        assert!(confine_tool(&OperationContext::unrestricted(), true, &mut no_tenant).is_err());
+
+        // A transaction is the tenant's own: its id is scoped, and one is
+        // required because a generated id could not be addressed again.
+        let mut multi = call("synap_transaction_multi", serde_json::json!({}));
+        assert!(confine_tool(&caller, true, &mut multi).is_err());
+        let mut exec = call(
+            "synap_transaction_exec",
+            serde_json::json!({"client_id": "tx"}),
+        );
+        confine_tool(&caller, true, &mut exec).unwrap();
+        assert_eq!(
+            exec.arguments.unwrap()["client_id"],
+            "user_550e8400e29b41d4a716446655440000:tx"
+        );
     }
 }

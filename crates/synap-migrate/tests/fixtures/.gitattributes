@@ -1,0 +1,3 @@
+# Data directories written by real servers: kept byte for byte, never
+# converted, so the tests read exactly what the server wrote.
+v*/data/** binary

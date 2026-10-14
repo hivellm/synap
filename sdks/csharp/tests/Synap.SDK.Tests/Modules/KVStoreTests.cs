@@ -278,6 +278,28 @@ public sealed class KVStoreTests : IDisposable
         Assert.True(result.ContainsKey("memory_usage"));
     }
 
+    [Fact]
+    public async Task AnErrorStatusWithAnEmptyBody_Throws()
+    {
+        // The server answers refused credentials with a bodiless 401; that is
+        // an error, not an empty result.
+        _httpHandlerMock.Protected()
+            .Setup<Task<HttpResponseMessage>>(
+                "SendAsync",
+                ItExpr.IsAny<HttpRequestMessage>(),
+                ItExpr.IsAny<CancellationToken>())
+            .ReturnsAsync(() => new HttpResponseMessage
+            {
+                StatusCode = HttpStatusCode.Unauthorized,
+                Content = new StringContent(string.Empty)
+            });
+
+        var setError = await Assert.ThrowsAsync<Synap.SDK.Exceptions.SynapException>(
+            () => _kv.SetAsync("k", "v"));
+        Assert.Contains("HTTP Error (401)", setError.Message, StringComparison.Ordinal);
+        await Assert.ThrowsAsync<Synap.SDK.Exceptions.SynapException>(() => _kv.GetAsync<string>("k"));
+    }
+
     public void Dispose()
     {
         _client.Dispose();

@@ -7,6 +7,12 @@ use crate::server::handlers::AppState;
 use std::sync::Arc;
 use std::time::Duration;
 
+/// These tests exercise command behaviour, not authorization, so they dispatch
+/// as an unrestricted caller (authentication disabled).
+async fn dispatch(state: &AppState, args: &[Resp3Value]) -> Resp3Value {
+    super::dispatch(state, &crate::auth::OperationContext::unrestricted(), args).await
+}
+
 fn make_state() -> AppState {
     let kv_store = Arc::new(KVStore::new(KVConfig::default()));
     let hash_store = Arc::new(HashStore::new());
@@ -58,6 +64,7 @@ fn make_state() -> AppState {
         user_manager: None,
         require_auth: false,
         replication: None,
+        server_config: None,
     }
 }
 
@@ -320,11 +327,15 @@ async fn test_bitcount_after_setbit() {
 }
 
 #[tokio::test]
-async fn test_flushall_returns_ok() {
+async fn test_flushall_refused_by_config_is_an_error() {
+    // `allow_flush_commands` defaults to false: the flush is refused, and the
+    // reply says so instead of an "OK" for a flush that never happened.
     let state = make_state();
     dispatch(&state, &args(&["SET", "flush_k", "v"])).await;
     let result = dispatch(&state, &args(&["FLUSHALL"])).await;
-    assert_eq!(result, Resp3Value::SimpleString("OK".into()));
+    assert!(matches!(result, Resp3Value::Error(ref e) if e.contains("disabled")));
+    let still_there = dispatch(&state, &args(&["GET", "flush_k"])).await;
+    assert!(matches!(still_there, Resp3Value::BulkShared(_)));
 }
 
 #[tokio::test]
@@ -1201,4 +1212,22 @@ async fn test_resp3_sstats_exposes_room_generation() {
         sstats_int(&after, "generation") > generation,
         "generation must move after a wipe: {after:?}"
     );
+}
+
+/// EXEC over RESP3 returns an error saying the commit is not durable when the
+/// WAL cannot log the transaction (spec: EXEC with failed logging).
+#[tokio::test]
+async fn test_exec_reports_a_transaction_the_wal_could_not_log() {
+    let mut state = make_state();
+    let (layer, faults) = crate::persistence::layer::test_support::faulty_layer("resp3_exec").await;
+    state.persistence = Some(layer);
+    let cid = "wal_fail_client";
+    dispatch(&state, &args(&["MULTI", cid])).await;
+    dispatch(&state, &args(&["TXQUEUE", cid, "SET", "wal:k", "v"])).await;
+
+    faults.fail_next_flush();
+    match dispatch(&state, &args(&["EXEC", cid])).await {
+        Resp3Value::Error(message) => assert!(message.contains("not durable"), "{message}"),
+        other => panic!("EXEC must fail when the WAL rejects it, got {other:?}"),
+    }
 }

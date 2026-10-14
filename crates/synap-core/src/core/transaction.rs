@@ -18,7 +18,9 @@ use tracing::debug;
 
 /// The per-command JSON results and the durable writes produced by a committed
 /// `EXEC`; `None` when the transaction aborted (a `WATCH`ed key changed).
-type ExecOutcome = Option<(Vec<serde_json::Value>, Vec<CommittedWrite>)>;
+/// What EXEC returns: `Some((results, writes))` when it committed, `None`
+/// when a watched key changed and the transaction was aborted.
+pub type ExecOutcome = Option<(Vec<serde_json::Value>, Vec<CommittedWrite>)>;
 
 /// Command to be executed in a transaction
 #[derive(Debug, Clone)]
@@ -88,10 +90,12 @@ pub enum TransactionCommand {
 /// from the master (audit M-010).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommittedWrite {
+    /// The key now holds `value`, expiring at `expires_at_ms` (absolute Unix
+    /// milliseconds, the deadline the store stored; `None` = persistent).
     KvSet {
         key: String,
         value: Vec<u8>,
-        ttl: Option<u64>,
+        expires_at_ms: Option<u64>,
     },
     KvDel {
         keys: Vec<String>,
@@ -150,6 +154,9 @@ pub struct Transaction {
     /// Timestamp when transaction started
     #[allow(dead_code)]
     pub started_at: u64,
+    /// Set when a command could not be queued (e.g. it was denied): `EXEC`
+    /// then fails without applying anything, like Redis `EXECABORT`.
+    aborted: Option<String>,
 }
 
 impl Transaction {
@@ -163,6 +170,14 @@ impl Transaction {
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs(),
+            aborted: None,
+        }
+    }
+
+    /// Mark the transaction so `EXEC` refuses to run it. The first reason wins.
+    pub fn abort(&mut self, reason: impl Into<String>) {
+        if self.aborted.is_none() {
+            self.aborted = Some(reason.into());
         }
     }
 
@@ -386,15 +401,32 @@ impl TransactionManager {
     /// durable effects the caller must persist and replicate (audit M-010) — or
     /// `Ok(None)` if watched keys changed (the transaction is aborted).
     pub async fn exec(&self, client_id: &str) -> Result<ExecOutcome> {
-        debug!("EXEC client_id={}", client_id);
+        let transaction = self.take_transaction(client_id)?;
+        self.exec_transaction(transaction).await
+    }
 
-        // Remove transaction from map first (atomic)
-        let transaction = {
-            let mut transactions = self.transactions.write();
-            transactions.remove(client_id).ok_or_else(|| {
-                SynapError::InvalidRequest("No transaction in progress".to_string())
-            })?
-        };
+    /// First half of [`exec`](Self::exec): remove the client's transaction so
+    /// nothing more can be queued on it. A caller that must hold its own locks
+    /// over the transaction's keys (the persistence layer orders WAL records
+    /// that way) reads [`Transaction::get_keys_to_lock`] here, then runs
+    /// [`exec_transaction`](Self::exec_transaction).
+    pub fn take_transaction(&self, client_id: &str) -> Result<Transaction> {
+        debug!("EXEC client_id={}", client_id);
+        let mut transactions = self.transactions.write();
+        transactions
+            .remove(client_id)
+            .ok_or_else(|| SynapError::InvalidRequest("No transaction in progress".to_string()))
+    }
+
+    /// Second half of [`exec`](Self::exec): check WATCH and run a transaction
+    /// taken with [`take_transaction`](Self::take_transaction).
+    pub async fn exec_transaction(&self, transaction: Transaction) -> Result<ExecOutcome> {
+        if let Some(reason) = &transaction.aborted {
+            debug!("EXEC refused: transaction aborted ({})", reason);
+            return Err(SynapError::InvalidRequest(format!(
+                "EXECABORT Transaction discarded because of a previous error: {reason}"
+            )));
+        }
 
         // Serialize the whole check-and-apply: hold the EXEC lock so no other
         // transaction interleaves and the WATCH check is atomic with execution.
@@ -492,13 +524,14 @@ impl TransactionManager {
                 TransactionCommand::KVSet { key, value, ttl } => {
                     // `*_unlocked`: EXEC already holds the per-key locks for the
                     // whole key set, so re-locking here would deadlock.
-                    self.kv_store
+                    let expires_at_ms = self
+                        .kv_store
                         .set_unlocked(key.clone(), value.clone(), *ttl)
                         .await?;
                     writes.push(CommittedWrite::KvSet {
                         key: key.clone(),
                         value: value.clone(),
-                        ttl: *ttl,
+                        expires_at_ms,
                     });
                     serde_json::json!({"ok": true})
                 }
@@ -513,15 +546,17 @@ impl TransactionManager {
                     serde_json::json!({"deleted": deleted})
                 }
                 TransactionCommand::KVIncr { key, delta } => {
-                    // `incr_unlocked` handles a negative delta (DECR) too.
-                    let value = self.kv_store.incr_unlocked(key, *delta).await?;
+                    // `incr_unlocked_with_expiry` handles a negative delta (DECR) too.
+                    let (value, expires_at_ms) =
+                        self.kv_store.incr_unlocked_with_expiry(key, *delta).await?;
                     // INCR has no persistence Operation of its own; log the
-                    // resulting value as a SET, exactly as the non-transactional
-                    // INCR handler does, so replay/replication is deterministic.
+                    // resulting value and the expiry the counter still carries
+                    // as a SET, exactly as the non-transactional INCR does, so
+                    // replay/replication is deterministic and keeps the TTL.
                     writes.push(CommittedWrite::KvSet {
                         key: key.clone(),
                         value: value.to_string().into_bytes(),
-                        ttl: None,
+                        expires_at_ms,
                     });
                     serde_json::json!({"value": value})
                 }
@@ -642,6 +677,19 @@ impl TransactionManager {
             Ok(true)
         } else {
             Ok(false)
+        }
+    }
+
+    /// Abort the open transaction of `client_id`, if any, so its `EXEC` fails
+    /// without applying a single command. Returns whether one was open.
+    pub fn abort(&self, client_id: &str, reason: impl Into<String>) -> bool {
+        let mut transactions = self.transactions.write();
+        match transactions.get_mut(client_id) {
+            Some(transaction) => {
+                transaction.abort(reason);
+                true
+            }
+            None => false,
         }
     }
 
@@ -945,13 +993,13 @@ mod tests {
             CommittedWrite::KvSet {
                 key: "k1".into(),
                 value: b"v1".to_vec(),
-                ttl: None,
+                expires_at_ms: None,
             },
             // INCR resolved to the resulting SET.
             CommittedWrite::KvSet {
                 key: "counter".into(),
                 value: b"5".to_vec(),
-                ttl: None,
+                expires_at_ms: None,
             },
             CommittedWrite::KvDel {
                 keys: vec!["k1".into()],
@@ -1043,5 +1091,39 @@ mod tests {
         manager.update_key_version("w");
 
         assert!(manager.exec(cid).await.unwrap().is_none());
+    }
+
+    /// A transaction with a refused command applies nothing at EXEC.
+    #[tokio::test]
+    async fn aborted_transaction_applies_nothing() {
+        let kv_store = Arc::new(KVStore::new(super::super::types::KVConfig::default()));
+        let manager = TransactionManager::new(
+            kv_store.clone(),
+            Arc::new(HashStore::new()),
+            Arc::new(ListStore::new()),
+            Arc::new(SetStore::new()),
+            Arc::new(SortedSetStore::new()),
+        );
+
+        manager.multi("c1".to_string()).unwrap();
+        manager
+            .queue_command_if_transaction(
+                "c1",
+                TransactionCommand::KVSet {
+                    key: "a".to_string(),
+                    value: b"1".to_vec(),
+                    ttl: None,
+                },
+            )
+            .unwrap();
+        assert!(manager.abort("c1", "NOPERM no 'write' permission on 'kv:b'"));
+        assert!(!manager.abort("no-such-client", "irrelevant"));
+
+        let err = manager.exec("c1").await.unwrap_err().to_string();
+        assert!(err.contains("EXECABORT"), "{err}");
+        assert!(err.contains("kv:b"), "{err}");
+        assert_eq!(kv_store.get("a").await.unwrap(), None);
+        // The aborted transaction is gone; a new one can start.
+        manager.multi("c1".to_string()).unwrap();
     }
 }
