@@ -228,7 +228,10 @@ async fn test_snapshot_rejects_corrupted_checksum() {
     // Load must fail with a corruption error rather than returning bad data.
     let result = snapshot_mgr.load_latest().await;
     assert!(
-        matches!(result, Err(types::PersistenceError::SnapshotCorrupted(_))),
+        matches!(
+            result,
+            Err(types::PersistenceError::SnapshotCorrupted { .. })
+        ),
         "expected SnapshotCorrupted, got {result:?}"
     );
 

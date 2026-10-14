@@ -10,20 +10,14 @@ use uuid::Uuid;
 pub async fn validate_migration(data_dir: &Path, user_id: &Uuid) -> Result<()> {
     info!("Validating migration for user {}", user_id);
 
-    // Find latest snapshot
-    let snapshot_path = snapshot::find_latest_snapshot(data_dir)
+    // Find and read the latest snapshot
+    let snapshot = match snapshot::load_latest(data_dir)
         .await
-        .context("Failed to find snapshot")?;
-
-    let snapshot_path = match snapshot_path {
-        Some(path) => path,
+        .context("Failed to read snapshot")?
+    {
+        Some((snapshot, _)) => snapshot,
         None => bail!("No snapshot found"),
     };
-
-    // Read snapshot
-    let snapshot = snapshot::read_snapshot(&snapshot_path)
-        .await
-        .context("Failed to read snapshot")?;
 
     let expected_prefix = format!("user_{}:", user_id.as_simple());
 
@@ -72,18 +66,13 @@ pub async fn validate_migration(data_dir: &Path, user_id: &Uuid) -> Result<()> {
 pub async fn check_status(data_dir: &Path) -> Result<String> {
     info!("Checking migration status");
 
-    // Find latest snapshot
-    let snapshot_path = snapshot::find_latest_snapshot(data_dir).await?;
-
-    let snapshot_path = match snapshot_path {
-        Some(path) => path,
+    // Find and read the latest snapshot
+    let snapshot = match snapshot::load_latest(data_dir).await? {
+        Some((snapshot, _)) => snapshot,
         None => {
             return Ok("Status: No snapshot found (likely fresh install)".to_string());
         }
     };
-
-    // Read snapshot
-    let snapshot = snapshot::read_snapshot(&snapshot_path).await?;
 
     // Check for scoped resources
     let mut scoped_count = 0;

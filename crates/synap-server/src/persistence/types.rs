@@ -10,8 +10,8 @@ pub enum PersistenceError {
     #[error("WAL corrupted at offset {offset}: {reason}")]
     WALCorrupted { offset: u64, reason: String },
 
-    #[error("Snapshot corrupted: {0:?}")]
-    SnapshotCorrupted(PathBuf),
+    #[error("Snapshot {path:?} is damaged: {reason}")]
+    SnapshotCorrupted { path: PathBuf, reason: String },
 
     #[error("Checksum mismatch: expected {expected}, got {actual}")]
     ChecksumMismatch { expected: u64, actual: u64 },
@@ -85,7 +85,7 @@ impl PersistenceError {
             PersistenceError::WALInteriorCorruption { .. }
                 | PersistenceError::WALUnsupportedVersion { .. }
                 | PersistenceError::WALCorrupted { .. }
-                | PersistenceError::SnapshotCorrupted(_)
+                | PersistenceError::SnapshotCorrupted { .. }
                 | PersistenceError::SnapshotUnrecoverable(_)
         )
     }

@@ -13,9 +13,14 @@ name = "synap-migrate"
 path = "src/main.rs"
 
 [dependencies]
+# The server's persistence codec and recovery (snapshot and WAL formats,
+# record replay) and its Hub naming. Using the server library keeps one
+# implementation of each; synap-server does not depend on this crate, so
+# there is no cycle.
+synap-server = { path = "../synap-server" }
+
 # Workspace dependencies
 tokio.workspace = true
-serde.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
@@ -35,5 +40,5 @@ chrono.workspace = true
 # File operations
 walkdir = "2.4"
 
-# Hash checksums
-crc = "3.0"
+[dev-dependencies]
+tempfile = "3.15"

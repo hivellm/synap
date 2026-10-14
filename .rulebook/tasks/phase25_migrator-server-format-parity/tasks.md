@@ -1,5 +1,5 @@
 ## 1. Implementation
-- [ ] 1.1 Move the server's snapshot and WAL codecs into one module used by both the server and `synap-migrate`
+- [x] 1.1 Move the server's snapshot and WAL codecs into one module used by both the server and `synap-migrate` — synap-migrate now depends on the synap-server library (no cycle) and its private v2 codec is gone; `SnapshotImage` fields are public, `SnapshotManager::write_snapshot` takes the stream section directly, `SnapshotCorrupted` names its reason, and `recovery::rebuild` is the file-free half of startup recovery
 - [ ] 1.2 Read every snapshot version and WAL format the server reads, and apply the WAL tail written after the snapshot
 - [ ] 1.3 Migrate every persisted structure with queue and stream metadata and absolute expiry, scoped for Hub mode
 - [ ] 1.4 Write output only to a new location, and reject corrupt or unsupported input before writing anything

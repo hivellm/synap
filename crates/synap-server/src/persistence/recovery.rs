@@ -109,8 +109,6 @@ pub async fn recover_all(
     // Opening the WAL repairs a torn tail and upgrades a 1.3.x file before it
     // is read below.
     WriteAheadLog::open(config.wal.clone()).await?;
-    let hyperloglog_store = HyperLogLogStore::new();
-    let bitmap_store = BitmapStore::new();
 
     // Step 1: pick the newest valid snapshot and check that skipping any
     // damaged newer file loses nothing.
@@ -132,14 +130,40 @@ pub async fn recover_all(
         );
     }
 
+    // Steps 2 and 3: restore the snapshot, then replay the WAL from its
+    // cutoff.
+    let snapshot = choice.loaded.map(|(snapshot, path)| {
+        info!(
+            "Loaded snapshot from {:?} at offset {}",
+            path, snapshot.wal_offset
+        );
+        snapshot
+    });
+    let next_offset = wal.next_offset(cutoff);
+    rebuild(snapshot, wal.entries, next_offset, kv_config, queue_config).await
+}
+
+/// Rebuild every store from `snapshot` (when there is one) plus the WAL
+/// records `entries` written after its cutoff, applied in order: steps 2 and 3
+/// of [`recover_all`], which calls it once it has read the data directory.
+///
+/// It reads and writes no file, so `synap-migrate` rebuilds a data directory
+/// it must leave untouched with the same code the server starts from. The
+/// snapshot's stream section is not restored (streams are not recovered at
+/// startup). `next_offset` is returned as [`RecoveredStores::wal_offset`].
+pub async fn rebuild(
+    snapshot: Option<Snapshot>,
+    entries: Vec<WALEntry>,
+    next_offset: u64,
+    kv_config: KVConfig,
+    queue_config: QueueConfig,
+) -> Result<RecoveredStores> {
+    let hyperloglog_store = HyperLogLogStore::new();
+    let bitmap_store = BitmapStore::new();
+
     // Step 2: restore the snapshot
     let (kv_store, hash_store, list_store, set_store, sorted_set_store, queue_manager, last_offset) =
-        if let Some((snapshot, path)) = choice.loaded {
-            info!(
-                "Loaded snapshot from {:?} at offset {}",
-                path, snapshot.wal_offset
-            );
-
+        if let Some(snapshot) = snapshot {
             // Restore KV store, each key with its absolute expiry; keys that
             // expired while the server was down are left out.
             let kv = KVStore::new(kv_config);
@@ -248,10 +272,9 @@ pub async fn recover_all(
 
     // Step 3: replay the WAL from the snapshot's cutoff
     info!("Replaying WAL from offset {}...", last_offset);
-    let next_offset = wal.next_offset(last_offset);
     let mut replayed = 0;
 
-    for entry in wal.entries {
+    for entry in entries {
         // Records written before phase23 carry TTLs relative to when they were
         // written; anchor them at the entry's timestamp.
         crate::persistence::apply::apply_operation(
@@ -313,7 +336,7 @@ async fn load_newest_valid(mgr: &SnapshotManager, dir: &Path) -> Result<Snapshot
                     damaged,
                 });
             }
-            Err(PersistenceError::SnapshotCorrupted(_)) => damaged.push(path),
+            Err(PersistenceError::SnapshotCorrupted { .. }) => damaged.push(path),
             Err(e) => {
                 return Err(PersistenceError::SnapshotUnrecoverable(format!(
                     "cannot read snapshot {path:?}: {e}"

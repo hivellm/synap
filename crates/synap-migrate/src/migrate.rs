@@ -1,10 +1,11 @@
 //! Migration logic for adding user namespace prefixes
 
-use crate::snapshot::{self, SnapshotData, SnapshotMetadata};
+use crate::snapshot;
 use anyhow::{Context, Result, bail};
 use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashMap;
 use std::path::Path;
+use synap_server::persistence::Snapshot;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -15,13 +16,9 @@ pub async fn migrate_to_hub(data_dir: &Path, user_id: &Uuid, dry_run: bool) -> R
         user_id, dry_run
     );
 
-    // Find latest snapshot
-    let snapshot_path = snapshot::find_latest_snapshot(data_dir)
-        .await
-        .context("Failed to find snapshot")?;
-
-    let snapshot_path = match snapshot_path {
-        Some(path) => path,
+    // Find and load the latest snapshot
+    let (mut snapshot, snapshot_path) = match snapshot::load_latest(data_dir).await? {
+        Some(found) => found,
         None => {
             warn!("No snapshot found - checking if data directory is empty");
 
@@ -39,11 +36,7 @@ pub async fn migrate_to_hub(data_dir: &Path, user_id: &Uuid, dry_run: bool) -> R
             bail!("Data directory exists but no valid snapshot found");
         }
     };
-
-    info!("Reading snapshot: {:?}", snapshot_path);
-    let mut snapshot = snapshot::read_snapshot(&snapshot_path)
-        .await
-        .context("Failed to read snapshot")?;
+    info!("Read snapshot: {:?}", snapshot_path);
 
     // Display migration plan
     info!("Migration plan:");
@@ -76,22 +69,28 @@ pub async fn migrate_to_hub(data_dir: &Path, user_id: &Uuid, dry_run: bool) -> R
             .progress_chars("=>-"),
     );
 
-    // Migrate KV data
+    // Migrate KV data, each key keeping its expiry
     pb.set_message("Migrating KV data...");
-    let mut new_kv_data = HashMap::new();
-    for (key, value) in snapshot.kv_data {
-        let scoped_key = snapshot::scope_resource_name(user_id, &key);
-        new_kv_data.insert(scoped_key, value);
-        pb.inc(1);
-    }
-    snapshot.kv_data = new_kv_data;
+    let scope = |name: String| snapshot::scope_resource_name(user_id, &name);
+    snapshot.kv_data = snapshot
+        .kv_data
+        .into_iter()
+        .map(|(key, value)| {
+            pb.inc(1);
+            (scope(key), value)
+        })
+        .collect();
+    snapshot.kv_expires_at_ms = snapshot
+        .kv_expires_at_ms
+        .into_iter()
+        .map(|(key, deadline)| (scope(key), deadline))
+        .collect();
 
     // Migrate queue data
     pb.set_message("Migrating queue data...");
     let mut new_queue_data = HashMap::new();
-    for (queue_name, messages) in snapshot.queue_data {
-        let scoped_name = snapshot::scope_resource_name(user_id, &queue_name);
-        new_queue_data.insert(scoped_name, messages);
+    for (queue_name, queue) in snapshot.queue_data {
+        new_queue_data.insert(scope(queue_name), queue);
         pb.inc(1);
     }
     snapshot.queue_data = new_queue_data;
@@ -100,39 +99,26 @@ pub async fn migrate_to_hub(data_dir: &Path, user_id: &Uuid, dry_run: bool) -> R
     pb.set_message("Migrating stream data...");
     let mut new_stream_data = HashMap::new();
     for (stream_name, entries) in snapshot.stream_data {
-        let scoped_name = snapshot::scope_resource_name(user_id, &stream_name);
-        new_stream_data.insert(scoped_name, entries);
+        new_stream_data.insert(scope(stream_name), entries);
         pb.inc(1);
     }
     snapshot.stream_data = new_stream_data;
 
     pb.finish_with_message("Migration complete");
 
-    // Update metadata
-    snapshot.metadata.kv_count = snapshot.kv_data.len() as u64;
-    snapshot.metadata.queue_count = snapshot.queue_data.len() as u64;
-    snapshot.metadata.stream_count = snapshot.stream_data.len() as u64;
-
-    // Write migrated snapshot
-    let migrated_path = data_dir.join("snapshots").join(format!(
-        "snapshot-v2-{}.bin",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-    ));
-
-    info!("Writing migrated snapshot to {:?}", migrated_path);
-    snapshot::write_snapshot(&migrated_path, &snapshot)
-        .await
-        .context("Failed to write migrated snapshot")?;
-
-    // Archive old snapshot
+    // Archive the old snapshot first: the server loads the newest snapshot
+    // file, and the migrated one must be the only candidate.
     let archive_path = snapshot_path.with_extension("bin.pre-migration");
     info!("Archiving old snapshot to {:?}", archive_path);
     tokio::fs::rename(&snapshot_path, &archive_path)
         .await
         .context("Failed to archive old snapshot")?;
+
+    // Write migrated snapshot
+    let migrated_path = snapshot::write(data_dir, snapshot)
+        .await
+        .context("Failed to write migrated snapshot")?;
+    info!("Wrote migrated snapshot to {:?}", migrated_path);
 
     info!("Migration completed successfully");
 
@@ -140,59 +126,34 @@ pub async fn migrate_to_hub(data_dir: &Path, user_id: &Uuid, dry_run: bool) -> R
 }
 
 /// Check if snapshot data is already migrated
-fn check_if_migrated(snapshot: &SnapshotData) -> bool {
-    // Check KV keys
-    for key in snapshot.kv_data.keys() {
-        if snapshot::is_scoped(key) {
-            return true;
-        }
-    }
-
-    // Check queue names
-    for queue_name in snapshot.queue_data.keys() {
-        if snapshot::is_scoped(queue_name) {
-            return true;
-        }
-    }
-
-    // Check stream names
-    for stream_name in snapshot.stream_data.keys() {
-        if snapshot::is_scoped(stream_name) {
-            return true;
-        }
-    }
-
-    false
+fn check_if_migrated(snapshot: &Snapshot) -> bool {
+    snapshot
+        .kv_data
+        .keys()
+        .chain(snapshot.queue_data.keys())
+        .chain(snapshot.stream_data.keys())
+        .any(|name| snapshot::is_scoped(name))
 }
 
 /// Create an empty snapshot for fresh installs
 async fn create_empty_snapshot(data_dir: &Path) -> Result<()> {
-    let snapshot_path = data_dir.join("snapshots").join(format!(
-        "snapshot-v2-{}.bin",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs()
-    ));
-
-    let empty_snapshot = SnapshotData {
-        metadata: SnapshotMetadata {
-            version: 2,
-            timestamp: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-            wal_offset: 0,
-            kv_count: 0,
-            queue_count: 0,
-            stream_count: 0,
-        },
+    let empty_snapshot = Snapshot {
+        version: 0,
+        timestamp: 0,
+        wal_offset: 0,
         kv_data: HashMap::new(),
         queue_data: HashMap::new(),
         stream_data: HashMap::new(),
+        list_data: HashMap::new(),
+        set_data: HashMap::new(),
+        sorted_set_data: HashMap::new(),
+        hash_data: HashMap::new(),
+        kv_expires_at_ms: HashMap::new(),
+        hyperloglog_data: HashMap::new(),
+        bitmap_data: HashMap::new(),
     };
 
-    snapshot::write_snapshot(&snapshot_path, &empty_snapshot).await?;
+    snapshot::write(data_dir, empty_snapshot).await?;
 
     info!("Created empty snapshot for migrated state");
     Ok(())
