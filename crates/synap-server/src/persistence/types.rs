@@ -31,10 +31,12 @@ pub enum PersistenceError {
     #[error("Recovery failed: {0}")]
     RecoveryFailed(String),
 
-    /// An invalid frame is followed by a valid one, so the damage is not a torn
-    /// tail left by a crash and truncating would discard acknowledged history.
+    /// A damaged frame (cut short, failing its checksum, or blank) is followed
+    /// by an intact one (complete, with a matching checksum, whether or not
+    /// its record decodes), so the damage is not a torn tail left by a crash
+    /// and truncating would discard acknowledged history.
     #[error(
-        "WAL {path:?} is corrupted at byte {position}: {reason}; a valid frame follows at byte {next_valid}, so this is interior corruption, not a torn tail"
+        "WAL {path:?} is corrupted at byte {position}: {reason}; a complete frame with a matching checksum follows at byte {next_valid}, so this is interior corruption, not a torn tail"
     )]
     WALInteriorCorruption {
         path: PathBuf,
@@ -63,6 +65,20 @@ pub enum PersistenceError {
         supported: u32,
     },
 
+    /// The first invalid frame of the WAL is complete and its checksum matches,
+    /// but its record does not decode, whether it ends the file or more
+    /// frames follow it. A crash does not leave one: it is a record this
+    /// server cannot read, such as a type a newer Synap added, so truncating
+    /// it as a torn tail would delete an acknowledged write.
+    #[error(
+        "WAL {path:?} holds a complete record at byte {position} that this server cannot decode ({reason}); its checksum matches, so it is not a torn tail left by a crash: a newer Synap release may have written it. Run that release or restore a WAL backup; the file was not modified"
+    )]
+    WALUnreadableRecord {
+        path: PathBuf,
+        position: u64,
+        reason: String,
+    },
+
     /// The newest snapshot file(s) are damaged or unreadable and no older
     /// starting point is provably complete (the WAL no longer holds every
     /// record after it), so recovering would lose acknowledged writes.
@@ -73,17 +89,18 @@ pub enum PersistenceError {
 impl PersistenceError {
     /// Whether this error must stop the server from starting.
     ///
-    /// Interior corruption, a WAL written by a newer format and a damaged WAL
-    /// header all mean the WAL holds acknowledged history this process cannot
-    /// replay safely; so does a damaged snapshot recovery cannot safely fall
-    /// back from. Starting fresh would hide that history, append after it and
-    /// let the next snapshot and retention delete it, so startup must fail
-    /// instead.
+    /// Interior corruption, a WAL written by a newer format, a WAL holding a
+    /// record this server cannot decode and a damaged WAL header all mean the
+    /// WAL holds acknowledged history this process cannot replay safely; so
+    /// does a damaged snapshot recovery cannot safely fall back from. Starting
+    /// fresh would hide that history, append after it and let the next
+    /// snapshot and retention delete it, so startup must fail instead.
     pub fn refuses_startup(&self) -> bool {
         matches!(
             self,
             PersistenceError::WALInteriorCorruption { .. }
                 | PersistenceError::WALUnsupportedVersion { .. }
+                | PersistenceError::WALUnreadableRecord { .. }
                 | PersistenceError::WALCorrupted { .. }
                 | PersistenceError::SnapshotCorrupted { .. }
                 | PersistenceError::SnapshotUnrecoverable(_)

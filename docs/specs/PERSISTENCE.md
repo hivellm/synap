@@ -598,7 +598,8 @@ exists):
   given to new events; each restored room is therefore a new incarnation and
   reports a new `generation`;
 - retention applies to restored events as to any other: compaction removes
-  those older than the retention window, and only the newest
+  the oldest while they are older than `retention_secs` (none when it is 0,
+  which keeps events regardless of age), and only the newest
   `max_buffer_size` events of a room are kept;
 - a room whose recorded offsets are not contiguous is skipped with a warning
   naming it; the other rooms and every other store still come back.
@@ -621,35 +622,45 @@ Time: 1-5 seconds
    a 1.3.x file (format version 1, frames from byte 0); a version newer than
    the server reads fails startup naming both versions
 2. Scan the WAL: verify each frame's length (must fit in the file) and CRC32
-3. First invalid frame with no valid frame after it (torn tail):
-   truncate the file to the last valid frame before anything is appended
-4. First invalid frame followed by a valid frame (interior corruption):
-   fail startup with the byte position of the bad frame
-5. Write the header of a new file, or upgrade a 1.3.x file in place
+3. First invalid frame that is a complete record whose checksum matches but
+   which does not decode: fail startup, naming the WAL, the record's byte
+   position and that a newer release may have written it, and leave the file
+   unchanged, whatever follows it
+4. First invalid frame with no intact frame (complete, matching its
+   checksum) after it (torn tail): truncate the file to the last valid frame
+   before anything is appended
+5. First invalid frame followed by an intact frame, whether or not its record
+   decodes (interior corruption): fail startup with the byte position of the
+   bad frame and leave the file unchanged
+6. Write the header of a new file, or upgrade a 1.3.x file in place
    (temp file with header + unchanged frames, fsync, rename)
-6. Load the newest valid snapshot; a damaged newer one is skipped only when
+7. Load the newest valid snapshot; a damaged newer one is skipped only when
    the WAL still covers the older snapshot (see "Corrupted Snapshot")
-7. Replay WAL from the snapshot offset; a transaction record applies every
+8. Replay WAL from the snapshot offset; a transaction record applies every
    operation it holds
-8. New WAL records continue at or above the snapshot's cutoff
-9. Resume operations
+9. New WAL records continue at or above the snapshot's cutoff
+10. Resume operations
 Time: 1-10 seconds
 ```
 
 The scanner lives in `persistence/wal_frame.rs` and is shared by the async WAL
 and the recovery WAL. A corrupt length that hides the next frame boundary is
-handled by searching the rest of the file byte by byte for a valid frame. The
-scan also reports what the first invalid frame is (`TailKind`): cut short,
+handled by searching the rest of the file byte by byte for an intact frame.
+The scan also reports what the first invalid frame is (`TailKind`): cut short,
 failing its checksum, blank (zero fill reads as empty frames whose checksum
 matches), or a complete record whose checksum matches but which this release
 cannot decode, such as a record type a newer release added. A crash leaves
-only the first three; `synap-migrate` refuses the last instead of dropping it.
+only the first three, which startup truncates when no intact frame follows
+them; startup (`PersistenceError::WALUnreadableRecord`) and `synap-migrate`
+both refuse the last instead of dropping an acknowledged write. Such a record
+also counts as intact after a damaged frame, so the damage is interior
+corruption rather than a tail that would be truncated with the record.
 
 ### Transaction Records
 
 A committed MULTI/EXEC is logged as ONE `Operation::Transaction { operations }`
 record: one frame, one CRC32, one WAL offset. A crash at any byte of it leaves
-a torn tail that step 3 discards whole, so recovery holds all of the
+a torn tail that step 4 discards whole, so recovery holds all of the
 transaction's effects or none. Replication ships the same record as one
 command at one replication offset; a replica decodes a command only once all
 of its bytes arrived, so a dropped connection applies nothing and the resync
