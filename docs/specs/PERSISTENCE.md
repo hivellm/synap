@@ -868,7 +868,7 @@ CRC64
 ```rust
 pub enum PersistenceError {
     WALCorrupted { offset: u64, reason: String },
-    SnapshotCorrupted { path: PathBuf },
+    SnapshotCorrupted { path: PathBuf, reason: String },
     ChecksumMismatch { expected: u64, actual: u64 },
     IOError(std::io::Error),
     SerializationError(bincode::Error),

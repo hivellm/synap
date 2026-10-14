@@ -1,371 +1,221 @@
 # Synap Migration Tool
 
-Migration utility for converting standalone Synap installations to HiveHub.Cloud SaaS mode.
+Migrates a standalone Synap data directory into one tenant's namespace for
+HiveHub.Cloud (Hub) mode.
 
-## Overview
-
-The migration tool adds user namespace prefixes (`user_{user_id}:`) to all resources (queues, streams, KV keys) in your Synap data, enabling multi-tenant isolation for HiveHub.Cloud integration.
+The tool reads the data directory the way the server recovers it at startup,
+renames every resource to the name Hub mode gives it for the tenant
+(`user_{user_id}:{name}`), and writes the result to a **new** directory as one
+snapshot in the server's current format. The original directory is only read,
+so it stays your rollback.
 
 ## Installation
-
-Build the migration tool:
 
 ```bash
 cargo build --release --bin synap-migrate
 ```
 
-The binary will be available at `target/release/synap-migrate` (or `synap-migrate.exe` on Windows).
+The binary is `target/release/synap-migrate` (`synap-migrate.exe` on Windows).
 
 ## Commands
 
-### 1. Check Status
+### migrate
 
-Check the migration status of your Synap installation:
+```bash
+synap-migrate migrate \
+  --data-dir ./data \
+  --output ./data-hub \
+  --user-id 550e8400-e29b-41d4-a716-446655440000
+```
+
+| Option | Meaning |
+|---|---|
+| `--data-dir` | The standalone data directory: `snapshots/` and `wal/synap.wal`, the server's default layout (default `./data`). It is not modified. |
+| `--output` | Where to write the migrated data directory. It must not exist yet or be an empty directory, and must not be inside `--data-dir`. Required. |
+| `--user-id` | The Hub user ID (tenant) that owns every migrated resource. |
+| `--server-config` | The configuration file of the server that wrote the data. Its `queue` settings configure the queues the data records no configuration for (snapshots older than v5, queues created implicitly by an old publish record). Without it they get the server's built-in queue defaults. |
+| `--dry-run` | Verify the input and print the report without writing anything. |
+
+What it does, in order:
+
+1. Checks the output location.
+2. Verifies the whole input before writing anything: **every** snapshot file
+   must load and pass its checksum (startup may fall back past a damaged
+   newest file; the migration does not), and the whole WAL must scan. Corrupt
+   or unsupported input fails the run with an error that names the file and
+   the reason, and nothing is written.
+3. Rebuilds the state as the server would recover it: the newest snapshot plus
+   every WAL record written after it, replayed with the server's own code.
+4. Refuses input that already holds Hub-scoped names (it was migrated before).
+5. Renames every resource for the tenant and writes
+   `<output>/snapshots/snapshot-v5-00000000000000000001.bin`.
+6. Loads the written snapshot back with the server's loader and checks it
+   holds what was written.
+
+It prints what it read, structure by structure:
+
+```
+Snapshot: ./data/snapshots/snapshot-v5-00000000000000000007.bin (format v5)
+WAL: ./data/wal/synap.wal (format v2): 49 records, 19 replayed after the snapshot
+Read:
+  KV keys:       5 (3 with expiry)
+  hashes:        1
+  lists:         1
+  sets:          1
+  sorted sets:   2 (geospatial included)
+  HyperLogLogs:  1
+  bitmaps:       1
+  queues:        3 (5 messages, 1 dead letters)
+  streams:       1 (3 events)
+Wrote: ./data-hub/snapshots/snapshot-v5-00000000000000000001.bin
+```
+
+`Note:` lines tell you what the input format could not carry (see
+[Older data directories](#older-data-directories)) and report a torn WAL tail.
+
+### validate
+
+```bash
+synap-migrate validate --data-dir ./data-hub --user-id 550e8400-e29b-41d4-a716-446655440000
+```
+
+Checks that every resource of every structure in the directory belongs to
+the tenant.
+
+### status
 
 ```bash
 synap-migrate status --data-dir ./data
 ```
 
-**Output:**
-- `NOT MIGRATED` - All resources are unscoped (standalone mode)
-- `MIGRATED` - All resources have user prefixes (Hub mode)
-- `PARTIALLY MIGRATED` - Mixed state (requires attention)
+Reports `NOT MIGRATED`, `MIGRATED` (with the tenants found) or `PARTIALLY
+MIGRATED` (with an example of an unscoped resource).
 
-### 2. Backup Data
+## Migration workflow
 
-Create a backup before migration:
+1. **Stop the server** cleanly (Ctrl-C or SIGTERM), so nothing writes to the
+   directory during the migration.
+2. **Dry run**: `synap-migrate migrate --data-dir ./data --output ./data-hub --user-id $USER_ID --dry-run`.
+   Read the report and its notes.
+3. **Migrate** into a new directory with the same command without `--dry-run`.
+4. **Point the Hub-mode server at the output**: in its configuration set
+   `persistence.snapshot.directory` to `./data-hub/snapshots` and
+   `persistence.wal.path` to `./data-hub/wal/synap.wal`, and enable `hub`.
+   The output has no WAL yet; the server creates it at its first start.
+5. **Rollback** if needed: stop the server, point it back at the original
+   directory with Hub disabled, and delete the output directory. The original
+   directory was never written to.
 
-```bash
-synap-migrate backup \
-  --data-dir ./data \
-  --output ./backup
-```
+## What gets migrated
 
-**What it does:**
-- Recursively copies all files from data directory
-- Preserves directory structure
-- Shows progress with file count and total size
+Every structure the server persists, renamed with the same functions the Hub
+handlers use (`synap_server::hub::MultiTenant`):
 
-### 3. Migrate to Hub Mode
+| Structure | Hub name | Kept |
+|---|---|---|
+| KV keys | `scope_kv_key` | value, absolute expiry deadline |
+| hashes, lists, sets | `scope_kv_key` | every field, element and member |
+| sorted sets and geospatial indexes | `scope_kv_key` | every member and score |
+| HyperLogLogs, bitmaps | `scope_kv_key` | registers and bits, expiry |
+| queues | `scope_queue_name` | configuration; every message with its ID, payload, priority, retry counters, creation time and headers; dead letters |
+| streams | `scope_stream_name` | every event of the snapshot's stream section with its ID, offset, type, data and timestamp |
 
-Migrate standalone data to user-scoped namespaces:
+What any restart changes, the migration changes the same way: keys whose
+deadline has passed are left out, and messages delivered but never
+acknowledged are ready again (with their ID and retry count).
 
-```bash
-synap-migrate migrate \
-  --data-dir ./data \
-  --user-id 550e8400-e29b-41d4-a716-446655440000 \
-  --backup-dir ./backup
-```
+Streams are not in the WAL: they are durable only through snapshots, and the
+server does not restore a snapshot's stream section at startup (in this or
+earlier releases). The migration carries the stream section into the output
+snapshot unchanged except for the room names.
 
-**Options:**
-- `--data-dir` - Path to Synap data directory (default: `./data`)
-- `--user-id` - UUID to assign ownership to all resources
-- `--backup-dir` - Directory for automatic backup (default: `./backup`)
-- `--dry-run` - Preview changes without modifying data
+## Formats read
 
-**What it does:**
-1. Creates automatic backup
-2. Reads latest snapshot
-3. Adds `user_{user_id}:` prefix to all resource names
-4. Writes new snapshot with prefixed resources
-5. Archives old snapshot with `.pre-migration` extension
-6. Validates migration
+Everything the server reads, through the server's own code:
 
-**Example:**
+- snapshots in formats v2 to v5, under sequence names
+  (`snapshot-v<format>-<20-digit sequence>.bin`, 1.4.0 and later) and legacy
+  names (`snapshot-v<format>-<unix seconds>.bin`); the newest one is used;
+- WAL files with the `SYNAPWAL` version 2 header and headerless 1.3.x files.
+  A torn tail (bytes a crash left mid-append) is skipped and reported, as
+  startup discards it; unlike startup, the migration does not truncate it.
 
-```bash
-# Dry run first (recommended)
-synap-migrate migrate \
-  --user-id 550e8400-e29b-41d4-a716-446655440000 \
-  --dry-run
+### Older data directories
 
-# Perform actual migration
-synap-migrate migrate \
-  --user-id 550e8400-e29b-41d4-a716-446655440000
-```
+A directory written by Synap 1.3.x holds less than a current one, so no
+server, and no migration, gets the rest back:
 
-### 4. Validate Migration
+- a v2 or v3 snapshot stores no key expiry: the keys it holds load without
+  expiry, as the server loads them (keys written to the WAL after it keep
+  their deadline);
+- snapshots older than v5 store no queue configuration and no in-flight or
+  dead-lettered messages; use `--server-config` to give those queues the
+  source server's queue settings;
+- 1.3.x did not persist HyperLogLogs and bitmaps, and did not log hash, list,
+  set and sorted-set writes to the WAL.
 
-Verify all resources have correct user prefixes:
+The report prints a `Note:` for each of these that applies.
 
-```bash
-synap-migrate validate \
-  --data-dir ./data \
-  --user-id 550e8400-e29b-41d4-a716-446655440000
-```
+## Design: one persistence codec
 
-**What it checks:**
-- All KV keys start with `user_{user_id}:`
-- All queue names start with `user_{user_id}:`
-- All stream names start with `user_{user_id}:`
+The migrator has no snapshot or WAL code of its own. It depends on the
+`synap-server` library and uses its persistence module:
+`SnapshotManager` lists, loads and writes snapshot files,
+`wal_frame::scan` reads WAL files, `recovery::rebuild` replays the records
+onto the snapshot exactly as startup recovery does, and `SnapshotImage` is the
+in-memory form both the server's snapshots and the migration write.
 
-**Output:**
-- Success: Reports count of validated resources
-- Failure: Lists resources with incorrect prefixes
+The alternative was moving the codecs into `synap-core`. They are not
+separable from the server: the WAL record set (`Operation`), its bincode
+framing, the snapshot writer (which captures the stores through `StoreRefs`)
+and the replay applier all live in `synap-server`'s persistence module, so the
+move would have carried most of that module into the engine crate.
+`synap-server` does not depend on `synap-migrate`, so the dependency compiles
+without a cycle and keeps one implementation of each format. The cost is a
+longer build of an offline tool that links the server library.
 
-### 5. Rollback Migration
-
-Restore data from backup:
-
-```bash
-synap-migrate rollback \
-  --data-dir ./data \
-  --backup-dir ./backup \
-  --force
-```
-
-**Options:**
-- `--force` - Required to confirm rollback operation
-
-**What it does:**
-1. Validates backup exists
-2. Clears current data directory
-3. Restores all files from backup
-4. Preserves backup directory structure
-
-**Warning:** This will overwrite all current data!
-
-## Migration Workflow
-
-### Step 1: Prepare
-
-1. **Stop Synap server:**
-   ```bash
-   # Stop the running server
-   systemctl stop synap-server
-   # OR
-   pkill synap-server
-   ```
-
-2. **Check current status:**
-   ```bash
-   synap-migrate status --data-dir ./data
-   ```
-
-### Step 2: Test with Dry Run
+## Testing
 
 ```bash
-synap-migrate migrate \
-  --user-id YOUR_USER_ID \
-  --data-dir ./data \
-  --dry-run
+cargo test -p synap-migrate --lib
+cargo test -p synap-migrate --features full-tests --test real_server_fixtures_tests
 ```
 
-Review the output to see what will be migrated.
+The unit tests cover the WAL formats and tail, the scoping of every
+structure, and the rejection of corrupt, unsupported and misplaced input.
 
-### Step 3: Perform Migration
-
-```bash
-synap-migrate migrate \
-  --user-id YOUR_USER_ID \
-  --data-dir ./data
-```
-
-The tool automatically:
-- Creates backup at `./backup`
-- Migrates all resources
-- Validates migration
-- Reports any errors
-
-### Step 4: Update Configuration
-
-Update your `synap.yaml` to enable Hub integration:
-
-```yaml
-hub:
-  enabled: true
-  service_api_key: "${HIVEHUB_SERVICE_API_KEY}"
-  base_url: "https://api.hivehub.cloud"
-```
-
-### Step 5: Start Synap Server
-
-```bash
-# Set service API key
-export HIVEHUB_SERVICE_API_KEY="sk_service_..."
-
-# Start server with Hub integration
-./synap-server --config synap.yaml
-```
-
-### Step 6: Verify
-
-```bash
-# Check server health
-curl http://localhost:15500/health
-
-# Test with Hub access key
-curl -H "Authorization: Bearer sk_test_..." \
-  http://localhost:15500/queue/list
-```
-
-## Rollback if Needed
-
-If something goes wrong:
-
-```bash
-# Stop server
-systemctl stop synap-server
-
-# Rollback to backup
-synap-migrate rollback \
-  --data-dir ./data \
-  --backup-dir ./backup \
-  --force
-
-# Start server in standalone mode (remove hub config)
-./synap-server --config synap-standalone.yaml
-```
-
-## Examples
-
-### Example 1: Simple Migration
-
-```bash
-# Single command migration
-synap-migrate migrate \
-  --user-id 550e8400-e29b-41d4-a716-446655440000
-```
-
-### Example 2: Custom Paths
-
-```bash
-# Specify custom data and backup directories
-synap-migrate migrate \
-  --user-id 550e8400-e29b-41d4-a716-446655440000 \
-  --data-dir /var/lib/synap \
-  --backup-dir /backup/synap
-```
-
-### Example 3: Verbose Logging
-
-```bash
-# Enable debug logging
-synap-migrate --verbose migrate \
-  --user-id 550e8400-e29b-41d4-a716-446655440000
-```
-
-### Example 4: Verify Before Production
-
-```bash
-# 1. Check status
-synap-migrate status
-
-# 2. Create manual backup
-synap-migrate backup
-
-# 3. Dry run
-synap-migrate migrate --user-id $USER_ID --dry-run
-
-# 4. Actual migration
-synap-migrate migrate --user-id $USER_ID
-
-# 5. Validate
-synap-migrate validate --user-id $USER_ID
-```
+`real_server_fixtures_tests` migrates data directories written by a real
+1.3.2 server and by this release's server (`tests/fixtures/`, see its README
+and `generate_fixtures.py`), then recovers the output in Hub mode in-process:
+a Hub-enabled `ServerConfig` recovered by `persistence::recover_all` as
+`synap-server` starts, served by the production router with a `HubClient`.
+The binary itself cannot serve those reads, because Hub request
+authentication refuses every request until the HiveHub SDK can validate
+access keys (hivellm/synap#230); the test's `HubClient` maps one access key to
+the tenant instead. The tenant then reads every resource and the test
+compares it with what the source server served before it stopped.
 
 ## Troubleshooting
 
-### Issue: "No snapshot found"
+| Error | Meaning |
+|---|---|
+| `the output ... is not empty` | Pick a new directory, or empty that one. |
+| `the output ... is inside the data directory` | The source must stay unchanged; write elsewhere. |
+| `the input already holds Hub-scoped names` | The directory was migrated before (`synap-migrate status` shows it). |
+| `Snapshot "..." is damaged: checksum mismatch ...` | That file is corrupt. Restore it from a backup, or move it out of `snapshots/` if you accept losing what only it holds. |
+| `Snapshot "..." is damaged: unknown magic ...` | Not a snapshot, or one written by a newer Synap: use that release's migrator. |
+| `WAL ... is corrupted at byte N ... interior corruption` | A damaged record is followed by valid ones; restore the WAL from a backup. |
+| `WAL ... uses format version N` | Written by a newer Synap: use that release's migrator. |
 
-**Cause:** Data directory is empty or no snapshots exist.
+## Resource naming
 
-**Solution:**
-- For fresh install: Migration creates empty snapshot automatically
-- For existing install: Start Synap server once to create initial snapshot
+After migration every resource is named `user_{user_id}:{name}`, the user ID
+in its 32-digit form. For user `550e8400-e29b-41d4-a716-446655440000`, queue
+`my-queue` becomes `user_550e8400e29b41d4a716446655440000:my-queue` and KV
+key `config:app` becomes `user_550e8400e29b41d4a716446655440000:config:app`.
 
-### Issue: "Cannot migrate already-migrated data"
+## See also
 
-**Cause:** Resources already have `user_` prefixes.
-
-**Solution:**
-- Check status: `synap-migrate status`
-- If accidentally migrated twice, use rollback
-- Verify user_id is correct
-
-### Issue: "Validation failed"
-
-**Cause:** Some resources don't have correct user prefix.
-
-**Solution:**
-1. Check which resources failed (shown in error output)
-2. Rollback: `synap-migrate rollback --force`
-3. Investigate the issue
-4. Re-run migration
-
-### Issue: "Backup directory empty"
-
-**Cause:** Backup was not created or was deleted.
-
-**Solution:**
-- Always run backup before migration
-- Keep backups for at least 7 days
-- Use `--backup-dir` to specify custom location
-
-## Resource Naming Convention
-
-After migration, all resources follow this pattern:
-
-```
-user_{user_id}:{resource_name}
-```
-
-**Examples:**
-
-Before migration:
-- Queue: `my-queue`
-- Stream: `events`
-- KV key: `config:app`
-
-After migration (user_id = `550e8400e29b41d4a716446655440000`):
-- Queue: `user_550e8400e29b41d4a716446655440000:my-queue`
-- Stream: `user_550e8400e29b41d4a716446655440000:events`
-- KV key: `user_550e8400e29b41d4a716446655440000:config:app`
-
-## Technical Details
-
-### What Gets Migrated?
-
-- **KV Store:** All keys
-- **Queues:** All queue names and messages
-- **Streams:** All stream names and entries
-
-### What Doesn't Change?
-
-- Message content (unchanged)
-- Timestamps (preserved)
-- Message ordering (maintained)
-- Data structure internals
-
-### Snapshot Format
-
-The tool reads and writes Synap's binary snapshot format (version 2):
-- Header: Magic bytes + version + metadata
-- KV data: Length-prefixed key-value pairs
-- Queue data: Queue names + messages
-- Stream data: Stream names + entries
-
-### Safety Features
-
-1. **Automatic Backup:** Creates backup before migration
-2. **Dry Run Mode:** Preview changes without modifying data
-3. **Validation:** Automatic post-migration validation
-4. **Rollback:** Restore from backup if issues occur
-5. **Archive:** Old snapshot saved as `.pre-migration`
-
-## Performance
-
-Migration performance depends on data size:
-
-- **Small** (< 1000 resources): < 1 second
-- **Medium** (1K-100K resources): 1-10 seconds
-- **Large** (100K-1M resources): 10-60 seconds
-- **Very Large** (> 1M resources): 1-5 minutes
-
-Progress bar shows real-time migration status.
-
-## See Also
-
-- [HiveHub Configuration Guide](../docs/guides/HUB_CONFIGURATION.md)
-- [Hub Integration Specification](../docs/specs/HUB_INTEGRATION.md)
-- [Synap Documentation](../README.md)
+- [Migration guide](../../docs/guides/MIGRATION_GUIDE.md)
+- [HiveHub configuration guide](../../docs/guides/HUB_CONFIGURATION.md)
+- [Hub integration specification](../../docs/specs/HUB_INTEGRATION.md)
