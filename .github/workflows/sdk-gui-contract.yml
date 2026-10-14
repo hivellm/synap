@@ -54,6 +54,9 @@ jobs:
       - name: Check the release workflow
         run: python scripts/release/test-release-workflow.py
 
+      - name: Test the performance baseline script
+        run: python scripts/bench/test_perf_baseline.py
+
   server:
     name: Build synap-server (release)
     runs-on: ubuntu-latest
