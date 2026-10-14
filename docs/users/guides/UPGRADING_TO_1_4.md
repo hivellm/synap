@@ -180,8 +180,12 @@ in the WAL and are not sent to replicas as they happen (a replica receives the
 master's stream events only in a full sync). New in 1.4.0: stream rooms come
 back at startup from the newest snapshot, so a restart keeps the events that
 snapshot holds and loses only those published after it (1.3.x wrote them to
-the snapshot but never read them back). Partitioned topics and consumer groups
-are not restored.
+the snapshot but never read them back). Stream retention applies to them at
+once: the first compaction pass, right after startup, removes events older than
+one hour, so a room restored from a snapshot taken longer ago keeps its offsets
+but not those events. A room with no events left is not written to the next
+snapshot, so the restart after that no longer has it. Partitioned topics and
+consumer groups are not restored.
 
 If the WAL cannot record a write, the client gets an error saying the write is
 applied in memory but not durable. A failed WAL write, flush or fsync fails

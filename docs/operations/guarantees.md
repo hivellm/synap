@@ -38,7 +38,12 @@ logged in the WAL nor sent to replicas. At startup each stream room is restored
 from the newest snapshot as a new generation (event IDs, offsets, types, data
 and timestamps kept; the next publish continues after the last offset), so a
 restart loses every event published after that snapshot. A room that cannot
-be restored is skipped with a warning.
+be restored is skipped with a warning. Retention applies to the restored events
+at once: the stream manager keeps events for one hour (its default, which the
+configuration file does not change), and its first compaction pass, right after
+startup, removes the restored events older than that. A room with no events
+left is not written to a snapshot, so a restart from that snapshot no longer
+has the room.
 
 With `persistence.enabled: false` there is no WAL and no snapshot: every write
 is acknowledged once it is applied in memory (a replication master still
@@ -50,7 +55,10 @@ and a persistence layer that opened at startup (see
 [1.7](#17-startup-what-refuses-to-start-and-what-starts-empty)).
 
 Code: `persistence/layer.rs:532-548` (stream publish is a no-op for the WAL),
-`persistence/recovery.rs:337` (`restore_streams`, seeding stream rooms from the snapshot), `main.rs:505` (called before the compaction task starts),
+`persistence/recovery.rs:337` (`restore_streams`, seeding stream rooms from the snapshot), `main.rs:504-510` (default stream configuration; rooms restored before the compaction task starts),
+`synap-core/src/core/stream.rs:53` (one-hour retention), `:639-659` (first
+compaction pass at once), `:559-571` (rooms without events left out of a
+snapshot),
 `main.rs:492-516` (fresh stream, partition and consumer-group managers),
 `replication/master.rs:331-340` (stream events only in a full sync),
 `auth/user.rs:133-145` and `auth/api_key.rs:179-185` (in-memory maps),
