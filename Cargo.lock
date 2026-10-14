@@ -3370,6 +3370,7 @@ dependencies = [
  "anyhow",
  "axum",
  "clap",
+ "crc32fast",
  "futures-util",
  "reqwest 0.13.5",
  "serde_json",

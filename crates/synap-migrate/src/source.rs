@@ -65,7 +65,9 @@ pub struct WalRead {
     /// does (streams come from the snapshot).
     pub stream_records: usize,
     /// A torn tail (bytes a crash left in the middle of an append), which the
-    /// server discards at startup and this read skips the same way.
+    /// server discards at startup and this read skips the same way. A
+    /// complete record this release cannot decode is not one: it fails the
+    /// read.
     pub torn_tail: Option<String>,
 }
 
@@ -210,9 +212,18 @@ async fn read_wal(path: PathBuf, cutoff: u64) -> Result<(Vec<WALEntry>, WalRead,
                 valid_len,
                 file_len,
                 reason,
-            } => Some(format!(
+                kind,
+            } if kind.is_torn() => Some(format!(
                 "bytes {valid_len} to {file_len} are a torn tail ({reason})"
             )),
+            // A complete record whose checksum matches is not what a crash
+            // leaves: it holds data this release cannot read.
+            ScanEnd::TornTail {
+                valid_len, reason, ..
+            } => bail!(
+                "the WAL {} holds a complete record at byte {valid_len} that this release cannot read ({reason}): it was likely written by a newer Synap release; use that release's migrator",
+                path.display()
+            ),
         };
         let wal = WalRead {
             path,
@@ -343,5 +354,53 @@ mod tests {
         let torn = source.wal.torn_tail.as_deref().unwrap();
         assert!(torn.contains("torn tail"), "{torn}");
         assert_eq!(std::fs::read(&layout.wal_path).unwrap(), bytes);
+    }
+
+    /// A complete frame whose checksum matches, holding a record of type
+    /// `tag` (offset, timestamp, type, then a string field).
+    fn record_frame(tag: u32) -> Vec<u8> {
+        let mut payload = Vec::new();
+        payload.extend_from_slice(&9u64.to_le_bytes());
+        payload.extend_from_slice(&1_700_000_000u64.to_le_bytes());
+        payload.extend_from_slice(&tag.to_le_bytes());
+        payload.extend_from_slice(&3u64.to_le_bytes());
+        payload.extend_from_slice(b"new");
+        let mut frame = (payload.len() as u64).to_be_bytes().to_vec();
+        frame.extend_from_slice(&crc32fast::hash(&payload).to_be_bytes());
+        frame.extend_from_slice(&payload);
+        frame
+    }
+
+    /// A complete, checksum-valid record of a type this release does not know
+    /// (as a newer release appends one) at the end of the WAL is not a torn
+    /// tail: the read fails, naming the WAL, and leaves it as it was. A
+    /// zero-filled tail, which a crash can leave, is still skipped.
+    #[tokio::test]
+    async fn an_unreadable_record_at_the_end_of_the_wal_fails_the_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::of(dir.path());
+        let mut bytes = write_wal(&layout.wal_path, false, &[set(1, "kept", "k", None)]);
+        let valid_len = bytes.len();
+        bytes.extend_from_slice(&record_frame(1000));
+        std::fs::write(&layout.wal_path, &bytes).unwrap();
+
+        let error = format!(
+            "{:#}",
+            read(&layout, QueueConfig::default()).await.err().unwrap()
+        );
+        assert!(error.contains("synap.wal"), "{error}");
+        assert!(
+            error.contains(&format!("complete record at byte {valid_len}")),
+            "{error}"
+        );
+        assert!(error.contains("newer Synap release"), "{error}");
+        assert_eq!(std::fs::read(&layout.wal_path).unwrap(), bytes);
+
+        bytes.truncate(valid_len);
+        bytes.extend_from_slice(&[0u8; 64]);
+        std::fs::write(&layout.wal_path, &bytes).unwrap();
+        let source = read(&layout, QueueConfig::default()).await.unwrap();
+        assert_eq!(get(&source, "kept").await, Some(b"k".to_vec()));
+        assert!(source.wal.torn_tail.is_some());
     }
 }

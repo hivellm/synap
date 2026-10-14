@@ -41,6 +41,8 @@ full-tests = []
 
 [dev-dependencies]
 tempfile = "3.15"
+# WAL frames the server's encoder cannot write (a record type it does not know).
+crc32fast = "1.4"
 serde_json.workspace = true
 axum.workspace = true
 futures-util = "0.3"

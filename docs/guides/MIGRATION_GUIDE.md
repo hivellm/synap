@@ -329,7 +329,9 @@ was migrated before.
 ### Issue: "Snapshot ... is damaged: checksum mismatch" (or a WAL error)
 
 **Cause:** a snapshot file or the WAL is corrupt, or was written by a newer
-Synap. Nothing was written.
+Synap (a newer snapshot or WAL format, or WAL records of a type this release
+does not know: "holds a complete record at byte N that this release cannot
+read"). Nothing was written.
 
 **Solutions:**
 1. Restore the named file from a backup and re-run

@@ -619,7 +619,12 @@ Time: 1-10 seconds
 
 The scanner lives in `persistence/wal_frame.rs` and is shared by the async WAL
 and the recovery WAL. A corrupt length that hides the next frame boundary is
-handled by searching the rest of the file byte by byte for a valid frame.
+handled by searching the rest of the file byte by byte for a valid frame. The
+scan also reports what the first invalid frame is (`TailKind`): cut short,
+failing its checksum, blank (zero fill reads as empty frames whose checksum
+matches), or a complete record whose checksum matches but which this release
+cannot decode, such as a record type a newer release added. A crash leaves
+only the first three; `synap-migrate` refuses the last instead of dropping it.
 
 ### Transaction Records
 

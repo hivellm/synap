@@ -139,6 +139,9 @@ Everything the server reads, through the server's own code:
 - WAL files with the `SYNAPWAL` version 2 header and headerless 1.3.x files.
   A torn tail (bytes a crash left mid-append) is skipped and reported, as
   startup discards it; unlike startup, the migration does not truncate it.
+  A complete record whose checksum matches but which this release cannot
+  decode (a record type a newer release added) is not a torn tail: the run
+  fails instead of dropping it.
 
 ### Older data directories
 
@@ -206,6 +209,7 @@ compares it with what the source server served before it stopped.
 | `Snapshot "..." is damaged: unknown magic ...` | Not a snapshot, or one written by a newer Synap: use that release's migrator. |
 | `WAL ... is corrupted at byte N ... interior corruption` | A damaged record is followed by valid ones; restore the WAL from a backup. |
 | `WAL ... uses format version N` | Written by a newer Synap: use that release's migrator. |
+| `the WAL ... holds a complete record at byte N that this release cannot read` | The WAL ends with records of a type this release does not know, written by a newer Synap: use that release's migrator. |
 
 ## Resource naming
 
