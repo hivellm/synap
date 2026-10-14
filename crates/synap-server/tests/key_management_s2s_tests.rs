@@ -324,12 +324,13 @@ async fn test_key_rename() {
 
     assert_eq!(exists_res["payload"]["exists"], false);
 
-    // Verify destination key exists with correct value
+    // Verify destination key exists with correct value. `kv.set` stores a
+    // string value as its raw UTF-8 bytes, so `kv.get` returns it unquoted.
     let get_res = send_command(&client, &base_url, "kv.get", json!({"key": "dest_key"})).await;
 
     assert_eq!(get_res["success"], true);
     let value_str = get_res["payload"].as_str().unwrap();
-    assert_eq!(value_str, "\"test_value\"");
+    assert_eq!(value_str, "test_value");
 }
 
 #[tokio::test]
@@ -495,8 +496,8 @@ async fn test_key_copy() {
 
     let dest_res = send_command(&client, &base_url, "kv.get", json!({"key": "dest_key"})).await;
 
-    assert_eq!(source_res["payload"].as_str().unwrap(), "\"test_value\"");
-    assert_eq!(dest_res["payload"].as_str().unwrap(), "\"test_value\"");
+    assert_eq!(source_res["payload"].as_str().unwrap(), "test_value");
+    assert_eq!(dest_res["payload"].as_str().unwrap(), "test_value");
 }
 
 #[tokio::test]
@@ -548,7 +549,7 @@ async fn test_key_copy_replace() {
     // Verify destination has source value
     let dest_res = send_command(&client, &base_url, "kv.get", json!({"key": "dest_key"})).await;
 
-    assert_eq!(dest_res["payload"].as_str().unwrap(), "\"source_value\"");
+    assert_eq!(dest_res["payload"].as_str().unwrap(), "source_value");
 }
 
 #[tokio::test]
