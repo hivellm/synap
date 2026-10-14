@@ -127,6 +127,7 @@ Advanced features and optimizations:
 - [Lua Scripting](./guides/LUA_SCRIPTING.md) - Server-side scripting
 - [Performance Optimization](./guides/PERFORMANCE.md) - Advanced optimization
 - [Migration Guide](./guides/MIGRATION.md) - Migrating from Redis, RabbitMQ, Kafka
+- [Upgrading to 1.4.0](./guides/UPGRADING_TO_1_4.md) - Backup, no-downgrade rule and every breaking change from 1.3.x
 - [Security Guide](./guides/SECURITY.md) - Security best practices and hardening
 - [GUI Dashboard](./guides/GUI_DASHBOARD.md) - Synap Desktop GUI for monitoring
 - [Compression Guide](./guides/COMPRESSION.md) - Data compression and optimization

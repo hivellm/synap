@@ -16,3 +16,5 @@
 - [ ] 3.1 Update or create documentation covering the implementation
 - [ ] 3.2 Write tests covering the new behavior
 - [ ] 3.3 Run tests and confirm they pass
+
+<!-- tail-waiver: Abandoned by the user's decision on 2026-10-14: the TypeScript 7 swap will not be implemented, so no docs or tests apply. -->

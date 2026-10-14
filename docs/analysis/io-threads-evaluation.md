@@ -1,5 +1,14 @@
 # IO Threads vs. the Sharded Async Model — Evaluation
 
+> **Historical analysis.** Written against `ba21407` (2026-07-10), during the
+> 1.0.0 release (first released in v1.0.0). The code has moved since: paths,
+> line numbers and findings describe that revision, not the current tree.
+> Current behavior: [1.4.0 guarantees](../operations/guarantees.md). Current
+> design: [persistence](../specs/PERSISTENCE.md),
+> [transports](../protocol/transports.md),
+> [KV store internals](../internals/kv-store.md) and the
+> [documentation index](../INDEX.md).
+
 **Status:** Complete — decision: do **not** implement Redis-style IO threads.
 **Backlog item:** `phase9_redis-parity-feature-backlog` 1.5
 **Date:** 2026-07-10

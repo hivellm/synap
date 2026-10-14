@@ -14,7 +14,8 @@ use std::time::Duration;
 use synap_server::auth::{ApiKeyManager, UserManager};
 use synap_server::core::{HashStore, ListStore, SetStore, SortedSetStore};
 use synap_server::monitoring::{ClientListManager, MonitoringManager};
-use synap_server::persistence::{PersistenceLayer, recover_all};
+use synap_server::persistence::types::StreamEvent;
+use synap_server::persistence::{PersistenceLayer, recover_all, restore_streams};
 use synap_server::replication::NodeRole;
 use synap_server::{
     AppState, ConsumerGroupConfig, ConsumerGroupManager, KVStore, PartitionConfig,
@@ -331,6 +332,7 @@ async fn main() -> Result<()> {
         Option<Arc<QueueManager>>,
         Option<Arc<synap_server::core::HyperLogLogStore>>,
         Option<Arc<synap_server::core::BitmapStore>>,
+        std::collections::HashMap<String, Vec<StreamEvent>>,
         u64,
     );
     let (
@@ -342,6 +344,7 @@ async fn main() -> Result<()> {
         queue_manager,
         hyperloglog_store_recovered,
         bitmap_store_recovered,
+        recovered_streams,
         recovered_wal_offset,
     ): RecoveredStores = if config.persistence.enabled {
         info!("Persistence enabled, attempting recovery...");
@@ -356,6 +359,7 @@ async fn main() -> Result<()> {
                     queue_manager: qm,
                     hyperloglog_store,
                     bitmap_store,
+                    streams,
                     wal_offset: offset,
                 } = recovered;
                 info!("Recovery successful, WAL offset: {}", offset);
@@ -393,6 +397,7 @@ async fn main() -> Result<()> {
                     qm.map(|s| Arc::new(s.with_global_memory(global_mem.clone()))),
                     Some(Arc::new(hyperloglog_store)),
                     Some(Arc::new(bitmap_store)),
+                    streams,
                     offset,
                 )
             }
@@ -431,6 +436,7 @@ async fn main() -> Result<()> {
                     },
                     None,
                     None,
+                    Default::default(),
                     0,
                 )
             }
@@ -474,6 +480,7 @@ async fn main() -> Result<()> {
             },
             None,
             None,
+            Default::default(),
             0,
         )
     };
@@ -481,19 +488,24 @@ async fn main() -> Result<()> {
     // Start TTL cleanup task
     kv_store.start_ttl_cleanup();
 
-    // Start queue deadline checker if queue enabled
-    if let Some(ref qm) = queue_manager {
-        qm.start_deadline_checker();
+    // The queue deadline checker starts once the persistence layer exists
+    // (below), so the requeues it performs are recorded.
+    if queue_manager.is_some() {
         info!("Queue system enabled");
     } else {
         info!("Queue system disabled");
     }
 
-    // Initialize stream manager (enabled by default for now)
+    // Initialize stream manager (enabled by default for now) with the rooms of
+    // the recovered snapshot; compaction then applies retention to them.
     let stream_manager = {
         let stream_mgr = Arc::new(
             StreamManager::new(StreamConfig::default()).with_global_memory(global_mem.clone()),
         );
+        let restored = restore_streams(&stream_mgr, recovered_streams).await;
+        if restored > 0 {
+            info!("Restored {} stream rooms from the snapshot", restored);
+        }
         stream_mgr.clone().start_compaction_task();
         info!("Event Stream system enabled");
         Some(stream_mgr)
@@ -662,6 +674,15 @@ async fn main() -> Result<()> {
     } else {
         None
     };
+
+    // Requeue in-flight queue messages whose ACK deadline passed, recording
+    // each requeue as a NACK so recovery and replicas count the same retries.
+    if let Some(ref qm) = queue_manager {
+        synap_server::persistence::durable::spawn_queue_deadline_checker(
+            persistence.clone(),
+            qm.clone(),
+        );
+    }
 
     // Periodically recompute collection/broker memory into the shared budget so
     // `maxmemory` reflects all datatypes (audit M-018). KV updates its counter

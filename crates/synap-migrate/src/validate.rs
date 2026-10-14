@@ -1,173 +1,179 @@
-//! Validation logic for migration
+//! Checks of a data directory's Hub scoping.
 
-use crate::snapshot;
+use crate::scope::{self, Kind};
+use crate::source::{self, Layout};
 use anyhow::{Context, Result, bail};
+use std::collections::{BTreeSet, HashMap};
 use std::path::Path;
+use synap_server::QueueConfig;
+use synap_server::hub::MultiTenant;
+use synap_server::persistence::SnapshotImage;
+use synap_server::persistence::types::StreamEvent;
 use tracing::info;
 use uuid::Uuid;
 
-/// Validate that migration was successful
-pub async fn validate_migration(data_dir: &Path, user_id: &Uuid) -> Result<()> {
-    info!("Validating migration for user {}", user_id);
-
-    // Find latest snapshot
-    let snapshot_path = snapshot::find_latest_snapshot(data_dir)
+/// The data directory `data_dir`, read as the server would recover it, as an
+/// image plus its stream section.
+async fn read_image(data_dir: &Path) -> Result<(SnapshotImage, HashMap<String, Vec<StreamEvent>>)> {
+    if !data_dir.is_dir() {
+        bail!(
+            "the data directory {} does not exist or is not a directory",
+            data_dir.display()
+        );
+    }
+    let source = source::read(&Layout::of(data_dir), QueueConfig::default()).await?;
+    let image = SnapshotImage::capture(source.store_refs())
         .await
-        .context("Failed to find snapshot")?;
+        .context("cannot copy the rebuilt stores")?;
+    Ok((image, source.streams))
+}
 
-    let snapshot_path = match snapshot_path {
-        Some(path) => path,
-        None => bail!("No snapshot found"),
-    };
-
-    // Read snapshot
-    let snapshot = snapshot::read_snapshot(&snapshot_path)
-        .await
-        .context("Failed to read snapshot")?;
-
-    let expected_prefix = format!("user_{}:", user_id.as_simple());
-
-    // Validate KV keys
-    for key in snapshot.kv_data.keys() {
-        if !key.starts_with(&expected_prefix) {
-            bail!(
-                "KV key '{}' does not have expected user prefix '{}'",
-                key,
-                expected_prefix
-            );
+/// Check that every resource of every structure in `data_dir` lives in the
+/// Hub namespace of `tenant`.
+pub async fn validate_migration(data_dir: &Path, tenant: &Uuid) -> Result<()> {
+    info!("Validating migration for tenant {}", tenant);
+    let (image, streams) = read_image(data_dir).await?;
+    let expected_prefix = MultiTenant::get_user_prefix(tenant);
+    let names = scope::names(&image, &streams);
+    for (kind, name) in &names {
+        if scope::owner(name) != Some(*tenant) {
+            bail!("{kind} {name:?} does not have the expected prefix {expected_prefix:?}");
         }
     }
-
-    // Validate queue names
-    for queue_name in snapshot.queue_data.keys() {
-        if !queue_name.starts_with(&expected_prefix) {
-            bail!(
-                "Queue '{}' does not have expected user prefix '{}'",
-                queue_name,
-                expected_prefix
-            );
-        }
-    }
-
-    // Validate stream names
-    for stream_name in snapshot.stream_data.keys() {
-        if !stream_name.starts_with(&expected_prefix) {
-            bail!(
-                "Stream '{}' does not have expected user prefix '{}'",
-                stream_name,
-                expected_prefix
-            );
-        }
-    }
-
-    info!("Validation successful:");
-    info!("  - {} KV entries validated", snapshot.kv_data.len());
-    info!("  - {} queues validated", snapshot.queue_data.len());
-    info!("  - {} streams validated", snapshot.stream_data.len());
-
+    info!("Validation successful: {} resources validated", names.len());
     Ok(())
 }
 
-/// Check migration status and return statistics
+/// Describe the Hub scoping of `data_dir`: migrated, not migrated, or mixed.
 pub async fn check_status(data_dir: &Path) -> Result<String> {
     info!("Checking migration status");
-
-    // Find latest snapshot
-    let snapshot_path = snapshot::find_latest_snapshot(data_dir).await?;
-
-    let snapshot_path = match snapshot_path {
-        Some(path) => path,
-        None => {
-            return Ok("Status: No snapshot found (likely fresh install)".to_string());
-        }
-    };
-
-    // Read snapshot
-    let snapshot = snapshot::read_snapshot(&snapshot_path).await?;
-
-    // Check for scoped resources
-    let mut scoped_count = 0;
-    let mut unscoped_count = 0;
-    let mut user_ids = std::collections::HashSet::new();
-
-    for key in snapshot.kv_data.keys() {
-        if snapshot::is_scoped(key) {
-            scoped_count += 1;
-            if let Some(user_id_str) = extract_user_id_from_key(key) {
-                user_ids.insert(user_id_str);
-            }
-        } else {
-            unscoped_count += 1;
-        }
+    let (image, streams) = read_image(data_dir).await?;
+    let names = scope::names(&image, &streams);
+    if names.is_empty() {
+        return Ok("Status: EMPTY (no resources; likely a fresh install)".to_string());
     }
 
-    for queue_name in snapshot.queue_data.keys() {
-        if snapshot::is_scoped(queue_name) {
-            scoped_count += 1;
-            if let Some(user_id_str) = extract_user_id_from_key(queue_name) {
-                user_ids.insert(user_id_str);
+    let mut tenants = BTreeSet::new();
+    let mut unscoped: Vec<(Kind, &str)> = Vec::new();
+    for (kind, name) in &names {
+        match scope::owner(name) {
+            Some(tenant) => {
+                tenants.insert(tenant);
             }
-        } else {
-            unscoped_count += 1;
+            None => unscoped.push((*kind, name)),
         }
     }
+    let total = names.len();
+    let scoped = total - unscoped.len();
+    let tenant_list = tenants
+        .iter()
+        .map(Uuid::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
 
-    for stream_name in snapshot.stream_data.keys() {
-        if snapshot::is_scoped(stream_name) {
-            scoped_count += 1;
-            if let Some(user_id_str) = extract_user_id_from_key(stream_name) {
-                user_ids.insert(user_id_str);
-            }
-        } else {
-            unscoped_count += 1;
-        }
-    }
-
-    let total_count = scoped_count + unscoped_count;
-
-    let status = if unscoped_count == 0 && scoped_count > 0 {
+    Ok(if unscoped.is_empty() {
         format!(
             "Status: MIGRATED\n\
-             Total resources: {}\n\
-             Scoped resources: {} (100%)\n\
-             Unique users: {}\n\
-             User IDs: {:?}",
-            total_count,
-            scoped_count,
-            user_ids.len(),
-            user_ids
+             Total resources: {total}\n\
+             Scoped resources: {scoped} (100%)\n\
+             Tenants: {} ({tenant_list})",
+            tenants.len()
         )
-    } else if scoped_count == 0 {
+    } else if scoped == 0 {
         format!(
             "Status: NOT MIGRATED\n\
-             Total resources: {}\n\
-             All resources are unscoped (standalone mode)",
-            total_count
+             Total resources: {total}\n\
+             All resources are unscoped (standalone mode)"
         )
     } else {
+        let (kind, name) = unscoped[0];
         format!(
             "Status: PARTIALLY MIGRATED (WARNING)\n\
-             Total resources: {}\n\
-             Scoped resources: {} ({:.1}%)\n\
-             Unscoped resources: {} ({:.1}%)\n\
+             Total resources: {total}\n\
+             Scoped resources: {scoped} ({:.1}%)\n\
+             Unscoped resources: {} ({:.1}%), for example {kind} {name:?}\n\
              This is an inconsistent state!",
-            total_count,
-            scoped_count,
-            (scoped_count as f64 / total_count as f64) * 100.0,
-            unscoped_count,
-            (unscoped_count as f64 / total_count as f64) * 100.0
+            (scoped as f64 / total as f64) * 100.0,
+            unscoped.len(),
+            (unscoped.len() as f64 / total as f64) * 100.0
         )
-    };
-
-    Ok(status)
+    })
 }
 
-/// Extract user ID from a scoped resource name
-fn extract_user_id_from_key(key: &str) -> Option<String> {
-    if key.starts_with("user_")
-        && let Some(colon_pos) = key.find(':')
-    {
-        return Some(key[5..colon_pos].to_string());
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::migrate::{self, Migration};
+    use crate::report::QueueDefaults;
+    use crate::snapshot;
+    use synap_server::persistence::StoreRefs;
+    use synap_server::{KVConfig, KVStore, QueueManager};
+
+    fn tenant() -> Uuid {
+        Uuid::parse_str("2c4e6a8b-1d3f-4a5b-8c7d-9e0f1a2b3c4d").unwrap()
     }
-    None
+
+    /// A standalone data directory with a KV key and a queue.
+    async fn standalone(dir: &Path) {
+        let kv = KVStore::new(KVConfig::default());
+        kv.set("k", b"v".to_vec(), None).await.unwrap();
+        let queues = QueueManager::new(QueueConfig::default());
+        queues.create_queue("q", None).await.unwrap();
+        snapshot::manager(&Layout::of(dir).snapshot_dir)
+            .create_snapshot(
+                StoreRefs {
+                    queue_manager: Some(&queues),
+                    ..StoreRefs::kv_only(&kv)
+                },
+                1,
+            )
+            .await
+            .unwrap();
+    }
+
+    /// Status tells a standalone directory from a migrated one, and validate
+    /// accepts only the tenant the directory was migrated for.
+    #[tokio::test]
+    async fn status_and_validate_follow_the_migration() {
+        let source = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        let output = scratch.path().join("migrated");
+        standalone(source.path()).await;
+
+        let status = check_status(source.path()).await.unwrap();
+        assert!(status.starts_with("Status: NOT MIGRATED"), "{status}");
+        assert!(status.contains("Total resources: 2"), "{status}");
+        let error = validate_migration(source.path(), &tenant())
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("expected prefix"),
+            "{error:#}"
+        );
+
+        migrate::run(&Migration {
+            source: source.path().to_path_buf(),
+            output: output.clone(),
+            tenant: tenant(),
+            queue_defaults: QueueDefaults::default(),
+            allow_scoped_names: false,
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+
+        let status = check_status(&output).await.unwrap();
+        assert!(status.starts_with("Status: MIGRATED"), "{status}");
+        assert!(status.contains(&tenant().to_string()), "{status}");
+        validate_migration(&output, &tenant()).await.unwrap();
+        let other = Uuid::parse_str("3d5f7b9c-2e4a-4b6c-9d8e-0f1a2b3c4d5e").unwrap();
+        assert!(validate_migration(&output, &other).await.is_err());
+
+        let empty = scratch.path().join("empty");
+        let error = check_status(&empty).await.unwrap_err();
+        assert!(format!("{error:#}").contains("does not exist"), "{error:#}");
+        std::fs::create_dir_all(&empty).unwrap();
+        let status = check_status(&empty).await.unwrap();
+        assert!(status.starts_with("Status: EMPTY"), "{status}");
+    }
 }

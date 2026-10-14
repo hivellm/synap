@@ -478,3 +478,7 @@ required-features = ["full-tests"]
 [[test]]
 name = "replica_full_sync_tests"
 required-features = ["full-tests"]
+
+[[test]]
+name = "queue_replay_identity_tests"
+required-features = ["full-tests"]

@@ -1,4 +1,4 @@
-use crate::core::queue::QueueMessage;
+use crate::core::queue::{QueueConfig, QueueMessage, QueueState};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -10,8 +10,8 @@ pub enum PersistenceError {
     #[error("WAL corrupted at offset {offset}: {reason}")]
     WALCorrupted { offset: u64, reason: String },
 
-    #[error("Snapshot corrupted: {0:?}")]
-    SnapshotCorrupted(PathBuf),
+    #[error("Snapshot {path:?} is damaged: {reason}")]
+    SnapshotCorrupted { path: PathBuf, reason: String },
 
     #[error("Checksum mismatch: expected {expected}, got {actual}")]
     ChecksumMismatch { expected: u64, actual: u64 },
@@ -85,7 +85,7 @@ impl PersistenceError {
             PersistenceError::WALInteriorCorruption { .. }
                 | PersistenceError::WALUnsupportedVersion { .. }
                 | PersistenceError::WALCorrupted { .. }
-                | PersistenceError::SnapshotCorrupted(_)
+                | PersistenceError::SnapshotCorrupted { .. }
                 | PersistenceError::SnapshotUnrecoverable(_)
         )
     }
@@ -383,6 +383,120 @@ pub enum Operation {
         elements: Vec<Vec<u8>>,
         expires_at_ms: u64,
     },
+
+    // phase24 variants: queue identity and lifecycle. Appended after the
+    // phase23 ones so every earlier index keeps decoding.
+    /// Queue PUBLISH carrying the whole message, creation time included
+    /// (`QueuePublish`, written before phase24, lacks it). Recovery and
+    /// replicas insert it with its original ID and metadata.
+    QueuePublishFull {
+        queue: String,
+        message: QueueMessageRecord,
+    },
+
+    /// Queue creation (QCREATE), with the configuration the queue got.
+    /// bincode is positional: a field added to `QueueConfig` changes this
+    /// record's encoding, so such a change needs a new variant.
+    QueueCreate { queue: String, config: QueueConfig },
+
+    /// Queue deletion (QDELETE) of an existing queue.
+    QueueDelete { queue: String },
+
+    /// Queue purge (QPURGE): the IDs of the ready messages it removed.
+    /// Deliveries are not logged, so on replay delivered messages are still
+    /// ready; replaying the purge by ID removes exactly what it removed.
+    QueuePurge {
+        queue: String,
+        message_ids: Vec<String>,
+    },
+}
+
+/// Every field of a queue message, as WAL records, replication and v5
+/// snapshots store it.
+///
+/// `QueueMessage`'s own serde form is the API shape and leaves out
+/// `created_at`; this one keeps it, so recovery and replicas rebuild the
+/// message exactly: ID, payload, priority, retry counters, creation time and
+/// headers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QueueMessageRecord {
+    pub id: String,
+    pub payload: Vec<u8>,
+    pub priority: u8,
+    pub retry_count: u32,
+    pub max_retries: u32,
+    /// Creation time, Unix seconds.
+    pub created_at: u32,
+    pub headers: HashMap<String, String>,
+}
+
+impl From<&QueueMessage> for QueueMessageRecord {
+    fn from(message: &QueueMessage) -> Self {
+        Self {
+            id: message.id.clone(),
+            payload: message.payload.as_ref().clone(),
+            priority: message.priority,
+            retry_count: message.retry_count,
+            max_retries: message.max_retries,
+            created_at: message.created_at,
+            headers: message.headers.clone(),
+        }
+    }
+}
+
+impl From<QueueMessageRecord> for QueueMessage {
+    fn from(record: QueueMessageRecord) -> Self {
+        Self {
+            id: record.id,
+            payload: std::sync::Arc::new(record.payload),
+            priority: record.priority,
+            retry_count: record.retry_count,
+            max_retries: record.max_retries,
+            created_at: record.created_at,
+            headers: record.headers,
+        }
+    }
+}
+
+/// One queue as a snapshot stores it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct QueueImage {
+    /// The queue's configuration (v5+). `None` for v2-v4 files, which did
+    /// not store it: those queues load with the server's default.
+    pub config: Option<QueueConfig>,
+    /// Messages waiting for delivery, in delivery order.
+    pub ready: Vec<QueueMessageRecord>,
+    /// Messages delivered but not acknowledged, in delivery order (v5+).
+    pub in_flight: Vec<QueueMessageRecord>,
+    /// Dead-lettered messages, oldest first (v5+).
+    pub dead_letter: Vec<QueueMessageRecord>,
+}
+
+impl From<&QueueState> for QueueImage {
+    fn from(state: &QueueState) -> Self {
+        let records = |list: &[QueueMessage]| list.iter().map(QueueMessageRecord::from).collect();
+        Self {
+            config: Some(state.config.clone()),
+            ready: records(&state.ready),
+            in_flight: records(&state.in_flight),
+            dead_letter: records(&state.dead_letter),
+        }
+    }
+}
+
+impl QueueImage {
+    /// The queue state this image describes, for
+    /// `QueueManager::restore_queue`; `default_config` stands in for a
+    /// configuration the image does not hold (v2-v4 snapshots).
+    pub fn into_state(self, default_config: QueueConfig) -> QueueState {
+        let messages = |list: Vec<QueueMessageRecord>| list.into_iter().map(Into::into).collect();
+        QueueState {
+            config: self.config.unwrap_or(default_config),
+            ready: messages(self.ready),
+            in_flight: messages(self.in_flight),
+            dead_letter: messages(self.dead_letter),
+        }
+    }
 }
 
 impl Operation {
@@ -448,7 +562,10 @@ pub struct Snapshot {
     pub timestamp: u64,
     pub wal_offset: u64,
     pub kv_data: HashMap<String, Vec<u8>>, // Simplified for now
-    pub queue_data: HashMap<String, Vec<QueueMessage>>, // Simplified for now
+    /// Every queue with its configuration and messages (v5 keeps in-flight
+    /// and dead-lettered messages and the full metadata; older files hold
+    /// the ready messages only).
+    pub queue_data: HashMap<String, QueueImage>,
     #[serde(default)]
     pub stream_data: HashMap<String, Vec<StreamEvent>>, // Room -> Events
     #[serde(default)]
@@ -699,5 +816,73 @@ mod tests {
             }),
             43
         );
+    }
+
+    /// The phase24 queue variants come after every earlier one, so earlier
+    /// tags (including the legacy `QueuePublish`, 3) do not move.
+    #[test]
+    fn phase24_variants_keep_earlier_tags() {
+        let tag = |op: &Operation| {
+            let bytes = bincode::serde::encode_to_vec(op, bincode::config::legacy()).unwrap();
+            u32::from_le_bytes(bytes[..4].try_into().unwrap())
+        };
+        let message = QueueMessage::new(b"p".to_vec(), 1, 2);
+        assert_eq!(
+            tag(&Operation::QueuePublish {
+                queue: String::new(),
+                message: message.clone(),
+            }),
+            3
+        );
+        assert_eq!(
+            tag(&Operation::QueuePublishFull {
+                queue: String::new(),
+                message: QueueMessageRecord::from(&message),
+            }),
+            44
+        );
+        assert_eq!(
+            tag(&Operation::QueueCreate {
+                queue: String::new(),
+                config: QueueConfig::default(),
+            }),
+            45
+        );
+        assert_eq!(
+            tag(&Operation::QueueDelete {
+                queue: String::new()
+            }),
+            46
+        );
+        assert_eq!(
+            tag(&Operation::QueuePurge {
+                queue: String::new(),
+                message_ids: vec![],
+            }),
+            47
+        );
+    }
+
+    /// A record keeps every field of the message, creation time included,
+    /// through an encode/decode round trip.
+    #[test]
+    fn queue_message_record_round_trips_every_field() {
+        let mut message = QueueMessage::new(b"payload".to_vec(), 7, 4);
+        message.retry_count = 2;
+        message.created_at = 1_700_000_123;
+        message.headers.insert("h".into(), "v".into());
+        let record = QueueMessageRecord::from(&message);
+        let bytes = bincode::serde::encode_to_vec(&record, bincode::config::legacy()).unwrap();
+        let (decoded, _): (QueueMessageRecord, _) =
+            bincode::serde::decode_from_slice(&bytes, bincode::config::legacy()).unwrap();
+        assert_eq!(decoded, record);
+        let restored = QueueMessage::from(decoded);
+        assert_eq!(restored.id, message.id);
+        assert_eq!(*restored.payload, b"payload".to_vec());
+        assert_eq!(restored.priority, 7);
+        assert_eq!(restored.retry_count, 2);
+        assert_eq!(restored.max_retries, 4);
+        assert_eq!(restored.created_at, 1_700_000_123);
+        assert_eq!(restored.headers, message.headers);
     }
 }

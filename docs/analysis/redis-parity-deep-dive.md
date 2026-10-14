@@ -1,5 +1,16 @@
 # Deep dive: what it takes to beat Redis 7 on the hot path
 
+> **Historical analysis.** Written against `0826a56` (2026-07-10), during the
+> 1.0.0 release (first released in v1.0.0). It cites the `synap-protocol` crate,
+> since dissolved: the binary wire layer is now the external Thunder crate
+> (`thunder-rpc`). The code has moved since: paths, line numbers and findings
+> describe that revision, not the current tree. Current behavior:
+> [1.4.0 guarantees](../operations/guarantees.md). Current design:
+> [persistence](../specs/PERSISTENCE.md),
+> [transports](../protocol/transports.md),
+> [KV store internals](../internals/kv-store.md) and the
+> [documentation index](../INDEX.md).
+
 **Date:** 2026-07-10 · **Status:** analysis + plan (phase12 follow-on)
 **Companion:** `docs/benchmarks/redis-vs-synap.md` (live numbers)
 

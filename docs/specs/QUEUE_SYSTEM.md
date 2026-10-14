@@ -430,19 +430,42 @@ PUBLISH → Master
     │
     ├─→ Add to queue
     │
-    └─→ Replicate
-        {
-          "op": "queue.publish",
-          "queue": "tasks",
-          "message": {...}
-        }
+    └─→ Replicate: QueuePublishFull { queue: "tasks", message: <every field> }
 ```
+
+The master replicates the same records it writes to the WAL: queue create
+(with its configuration), publish (the whole message), ACK, NACK, ACK-deadline
+requeues (as NACKs), purge (the IDs it removed) and delete. A replica applies
+them with the same code recovery uses, so it holds the same message IDs,
+priorities, retry counters and creation times as the master. Deliveries are
+not replicated: a message delivered on the master stays ready on the replica
+until the master's ACK or NACK arrives, and the replica then settles it by ID.
 
 ### Consume from Replica
 - Consumers can consume from read replicas
 - CONSUME doesn't modify queue (read-only)
 - ACK/NACK must be sent to master
 - Master propagates ACK to replicas
+
+## Durability and Recovery
+
+With persistence enabled, message identity survives restarts:
+
+- **Stable IDs.** Recovery restores every message with its original ID and
+  metadata (priority, retry counters, creation time, headers), from the WAL
+  and from snapshots.
+- **ACK semantics across restarts.** An acknowledged message is never
+  deliverable after a restart. A message delivered but not acknowledged
+  before the restart is delivered again (at-least-once); an ACK for it sent
+  after the restart returns not-found.
+- **Retry counters.** NACKs and ACK-deadline requeues are recorded, so a
+  message comes back with the retry count it had and is dead-lettered at the
+  same point it would have been without the restart.
+- **Lifecycle.** QCREATE (with its configuration), QPURGE and QDELETE are
+  recorded and survive restarts; the dead letter queue is kept in snapshots.
+
+See [PERSISTENCE.md](PERSISTENCE.md#queue-persistence) for the records and
+replay rules.
 
 ## Testing
 

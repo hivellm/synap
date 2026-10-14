@@ -52,7 +52,7 @@ pub use partition::{
 pub use pubsub::{
     Message, MessageSender, PubSubRouter, PubSubStats, PublishResult, SubscribeResult, TopicInfo,
 };
-pub use queue::{QueueConfig, QueueManager, QueueMessage, QueueStats};
+pub use queue::{QueueConfig, QueueManager, QueueMessage, QueueState, QueueStats};
 pub use set::{SetStats, SetStore, SetValue};
 pub use sorted_set::{
     Aggregate, OrderedFloat, ScoredMember, SortedSetStats, SortedSetStore, SortedSetValue,

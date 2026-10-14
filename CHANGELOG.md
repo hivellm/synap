@@ -122,6 +122,24 @@ migration notes before upgrading.
   one offset: a replica whose connection drops mid-transaction applies none of
   it and receives it whole on resync. A replica still applies the operations of
   a transaction one after another, so a reader there can observe it half-applied.
+- **Queue messages keep their identity across restarts and replicas** (review
+  finding D-05). WAL replay, snapshot restore and replicas re-published every
+  message under a fresh ID, so a replayed ACK missed it and acknowledged
+  messages came back deliverable after a restart, and master and replica IDs
+  diverged. Messages are now restored with their original ID, priority, retry
+  counters, creation time and headers; replayed ACK/NACK settle by ID whether
+  the message is ready or pending, tolerating only "not found" and failing
+  recovery on any other error. QCREATE (with its configuration), QDELETE and
+  QPURGE are persisted and replicated on every transport (a purge replays
+  exactly the messages it removed), and ACK-deadline requeues are recorded as
+  NACKs so retry counters and dead-lettering match after a restart. Snapshot
+  format v5 stores each queue whole (in-flight messages come back ready for
+  redelivery); v4, v3 and v2 still load. Replica full sync carries whole queue
+  state, so a new replica holds the master's IDs, in-flight messages, dead
+  letters and configuration. Delivery stays at-least-once: an ACK sent after a
+  restart for a message delivered before it answers not-found and the message
+  is delivered again. **Breaking (downgrade only):** 1.3.x cannot read v5
+  snapshots.
 - **Replica full sync carries every datatype, exactly.** A new or resyncing
   replica received only KV keys and stream events; it now receives hashes,
   lists, sets, sorted sets (geo), HyperLogLogs, bitmaps and queues too, with KV
@@ -203,6 +221,23 @@ migration notes before upgrading.
   command-line override applied) as JSON and YAML, with passwords, API keys,
   the Hub service key and any other secret-named field replaced by
   `[redacted]`. Refused in Hub mode.
+- **1.4.0 upgrade guide and guarantees document.**
+  `docs/users/guides/UPGRADING_TO_1_4.md` lists every breaking change with who
+  is affected and what to do, the backup step and the no-downgrade rule;
+  `docs/operations/guarantees.md` states what 1.4.0 guarantees per fsync mode,
+  per transport, in Hub mode and under limits, and what an error reply means
+  for in-memory state. Both were fact-checked claim by claim against the code.
+  Historical analyses under `docs/analysis/` carry a banner naming the
+  revision they describe.
+- **Recorded performance baseline.** `scripts/bench/perf_baseline.py` runs a
+  real `synap-server` over RESP3 and SynapRPC (KV get/set, lists, pipelined
+  writes) with persistence off and WAL fsync never/periodic/always, and
+  records throughput, p50/p95/p99 latency, server memory, build and hardware
+  as JSON plus a summary, with median and spread over repeated runs;
+  `--server-bin` measures another release the same way. The
+  `perf-baseline.yml` workflow runs it weekly and on demand on the runner
+  named by the `PERF_BENCH_RUNNER` variable (a labeled smoke run on shared
+  runners otherwise), with no latency gate.
 - **GUI tests.** `npm test` in `gui/` runs Vitest contract tests of the API
   client and a smoke test of the structure inspector against a real
   `synap-server`.
@@ -263,7 +298,7 @@ migration notes before upgrading.
   - Snapshots are written to a temporary file, fsynced, renamed and the
     directory fsynced (Unix; NTFS renames are atomic), so a crash mid-snapshot
     no longer leaves a truncated newest file. Files are named
-    `snapshot-v4-<sequence>.bin` and loaded in sequence order, so two snapshots
+    `snapshot-v<format>-<sequence>.bin` and loaded in sequence order, so two snapshots
     in the same second no longer overwrite each other; old timestamp names
     still load, as older. Every length read from a snapshot is bounded by the
     file size.
@@ -295,6 +330,32 @@ migration notes before upgrading.
   `tests/` directories, and cargo refuses to parse a manifest whose test file
   is missing, even for `cargo build --bins`. The builder stage now copies them;
   they are never compiled into the image.
+- **`synap-migrate` reads what the server writes** (review finding). It only
+  looked for `snapshot-v2-*` files, decoded integers little-endian where the
+  server writes big-endian, and wrote snapshots without the checksum the server
+  requires, so standalone-to-Hub migration was broken. It now uses the server's
+  own snapshot and WAL codecs (it depends on the `synap-server` library):
+  every snapshot format the server loads (v2 to v5, timestamp and sequenced
+  names), both WAL formats, and the WAL tail after the snapshot, rebuilt the
+  way startup recovery does. Every persisted structure is scoped for Hub mode
+  with the server's own `MultiTenant` functions, keeping absolute expiry,
+  whole queue state and stream events. A complete WAL record this release
+  cannot decode is refused instead of being dropped as a torn tail, and
+  standalone names that merely look Hub-scoped no longer block a migration
+  (`--allow-scoped-names` for input whose names all look scoped). Tests
+  migrate data directories written by real 1.3.2 and 1.4.0 servers and read
+  them back through a Hub-mode server. **Breaking (CLI):** `migrate` takes
+  `--output`, writes only to a new or empty directory outside the source after
+  verifying the whole input, and the `backup`/`rollback` commands are gone:
+  the untouched source directory is the rollback.
+- **Stream rooms come back after a restart.** Snapshots always contained the
+  stream events, but startup never read them back and started with empty
+  streams. Each room is now restored from the newest snapshot as a new
+  generation, keeping event IDs, offsets, types, data and timestamps, and the
+  next publish continues after the last offset. Live stream publishes are
+  still neither logged in the WAL nor replicated as they happen, so events
+  published after the newest snapshot are lost on restart; partitioned topics
+  and consumer groups stay memory-only.
 - **Multi-key blocking pops wake on whichever key gets data.** BLPOP, BRPOP,
   BZPOPMIN and BZPOPMAX on several keys waited for each key's notification in
   turn, so a push to a later key went unnoticed until the earlier keys were

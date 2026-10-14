@@ -32,14 +32,14 @@
 //!   plain store call — no lock, no clone, no `Operation`, no allocation.
 
 use super::layer::{Ordered, PersistenceLayer, write_not_durable_message};
-use super::types::{BitfieldWrite, Operation, PersistenceError};
+use super::types::{BitfieldWrite, Operation, PersistenceError, QueueMessageRecord};
 use crate::core::bitmap::{BitfieldOp, BitfieldResult};
 use crate::core::sorted_set::{SortedSetStore, ZAddOptions};
 use crate::core::{
     Aggregate, BitfieldOperation, BitmapOperation, BitmapStore, ExecOutcome, Expiry,
-    GeospatialStore, HashStore, HyperLogLogStore, KVStore, KeyManager, ListStore, QueueManager,
-    QueueMessage, ScoredMember, SetOptions, SetResult, SetStore, SynapError, TransactionManager,
-    coordinate_to_score,
+    GeospatialStore, HashStore, HyperLogLogStore, KVStore, KeyManager, ListStore, QueueConfig,
+    QueueManager, QueueMessage, ScoredMember, SetOptions, SetResult, SetStore, SynapError,
+    TransactionManager, coordinate_to_score,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -1438,6 +1438,126 @@ fn field_write(offset: usize, width: usize, signed: bool, value: i64) -> Bitfiel
 }
 
 // ── Queues ──────────────────────────────────────────────────────────────────
+//
+// Queue writes lock the queue name's ordering stripe like any key. Publishes
+// are recorded with the whole message (`QueuePublishFull`), so recovery and
+// replicas keep its ID and metadata. Deliveries (consume) are not recorded:
+// after a restart, or on a replica, a delivered message is ready until its
+// ACK or NACK, which are replayed by message ID.
+
+/// Queue create (QCREATE). Records the configuration the queue got; an
+/// existing queue is left unchanged and nothing is recorded.
+pub async fn queue_create(
+    log: Log<'_>,
+    qm: &QueueManager,
+    queue: &str,
+    config: Option<QueueConfig>,
+) -> Result<()> {
+    let Some(layer) = log else {
+        return qm.create_queue(queue, config).await;
+    };
+    let order = layer.order([queue]).await;
+    match qm.create_queue_if_absent(queue, config).await? {
+        Some(config) => {
+            record(
+                order,
+                Operation::QueueCreate {
+                    queue: queue.to_owned(),
+                    config,
+                },
+            )
+            .await
+        }
+        None => Ok(()),
+    }
+}
+
+/// Queue delete (QDELETE); returns whether the queue existed. Only a real
+/// deletion is recorded.
+pub async fn queue_delete(log: Log<'_>, qm: &QueueManager, queue: &str) -> Result<bool> {
+    let Some(layer) = log else {
+        return qm.delete_queue(queue).await;
+    };
+    let order = layer.order([queue]).await;
+    let deleted = qm.delete_queue(queue).await?;
+    if deleted {
+        record(
+            order,
+            Operation::QueueDelete {
+                queue: queue.to_owned(),
+            },
+        )
+        .await?;
+    }
+    Ok(deleted)
+}
+
+/// Queue purge (QPURGE); returns how many ready messages it removed. The
+/// record lists their IDs (see [`Operation::QueuePurge`]); a purge that
+/// removed nothing is not recorded.
+pub async fn queue_purge(log: Log<'_>, qm: &QueueManager, queue: &str) -> Result<usize> {
+    let Some(layer) = log else {
+        return qm.purge(queue).await;
+    };
+    let order = layer.order([queue]).await;
+    let message_ids = qm.purge_ids(queue).await?;
+    let purged = message_ids.len();
+    if purged > 0 {
+        record(
+            order,
+            Operation::QueuePurge {
+                queue: queue.to_owned(),
+                message_ids,
+            },
+        )
+        .await?;
+    }
+    Ok(purged)
+}
+
+/// NACK (with requeue) every in-flight message whose ACK deadline has
+/// passed, queue by queue under each queue's stripe, and record each one as
+/// the NACK it is, so recovery and replicas count the same retries and
+/// dead-letter the same messages. Returns how many messages were requeued
+/// or dead-lettered.
+pub async fn queue_requeue_expired(log: Log<'_>, qm: &QueueManager) -> Result<usize> {
+    let mut total = 0;
+    for queue in qm.queues_with_expired_deliveries() {
+        let order = ordered(log, [queue.as_str()]).await;
+        let message_ids = qm.requeue_expired(&queue);
+        total += message_ids.len();
+        if let Some(order) = order {
+            let operations = message_ids
+                .into_iter()
+                .map(|message_id| Operation::QueueNack {
+                    queue: queue.clone(),
+                    message_id,
+                    requeue: true,
+                })
+                .collect();
+            record_all(order, operations).await?;
+        }
+    }
+    Ok(total)
+}
+
+/// Start the queue deadline checker: once a second, [`queue_requeue_expired`]
+/// through `log`. It replaces `QueueManager::start_deadline_checker`, whose
+/// requeues are not recorded, whenever a persistence layer may exist.
+pub fn spawn_queue_deadline_checker(
+    log: Option<Arc<PersistenceLayer>>,
+    qm: Arc<QueueManager>,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(1));
+        loop {
+            interval.tick().await;
+            if let Err(e) = queue_requeue_expired(log.as_deref(), &qm).await {
+                tracing::error!("Queue ACK-deadline requeue could not be recorded: {}", e);
+            }
+        }
+    })
+}
 
 /// Queue PUBLISH; returns the published message.
 pub async fn queue_publish(
@@ -1452,9 +1572,9 @@ pub async fn queue_publish(
     let message = qm
         .publish_with_message(queue, payload, priority, max_retries)
         .await?;
-    commit(order, || Operation::QueuePublish {
+    commit(order, || Operation::QueuePublishFull {
         queue: queue.to_owned(),
-        message: message.clone(),
+        message: QueueMessageRecord::from(&message),
     })
     .await?;
     Ok(message)
@@ -1622,6 +1742,61 @@ mod tests {
         );
         assert_eq!(r.kv_store.get("n").await.unwrap(), Some(b"5".to_vec()));
         assert!(matches!(r.kv_store.ttl("n").await, Ok(Some(t)) if t > 0));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// Queue lifecycle writes record only real changes: creating an existing
+    /// queue, purging an empty one or deleting a missing one logs nothing;
+    /// a publish is logged with the whole message.
+    #[tokio::test]
+    async fn queue_lifecycle_records_only_real_changes() {
+        let dir = "./target/durable_queue_lifecycle";
+        let _ = std::fs::remove_dir_all(dir);
+        let mut config = crate::persistence::PersistenceConfig::default();
+        config.wal.fsync_mode = crate::persistence::types::FsyncMode::Always;
+        config.wal.path = std::path::PathBuf::from(format!("{dir}/wal.log"));
+        config.snapshot.enabled = false;
+        config.snapshot.directory = std::path::PathBuf::from(format!("{dir}/snap"));
+        let layer = PersistenceLayer::new(config.clone()).await.unwrap();
+        let qm = QueueManager::new(QueueConfig::default());
+        let log = Some(&layer);
+
+        queue_create(log, &qm, "q", None).await.unwrap();
+        queue_create(log, &qm, "q", None).await.unwrap(); // exists: nothing
+        assert_eq!(queue_purge(log, &qm, "q").await.unwrap(), 0); // empty: nothing
+        assert!(!queue_delete(log, &qm, "missing").await.unwrap()); // nothing
+        let message = queue_publish(log, &qm, "q", b"m".to_vec(), Some(6), None)
+            .await
+            .unwrap();
+        assert_eq!(queue_purge(log, &qm, "q").await.unwrap(), 1);
+        assert!(queue_delete(log, &qm, "q").await.unwrap());
+        layer.shutdown().await.unwrap();
+
+        let wal = crate::persistence::WriteAheadLog::open(config.wal.clone())
+            .await
+            .unwrap();
+        let operations: Vec<Operation> = wal
+            .replay(0)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.operation)
+            .collect();
+        assert_eq!(operations.len(), 4, "{operations:?}");
+        assert!(matches!(&operations[0], Operation::QueueCreate { queue, .. } if queue == "q"));
+        match &operations[1] {
+            Operation::QueuePublishFull {
+                message: record, ..
+            } => {
+                assert_eq!(record, &QueueMessageRecord::from(&message));
+            }
+            other => panic!("expected a full publish record, got {other:?}"),
+        }
+        assert!(matches!(
+            &operations[2],
+            Operation::QueuePurge { message_ids, .. } if message_ids == &vec![message.id.clone()]
+        ));
+        assert!(matches!(&operations[3], Operation::QueueDelete { queue } if queue == "q"));
         let _ = std::fs::remove_dir_all(dir);
     }
 

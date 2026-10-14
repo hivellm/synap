@@ -490,14 +490,19 @@ impl PersistenceLayer {
         .await
     }
 
-    /// Log a Queue PUBLISH operation
+    /// Log a Queue PUBLISH operation with the whole message (creation time
+    /// included), so recovery and replicas restore it with its original ID
+    /// and metadata.
     pub async fn log_queue_publish(
         &self,
         queue: String,
         message: crate::core::queue::QueueMessage,
     ) -> super::types::Result<()> {
-        self.record(Operation::QueuePublish { queue, message })
-            .await
+        self.record(Operation::QueuePublishFull {
+            queue,
+            message: super::types::QueueMessageRecord::from(&message),
+        })
+        .await
     }
 
     /// Log a Queue ACK operation

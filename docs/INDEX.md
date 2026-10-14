@@ -95,12 +95,14 @@ How the engine works inside — for contributors and the curious:
 
 Running a server in production:
 
+- **[Guarantees (1.4.0)](operations/guarantees.md)** - Durability per fsync mode, authorization per transport, Hub mode, limits, replication, and what an error reply means
 - **[Observability](operations/observability.md)** - Metrics, logs and tracing
 - **[Network Limits](operations/network-limits.md)** - Connection, frame and memory caps
 - **[Configuration](specs/CONFIGURATION.md)** - Configuration reference
 - **[Deployment](specs/DEPLOYMENT.md)** - Deployment guide
 - **[Packaging & Distribution](specs/PACKAGING_AND_DISTRIBUTION.md)** - Build installers for all platforms
 - **[Admin Guide](guides/ADMIN_GUIDE.md)** - Day-to-day administration
+- **[Upgrading to 1.4.0](users/guides/UPGRADING_TO_1_4.md)** - Backup step, no-downgrade rule and breaking changes from 1.3.x
 
 ## Development
 

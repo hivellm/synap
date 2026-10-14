@@ -281,8 +281,9 @@ replication:
 
 8. **Full sync is an exact image of every datatype** (1.4.0)
    - The image holds KV keys (with their absolute expiry), hashes, lists,
-     sets, sorted sets (geo included), HyperLogLogs, bitmaps and queues
-     (ready messages), plus stream events. Until 1.4.0 it held only KV keys
+     sets, sorted sets (geo included), HyperLogLogs, bitmaps and whole
+     queues (configuration, ready, in-flight and dead-lettered messages with
+     every field), plus stream events. Until 1.4.0 it held only KV keys
      and stream events, so a new replica never received the other datatypes
      the master already held.
    - The master copies the stores under the same write barrier snapshots
@@ -304,8 +305,12 @@ replication:
      are therefore gone. Clients reading from the replica while an image
      loads can see a partially loaded dataset. If loading fails part way, the
      replica asks for a full sync again on its next connection.
-   - Queue messages are re-published on the replica, the same way streamed
-     `QueuePublish` records are applied.
+   - Queues are restored on the replica with the primitive recovery uses
+     (`QueueManager::restore_queue`): the same message IDs, priorities, retry
+     counters, creation times and headers as the master, the same
+     configuration and dead letters. Messages in flight on the master are
+     ready on the replica (deliveries are not replicated); the master's ACK
+     or NACK, streamed afterwards, settles them by ID.
    - The master sends a full sync when the replica asks for offset 0 (it has
      nothing from this master: a new or restarted replica), for an offset
      older than the replication log, or for an offset beyond the master's

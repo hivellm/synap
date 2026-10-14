@@ -1,0 +1,332 @@
+{
+  "bitmaps": {
+    "flags": {
+      "bitcount": {
+        "count": 4,
+        "key": "flags"
+      },
+      "bits": {
+        "0": {
+          "key": "flags",
+          "offset": 0,
+          "value": 0
+        },
+        "1": {
+          "key": "flags",
+          "offset": 1,
+          "value": 1
+        },
+        "100": {
+          "key": "flags",
+          "offset": 100,
+          "value": 1
+        },
+        "200": {
+          "key": "flags",
+          "offset": 200,
+          "value": 1
+        },
+        "7": {
+          "key": "flags",
+          "offset": 7,
+          "value": 1
+        }
+      }
+    }
+  },
+  "captured_at_ms": 1791951638306,
+  "geo": {
+    "places": {
+      "coordinates": [
+        {
+          "lat": -23.550500571727753,
+          "lon": -46.63329899311066
+        },
+        {
+          "lat": 48.85660082101822,
+          "lon": 2.352200746536255
+        }
+      ],
+      "key": "places"
+    }
+  },
+  "hashes": {
+    "user:1": {
+      "count": 3,
+      "fields": {
+        "city": "London",
+        "email": "ada@example.com",
+        "name": "Ada"
+      }
+    }
+  },
+  "hyperloglogs": {
+    "visitors": {
+      "count": 6,
+      "key": "visitors"
+    }
+  },
+  "kv": {
+    "deleted": {
+      "get": null,
+      "ttl": {
+        "error": "Key not found: deleted"
+      },
+      "ttl_read_at_ms": 1791951638348
+    },
+    "plain": {
+      "get": "value-b",
+      "ttl": {
+        "ttl": null
+      },
+      "ttl_read_at_ms": 1791951638308
+    },
+    "tail-deleted": {
+      "get": null,
+      "ttl": {
+        "error": "Key not found: tail-deleted"
+      },
+      "ttl_read_at_ms": 1791951638439
+    },
+    "tail-plain": {
+      "get": "after",
+      "ttl": {
+        "ttl": null
+      },
+      "ttl_read_at_ms": 1791951638379
+    },
+    "ttl-long": {
+      "get": "lives",
+      "ttl": {
+        "ttl": 315359999
+      },
+      "ttl_read_at_ms": 1791951638333
+    },
+    "ttl-short": {
+      "get": "expires",
+      "ttl": {
+        "ttl": 59
+      },
+      "ttl_read_at_ms": 1791951638409
+    },
+    "ttl-tail": {
+      "get": "tail lives",
+      "ttl": {
+        "ttl": 315359999
+      },
+      "ttl_read_at_ms": 1791951638382
+    }
+  },
+  "lists": {
+    "events": {
+      "key": "events",
+      "values": [
+        "b",
+        "c",
+        "d"
+      ]
+    }
+  },
+  "queue_list": {
+    "queues": [
+      "late",
+      "jobs",
+      "dead"
+    ]
+  },
+  "queues": {
+    "dead": {
+      "dead_lettered": [
+        "b525798e-f2ca-4635-a2a3-5915c03a41c9"
+      ],
+      "stats": {
+        "acked": 0,
+        "consumed": 1,
+        "consumers": 0,
+        "dead_lettered": 1,
+        "depth": 0,
+        "nacked": 1,
+        "published": 1
+      }
+    },
+    "jobs": {
+      "acked": [
+        "9eed077a-a597-416e-b8ce-1574697edad9",
+        "fbb623df-6fc3-49dd-8ad2-7e716412bac8"
+      ],
+      "in_flight_at_snapshot": [
+        "fbb623df-6fc3-49dd-8ad2-7e716412bac8"
+      ],
+      "in_flight_at_stop": [
+        "22b17fc0-0162-4189-b1a7-cf5c84a77ed4"
+      ],
+      "published": {
+        "job-1": "fbb623df-6fc3-49dd-8ad2-7e716412bac8",
+        "job-2": "9eed077a-a597-416e-b8ce-1574697edad9",
+        "job-3": "b02a3002-135b-48ac-aba6-268de9478920",
+        "job-4": "994ebabd-010d-4fe3-a83b-949835c479f4",
+        "job-5": "0e7cc80d-93f0-489a-bbe4-b966bbc8b3bb",
+        "job-6": "22b17fc0-0162-4189-b1a7-cf5c84a77ed4"
+      },
+      "requeued_by_nack": [
+        "b02a3002-135b-48ac-aba6-268de9478920"
+      ],
+      "stats": {
+        "acked": 2,
+        "consumed": 4,
+        "consumers": 1,
+        "dead_lettered": 0,
+        "depth": 3,
+        "nacked": 1,
+        "published": 6
+      }
+    },
+    "late": {
+      "published": {
+        "late-1": "40e68d69-5215-4345-828b-eb8aba32666d"
+      },
+      "stats": {
+        "acked": 0,
+        "consumed": 0,
+        "consumers": 0,
+        "dead_lettered": 0,
+        "depth": 1,
+        "nacked": 0,
+        "published": 1
+      }
+    }
+  },
+  "sets": {
+    "tags": {
+      "members": [
+        "x",
+        "z",
+        "w"
+      ]
+    }
+  },
+  "sorted_sets": {
+    "places": {
+      "key": "places",
+      "members": [
+        {
+          "member": "sao-paulo",
+          "score": 1662566362995371.0
+        },
+        {
+          "member": "paris",
+          "score": 3474191899078866.0
+        }
+      ]
+    },
+    "scores": {
+      "key": "scores",
+      "members": [
+        {
+          "member": "dave",
+          "score": 1.0
+        },
+        {
+          "member": "carol",
+          "score": 5.0
+        },
+        {
+          "member": "alice",
+          "score": 10.0
+        },
+        {
+          "member": "bob",
+          "score": 20.5
+        }
+      ]
+    }
+  },
+  "source": {
+    "dataset": "see generate_fixtures.py: drive_before_snapshot, POST /snapshot, drive_after_snapshot",
+    "exit_code_after_ctrl_c": 0,
+    "health": {
+      "service": "synap",
+      "status": "healthy",
+      "version": "1.3.2",
+      "wal": "ok"
+    },
+    "label": "v1.4.0",
+    "server_binary": "synap-server.exe",
+    "snapshot": "snapshot-v5-00000000000000000001.bin"
+  },
+  "streams": {
+    "feed": {
+      "events": [
+        {
+          "data": [
+            123,
+            34,
+            110,
+            34,
+            58,
+            48,
+            125
+          ],
+          "event": "created",
+          "id": "926745d6-7e54-4f82-bcc3-d2c4e688da3d",
+          "metadata": {},
+          "offset": 0,
+          "room": "feed",
+          "timestamp": 1791951637
+        },
+        {
+          "data": [
+            123,
+            34,
+            110,
+            34,
+            58,
+            49,
+            125
+          ],
+          "event": "created",
+          "id": "a56c7951-49f8-42ed-a20b-8ebc3b40752b",
+          "metadata": {},
+          "offset": 1,
+          "room": "feed",
+          "timestamp": 1791951637
+        },
+        {
+          "data": [
+            123,
+            34,
+            110,
+            34,
+            58,
+            50,
+            125
+          ],
+          "event": "created",
+          "id": "3e6a5a67-d18b-41ac-80c3-45f4d1da8a28",
+          "metadata": {},
+          "offset": 2,
+          "room": "feed",
+          "timestamp": 1791951637
+        },
+        {
+          "data": [
+            123,
+            34,
+            110,
+            34,
+            58,
+            51,
+            125
+          ],
+          "event": "after-snapshot",
+          "id": "41e82936-b602-4b89-8793-6afb095abf97",
+          "metadata": {},
+          "offset": 3,
+          "room": "feed",
+          "timestamp": 1791951638
+        }
+      ],
+      "next_offset": 4
+    }
+  }
+}

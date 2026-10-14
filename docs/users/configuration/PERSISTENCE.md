@@ -41,8 +41,11 @@ missing member) are not logged.
 HyperLogLog and bitmap data are rebuilt from the WAL only: the snapshot format
 has no section for them yet, so after a snapshot their state before the
 snapshot is not restored. Queue publish/ack/nack are logged on every
-transport; queue create/delete/purge and streams are not part of the WAL
-(streams have their own persistence).
+transport; queue create/delete/purge and streams are not part of the WAL.
+Stream rooms come back at startup from the newest snapshot: every event with
+its ID, offset, type, data and timestamp, and new publishes continue after the
+last offset. Events published after that snapshot are lost, so each restored
+room reports a new `generation`, and stream retention then applies as usual.
 
 ## Basic Configuration
 
@@ -279,7 +282,7 @@ curl -X POST http://localhost:15500/snapshot
 ```json
 {
   "success": true,
-  "snapshot_path": "./data/snapshots/snapshot-v4-00000000000000000042.bin"
+  "snapshot_path": "./data/snapshots/snapshot-v5-00000000000000000042.bin"
 }
 ```
 
@@ -294,7 +297,7 @@ curl http://localhost:15500/snapshots
 {
   "snapshots": [
     {
-      "path": "snapshot-v4-00000000000000000042.bin",
+      "path": "snapshot-v5-00000000000000000042.bin",
       "size_bytes": 1048576,
       "created_at": "2025-01-01T12:00:00Z"
     }

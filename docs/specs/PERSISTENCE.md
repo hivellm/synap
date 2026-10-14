@@ -40,7 +40,7 @@ Capture the stores under the write barrier, record the WAL cutoff
 Fsync the WAL up to the cutoff (whatever fsync_mode is)
     │
     ▼
-Write snapshot-v4-<sequence>.bin.tmp, fsync, rename, fsync the directory
+Write snapshot-v5-<sequence>.bin.tmp, fsync, rename, fsync the directory
     │
     ▼
 Keep the last K snapshots (never the one just written)
@@ -522,9 +522,9 @@ WAL (always):      10K ops/sec  (98% reduction)
 │   └── synap.wal              # Write-ahead log
 │
 ├── snapshots/
-│   ├── snapshot-v4-00000000000000000041.bin
-│   ├── snapshot-v4-00000000000000000042.bin
-│   └── snapshot-v4-00000000000000000043.bin
+│   ├── snapshot-v5-00000000000000000041.bin
+│   ├── snapshot-v5-00000000000000000042.bin
+│   └── snapshot-v5-00000000000000000043.bin
 │
 └── metadata/
     └── recovery.json          # Recovery metadata
@@ -532,45 +532,76 @@ WAL (always):      10K ops/sec  (98% reduction)
 
 ## Queue Persistence
 
-### Queue State
+Queue writes go through `persistence::durable` on every transport (REST,
+envelope, RESP3, SynapRPC, MCP) and lock the queue name's ordering stripe like
+any key, so they are ordered against snapshots like every other write.
 
-Persisted queue state includes:
-- Messages in queue (VecDeque)
-- Pending messages (HashMap)
-- Consumer state
-- Dead letter queue
+### What is recorded
 
-```rust
-pub struct QueueSnapshot {
-    pub queued: Vec<QueueMessage>,
-    pub pending: Vec<PendingMessage>,
-    pub dead_letter: Vec<DeadLetteredMessage>,
-    pub stats: QueueStats,
-}
-```
+| Write | Record | Replay |
+|---|---|---|
+| QCREATE | `QueueCreate { queue, config }` (only when the queue is new) | create with that configuration |
+| QPUBLISH | `QueuePublishFull { queue, message }` — every field, `created_at` included | insert the message with its original ID and metadata (`restore_message`) |
+| QACK | `QueueAck { queue, message_id }` | remove the message by ID, ready or pending |
+| QNACK | `QueueNack { queue, message_id, requeue }` | by ID, ready or pending: retry counter +1, then requeue at the back, dead-letter or drop |
+| ACK deadline expiry | `QueueNack { requeue: true }` per expired delivery | as a NACK |
+| QPURGE | `QueuePurge { queue, message_ids }` (the ready messages it removed) | remove exactly those IDs |
+| QDELETE | `QueueDelete { queue }` (only when the queue existed) | delete the queue |
 
-### ACK Durability
+Deliveries (CONSUME) are not recorded. During a replay, and on a replica, a
+delivered message is therefore ready until its ACK or NACK is applied; that is
+why ACK, NACK and purge act by message ID in either state. `QueuePublish`
+records from older WALs carry no creation time; they are restored with their
+ID and every other field.
 
-```rust
-impl Queue {
-    pub async fn ack_with_persistence(
-        &mut self,
-        message_id: &MessageId,
-        wal: &mut WriteAheadLog,
-    ) -> Result<()> {
-        // 1. Write to WAL
-        wal.append(Operation::QueueAck {
-            queue: self.name.clone(),
-            message_id: message_id.clone(),
-        }).await?;
-        
-        // 2. Remove from pending
-        self.pending.remove(message_id);
-        
-        Ok(())
-    }
-}
-```
+A replayed ACK, NACK or purge whose message (or queue) is already gone is
+expected — a snapshot taken after the message was settled no longer holds it —
+and is skipped. Any other replay error fails recovery.
+
+### Queue state in snapshots
+
+Snapshot v5 stores each queue whole: its configuration and its ready,
+in-flight and dead-lettered messages with their full metadata (see
+`docs/internals/persistence-snapshot-format.md`). On restart, in-flight
+messages become ready again for redelivery (no consumer survives a restart),
+each ahead of the waiting messages of the same or lower priority, in the order
+they were delivered.
+
+### Guarantees after a restart
+
+- An acknowledged message is never deliverable again, whether recovery used
+  the WAL alone or a snapshot plus the WAL tail.
+- Every unacknowledged message keeps its ID, payload, priority, retry
+  counters, creation time and headers.
+- A message that was delivered but not acknowledged is delivered again
+  (at-least-once). An ACK sent after the restart for such a message returns
+  not-found, because the server no longer considers it delivered.
+- Queue configuration, purges and deletions survive the restart. Queues
+  created before 1.4.0 have no creation record and come back with the
+  server's default configuration.
+- The redelivery order of messages that were in flight at the restart can
+  differ between a WAL-only recovery (they stay where they were published)
+  and a snapshot recovery (they go ahead of waiting messages of the same or
+  lower priority).
+
+## Stream Persistence
+
+Stream publishes are not written to the WAL. Every snapshot holds each room's
+buffered events in its stream section, and startup restores those rooms
+(`recovery::restore_streams`, called by `main.rs` once the stream manager
+exists):
+
+- every event comes back with its ID, offset, type, data and timestamp, so a
+  consumer resumes at the offset it had, and the next publish gets the offset
+  after the last restored event;
+- events published after the newest snapshot are lost, and their offsets are
+  given to new events; each restored room is therefore a new incarnation and
+  reports a new `generation`;
+- retention applies to restored events as to any other: compaction removes
+  those older than the retention window, and only the newest
+  `max_buffer_size` events of a room are kept;
+- a room whose recorded offsets are not contiguous is skipped with a warning
+  naming it; the other rooms and every other store still come back.
 
 ## Recovery Scenarios
 
@@ -607,7 +638,12 @@ Time: 1-10 seconds
 
 The scanner lives in `persistence/wal_frame.rs` and is shared by the async WAL
 and the recovery WAL. A corrupt length that hides the next frame boundary is
-handled by searching the rest of the file byte by byte for a valid frame.
+handled by searching the rest of the file byte by byte for a valid frame. The
+scan also reports what the first invalid frame is (`TailKind`): cut short,
+failing its checksum, blank (zero fill reads as empty frames whose checksum
+matches), or a complete record whose checksum matches but which this release
+cannot decode, such as a record type a newer release added. A crash leaves
+only the first three; `synap-migrate` refuses the last instead of dropping it.
 
 ### Transaction Records
 
@@ -658,7 +694,7 @@ disabled no stripe is taken.
 Expiry is stored as an absolute Unix-millisecond deadline everywhere it is
 persisted:
 
-- Snapshot v4 stores each KV key's deadline (`0` = persistent) and the
+- Snapshots (v4 and later) store each KV key's deadline (`0` = persistent) and the
   HyperLogLog and bitmap values, which carry `created_at + ttl_secs`.
 - WAL records that set or change expiry carry the deadline the store stored:
   `KVSetAt { key, value, expires_at_ms }` (SET EX/PX/EXAT/PXAT/KEEPTTL, and
@@ -702,8 +738,9 @@ it returns once every earlier entry reached the OS (and the disk unless
 
 ### Snapshot Files and Crash Safety
 
-A snapshot is written to `snapshot-v4-<20-digit sequence>.bin.tmp` in the
-snapshot directory, fsynced, renamed to `snapshot-v4-<sequence>.bin`, and the
+A snapshot is written to `snapshot-v5-<20-digit sequence>.bin.tmp` in the
+snapshot directory (named after its format version), fsynced, renamed to
+`snapshot-v5-<sequence>.bin`, and the
 directory is fsynced (Unix). On Windows the directory cannot be fsynced; NTFS
 renames are atomic and journaled in order, so after a crash the new name
 either exists with the complete, already-flushed file or does not exist,
@@ -839,8 +876,8 @@ systemctl restart synap
 
 ### Snapshot Binary Format
 
-Streamed sections ending in a CRC64 digest; the current layout is v4 (magic
-`SYNAP004`), described byte by byte in
+Streamed sections ending in a CRC64 digest; the current layout is v5 (magic
+`SYNAP005`), described byte by byte in
 [`docs/internals/persistence-snapshot-format.md`](../internals/persistence-snapshot-format.md):
 
 ```
@@ -855,7 +892,7 @@ CRC64
 ```rust
 pub enum PersistenceError {
     WALCorrupted { offset: u64, reason: String },
-    SnapshotCorrupted { path: PathBuf },
+    SnapshotCorrupted { path: PathBuf, reason: String },
     ChecksumMismatch { expected: u64, actual: u64 },
     IOError(std::io::Error),
     SerializationError(bincode::Error),
