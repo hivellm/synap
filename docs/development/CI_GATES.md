@@ -38,7 +38,7 @@ Workflows run on pushes and pull requests to `main` and `develop`.
 | `sdk-gui-contract.yml` sdk-csharp | `dotnet test` with coverage, coverage gate |
 | `sdk-gui-contract.yml` sdk-php | the `sdks/php` submodule's PHPUnit suite against the server (the suite mixes unit and server-to-server tests, and that repository has no CI of its own) |
 | `sdk-gui-contract.yml` gui | `npm run type-check`, `npm run lint`, `npm run build`, `npm test` (API client contract tests and inspector smoke tests against the server) |
-| `sdk-gui-contract.yml` contract | TypeScript E2E suite over HTTP, SynapRPC and RESP3; TypeScript and Python server-to-server suites; `scripts/interop/run-matrix.py --strict` over every cell (Rust, TypeScript, Python, C#, Go, PHP, pre-Thunder replay) |
+| `sdk-gui-contract.yml` contract | TypeScript E2E suite over HTTP, SynapRPC and RESP3; TypeScript, Python and C# server-to-server suites; `scripts/interop/run-matrix.py --strict` over every cell (Rust, TypeScript, Python, C#, Go, PHP, pre-Thunder replay) |
 | `sdk-gui-contract.yml` gate-scripts | tests of the coverage gate, the CI wiring checks, the release-workflow checks, the tests of the performance baseline script (`scripts/bench/test_perf_baseline.py`) |
 
 The Go SDK lives in its own repository (`sdks/go` submodule). Its suite runs

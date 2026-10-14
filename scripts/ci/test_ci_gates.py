@@ -124,7 +124,10 @@ check("gui lint does not --fix", "--fix" not in json.loads((REPO / "gui" / "pack
 contract = runs("contract")
 check("contract runs the TypeScript E2E suite", "src/__tests__/e2e.test.ts" in contract)
 check("contract runs the interop matrix strictly", "run-matrix.py --strict" in contract)
-check("contract runs the S2S suites", "npm run test:s2s" in contract and "pytest" in contract)
+check(
+    "contract runs the S2S suites",
+    "npm run test:s2s" in contract and "pytest" in contract and "dotnet test" in contract,
+)
 check("sdk-php checks out the submodule", jobs.get("sdk-php", {}).get("steps", [{}])[0].get("with", {}).get("submodules") is True)
 check("sdk-php runs phpunit", "phpunit" in runs("sdk-php"))
 e2e = (REPO / "sdks" / "typescript" / "src" / "__tests__" / "e2e.test.ts").read_text(encoding="utf-8")
