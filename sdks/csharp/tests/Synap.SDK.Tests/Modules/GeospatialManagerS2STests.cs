@@ -7,7 +7,7 @@ namespace Synap.SDK.Tests.Modules;
 
 /// <summary>
 /// S2S integration tests for GeospatialManager.
-/// These tests require a running Synap server.
+/// These tests require a running Synap server and run only when SYNAP_S2S=true.
 /// </summary>
 public class GeospatialManagerS2STests
 {
@@ -19,7 +19,7 @@ public class GeospatialManagerS2STests
         _client = new SynapClient(new SynapConfig(url));
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task GeoAdd_Works()
     {
         var key = $"test:geospatial:{Process.GetCurrentProcess().Id}";
@@ -33,7 +33,7 @@ public class GeospatialManagerS2STests
         Assert.True(added >= 0);
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task GeoDist_Works()
     {
         var key = $"test:geospatial:dist:{Process.GetCurrentProcess().Id}";
@@ -54,7 +54,7 @@ public class GeospatialManagerS2STests
         Assert.True(distance > 0);
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task GeoRadius_Works()
     {
         var key = $"test:geospatial:radius:{Process.GetCurrentProcess().Id}";
@@ -76,7 +76,7 @@ public class GeospatialManagerS2STests
         Assert.NotEmpty(results);
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task GeoPos_Works()
     {
         var key = $"test:geospatial:geopos:{Process.GetCurrentProcess().Id}";
@@ -91,7 +91,7 @@ public class GeospatialManagerS2STests
         Assert.InRange(coords[0]!.Lat, 37.7, 37.8);
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task GeoHash_Works()
     {
         var key = $"test:geospatial:geohash:{Process.GetCurrentProcess().Id}";
@@ -106,7 +106,7 @@ public class GeospatialManagerS2STests
         Assert.Equal(11, geohashes[0]!.Length);
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task GeoSearch_FromMemberByRadius_Works()
     {
         var key = $"test:geospatial:geosearch:{Process.GetCurrentProcess().Id}";
@@ -128,7 +128,7 @@ public class GeospatialManagerS2STests
         Assert.Contains(results, r => r.Member == "San Francisco");
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task GeoSearch_FromLonLatByRadius_Works()
     {
         var key = $"test:geospatial:geosearch:lonlat:{Process.GetCurrentProcess().Id}";
@@ -149,7 +149,7 @@ public class GeospatialManagerS2STests
         Assert.NotEmpty(results);
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task GeoSearch_ByBox_Works()
     {
         var key = $"test:geospatial:geosearch:box:{Process.GetCurrentProcess().Id}";
@@ -169,7 +169,7 @@ public class GeospatialManagerS2STests
         Assert.NotEmpty(results);
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task Stats_Works()
     {
         var stats = await _client.Geospatial.StatsAsync();

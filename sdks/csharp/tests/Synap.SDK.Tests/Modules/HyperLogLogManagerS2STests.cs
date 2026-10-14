@@ -7,7 +7,7 @@ namespace Synap.SDK.Tests.Modules;
 
 /// <summary>
 /// Server-to-Server (S2S) integration tests for HyperLogLogManager.
-/// These tests require a running Synap server.
+/// These tests require a running Synap server and run only when SYNAP_S2S=true.
 /// Set SYNAP_URL environment variable to point to the server (default: http://localhost:15500).
 /// </summary>
 public sealed class HyperLogLogManagerS2STests : IDisposable
@@ -21,7 +21,7 @@ public sealed class HyperLogLogManagerS2STests : IDisposable
         _client = new SynapClient(config);
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task PfAdd_PfCount_Works()
     {
         var key = $"test:hll:{Process.GetCurrentProcess().Id}";
@@ -34,7 +34,7 @@ public sealed class HyperLogLogManagerS2STests : IDisposable
         Assert.True(count >= 2 && count <= 4);
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task PfMerge_Works()
     {
         var timestamp = Process.GetCurrentProcess().Id;
@@ -50,7 +50,7 @@ public sealed class HyperLogLogManagerS2STests : IDisposable
         Assert.True(count >= 5 && count <= 7);
     }
 
-    [Fact(Skip = "S2S test - requires running Synap server")]
+    [S2SFact]
     public async Task Stats_ReturnsValidData()
     {
         var key = $"test:hll:stats:{Process.GetCurrentProcess().Id}";

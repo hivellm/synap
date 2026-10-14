@@ -40,7 +40,7 @@ public sealed class RpcParityS2STests : IDisposable
 
     // ── Queue tests ──────────────────────────────────────────────────────────
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Queue_RoundTrip_Http()
     {
         if (!S2SEnabled) return;
@@ -48,7 +48,7 @@ public sealed class RpcParityS2STests : IDisposable
         await QueueRoundTrip(client);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Queue_RoundTrip_Rpc()
     {
         if (!S2SEnabled) return;
@@ -56,7 +56,7 @@ public sealed class RpcParityS2STests : IDisposable
         await QueueRoundTrip(client);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Queue_RoundTrip_Resp3()
     {
         if (!S2SEnabled) return;
@@ -79,7 +79,7 @@ public sealed class RpcParityS2STests : IDisposable
         await client.Queue.AckAsync(name, msg.Id);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Queue_EmptyReturnsNull_Http()
     {
         if (!S2SEnabled) return;
@@ -90,7 +90,7 @@ public sealed class RpcParityS2STests : IDisposable
         Assert.Null(msg);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Queue_List_Http()
     {
         if (!S2SEnabled) return;
@@ -103,7 +103,7 @@ public sealed class RpcParityS2STests : IDisposable
 
     // ── Stream tests ─────────────────────────────────────────────────────────
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Stream_RoundTrip_Http()
     {
         if (!S2SEnabled) return;
@@ -111,7 +111,7 @@ public sealed class RpcParityS2STests : IDisposable
         await StreamRoundTrip(client);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Stream_RoundTrip_Rpc()
     {
         if (!S2SEnabled) return;
@@ -119,7 +119,7 @@ public sealed class RpcParityS2STests : IDisposable
         await StreamRoundTrip(client);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Stream_RoundTrip_Resp3()
     {
         if (!S2SEnabled) return;
@@ -142,7 +142,7 @@ public sealed class RpcParityS2STests : IDisposable
         Assert.Equal("user.updated", events[1].Event);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Stream_ListRooms_Http()
     {
         if (!S2SEnabled) return;
@@ -155,7 +155,7 @@ public sealed class RpcParityS2STests : IDisposable
 
     // ── Pub/Sub tests ────────────────────────────────────────────────────────
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task PubSub_Publish_Http()
     {
         if (!S2SEnabled) return;
@@ -164,7 +164,7 @@ public sealed class RpcParityS2STests : IDisposable
         Assert.True(count >= 0);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task PubSub_Publish_Rpc()
     {
         if (!S2SEnabled) return;
@@ -173,7 +173,7 @@ public sealed class RpcParityS2STests : IDisposable
         Assert.True(count >= 0);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task PubSub_Publish_Resp3()
     {
         if (!S2SEnabled) return;
@@ -184,7 +184,7 @@ public sealed class RpcParityS2STests : IDisposable
 
     // ── Transaction tests ────────────────────────────────────────────────────
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Transaction_MultiExec_Http()
     {
         if (!S2SEnabled) return;
@@ -192,7 +192,7 @@ public sealed class RpcParityS2STests : IDisposable
         await TransactionRoundTrip(client);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Transaction_MultiExec_Rpc()
     {
         if (!S2SEnabled) return;
@@ -219,7 +219,7 @@ public sealed class RpcParityS2STests : IDisposable
 
     // ── Script tests ─────────────────────────────────────────────────────────
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Script_Eval_Http()
     {
         if (!S2SEnabled) return;
@@ -227,7 +227,7 @@ public sealed class RpcParityS2STests : IDisposable
         await ScriptEval(client);
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Script_Eval_Rpc()
     {
         if (!S2SEnabled) return;
@@ -249,7 +249,7 @@ public sealed class RpcParityS2STests : IDisposable
 
     // ── UnsupportedCommandException regression ──────────────────────────────
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Rpc_Raises_UnsupportedCommandException_ForBitmap()
     {
         if (!S2SEnabled) return;
@@ -259,7 +259,7 @@ public sealed class RpcParityS2STests : IDisposable
                 new Dictionary<string, object?> { ["key"] = "bm", ["offset"] = 7L, ["value"] = 1L }));
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Resp3_Raises_UnsupportedCommandException_ForBitmap()
     {
         if (!S2SEnabled) return;
@@ -269,7 +269,7 @@ public sealed class RpcParityS2STests : IDisposable
                 new Dictionary<string, object?> { ["key"] = "bm", ["offset"] = 7L, ["value"] = 1L }));
     }
 
-    [Fact(Skip = "S2S — set SYNAP_S2S=true to run")]
+    [S2SFact]
     public async Task Http_DoesNotRaise_UnsupportedCommandException_ForBitmap()
     {
         if (!S2SEnabled) return;
