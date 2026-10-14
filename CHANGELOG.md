@@ -15,6 +15,13 @@ migration notes before upgrading.
 
 ### Security
 
+- **rustls 0.23.46** (RUSTSEC-2026-0346, -0347, -0348, -0349). The TLS stack
+  used by the HTTP clients (Hub client, UMICP, SDK) is updated from 0.23.45:
+  session values no longer print TLS secrets in `Debug` output, buffered data
+  is no longer sent to the outer server after an ECH rejection, Brotli
+  certificate decompression is bounded before authentication, and an
+  unauthenticated ServerHello can no longer downgrade later connections to
+  classical key exchange.
 - **An API key can no longer carry more than its issuer holds** (review
   finding S-01). `POST /auth/keys` stored whatever permissions the caller
   asked for, so a read-only user could mint a `*`/`all` key and use it to write
