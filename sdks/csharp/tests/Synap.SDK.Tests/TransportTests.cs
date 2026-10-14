@@ -363,6 +363,22 @@ public sealed class TransportTests
     }
 
     [Fact]
+    public void MapCommand_TransactionWatch_SendsTheKeysOfAnyCollection()
+    {
+        // WatchAsync hands over the caller's IReadOnlyCollection<string>.
+        var fromList = CommandMapper.MapCommand(
+            "transaction.watch",
+            new Dictionary<string, object?> { ["client_id"] = "c1", ["keys"] = new List<string> { "a", "b" } });
+        Assert.Equal("WATCH", fromList!.Value.Command);
+        Assert.Equal(new object?[] { "c1", "a", "b" }, fromList.Value.Args);
+
+        var fromArray = CommandMapper.MapCommand(
+            "transaction.watch",
+            new Dictionary<string, object?> { ["client_id"] = "c1", ["keys"] = new object?[] { "a" } });
+        Assert.Equal(new object?[] { "c1", "a" }, fromArray!.Value.Args);
+    }
+
+    [Fact]
     public void MapCommand_StreamPublish_MapsToSPUBLISH()
     {
         // stream.publish is now mapped to SPUBLISH.
@@ -437,6 +453,27 @@ public sealed class TransportTests
         Assert.Equal(1L, CommandMapper.MapResponse("bitmap.setbit", 1L)["old_value"]);
         Assert.Equal(1L, CommandMapper.MapResponse("bitmap.getbit", 1L)["value"]);
         Assert.Equal(3L, CommandMapper.MapResponse("bitmap.bitcount", 3L)["count"]);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Null")]
+    public void MapResponse_TransactionExecNull_IsAnAbort(object? raw)
+    {
+        // A watched key changed: EXEC replies null, which must read as the
+        // HTTP {aborted} payload rather than a success with no results.
+        var result = CommandMapper.MapResponse("transaction.exec", raw);
+        Assert.Equal(true, result["aborted"]);
+        Assert.Equal(false, result["success"]);
+        Assert.False(result.ContainsKey("results"));
+    }
+
+    [Fact]
+    public void MapResponse_TransactionExecArray_CarriesTheResults()
+    {
+        var result = CommandMapper.MapResponse("transaction.exec", new object?[] { "{\"ok\":true}" });
+        Assert.Equal(true, result["success"]);
+        Assert.Single(Assert.IsType<List<object?>>(result["results"]));
     }
 
     // =========================================================================

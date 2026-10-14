@@ -334,7 +334,11 @@ internal static class CommandMapper
             // ---- Transaction responses ----
             "transaction.multi" or "transaction.discard" or "transaction.watch" or "transaction.unwatch"
                 => new Dictionary<string, object?> { ["success"] = IsOk(raw) },
-            "transaction.exec" => new Dictionary<string, object?> { ["success"] = true, ["results"] = RawToList(raw) },
+            // EXEC replies null when a watched key changed: the HTTP payload's
+            // {aborted} shape, not an empty success.
+            "transaction.exec" => raw is null or "Null"
+                ? new Dictionary<string, object?> { ["success"] = false, ["aborted"] = true }
+                : new Dictionary<string, object?> { ["success"] = true, ["results"] = RawToList(raw) },
 
             // ---- Scripting responses ----
             "script.eval" or "script.evalsha" => new Dictionary<string, object?> { ["result"] = raw },
@@ -662,8 +666,11 @@ internal static class CommandMapper
             return null;
         }
 
-        var keys = payload.TryGetValue("keys", out var k) && k is object?[] arr
-            ? arr
+        // TransactionManager.WatchAsync passes the caller's collection (a
+        // List<string>, say), not an object?[]: take any sequence but a string.
+        var keys = payload.TryGetValue("keys", out var k)
+            && k is System.Collections.IEnumerable seq and not string
+            ? seq.Cast<object?>()
             : Array.Empty<object?>();
         return ("WATCH", new object?[] { clientId }.Concat(keys).ToArray());
     }
