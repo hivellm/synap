@@ -574,6 +574,7 @@ Use queues for reliable inter-service messaging with delivery guarantees.
 - **[User Guide](docs/guides/USER_GUIDE.md)** - Complete getting started guide (Installation, Quick Start, Operations)
 - **[Admin Guide](docs/guides/ADMIN_GUIDE.md)** - Operations handbook (Deployment, Monitoring, HA, Security)
 - **[Tutorials](docs/guides/TUTORIALS.md)** - 8 practical tutorials (Chat, Queues, Caching, Pub/Sub)
+- **[Upgrading to 1.4.0](docs/users/guides/UPGRADING_TO_1_4.md)** - Backup step, no-downgrade rule and breaking changes from 1.3.x
 
 ### 🔧 Core Documentation
 - **[Architecture](docs/ARCHITECTURE.md)** - System architecture and components
