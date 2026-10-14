@@ -74,7 +74,9 @@ public sealed class RpcParityS2STests : IDisposable
 
         var msg = await client.Queue.ConsumeAsync(name, "worker-1");
         Assert.NotNull(msg);
+        Assert.Equal(msgId, msg.Id);
         Assert.Equal(5, msg.Priority);
+        Assert.Equal("hello", msg.Payload?.GetProperty("data").GetString());
 
         await client.Queue.AckAsync(name, msg.Id);
     }

@@ -408,6 +408,25 @@ public sealed class TransportTests
     }
 
     [Fact]
+    public void MapCommand_QueuePublish_SendsThePayloadBytes()
+    {
+        // QueueManager hands over the byte list of the HTTP command.
+        var fromModule = CommandMapper.MapCommand("queue.publish", new Dictionary<string, object?>
+        {
+            ["queue"] = "q",
+            ["payload"] = new[] { 104, 105 },
+            ["priority"] = 5L,
+            ["max_retries"] = 3L,
+        });
+        Assert.Equal(new object?[] { "q", new byte[] { 104, 105 }, 5L, 3L }, fromModule!.Value.Args);
+
+        // A raw caller's string travels as its UTF-8 text, not JSON-quoted.
+        var fromString = CommandMapper.MapCommand(
+            "queue.publish", new Dictionary<string, object?> { ["queue"] = "q", ["payload"] = "hi" });
+        Assert.Equal(new byte[] { 104, 105 }, fromString!.Value.Args[1]);
+    }
+
+    [Fact]
     public void MapCommand_StreamPublish_MapsToSPUBLISH()
     {
         // stream.publish is now mapped to SPUBLISH.
@@ -495,6 +514,48 @@ public sealed class TransportTests
         Assert.Equal(true, result["aborted"]);
         Assert.Equal(false, result["success"]);
         Assert.False(result.ContainsKey("results"));
+    }
+
+    [Fact]
+    public void MapResponse_QueueConsume_GivesTheHttpShapeForEveryNativeReply()
+    {
+        // SynapRPC: a map, its UTF-8 payload bytes decoded to a string.
+        var rpc = CommandMapper.MapResponse("queue.consume", new Dictionary<string, object?>
+        {
+            ["id"] = "m-1",
+            ["payload"] = "hi",
+            ["priority"] = 7L,
+            ["retry_count"] = 1L,
+        });
+        var rpcMessage = Assert.IsType<Dictionary<string, object?>>(rpc["message"]);
+        Assert.Equal("m-1", rpcMessage["id"]);
+        Assert.Equal(new[] { 104, 105 }, rpcMessage["payload"]);
+        Assert.Equal(7L, rpcMessage["priority"]);
+
+        // SynapRPC bytes that are not UTF-8 stay byte[].
+        var binary = CommandMapper.MapResponse("queue.consume", new Dictionary<string, object?>
+        {
+            ["id"] = "m-2",
+            ["payload"] = new byte[] { 0xDE, 0xAD },
+        });
+        Assert.Equal(new[] { 0xDE, 0xAD },
+            Assert.IsType<Dictionary<string, object?>>(binary["message"])["payload"]);
+
+        // RESP3: an [id, payload, priority, retry_count] array.
+        var resp3 = CommandMapper.MapResponse("queue.consume", new object?[] { "m-3", "hi", 5L, 0L });
+        var resp3Message = Assert.IsType<Dictionary<string, object?>>(resp3["message"]);
+        Assert.Equal("m-3", resp3Message["id"]);
+        Assert.Equal(new[] { 104, 105 }, resp3Message["payload"]);
+        Assert.Equal(5L, resp3Message["priority"]);
+        Assert.Equal(0L, resp3Message["retry_count"]);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Null")]
+    public void MapResponse_QueueConsumeOnAnEmptyQueue_HasNoMessage(object? raw)
+    {
+        Assert.Null(CommandMapper.MapResponse("queue.consume", raw)["message"]);
     }
 
     [Fact]

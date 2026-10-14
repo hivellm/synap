@@ -309,9 +309,7 @@ internal static class CommandMapper
             "queue.create" => new Dictionary<string, object?> { ["success"] = IsOk(raw) },
             "queue.delete" or "queue.purge" => new Dictionary<string, object?> { ["success"] = raw is true or 1L },
             "queue.publish" => new Dictionary<string, object?> { ["message_id"] = raw?.ToString() ?? string.Empty },
-            "queue.consume" => raw is null or "Null"
-                ? new Dictionary<string, object?>()
-                : new Dictionary<string, object?> { ["message"] = raw },
+            "queue.consume" => QueueConsumeResponse(raw),
             "queue.ack" or "queue.nack" => new Dictionary<string, object?> { ["success"] = true },
             "queue.stats" => raw is Dictionary<string, object?> qsd ? qsd : new Dictionary<string, object?> { ["result"] = raw },
             "queue.list" => new Dictionary<string, object?> { ["queues"] = RawToList(raw) },
@@ -604,7 +602,64 @@ internal static class CommandMapper
         var payloadVal = payload.TryGetValue("payload", out var p) ? p : null;
         var priority   = payload.TryGetValue("priority", out var pr) ? pr : (object?)0L;
         var maxRetries = payload.TryGetValue("max_retries", out var mr) ? mr : (object?)3L;
-        return ("QPUBLISH", [queue, System.Text.Json.JsonSerializer.Serialize(payloadVal), priority, maxRetries]);
+        return ("QPUBLISH", [queue, QueuePayloadBytes(payloadVal), priority, maxRetries]);
+    }
+
+    /// <summary>
+    /// The bytes of a queue payload. QueueManager hands over the byte list the
+    /// HTTP command carries (an <c>int[]</c>); a raw caller may pass bytes, a
+    /// string (sent as UTF-8) or any other value (sent as its JSON).
+    /// </summary>
+    private static byte[] QueuePayloadBytes(object? payload) => payload switch
+    {
+        byte[] bytes => bytes,
+        int[] byteList => Array.ConvertAll(byteList, b => checked((byte)b)),
+        string text => Encoding.UTF8.GetBytes(text),
+        _ => System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(payload),
+    };
+
+    /// <summary>
+    /// Native QCONSUME replies the message flat (a map on SynapRPC, an
+    /// [id, payload, priority, retry_count] array on RESP3) or null when the
+    /// queue is empty. QueueManager reads the HTTP shape: {"message": {...}}
+    /// with the payload as a byte list.
+    /// </summary>
+    private static Dictionary<string, object?> QueueConsumeResponse(object? raw)
+    {
+        Dictionary<string, object?>? message = null;
+        if (raw is Dictionary<string, object?> map)
+        {
+            message = new Dictionary<string, object?>(map, StringComparer.Ordinal);
+        }
+        else if (AsRawArray(raw) is { Length: >= 4 } fields)
+        {
+            message = new Dictionary<string, object?>
+            {
+                ["id"] = fields[0],
+                ["payload"] = fields[1],
+                ["priority"] = fields[2],
+                ["retry_count"] = fields[3],
+            };
+        }
+
+        if (message is null)
+        {
+            return new Dictionary<string, object?> { ["message"] = null };
+        }
+
+        // SynapRPC bytes arrive as a string when they are UTF-8 (byte[]
+        // otherwise); the RESP3 reader yields text.
+        if (message.TryGetValue("payload", out var body))
+        {
+            message["payload"] = body switch
+            {
+                byte[] bytes => Array.ConvertAll(bytes, b => (int)b),
+                string text => Array.ConvertAll(Encoding.UTF8.GetBytes(text), b => (int)b),
+                _ => body,
+            };
+        }
+
+        return new Dictionary<string, object?> { ["message"] = message };
     }
 
     // ---- Stream helpers ----
