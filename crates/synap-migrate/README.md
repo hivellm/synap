@@ -129,10 +129,12 @@ What any restart changes, the migration changes the same way: keys whose
 deadline has passed are left out, and messages delivered but never
 acknowledged are ready again (with their ID and retry count).
 
-Streams are not in the WAL: they are durable only through snapshots, and the
-server does not restore a snapshot's stream section at startup (in this or
-earlier releases). The migration carries the stream section into the output
-snapshot unchanged except for the room names.
+Streams are not in the WAL: they are durable only through snapshots. The
+migration carries the stream section into the output snapshot unchanged
+except for the room names, and the Hub-mode server restores those rooms at
+startup, so the tenant reads every event with its ID and offset (stream
+retention, one hour by default, still applies to the events' timestamps).
+Releases before 1.4.0 did not restore a snapshot's stream rooms at startup.
 
 ## Formats read
 
@@ -196,12 +198,15 @@ structure, and the rejection of corrupt, unsupported and misplaced input.
 1.3.2 server and by this release's server (`tests/fixtures/`, see its README
 and `generate_fixtures.py`), then recovers the output in Hub mode in-process:
 a Hub-enabled `ServerConfig` recovered by `persistence::recover_all` as
-`synap-server` starts, served by the production router with a `HubClient`.
+`synap-server` starts, its stream rooms restored by
+`persistence::restore_streams`, served by the production router with a
+`HubClient`.
 The binary itself cannot serve those reads, because Hub request
 authentication refuses every request until the HiveHub SDK can validate
 access keys (hivellm/synap#230); the test's `HubClient` maps one access key to
-the tenant instead. The tenant then reads every resource and the test
-compares it with what the source server served before it stopped.
+the tenant instead. The tenant then reads every resource, stream events
+included, and the test compares it with what the source server served before
+it stopped.
 
 ## Troubleshooting
 

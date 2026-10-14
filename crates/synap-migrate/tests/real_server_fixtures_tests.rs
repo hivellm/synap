@@ -13,8 +13,10 @@
 //! 3. boots Hub mode on the output in-process, the way `synap-server` starts
 //!    with `hub.enabled: true`: a `ServerConfig` with Hub on and persistence
 //!    pointed at the output is recovered by `persistence::recover_all` with
-//!    that configuration (the call `main.rs` makes), and the recovered stores
-//!    are served by the production router (`create_router`) with a
+//!    that configuration (the call `main.rs` makes), the snapshot's stream
+//!    rooms are restored into a stream manager by
+//!    `persistence::restore_streams` (as `main.rs` does), and the recovered
+//!    stores are served by the production router (`create_router`) with a
 //!    `HubClient` in the state. The `synap-server` binary itself cannot serve
 //!    the reads: in Hub mode it refuses every request, because the HiveHub
 //!    SDK cannot validate access keys (hivellm/synap#230). So the `HubClient`
@@ -31,9 +33,10 @@
 //!    standalone mode: every key with its value and absolute expiry, every
 //!    collection, HyperLogLog and bitmap, and every queue with its
 //!    configuration and its messages' IDs and metadata;
-//! 6. checks the migrated snapshot's stream section against the events the
-//!    source served (the server does not restore streams at startup, so they
-//!    cannot be read back through it).
+//! 6. reads the stream `feed` as the tenant and compares every event with
+//!    what the source served: ID, offset, type, data and timestamp. Streams
+//!    are not in the WAL, so the event published after the source's last
+//!    snapshot is gone, as it is from the source server after any restart.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
@@ -51,9 +54,11 @@ use synap_server::hub::{AccessKeyValidator, HubClient, HubConfig, MultiTenant, P
 use synap_server::monitoring::{ClientListManager, MonitoringManager};
 use synap_server::persistence::types::{PersistenceConfig, SnapshotConfig, WALConfig};
 use synap_server::persistence::{
-    QueueMessageRecord, RecoveredStores, SnapshotImage, SnapshotManager, StoreRefs, recover_all,
+    QueueMessageRecord, RecoveredStores, SnapshotImage, StoreRefs, recover_all, restore_streams,
 };
-use synap_server::{AppState, ScriptManager, ServerConfig, create_router};
+use synap_server::{
+    AppState, ScriptManager, ServerConfig, StreamConfig, StreamManager, create_router,
+};
 use uuid::Uuid;
 
 const TENANT_KEY: &str = "hub-key-migrated-tenant";
@@ -259,8 +264,19 @@ impl HubServer {
             queue_manager,
             hyperloglog_store,
             bitmap_store,
+            streams,
             ..
         } = recover(&config).await;
+        // The stream manager `main.rs` builds, seeded by the same call. Its
+        // retention is long enough to keep the fixture's events, published
+        // when the fixture was generated: the default hour would compact them
+        // away, as on any server restarted more than an hour after them.
+        let stream_manager = Arc::new(StreamManager::new(StreamConfig {
+            retention_secs: 100 * 365 * 24 * 3600,
+            ..StreamConfig::default()
+        }));
+        restore_streams(&stream_manager, streams).await;
+        stream_manager.clone().start_compaction_task();
         let kv_store = Arc::new(kv_store);
         let hash_store = Arc::new(hash_store.unwrap());
         let list_store = Arc::new(list_store.unwrap());
@@ -291,7 +307,7 @@ impl HubServer {
             hyperloglog_store: Arc::new(hyperloglog_store),
             bitmap_store: Arc::new(bitmap_store),
             queue_manager: queue_manager.map(Arc::new),
-            stream_manager: None,
+            stream_manager: Some(stream_manager),
             partition_manager: None,
             consumer_group_manager: None,
             pubsub_router: None,
@@ -584,10 +600,6 @@ async fn migrates_into_hub_mode(release: Release) {
         vec![migrated.clone()]
     );
 
-    // 6. The stream section carries the events the source snapshot held, with
-    //    their IDs, offsets and timestamps, under the tenant's name.
-    check_streams(&output.join(&migrated), &baseline).await;
-
     // 3. Boot Hub mode on the output.
     let hub = HubServer::boot(&output).await;
 
@@ -607,6 +619,9 @@ async fn migrates_into_hub_mode(release: Release) {
     check_collections(&hub, &found, &baseline, release).await;
     check_queues(&hub, &found, &baseline, release).await;
 
+    // 6. The tenant reads the stream events the source snapshot held.
+    check_streams(&hub, &baseline).await;
+
     // Another tenant sees none of it.
     let other = hub
         .envelope(OTHER_KEY, "kv.get", json!({"key": "plain"}))
@@ -614,32 +629,33 @@ async fn migrates_into_hub_mode(release: Release) {
     assert_eq!(other["payload"], Value::Null, "{other}");
     let other_queues = hub.get(OTHER_KEY, "/queue/list").await;
     assert_eq!(other_queues["queues"], json!([]), "{other_queues}");
+    let other_rooms = hub.get(OTHER_KEY, "/stream/list").await;
+    assert_eq!(other_rooms["rooms"], json!([]), "{other_rooms}");
 }
 
-async fn check_streams(snapshot_path: &Path, baseline: &Value) {
-    let manager = SnapshotManager::new(SnapshotConfig {
-        directory: snapshot_path.parent().unwrap().to_path_buf(),
-        ..SnapshotConfig::default()
-    });
-    let snapshot = manager.load(snapshot_path).await.unwrap();
-    assert_eq!(snapshot.version, 5);
-    assert_eq!(snapshot.stream_data.len(), 1);
-    let room = &snapshot.stream_data[&MultiTenant::scope_stream_name(Some(&tenant()), "feed")];
+async fn check_streams(hub: &HubServer, baseline: &Value) {
+    let rooms = hub.get(TENANT_KEY, "/stream/list").await;
+    assert_eq!(rooms["rooms"], json!(["feed"]), "{rooms}");
     // The event published after the snapshot was never persisted.
     let served = without(&baseline["streams"]["feed"]["events"], |e| {
         e["event"] == "after-snapshot"
     });
     let served = served.as_array().unwrap();
-    assert_eq!(room.len(), served.len());
-    assert_eq!(room.len(), 3);
-    for (event, served) in room.iter().zip(served) {
-        assert_eq!(event.id, served["id"].as_str().unwrap());
-        assert_eq!(event.offset, served["offset"].as_u64().unwrap());
-        assert_eq!(event.event_type, served["event"].as_str().unwrap());
-        assert_eq!(event.timestamp, served["timestamp"].as_u64().unwrap());
-        let data: Vec<u8> = serde_json::from_value(served["data"].clone()).unwrap();
-        assert_eq!(event.data, data);
+    assert_eq!(served.len(), 3);
+    let got = hub
+        .read(
+            "stream.consume",
+            json!({"room": "feed", "subscriber_id": "c", "from_offset": 0, "limit": 100}),
+        )
+        .await;
+    let events = got["events"].as_array().unwrap();
+    assert_eq!(events.len(), served.len(), "{got}");
+    for (event, served) in events.iter().zip(served) {
+        for field in ["id", "offset", "event", "data", "timestamp"] {
+            assert_eq!(event[field], served[field], "{field}: {event}");
+        }
     }
+    assert_eq!(got["next_offset"], 3, "{got}");
 }
 
 async fn check_kv(hub: &HubServer, found: &Dump, baseline: &Value, release: Release) {

@@ -584,6 +584,25 @@ they were delivered.
   and a snapshot recovery (they go ahead of waiting messages of the same or
   lower priority).
 
+## Stream Persistence
+
+Stream publishes are not written to the WAL. Every snapshot holds each room's
+buffered events in its stream section, and startup restores those rooms
+(`recovery::restore_streams`, called by `main.rs` once the stream manager
+exists):
+
+- every event comes back with its ID, offset, type, data and timestamp, so a
+  consumer resumes at the offset it had, and the next publish gets the offset
+  after the last restored event;
+- events published after the newest snapshot are lost, and their offsets are
+  given to new events; each restored room is therefore a new incarnation and
+  reports a new `generation`;
+- retention applies to restored events as to any other: compaction removes
+  those older than the retention window, and only the newest
+  `max_buffer_size` events of a room are kept;
+- a room whose recorded offsets are not contiguous is skipped with a warning
+  naming it; the other rooms and every other store still come back.
+
 ## Recovery Scenarios
 
 ### Normal Restart

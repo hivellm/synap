@@ -114,7 +114,7 @@ fn unbounded_kv_config() -> KVConfig {
 /// record one for (snapshots older than v5, queues created implicitly by a
 /// replayed publish), as the server's own queue settings would give them.
 pub async fn read(layout: &Layout, queue_defaults: QueueConfig) -> Result<Source> {
-    let (mut snapshot, snapshot_read) = match load_every_snapshot(&layout.snapshot_dir).await? {
+    let (snapshot, snapshot_read) = match load_every_snapshot(&layout.snapshot_dir).await? {
         Some((snapshot, path)) => {
             let read = SnapshotRead {
                 path,
@@ -126,13 +126,9 @@ pub async fn read(layout: &Layout, queue_defaults: QueueConfig) -> Result<Source
         None => (None, None),
     };
     let cutoff = snapshot_read.as_ref().map_or(0, |s| s.wal_offset);
-    let streams = snapshot
-        .as_mut()
-        .map(|s| std::mem::take(&mut s.stream_data))
-        .unwrap_or_default();
 
     let (entries, wal, next_offset) = read_wal(layout.wal_path.clone(), cutoff).await?;
-    let stores = recovery::rebuild(
+    let mut stores = recovery::rebuild(
         snapshot,
         entries,
         next_offset,
@@ -146,6 +142,7 @@ pub async fn read(layout: &Layout, queue_defaults: QueueConfig) -> Result<Source
             layout.wal_path.display()
         )
     })?;
+    let streams = std::mem::take(&mut stores.streams);
     Ok(Source {
         stores,
         streams,

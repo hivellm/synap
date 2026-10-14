@@ -134,10 +134,13 @@ server's default queue configuration, creation time = load time), their keys
 persistent where they had no expiry field, and empty sections for what they
 lack.
 
-Streams are additionally persisted by `StreamPersistence`; they are **not** written
-to the KV WAL (audit M-014) — recovery never replayed those entries, so logging
-them risked divergence. Their section is read when the file is written, outside
-the barrier.
+Streams are **not** written to the KV WAL (audit M-014) — recovery never
+replayed those entries, so logging them risked divergence. Recovery hands the
+snapshot's stream section back as `RecoveredStores::streams`, and startup
+restores those rooms with `recovery::restore_streams`: every event keeps its
+ID, offset, type, data and timestamp, and each room is a new incarnation (a new
+`generation`), since events published after the snapshot are lost. Their
+section is read when the file is written, outside the barrier.
 
 ## Compatibility
 
