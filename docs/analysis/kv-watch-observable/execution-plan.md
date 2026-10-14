@@ -1,5 +1,15 @@
 # Execution plan — kv-watch-observable
 
+> **Historical analysis.** Written against `870b1d1` (Thunder adoption, #241,
+> 2026-07-19), first released in v1.2.0. Its phase numbers belong to that
+> release's task list. The code has moved since: paths, line numbers and
+> findings describe that revision, not the current tree. Current behavior:
+> [1.4.0 guarantees](../../operations/guarantees.md). Current design:
+> [persistence](../../specs/PERSISTENCE.md),
+> [transports](../../protocol/transports.md),
+> [KV store internals](../../internals/kv-store.md) and the
+> [documentation index](../../INDEX.md).
+
 Six sequential rulebook tasks (phase21..phase26). Each task is gated by
 `cargo check` / language type-check + `clippy -D warnings` / lint + full tests before commit.
 

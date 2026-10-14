@@ -95,6 +95,7 @@ How the engine works inside — for contributors and the curious:
 
 Running a server in production:
 
+- **[Guarantees (1.4.0)](operations/guarantees.md)** - Durability per fsync mode, authorization per transport, Hub mode, limits, replication, and what an error reply means
 - **[Observability](operations/observability.md)** - Metrics, logs and tracing
 - **[Network Limits](operations/network-limits.md)** - Connection, frame and memory caps
 - **[Configuration](specs/CONFIGURATION.md)** - Configuration reference

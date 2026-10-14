@@ -1,5 +1,15 @@
 # Execution Plan — Synap vs Redis
 
+> **Historical analysis.** Written on 2026-04-07 against the flat
+> `synap-server/` layout (workspace version 0.9.1, between releases v0.9.1 and
+> v0.11.0); first committed in `33e21d0`. The code has moved since: paths, line
+> numbers and findings describe that revision, not the current tree. Current
+> behavior: [1.4.0 guarantees](../../operations/guarantees.md). Current design:
+> [persistence](../../specs/PERSISTENCE.md),
+> [transports](../../protocol/transports.md),
+> [KV store internals](../../internals/kv-store.md) and the
+> [documentation index](../../INDEX.md).
+
 Three phases, ordered by user impact and dependency. Phase 1 is non-negotiable: it fixes the user's #1 reported pain point and unblocks real cache use cases.
 
 ---
