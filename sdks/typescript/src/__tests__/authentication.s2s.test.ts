@@ -3,7 +3,7 @@
  * Tests authentication (Basic Auth and API Key) with a running Synap server
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { Synap } from '../index';
 
 const SYNAP_URL = process.env.SYNAP_URL || 'http://localhost:15500';
@@ -13,6 +13,9 @@ const TEST_PASSWORD = process.env.SYNAP_TEST_PASSWORD || 'root';
 // Probe once whether the target server actually enforces auth. The rejection
 // tests only make sense against an auth-enabled server (SYNAP_AUTH_ENABLED);
 // against a dev server with auth off they are skipped instead of failing.
+// They check the rejection on a command: `/health` and `/metrics` answer
+// without credentials by design (liveness probes and scrapers), whatever
+// credentials a request carries.
 let authRequired = false;
 
 beforeAll(async () => {
@@ -69,7 +72,7 @@ describe('Synap Authentication (S2S Integration)', () => {
       });
 
       try {
-        await expect(synap.health()).rejects.toThrow();
+        await expect(synap.kv.get('auth:probe')).rejects.toThrow();
       } finally {
         synap.close();
       }
@@ -87,7 +90,7 @@ describe('Synap Authentication (S2S Integration)', () => {
       });
 
       try {
-        await expect(synap.health()).rejects.toThrow();
+        await expect(synap.kv.get('auth:probe')).rejects.toThrow();
       } finally {
         synap.close();
       }
@@ -98,32 +101,23 @@ describe('Synap Authentication (S2S Integration)', () => {
     let apiKey: string;
 
     beforeAll(async () => {
-      // Create an API key using Basic Auth
-      const adminClient = new Synap({
-        url: SYNAP_URL,
-        auth: {
-          type: 'basic',
-          username: TEST_USERNAME,
-          password: TEST_PASSWORD,
-        },
+      // Issue a short-lived key with the Basic Auth credentials.
+      const credentials = Buffer.from(`${TEST_USERNAME}:${TEST_PASSWORD}`).toString('base64');
+      const response = await fetch(`${SYNAP_URL}/auth/keys`, {
+        method: 'POST',
+        headers: { Authorization: `Basic ${credentials}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'ts-sdk-s2s',
+          expires_in_seconds: 300,
+          permissions: [{ resource: '*', action: 'all' }],
+        }),
       });
-
-      try {
-        // Create API key via REST API (if endpoint exists)
-        // For now, we'll skip if API key creation fails
-        // In real scenario, you'd create the key first
-        apiKey = 'test-api-key-placeholder';
-      } finally {
-        adminClient.close();
-      }
+      expect(response.status).toBe(200);
+      const created = (await response.json()) as { key: { key: string } };
+      apiKey = created.key.key;
     });
 
     it('should authenticate with API Key and perform operations', async () => {
-      // Skip if no API key available
-      if (!apiKey || apiKey === 'test-api-key-placeholder') {
-        console.log('Skipping API Key test - no valid API key available');
-        return;
-      }
 
       const synap = new Synap({
         url: SYNAP_URL,
@@ -161,7 +155,7 @@ describe('Synap Authentication (S2S Integration)', () => {
       });
 
       try {
-        await expect(synap.health()).rejects.toThrow();
+        await expect(synap.kv.get('auth:probe')).rejects.toThrow();
       } finally {
         synap.close();
       }
@@ -178,7 +172,7 @@ describe('Synap Authentication (S2S Integration)', () => {
       });
 
       try {
-        await expect(synap.health()).rejects.toThrow();
+        await expect(synap.kv.get('auth:probe')).rejects.toThrow();
       } finally {
         synap.close();
       }
