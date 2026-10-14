@@ -95,8 +95,8 @@ stop further drops while the gap closes.
 
 Not measured: the integration suites (`cargo test-full`) under coverage, the
 GUI (its tests are contract tests and it has no coverage tooling), the PHP and
-Go SDKs (separate repositories), synap-cli and synap-migrate (no unit tests
-under `--lib`). Two Linux runs of the Rust measurement differed by one line of
+Go SDKs (separate repositories), synap-cli (no unit tests under `--lib`) and
+synap-migrate (its unit tests run under `--lib`, but it has no floor yet). Two Linux runs of the Rust measurement differed by one line of
 synap-server, which the one-decimal truncation absorbs.
 
 When coverage rises, raise the floor in the same pull request; the gate

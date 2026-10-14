@@ -1,8 +1,11 @@
 # Snapshot format
 
-Point-in-time snapshots are written by `SnapshotManager::write_image` (the
-image is captured by `SnapshotImage::capture`) and read by
+Point-in-time snapshots are written by `SnapshotManager::write_snapshot` (the
+image is captured by `SnapshotImage::capture`; `write_image` adds the stream
+manager's events as the stream section and calls it) and read by
 `SnapshotManager::load` (`crates/synap-server/src/persistence/snapshot.rs`).
+`synap-migrate` reads and writes snapshots through the same functions; it has
+no codec of its own.
 The format is a single streamed binary file ending in a CRC64 integrity
 digest.
 
@@ -18,7 +21,7 @@ comes before `snapshot-v5-...8.bin`; any other `snapshot-*.bin` name (earlier
 releases used `snapshot-v<N>-<unix seconds>.bin`) is older than every
 sequenced file and ordered among the others by name, as before.
 
-`write_image`:
+`write_snapshot`:
 
 1. creates the directory if needed (fsyncing its parent) and removes
    `snapshot-*.tmp` files left by a write that never finished;
@@ -78,8 +81,8 @@ The writer feeds a running CRC64 the same byte sequence it writes, except that
 numeric length/count fields are digested little-endian (raw bytes for
 keys/values). On load the digest is recomputed identically and compared to
 the trailing checksum; a mismatch returns
-`PersistenceError::SnapshotCorrupted` instead of loading corrupt data (audit
-M-002). So do an unknown magic, a version byte that does not match it, a
+`PersistenceError::SnapshotCorrupted`, naming the file and the reason, instead
+of loading corrupt data (audit M-002). So do an unknown magic, a version byte that does not match it, a
 file that ends early and a record that does not decode. Every length and
 count is checked against the bytes left in the file before it is read, so a
 damaged length fails as a truncated file instead of allocating it.
@@ -96,6 +99,12 @@ returns `PersistenceError::SnapshotUnrecoverable`, which, like
 next WAL record must get (`RecoveredStores::wal_offset`: past the WAL and
 never below the loaded cutoff); `main.rs` passes it to
 `PersistenceLayer::continue_wal_at`.
+
+Restoring the loaded snapshot and replaying the WAL records after its cutoff
+is `recovery::rebuild`, which reads and writes no file. `synap-migrate` uses
+it, with `SnapshotManager::load` and `wal_frame::scan`, to rebuild a data
+directory it must leave untouched (startup also repairs a torn WAL tail and
+upgrades a 1.3.x WAL in place; the migrator does neither).
 
 ## Pairing with the WAL
 
@@ -125,10 +134,13 @@ server's default queue configuration, creation time = load time), their keys
 persistent where they had no expiry field, and empty sections for what they
 lack.
 
-Streams are additionally persisted by `StreamPersistence`; they are **not** written
-to the KV WAL (audit M-014) — recovery never replayed those entries, so logging
-them risked divergence. Their section is read when the file is written, outside
-the barrier.
+Streams are **not** written to the KV WAL (audit M-014) — recovery never
+replayed those entries, so logging them risked divergence. Recovery hands the
+snapshot's stream section back as `RecoveredStores::streams`, and startup
+restores those rooms with `recovery::restore_streams`: every event keeps its
+ID, offset, type, data and timestamp, and each room is a new incarnation (a new
+`generation`), since events published after the snapshot are lost. Their
+section is read when the file is written, outside the barrier.
 
 ## Compatibility
 

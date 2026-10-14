@@ -27,15 +27,18 @@ describes 1.4.0.
 |---|---|---|---|---|
 | Strings (with expiry), hashes, lists, sets, sorted sets and geospatial keys, HyperLogLog, bitmaps | yes | yes | yes | yes |
 | Queues: messages, configuration, ACK/NACK, purge, delete | yes | yes (each queue whole) | yes | yes, see [1.8](#18-transactions-scripts-and-queues) |
-| Event streams (`stream.*`) | no | written, never loaded | only inside a full sync | **no** |
+| Event streams (`stream.*`) | no | yes | only inside a full sync | **partly**: the newest snapshot's events come back; events published after it are lost |
 | Partitioned topics and consumer groups | no | no | no | **no** |
 | Pub/Sub messages, KV watch and keyspace notifications | no | no | no | delivered live only |
 | Users, their roles, API keys | no | no | no | **no**; the root user is re-created from `auth.root` at startup when its password is valid (see [3.1](#31-modes)) |
 | Lua script cache (`SCRIPT LOAD`) | no | no | no | **no** |
 
-Event streams deserve a plain warning: a snapshot file contains the stream
-events, but startup never reads that section and builds an empty stream
-manager, and live stream publishes are neither logged nor sent to replicas.
+Event streams deserve a plain warning: live stream publishes are neither
+logged in the WAL nor sent to replicas. At startup each stream room is restored
+from the newest snapshot as a new generation (event IDs, offsets, types, data
+and timestamps kept; the next publish continues after the last offset), so a
+restart loses every event published after that snapshot. A room that cannot
+be restored is skipped with a warning.
 
 With `persistence.enabled: false` there is no WAL and no snapshot: every write
 is acknowledged once it is applied in memory (a replication master still
@@ -47,7 +50,7 @@ and a persistence layer that opened at startup (see
 [1.7](#17-startup-what-refuses-to-start-and-what-starts-empty)).
 
 Code: `persistence/layer.rs:532-548` (stream publish is a no-op for the WAL),
-`persistence/recovery.rs:135-247` (snapshot restore reads no stream section),
+`persistence/recovery.rs:337` (`restore_streams`, seeding stream rooms from the snapshot), `main.rs:505` (called before the compaction task starts),
 `main.rs:492-516` (fresh stream, partition and consumer-group managers),
 `replication/master.rs:331-340` (stream events only in a full sync),
 `auth/user.rs:133-145` and `auth/api_key.rs:179-185` (in-memory maps),
