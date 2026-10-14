@@ -175,7 +175,7 @@ internal static class CommandMapper
             "bitmap.getbit" => payload.TryGetValue("offset", out var bgo)
                 ? ("GETBIT", new object?[] { key, bgo })
                 : null,
-            "bitmap.bitcount" => ("BITCOUNT", [key]),
+            "bitmap.bitcount" => BuildBitCount(key, payload),
             "bitmap.bitop.and" => BuildBitOp("AND", payload),
             "bitmap.bitop.or" => BuildBitOp("OR", payload),
             "bitmap.bitop.xor" => BuildBitOp("XOR", payload),
@@ -293,7 +293,8 @@ internal static class CommandMapper
             "sorted_set.rank" => new Dictionary<string, object?> { ["rank"] = raw },
             "sorted_set.range" => new Dictionary<string, object?> { ["members"] = ZRangeToList(raw) },
 
-            "bitmap.getbit" => new Dictionary<string, object?> { ["bit"] = raw },
+            "bitmap.setbit" => new Dictionary<string, object?> { ["old_value"] = raw },
+            "bitmap.getbit" => new Dictionary<string, object?> { ["value"] = raw },
             "bitmap.bitcount" => new Dictionary<string, object?> { ["count"] = raw },
 
             "hyperloglog.add" => new Dictionary<string, object?> { ["changed"] = raw is long hll && hll > 0 },
@@ -400,6 +401,23 @@ internal static class CommandMapper
         }
 
         return ("ZRANGE", [key, start, stop]);
+    }
+
+    /// <summary>
+    /// BITCOUNT key [start end]. The native commands take the range only as a
+    /// pair, so a lone bound is completed with the whole-bitmap default
+    /// (start 0, end -1), which the server reads exactly as an absent bound.
+    /// </summary>
+    private static (string, object?[])? BuildBitCount(string key, Dictionary<string, object?> payload)
+    {
+        var hasStart = payload.TryGetValue("start", out var start) && start is not null;
+        var hasEnd = payload.TryGetValue("end", out var end) && end is not null;
+        if (!hasStart && !hasEnd)
+        {
+            return ("BITCOUNT", [key]);
+        }
+
+        return ("BITCOUNT", [key, hasStart ? start : 0L, hasEnd ? end : -1L]);
     }
 
     private static (string, object?[])? BuildBitOp(string op, Dictionary<string, object?> payload)

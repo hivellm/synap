@@ -340,6 +340,29 @@ public sealed class TransportTests
     }
 
     [Fact]
+    public void MapCommand_BitmapBitCount_SendsTheRangeWhenGiven()
+    {
+        var all = CommandMapper.MapCommand(
+            "bitmap.bitcount", new Dictionary<string, object?> { ["key"] = "bm" });
+        Assert.Equal("BITCOUNT", all!.Value.Command);
+        Assert.Equal(new object?[] { "bm" }, all.Value.Args);
+
+        var range = CommandMapper.MapCommand(
+            "bitmap.bitcount", new Dictionary<string, object?> { ["key"] = "bm", ["start"] = 2, ["end"] = 9 });
+        Assert.Equal(new object?[] { "bm", 2, 9 }, range!.Value.Args);
+
+        // The native commands take the range as a pair; the missing bound is
+        // the whole-bitmap default the server applies to an absent one.
+        var fromStart = CommandMapper.MapCommand(
+            "bitmap.bitcount", new Dictionary<string, object?> { ["key"] = "bm", ["start"] = 2 });
+        Assert.Equal(new object?[] { "bm", 2, -1L }, fromStart!.Value.Args);
+
+        var toEnd = CommandMapper.MapCommand(
+            "bitmap.bitcount", new Dictionary<string, object?> { ["key"] = "bm", ["end"] = 9 });
+        Assert.Equal(new object?[] { "bm", 0L, 9 }, toEnd!.Value.Args);
+    }
+
+    [Fact]
     public void MapCommand_StreamPublish_MapsToSPUBLISH()
     {
         // stream.publish is now mapped to SPUBLISH.
@@ -404,6 +427,16 @@ public sealed class TransportTests
     {
         var result = CommandMapper.MapResponse("hash.get", "fieldval");
         Assert.Equal("fieldval", result["value"]);
+    }
+
+    [Fact]
+    public void MapResponse_BitmapSetBitAndGetBit_UseTheHttpFieldNames()
+    {
+        // BitmapManager reads the same fields from every transport: the HTTP
+        // payload carries old_value for SETBIT and value for GETBIT.
+        Assert.Equal(1L, CommandMapper.MapResponse("bitmap.setbit", 1L)["old_value"]);
+        Assert.Equal(1L, CommandMapper.MapResponse("bitmap.getbit", 1L)["value"]);
+        Assert.Equal(3L, CommandMapper.MapResponse("bitmap.bitcount", 3L)["count"]);
     }
 
     // =========================================================================
