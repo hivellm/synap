@@ -277,6 +277,13 @@ class SynapClient:
             response = await self._http_client.post("/api/v1/command", json=request_payload)
 
             if not response.text:
+                # An empty body is a result only on success: the server
+                # answers a refused credential with a bodiless 401.
+                if not response.is_success:
+                    raise SynapException.http_error(
+                        f"Request failed with status {response.status_code}",
+                        response.status_code,
+                    )
                 return {}
 
             try:
@@ -330,6 +337,13 @@ class SynapClient:
             response = await self._http_client.post("/api/stream", json=payload)
 
             if not response.text:
+                # An empty body is a result only on success: the server
+                # answers a refused credential with a bodiless 401.
+                if not response.is_success:
+                    raise SynapException.http_error(
+                        f"Request failed with status {response.status_code}",
+                        response.status_code,
+                    )
                 return {}
 
             try:

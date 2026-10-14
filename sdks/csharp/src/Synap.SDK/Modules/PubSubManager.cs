@@ -52,7 +52,7 @@ public sealed class PubSubManager
             cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Unsubscribes from topics.</summary>
+    /// <summary>Unsubscribes from topics (HTTP transport only).</summary>
     public async Task UnsubscribeTopicsAsync(
         string subscriberId,
         IEnumerable<string> topics,
@@ -68,7 +68,7 @@ public sealed class PubSubManager
             cancellationToken).ConfigureAwait(false);
     }
 
-    /// <summary>Gets Pub/Sub statistics.</summary>
+    /// <summary>Gets Pub/Sub statistics (HTTP transport only).</summary>
     public async Task<Dictionary<string, JsonElement>> StatsAsync(CancellationToken cancellationToken = default)
     {
         using var response = await _client.SendCommandAsync("pubsub.stats", null, cancellationToken).ConfigureAwait(false);

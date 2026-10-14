@@ -3,6 +3,7 @@
 | File | What it is |
 |---|---|
 | [`perf_baseline.py`](perf_baseline.py) | The performance baseline: repeated, recorded runs against a real `synap-server` (below). |
+| [`test_perf_baseline.py`](test_perf_baseline.py) | Tests of the baseline script's statistics, aggregation, merge, summary and argument checks; they need no server. CI runs them in the `gate-scripts` job. |
 | [`bench-config.yml`](bench-config.yml) | Benchmark server config: auth, rate limiting, replication and persistence off; RESP3 and SynapRPC on. The baseline starts every server from it. |
 | [`bench-vs-redis/`](bench-vs-redis/) | In-process KV store numbers next to `redis-benchmark` figures. |
 | [`bench-redis-comparison.sh`](bench-redis-comparison.sh) | Starts Redis and runs the `redis_vs_synap` criterion bench. |
@@ -46,7 +47,27 @@ python scripts/bench/perf_baseline.py --durability off,always --protocols resp3 
 # read from the binary unless --server-toolchain names the compiler.
 python scripts/bench/perf_baseline.py --server-bin /path/to/synap-server-1.3.2 \
     --server-git-sha <sha> --server-profile release
+
+# Two binaries compared fairly: alternate single runs of each, then merge each
+# binary's reports into one
+for i in 1 2 3 4 5; do
+  python scripts/bench/perf_baseline.py --no-build --runs 1 --out-dir target/perf-baseline/new
+  python scripts/bench/perf_baseline.py --no-build --runs 1 --out-dir target/perf-baseline/old \
+      --server-bin /path/to/synap-server-1.3.2 --server-git-sha <sha> --server-profile release
+done
+python scripts/bench/perf_baseline.py --merge target/perf-baseline/new/*.json --out-dir target/perf-baseline
+python scripts/bench/perf_baseline.py --merge target/perf-baseline/old/*.json --out-dir target/perf-baseline
 ```
+
+`--merge` measures nothing. It combines reports of one binary into one report,
+numbering the runs in the order the reports started, and aggregates the cells
+exactly as a single `--runs N` measurement would. It refuses reports whose
+build, hardware, runner, parameters (other than the run count) or cells differ,
+and a report that is itself merged. Alternating the two binaries run by run
+spreads a drift of the machine over both, which two back-to-back `--runs 5`
+measurements would not. The merged report is written as
+`perf-baseline-<start of its earliest source>-merged.json` (and `.md`) and
+lists its sources under `merged_from`.
 
 A binary that cannot run a cell (a listener it lacks, a config key or command
 it rejects) fails that cell only: the run goes on, the summary marks the cell
@@ -113,3 +134,13 @@ throughput threshold exists; comparing two reports is a human decision.
 
 The scheduled workflow that runs this script is described in
 [docs/development/CI_GATES.md](../../docs/development/CI_GATES.md#performance-baseline).
+
+### Recorded baselines
+
+[docs/benchmarks/BASELINE_1_4_0.md](../../docs/benchmarks/BASELINE_1_4_0.md)
+holds the 1.4.0 baseline next to 1.3.2. Both were measured with this script,
+in five alternating runs merged with `--merge`. The page also explains why
+writes with the WAL on are slower in 1.4.0. Its WAL measurements come from
+`crates/synap-server/examples/wal_ack_probe.rs`, which times the server's
+`AsyncWAL` acknowledgement path without a server
+(`cargo run --release --locked -p synap-server --example wal_ack_probe`).

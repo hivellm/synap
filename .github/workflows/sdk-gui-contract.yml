@@ -54,6 +54,9 @@ jobs:
       - name: Check the release workflow
         run: python scripts/release/test-release-workflow.py
 
+      - name: Test the performance baseline script
+        run: python scripts/bench/test_perf_baseline.py
+
   server:
     name: Build synap-server (release)
     runs-on: ubuntu-latest
@@ -319,6 +322,14 @@ jobs:
         env:
           SYNAP_S2S: "true"
         run: pytest --no-cov
+
+      # The [S2SFact] tests run only with SYNAP_S2S=true; the sdk-csharp job
+      # runs the same project without a server, where they are skipped.
+      - name: C# server-to-server suites
+        working-directory: sdks/csharp
+        env:
+          SYNAP_S2S: "true"
+        run: dotnet test --configuration Release
 
       # Every cell (Rust, TypeScript, Python, C#, Go, PHP, pre-Thunder
       # replay) against one server it starts itself; --strict fails a cell

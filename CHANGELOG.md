@@ -5,7 +5,7 @@ All notable changes to Synap will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.4.0] - 2026-10-13
+## [1.4.0] - 2026-10-14
 
 A hardening release built from the 2026-10-12 next-release review
 (`docs/analysis/next-release-review-2026-10-12/`): authorization that holds on
@@ -213,6 +213,16 @@ migration notes before upgrading.
 - **One credential check per MCP request.** `/mcp` carried its own
   authentication layer inside the main router's, so every MCP request with a
   password paid bcrypt twice; the duplicate layer is gone.
+- **Writes with the WAL on cost more, because they are now durable.** 1.3.2
+  never logged plain RESP3 or SynapRPC writes, so it answered them at
+  in-memory speed and a crash lost them. 1.4.0 acknowledges a write only after
+  its WAL group commit: on the reference machine single in-flight writes are
+  about 30-37% slower with fsync `never`/`periodic`, `always` is bound by one
+  fsync per group (about 1.2k ops/s with 4 clients), and RESP3 pipelines wait
+  for each write's commit in turn (about -89% for pipelined `SET` in
+  `never`/`periodic`; SynapRPC pipelines share group commits). Reads, and
+  every operation with persistence off, match 1.3.2. Full numbers, method and
+  two identified avoidable overheads in `docs/benchmarks/BASELINE_1_4_0.md`.
 
 ### Added
 
@@ -238,6 +248,11 @@ migration notes before upgrading.
   `perf-baseline.yml` workflow runs it weekly and on demand on the runner
   named by the `PERF_BENCH_RUNNER` variable (a labeled smoke run on shared
   runners otherwise), with no latency gate.
+- **Upgrade test from a real 1.3.2 data directory.** `upgrade_from_1_3_2_tests`
+  starts the 1.4.0 binary on data written by a real 1.3.2 server and checks the
+  in-place WAL upgrade, recovery against what 1.3.2 served, writes surviving
+  restarts, and the first v5 snapshot. `scripts/bench/perf_baseline.py --merge`
+  and `examples/wal_ack_probe.rs` support the recorded baseline.
 - **GUI tests.** `npm test` in `gui/` runs Vitest contract tests of the API
   client and a smoke test of the structure inspector against a real
   `synap-server`.
@@ -356,6 +371,26 @@ migration notes before upgrading.
   still neither logged in the WAL nor replicated as they happen, so events
   published after the newest snapshot are lost on restart; partitioned topics
   and consumer groups stay memory-only.
+- **Startup no longer deletes a WAL record it cannot decode.** A complete,
+  checksum-valid record this release cannot decode (for example one written by
+  a newer release) was truncated as if it were a torn tail, at the end of the
+  file or behind a damaged frame. The server now refuses to start with
+  `WALUnreadableRecord`, naming the WAL path and byte position, and leaves the
+  file unchanged. Real crash leftovers (cut-short frames, checksum mismatches,
+  zero fill) are still truncated.
+- **Stream retention `0` keeps events, as documented.** Every compaction
+  emptied rooms with `retention_secs: 0`, including rooms just restored from a
+  snapshot. Compaction now removes expired events from the oldest end only and
+  keeps the room's earliest offset and statistics correct: once every event
+  had expired, newly published events could not be read at their offsets.
+- **SDK fixes found by the release test run.** The C# SDK read results from a
+  `payload` field the HTTP transport had already unwrapped, so bitmap,
+  HyperLogLog, geospatial and transaction results over HTTP were silent
+  defaults; it published with `PPUBLISH`, a command the server never had;
+  queue payloads, EXEC aborts and `WATCH` keys were mishandled on some
+  transports. The C# and Python SDKs reported a body-less 401 as success, so a
+  wrong password made `kv.set` look successful without writing. The C# S2S
+  suite, which had never run, now runs in CI.
 - **Multi-key blocking pops wake on whichever key gets data.** BLPOP, BRPOP,
   BZPOPMIN and BZPOPMAX on several keys waited for each key's notification in
   turn, so a push to a later key went unnoticed until the earlier keys were

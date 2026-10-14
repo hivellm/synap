@@ -38,7 +38,12 @@ logged in the WAL nor sent to replicas. At startup each stream room is restored
 from the newest snapshot as a new generation (event IDs, offsets, types, data
 and timestamps kept; the next publish continues after the last offset), so a
 restart loses every event published after that snapshot. A room that cannot
-be restored is skipped with a warning.
+be restored is skipped with a warning. Retention applies to the restored events
+at once: the stream manager keeps events for one hour (its default, which the
+configuration file does not change), and its first compaction pass, right after
+startup, removes the restored events older than that. A room with no events
+left is not written to a snapshot, so a restart from that snapshot no longer
+has the room.
 
 With `persistence.enabled: false` there is no WAL and no snapshot: every write
 is acknowledged once it is applied in memory (a replication master still
@@ -50,7 +55,10 @@ and a persistence layer that opened at startup (see
 [1.7](#17-startup-what-refuses-to-start-and-what-starts-empty)).
 
 Code: `persistence/layer.rs:532-548` (stream publish is a no-op for the WAL),
-`persistence/recovery.rs:337` (`restore_streams`, seeding stream rooms from the snapshot), `main.rs:505` (called before the compaction task starts),
+`persistence/recovery.rs:337` (`restore_streams`, seeding stream rooms from the snapshot), `main.rs:504-510` (default stream configuration; rooms restored before the compaction task starts),
+`synap-core/src/core/stream.rs:53` (one-hour retention), `:639-659` (first
+compaction pass at once), `:559-571` (rooms without events left out of a
+snapshot),
 `main.rs:492-516` (fresh stream, partition and consumer-group managers),
 `replication/master.rs:331-340` (stream events only in a full sync),
 `auth/user.rs:133-145` and `auth/api_key.rs:179-185` (in-memory maps),
@@ -159,7 +167,7 @@ Code: `persistence/types.rs:630-641` (defaults), `persistence/types.rs:667-677`
 `persistence/wal_async.rs:452-457` (each group handed to the OS before its
 replies), `persistence/wal_async.rs:504-528` (when fsync runs),
 `persistence/layer.rs:615-623` (fsync before a snapshot),
-`persistence/wal_frame.rs:25-33` (torn tail).
+`persistence/wal_frame.rs:31-35` (torn tail).
 
 ### 1.4 Graceful shutdown
 
@@ -199,7 +207,7 @@ fsync failures poison; the flush runs before the fsync),
 `persistence/recovery.rs:353-379` (every whole record at or after the cutoff
 is replayed), `persistence/layer.rs:603-623` (a snapshot takes a mark and
 syncs the WAL),
-`persistence/types.rs:46-52`, `server/handlers/mod.rs:227-264` (health).
+`persistence/types.rs:48-54`, `server/handlers/mod.rs:227-264` (health).
 
 ### 1.6 Snapshots
 
@@ -243,7 +251,7 @@ transaction counts each operation), `persistence/layer.rs:640-652`
 fsync), `persistence/types.rs:654-665` (defaults),
 `persistence/snapshot.rs:166-211` (temporary file, rename, directory fsync),
 `persistence/snapshot.rs:323-338` (retention),
-`persistence/wal_frame.rs:345-360` (directory fsync on Unix only),
+`persistence/wal_frame.rs:417-433` (directory fsync on Unix only),
 `persistence/recovery.rs:64-73` and `persistence/recovery.rs:296-328`
 (fallback rules).
 
@@ -251,8 +259,12 @@ fsync), `persistence/types.rs:654-665` (defaults),
 
 Startup **refuses** (the process exits with the error) when:
 
-- the WAL has interior corruption (a bad frame followed by valid ones), naming
-  the byte position;
+- the WAL has interior corruption (a bad frame followed by complete ones whose
+  checksum matches, decodable or not), naming the byte position;
+- the WAL holds a complete record whose checksum matches but which this
+  server cannot decode, for example one a newer release wrote, naming the WAL
+  and the byte position and leaving the file unchanged (a crash does not leave
+  such a record, so it is never truncated as a torn tail);
 - the WAL header is damaged or declares a newer format than this server reads;
 - the newest snapshot is damaged and no older starting point is provably
   complete, or a snapshot cannot be read.
@@ -288,7 +300,7 @@ The WAL is never truncated after a snapshot and never rotated; startup scans
 the whole file. `wal.max_size_mb` is not enforced. Plan disk space for a WAL
 that grows with every write.
 
-Code: `persistence/types.rs:73-91` (`refuses_startup`), `main.rs:399-436`
+Code: `persistence/types.rs:90-108` (`refuses_startup`), `main.rs:404-413`
 (refuse, else start empty), `persistence/types.rs:106-110` (a replay error
 becomes `RecoveryFailed`, which does not refuse), `persistence/recovery.rs:254-273`
 (replay stops at the first error), `main.rs:637-664` and `main.rs:657-660`
@@ -296,8 +308,9 @@ becomes `RecoveryFailed`, which does not refuse), `persistence/recovery.rs:254-2
 with a layer), `persistence/layer.rs:181-185` and `:200-201` (replication
 fan-out lives in the layer), `server/handlers/mod.rs:252-255` (`"disabled"`
 without a layer), `persistence/recovery.rs:143-171` and
-`persistence/types.rs:510` (absolute expiry), `persistence/wal_frame.rs:244-256`
-(the only truncation is a torn tail), `persistence/types.rs:620-628`
+`persistence/types.rs:510` (absolute expiry), `persistence/wal_frame.rs:274-297`
+and `:320-337` (a record this server cannot decode refuses, and so does damage
+followed by a complete record; the only truncation is a torn tail), `persistence/types.rs:620-628`
 (`max_size_mb` is never read).
 
 ### 1.8 Transactions, scripts and queues
@@ -751,7 +764,7 @@ applies), `replication/config.rs:139-153` (defaults),
   and snapshot directories before upgrading.
 - `synap-migrate` is the offline migration utility; this page does not cover it.
 
-Code: `persistence/wal_frame.rs:1-50`, `persistence/snapshot.rs:19-28`,
+Code: `persistence/wal_frame.rs:1-62`, `persistence/snapshot.rs:19-28`,
 `replication/sync.rs:20-24`.
 
 ---

@@ -330,6 +330,15 @@ public sealed class SynapClient : IDisposable
 
             if (string.IsNullOrWhiteSpace(content))
             {
+                // An empty body is a result only on success: the server
+                // answers a refused credential with a bodiless 401.
+                if (!response.IsSuccessStatusCode)
+                {
+                    throw SynapException.HttpError(
+                        $"Request failed with status {response.StatusCode}",
+                        (int)response.StatusCode);
+                }
+
                 return JsonDocument.Parse("{}");
             }
 

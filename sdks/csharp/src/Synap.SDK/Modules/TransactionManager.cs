@@ -77,16 +77,7 @@ public sealed class TransactionManager
         }
 
         using var response = await _client.ExecuteAsync("transaction.multi", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload))
-        {
-            return JsonSerializer.Deserialize<TransactionResponse>(payload.GetRawText()) ?? new TransactionResponse
-            {
-                Success = true,
-                Message = "Transaction started"
-            };
-        }
-
-        return new TransactionResponse
+        return JsonSerializer.Deserialize<TransactionResponse>(response.RootElement.GetRawText()) ?? new TransactionResponse
         {
             Success = true,
             Message = "Transaction started"
@@ -110,16 +101,7 @@ public sealed class TransactionManager
         }
 
         using var response = await _client.ExecuteAsync("transaction.discard", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload))
-        {
-            return JsonSerializer.Deserialize<TransactionResponse>(payload.GetRawText()) ?? new TransactionResponse
-            {
-                Success = true,
-                Message = "Transaction discarded"
-            };
-        }
-
-        return new TransactionResponse
+        return JsonSerializer.Deserialize<TransactionResponse>(response.RootElement.GetRawText()) ?? new TransactionResponse
         {
             Success = true,
             Message = "Transaction discarded"
@@ -154,16 +136,7 @@ public sealed class TransactionManager
         }
 
         using var response = await _client.ExecuteAsync("transaction.watch", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload))
-        {
-            return JsonSerializer.Deserialize<TransactionResponse>(payload.GetRawText()) ?? new TransactionResponse
-            {
-                Success = true,
-                Message = "Keys watched"
-            };
-        }
-
-        return new TransactionResponse
+        return JsonSerializer.Deserialize<TransactionResponse>(response.RootElement.GetRawText()) ?? new TransactionResponse
         {
             Success = true,
             Message = "Keys watched"
@@ -187,16 +160,7 @@ public sealed class TransactionManager
         }
 
         using var response = await _client.ExecuteAsync("transaction.unwatch", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload))
-        {
-            return JsonSerializer.Deserialize<TransactionResponse>(payload.GetRawText()) ?? new TransactionResponse
-            {
-                Success = true,
-                Message = "Keys unwatched"
-            };
-        }
-
-        return new TransactionResponse
+        return JsonSerializer.Deserialize<TransactionResponse>(response.RootElement.GetRawText()) ?? new TransactionResponse
         {
             Success = true,
             Message = "Keys unwatched"
@@ -220,25 +184,23 @@ public sealed class TransactionManager
         }
 
         using var response = await _client.ExecuteAsync("transaction.exec", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload))
+        var result = response.RootElement;
+        if (result.TryGetProperty("results", out var results))
         {
-            if (payload.TryGetProperty("results", out var results))
+            var successResult = new TransactionExecSuccess();
+            if (results.ValueKind == JsonValueKind.Array)
             {
-                var successResult = new TransactionExecSuccess();
-                if (results.ValueKind == JsonValueKind.Array)
+                foreach (var item in results.EnumerateArray())
                 {
-                    foreach (var item in results.EnumerateArray())
-                    {
-                        successResult.Results.Add(item);
-                    }
+                    successResult.Results.Add(item.Clone());
                 }
-                return successResult;
             }
+            return successResult;
+        }
 
-            if (payload.TryGetProperty("aborted", out _))
-            {
-                return JsonSerializer.Deserialize<TransactionExecAborted>(payload.GetRawText()) ?? new TransactionExecAborted();
-            }
+        if (result.TryGetProperty("aborted", out _))
+        {
+            return JsonSerializer.Deserialize<TransactionExecAborted>(result.GetRawText()) ?? new TransactionExecAborted();
         }
 
         return new TransactionExecAborted();

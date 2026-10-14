@@ -1,7 +1,9 @@
 # synap-migrate fixtures
 
 Data directories written by real Synap servers, used by
-`tests/real_server_fixtures_tests.rs`. Nothing here is written by the code
+`tests/real_server_fixtures_tests.rs`; `v1.3.2` is also the directory that
+synap-server's `tests/upgrade_from_1_3_2_tests.rs` starts the server binary on
+(the in-place upgrade to this release). Nothing here is written by the code
 under test: `generate_fixtures.py` starts a real server binary with
 persistence on, drives every datatype through `/api/v1/command`, forces one
 snapshot (`POST /snapshot`), writes more data that only the WAL holds, records

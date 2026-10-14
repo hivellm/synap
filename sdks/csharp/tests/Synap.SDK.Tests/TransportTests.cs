@@ -340,6 +340,93 @@ public sealed class TransportTests
     }
 
     [Fact]
+    public void MapCommand_BitmapBitCount_SendsTheRangeWhenGiven()
+    {
+        var all = CommandMapper.MapCommand(
+            "bitmap.bitcount", new Dictionary<string, object?> { ["key"] = "bm" });
+        Assert.Equal("BITCOUNT", all!.Value.Command);
+        Assert.Equal(new object?[] { "bm" }, all.Value.Args);
+
+        var range = CommandMapper.MapCommand(
+            "bitmap.bitcount", new Dictionary<string, object?> { ["key"] = "bm", ["start"] = 2, ["end"] = 9 });
+        Assert.Equal(new object?[] { "bm", 2, 9 }, range!.Value.Args);
+
+        // The native commands take the range as a pair; the missing bound is
+        // the whole-bitmap default the server applies to an absent one.
+        var fromStart = CommandMapper.MapCommand(
+            "bitmap.bitcount", new Dictionary<string, object?> { ["key"] = "bm", ["start"] = 2 });
+        Assert.Equal(new object?[] { "bm", 2, -1L }, fromStart!.Value.Args);
+
+        var toEnd = CommandMapper.MapCommand(
+            "bitmap.bitcount", new Dictionary<string, object?> { ["key"] = "bm", ["end"] = 9 });
+        Assert.Equal(new object?[] { "bm", 0L, 9 }, toEnd!.Value.Args);
+    }
+
+    [Fact]
+    public void MapCommand_TransactionWatch_SendsTheKeysOfAnyCollection()
+    {
+        // WatchAsync hands over the caller's IReadOnlyCollection<string>.
+        var fromList = CommandMapper.MapCommand(
+            "transaction.watch",
+            new Dictionary<string, object?> { ["client_id"] = "c1", ["keys"] = new List<string> { "a", "b" } });
+        Assert.Equal("WATCH", fromList!.Value.Command);
+        Assert.Equal(new object?[] { "c1", "a", "b" }, fromList.Value.Args);
+
+        var fromArray = CommandMapper.MapCommand(
+            "transaction.watch",
+            new Dictionary<string, object?> { ["client_id"] = "c1", ["keys"] = new object?[] { "a" } });
+        Assert.Equal(new object?[] { "c1", "a" }, fromArray!.Value.Args);
+    }
+
+    [Fact]
+    public void MapCommand_PubSubPublish_SendsTheServersPublishCommand()
+    {
+        // The server dispatches PUBLISH on both native transports; it has
+        // never had the PPUBLISH this mapper used to send.
+        var result = CommandMapper.MapCommand(
+            "pubsub.publish",
+            new Dictionary<string, object?> { ["topic"] = "news", ["payload"] = new { msg = "hi" } });
+        Assert.Equal("PUBLISH", result!.Value.Command);
+        Assert.Equal(new object?[] { "news", "{\"msg\":\"hi\"}" }, result.Value.Args);
+    }
+
+    [Theory]
+    [InlineData("pubsub.subscribe")]
+    [InlineData("pubsub.unsubscribe")]
+    [InlineData("pubsub.topics")]
+    [InlineData("pubsub.stats")]
+    public void MapCommand_PubSubCallsWithoutOneNativeName_AreNotMapped(string operation)
+    {
+        // Unmapped → UnsupportedCommandException on SynapRPC/RESP3, instead of
+        // a command name the server does not know.
+        var payload = new Dictionary<string, object?>
+        {
+            ["subscriber_id"] = "s1",
+            ["topics"] = new object?[] { "news" },
+        };
+        Assert.Null(CommandMapper.MapCommand(operation, payload));
+    }
+
+    [Fact]
+    public void MapCommand_QueuePublish_SendsThePayloadBytes()
+    {
+        // QueueManager hands over the byte list of the HTTP command.
+        var fromModule = CommandMapper.MapCommand("queue.publish", new Dictionary<string, object?>
+        {
+            ["queue"] = "q",
+            ["payload"] = new[] { 104, 105 },
+            ["priority"] = 5L,
+            ["max_retries"] = 3L,
+        });
+        Assert.Equal(new object?[] { "q", new byte[] { 104, 105 }, 5L, 3L }, fromModule!.Value.Args);
+
+        // A raw caller's string travels as its UTF-8 text, not JSON-quoted.
+        var fromString = CommandMapper.MapCommand(
+            "queue.publish", new Dictionary<string, object?> { ["queue"] = "q", ["payload"] = "hi" });
+        Assert.Equal(new byte[] { 104, 105 }, fromString!.Value.Args[1]);
+    }
+
+    [Fact]
     public void MapCommand_StreamPublish_MapsToSPUBLISH()
     {
         // stream.publish is now mapped to SPUBLISH.
@@ -404,6 +491,94 @@ public sealed class TransportTests
     {
         var result = CommandMapper.MapResponse("hash.get", "fieldval");
         Assert.Equal("fieldval", result["value"]);
+    }
+
+    [Fact]
+    public void MapResponse_BitmapSetBitAndGetBit_UseTheHttpFieldNames()
+    {
+        // BitmapManager reads the same fields from every transport: the HTTP
+        // payload carries old_value for SETBIT and value for GETBIT.
+        Assert.Equal(1L, CommandMapper.MapResponse("bitmap.setbit", 1L)["old_value"]);
+        Assert.Equal(1L, CommandMapper.MapResponse("bitmap.getbit", 1L)["value"]);
+        Assert.Equal(3L, CommandMapper.MapResponse("bitmap.bitcount", 3L)["count"]);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Null")]
+    public void MapResponse_TransactionExecNull_IsAnAbort(object? raw)
+    {
+        // A watched key changed: EXEC replies null, which must read as the
+        // HTTP {aborted} payload rather than a success with no results.
+        var result = CommandMapper.MapResponse("transaction.exec", raw);
+        Assert.Equal(true, result["aborted"]);
+        Assert.Equal(false, result["success"]);
+        Assert.False(result.ContainsKey("results"));
+    }
+
+    [Fact]
+    public void MapResponse_QueueConsume_GivesTheHttpShapeForEveryNativeReply()
+    {
+        // SynapRPC: a map, its UTF-8 payload bytes decoded to a string.
+        var rpc = CommandMapper.MapResponse("queue.consume", new Dictionary<string, object?>
+        {
+            ["id"] = "m-1",
+            ["payload"] = "hi",
+            ["priority"] = 7L,
+            ["retry_count"] = 1L,
+        });
+        var rpcMessage = Assert.IsType<Dictionary<string, object?>>(rpc["message"]);
+        Assert.Equal("m-1", rpcMessage["id"]);
+        Assert.Equal(new[] { 104, 105 }, rpcMessage["payload"]);
+        Assert.Equal(7L, rpcMessage["priority"]);
+
+        // SynapRPC bytes that are not UTF-8 stay byte[].
+        var binary = CommandMapper.MapResponse("queue.consume", new Dictionary<string, object?>
+        {
+            ["id"] = "m-2",
+            ["payload"] = new byte[] { 0xDE, 0xAD },
+        });
+        Assert.Equal(new[] { 0xDE, 0xAD },
+            Assert.IsType<Dictionary<string, object?>>(binary["message"])["payload"]);
+
+        // RESP3: an [id, payload, priority, retry_count] array.
+        var resp3 = CommandMapper.MapResponse("queue.consume", new object?[] { "m-3", "hi", 5L, 0L });
+        var resp3Message = Assert.IsType<Dictionary<string, object?>>(resp3["message"]);
+        Assert.Equal("m-3", resp3Message["id"]);
+        Assert.Equal(new[] { 104, 105 }, resp3Message["payload"]);
+        Assert.Equal(5L, resp3Message["priority"]);
+        Assert.Equal(0L, resp3Message["retry_count"]);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("Null")]
+    public void MapResponse_QueueConsumeOnAnEmptyQueue_HasNoMessage(object? raw)
+    {
+        Assert.Null(CommandMapper.MapResponse("queue.consume", raw)["message"]);
+    }
+
+    [Fact]
+    public void MapResponse_PubSubPublish_ReadsBothNativeReplies()
+    {
+        // SynapRPC replies a map, RESP3 the subscriber count alone.
+        var rpc = CommandMapper.MapResponse("pubsub.publish", new Dictionary<string, object?>
+        {
+            ["message_id"] = "m1",
+            ["subscribers_matched"] = 2L,
+        });
+        Assert.Equal(2L, rpc["subscribers_matched"]);
+        Assert.Equal("m1", rpc["message_id"]);
+
+        Assert.Equal(3L, CommandMapper.MapResponse("pubsub.publish", 3L)["subscribers_matched"]);
+    }
+
+    [Fact]
+    public void MapResponse_TransactionExecArray_CarriesTheResults()
+    {
+        var result = CommandMapper.MapResponse("transaction.exec", new object?[] { "{\"ok\":true}" });
+        Assert.Equal(true, result["success"]);
+        Assert.Single(Assert.IsType<List<object?>>(result["results"]));
     }
 
     // =========================================================================

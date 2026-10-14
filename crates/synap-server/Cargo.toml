@@ -482,3 +482,7 @@ required-features = ["full-tests"]
 [[test]]
 name = "queue_replay_identity_tests"
 required-features = ["full-tests"]
+
+[[test]]
+name = "upgrade_from_1_3_2_tests"
+required-features = ["full-tests"]

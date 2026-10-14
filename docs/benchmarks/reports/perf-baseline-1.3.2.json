@@ -1,0 +1,6717 @@
+{
+  "schema": "synap-perf-baseline/1",
+  "started_at": "2026-10-14T06:41:33+00:00",
+  "finished_at": "2026-10-14T07:26:19+00:00",
+  "runner": {
+    "class": "local",
+    "comparable": false,
+    "note": "developer machine; comparable only with runs on the same machine under the same load"
+  },
+  "build": {
+    "server": {
+      "binary": "E:\\HiveLLM\\Synap-v132\\target\\release\\synap-server.exe",
+      "version": "1.3.2",
+      "source": "external binary (--server-bin)",
+      "git_sha": "bfecd0c0c98d353b5d06570c66fb19b1128d3444",
+      "git_dirty": null,
+      "profile": "release",
+      "toolchain": "rustc commit 6f72b5dd5f82226a2773d40efea7bab941892a73 (read from the binary)"
+    },
+    "loadgen": {
+      "binary": "E:\\HiveLLM\\Synap-wt-phase29\\target\\release\\examples\\bench_loadgen.exe",
+      "profile": "release",
+      "git_sha": "1cacdfc555094504c12d64804182470eef02b523",
+      "git_dirty": false,
+      "toolchain": "rustc 1.99.0-nightly (6f72b5dd5 2026-07-22) host=x86_64-pc-windows-msvc llvm=22.1.8"
+    }
+  },
+  "hardware": {
+    "arch": "x86_64",
+    "cpu_model": "AMD Ryzen 9 7950X3D 16-Core Processor",
+    "kernel": "26200",
+    "logical_cores": 32,
+    "os": "Windows 11 Pro",
+    "physical_cores": 16,
+    "ram_bytes": 136592523264,
+    "python": "3.13.9"
+  },
+  "parameters": {
+    "runs": 5,
+    "clients": 4,
+    "pipeline": 16,
+    "duration_s": 5.0,
+    "warmup_s": 1.0,
+    "keyspace": 100000,
+    "value_size": 64,
+    "order": "5 reports merged in start order, so run k is the k-th one measured; within each report: runs interleaved: every cell of run 1, then of run 2, ...; a fresh server per cell"
+  },
+  "merged_from": [
+    {
+      "started_at": "2026-10-14T06:41:33+00:00",
+      "runs": 1
+    },
+    {
+      "started_at": "2026-10-14T06:52:13+00:00",
+      "runs": 1
+    },
+    {
+      "started_at": "2026-10-14T07:02:24+00:00",
+      "runs": 1
+    },
+    {
+      "started_at": "2026-10-14T07:12:30+00:00",
+      "runs": 1
+    },
+    {
+      "started_at": "2026-10-14T07:22:44+00:00",
+      "runs": 1
+    }
+  ],
+  "durability_modes": {
+    "off": {
+      "enabled": false,
+      "wal": {
+        "enabled": false,
+        "path": "<scratch>/wal/synap.wal",
+        "buffer_size_kb": 64,
+        "fsync_mode": "always",
+        "fsync_interval_ms": 1000,
+        "max_size_mb": 1024
+      },
+      "snapshot": {
+        "enabled": false,
+        "directory": "<scratch>/snapshots",
+        "interval_secs": 300,
+        "operation_threshold": 10000,
+        "max_snapshots": 10,
+        "compression": false
+      }
+    },
+    "never": {
+      "enabled": true,
+      "wal": {
+        "enabled": true,
+        "path": "<scratch>/wal/synap.wal",
+        "buffer_size_kb": 64,
+        "fsync_mode": "never",
+        "fsync_interval_ms": 1000,
+        "max_size_mb": 1024
+      },
+      "snapshot": {
+        "enabled": true,
+        "directory": "<scratch>/snapshots",
+        "interval_secs": 300,
+        "operation_threshold": 10000,
+        "max_snapshots": 10,
+        "compression": false
+      }
+    },
+    "periodic": {
+      "enabled": true,
+      "wal": {
+        "enabled": true,
+        "path": "<scratch>/wal/synap.wal",
+        "buffer_size_kb": 64,
+        "fsync_mode": "periodic",
+        "fsync_interval_ms": 1000,
+        "max_size_mb": 1024
+      },
+      "snapshot": {
+        "enabled": true,
+        "directory": "<scratch>/snapshots",
+        "interval_secs": 300,
+        "operation_threshold": 10000,
+        "max_snapshots": 10,
+        "compression": false
+      }
+    },
+    "always": {
+      "enabled": true,
+      "wal": {
+        "enabled": true,
+        "path": "<scratch>/wal/synap.wal",
+        "buffer_size_kb": 64,
+        "fsync_mode": "always",
+        "fsync_interval_ms": 1000,
+        "max_size_mb": 1024
+      },
+      "snapshot": {
+        "enabled": true,
+        "directory": "<scratch>/snapshots",
+        "interval_secs": 300,
+        "operation_threshold": 10000,
+        "max_snapshots": 10,
+        "compression": false
+      }
+    }
+  },
+  "workloads": {
+    "get": "GET of a random key from a pre-written keyspace, one request per round trip",
+    "set": "SET of a random key, one request per round trip",
+    "list": "RPUSH then LPOP alternating on one list per client, one request per round trip",
+    "set-pipelined": "SET of a random key, --pipeline requests per round trip"
+  },
+  "failures": 0,
+  "results": [
+    {
+      "durability": "off",
+      "protocol": "resp3",
+      "workload": "get",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 35849.6,
+          "min": 35189.06,
+          "max": 36946.19,
+          "spread_pct": 4.9,
+          "stdev": 727.44,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 105.0,
+          "min": 101.9,
+          "max": 106.6,
+          "spread_pct": 4.48,
+          "stdev": 1.95,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 165.3,
+          "min": 159.1,
+          "max": 167.9,
+          "spread_pct": 5.32,
+          "stdev": 4.04,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 213.4,
+          "min": 202.6,
+          "max": 216.0,
+          "spread_pct": 6.28,
+          "stdev": 6.78,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35688448,
+          "min": 35467264,
+          "max": 35786752,
+          "spread_pct": 0.9,
+          "stdev": 131774.12,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35688448,
+          "min": 35467264,
+          "max": 35786752,
+          "spread_pct": 0.9,
+          "stdev": 131774.12,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1467.5,
+            "mean": 106.46,
+            "p50": 101.9,
+            "p95": 159.1,
+            "p99": 202.6,
+            "p999": 309.8
+          },
+          "ops": 184735,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35786752,
+            "peak": 35786752,
+            "samples": 67,
+            "start": 35786752
+          },
+          "throughput_ops_s": 36946.19,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3882.1,
+            "mean": 107.38,
+            "p50": 102.6,
+            "p95": 159.7,
+            "p99": 202.7,
+            "p999": 309.6
+          },
+          "ops": 183224,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35688448,
+            "peak": 35688448,
+            "samples": 72,
+            "start": 35684352
+          },
+          "throughput_ops_s": 36644.14,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00006,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 4866.3,
+            "mean": 110.44,
+            "p50": 105.2,
+            "p95": 165.3,
+            "p99": 213.4,
+            "p999": 317.4
+          },
+          "ops": 178136,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35778560,
+            "peak": 35778560,
+            "samples": 70,
+            "start": 35766272
+          },
+          "throughput_ops_s": 35626.77,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00008,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 62221.5,
+            "mean": 109.85,
+            "p50": 105.0,
+            "p95": 166.5,
+            "p99": 216.0,
+            "p999": 336.7
+          },
+          "ops": 179251,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35467264,
+            "peak": 35467264,
+            "samples": 66,
+            "start": 35467264
+          },
+          "throughput_ops_s": 35849.6,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3036.7,
+            "mean": 111.85,
+            "p50": 106.6,
+            "p95": 167.9,
+            "p99": 215.3,
+            "p999": 323.6
+          },
+          "ops": 175949,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35618816,
+            "peak": 35618816,
+            "samples": 69,
+            "start": 35618816
+          },
+          "throughput_ops_s": 35189.06,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        }
+      ]
+    },
+    {
+      "durability": "off",
+      "protocol": "resp3",
+      "workload": "set",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 35223.3,
+          "min": 33193.11,
+          "max": 36200.55,
+          "spread_pct": 8.54,
+          "stdev": 1225.76,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 106.7,
+          "min": 103.6,
+          "max": 113.4,
+          "spread_pct": 9.18,
+          "stdev": 3.95,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 165.8,
+          "min": 162.1,
+          "max": 180.0,
+          "spread_pct": 10.8,
+          "stdev": 7.3,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 212.3,
+          "min": 209.4,
+          "max": 235.8,
+          "spread_pct": 12.44,
+          "stdev": 11.23,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35454976,
+          "min": 34844672,
+          "max": 36065280,
+          "spread_pct": 3.44,
+          "stdev": 461699.33,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35454976,
+          "min": 34844672,
+          "max": 36065280,
+          "spread_pct": 3.44,
+          "stdev": 461699.33,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2321.9,
+            "mean": 109.56,
+            "p50": 104.2,
+            "p95": 164.2,
+            "p99": 212.3,
+            "p999": 351.6
+          },
+          "ops": 179466,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35790848,
+            "peak": 35790848,
+            "samples": 72,
+            "start": 15900672
+          },
+          "throughput_ops_s": 35892.48,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1676.8,
+            "mean": 111.66,
+            "p50": 106.7,
+            "p95": 165.8,
+            "p99": 209.8,
+            "p999": 342.2
+          },
+          "ops": 176120,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35368960,
+            "peak": 35368960,
+            "samples": 70,
+            "start": 15691776
+          },
+          "throughput_ops_s": 35223.3,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00006,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 6617.0,
+            "mean": 108.63,
+            "p50": 103.6,
+            "p95": 162.1,
+            "p99": 209.4,
+            "p999": 321.4
+          },
+          "ops": 181005,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 36065280,
+            "peak": 36065280,
+            "samples": 71,
+            "start": 15884288
+          },
+          "throughput_ops_s": 36200.55,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1891.1,
+            "mean": 118.65,
+            "p50": 113.4,
+            "p95": 180.0,
+            "p99": 235.8,
+            "p999": 356.3
+          },
+          "ops": 165969,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35454976,
+            "peak": 35454976,
+            "samples": 66,
+            "start": 15888384
+          },
+          "throughput_ops_s": 33193.11,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 65404.0,
+            "mean": 114.63,
+            "p50": 108.6,
+            "p95": 172.4,
+            "p99": 221.8,
+            "p999": 342.2
+          },
+          "ops": 171600,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 34844672,
+            "peak": 34844672,
+            "samples": 68,
+            "start": 15822848
+          },
+          "throughput_ops_s": 34319.4,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "off",
+      "protocol": "resp3",
+      "workload": "list",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 35542.2,
+          "min": 35272.17,
+          "max": 36688.3,
+          "spread_pct": 3.98,
+          "stdev": 584.81,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 106.3,
+          "min": 103.6,
+          "max": 106.6,
+          "spread_pct": 2.82,
+          "stdev": 1.25,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 165.8,
+          "min": 163.7,
+          "max": 168.7,
+          "spread_pct": 3.02,
+          "stdev": 2.16,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 211.1,
+          "min": 208.2,
+          "max": 219.4,
+          "spread_pct": 5.31,
+          "stdev": 4.89,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 15511552,
+          "min": 15466496,
+          "max": 15577088,
+          "spread_pct": 0.71,
+          "stdev": 43289.9,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 15511552,
+          "min": 15466496,
+          "max": 15577088,
+          "spread_pct": 0.71,
+          "stdev": 43289.9,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1856.8,
+            "mean": 111.98,
+            "p50": 106.5,
+            "p95": 168.7,
+            "p99": 219.4,
+            "p999": 348.7
+          },
+          "ops": 176373,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15466496,
+            "peak": 15466496,
+            "samples": 71,
+            "start": 15450112
+          },
+          "throughput_ops_s": 35273.84,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00014,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3392.9,
+            "mean": 111.12,
+            "p50": 106.3,
+            "p95": 164.4,
+            "p99": 208.2,
+            "p999": 325.9
+          },
+          "ops": 177716,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15556608,
+            "peak": 15556608,
+            "samples": 71,
+            "start": 15515648
+          },
+          "throughput_ops_s": 35542.2,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 5077.4,
+            "mean": 112.01,
+            "p50": 106.6,
+            "p95": 167.9,
+            "p99": 216.9,
+            "p999": 330.6
+          },
+          "ops": 176364,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15511552,
+            "peak": 15511552,
+            "samples": 70,
+            "start": 15503360
+          },
+          "throughput_ops_s": 35272.17,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1745.0,
+            "mean": 107.75,
+            "p50": 103.6,
+            "p95": 163.7,
+            "p99": 209.4,
+            "p999": 324.6
+          },
+          "ops": 183445,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15511552,
+            "peak": 15511552,
+            "samples": 69,
+            "start": 15441920
+          },
+          "throughput_ops_s": 36688.3,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00008,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1464.9,
+            "mean": 110.77,
+            "p50": 105.7,
+            "p95": 165.8,
+            "p99": 211.1,
+            "p999": 314.2
+          },
+          "ops": 178232,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15577088,
+            "peak": 15577088,
+            "samples": 67,
+            "start": 15560704
+          },
+          "throughput_ops_s": 35645.86,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        }
+      ]
+    },
+    {
+      "durability": "off",
+      "protocol": "resp3",
+      "workload": "set-pipelined",
+      "pipeline": 16,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 378965.24,
+          "min": 313920.97,
+          "max": 380945.33,
+          "spread_pct": 17.69,
+          "stdev": 28515.33,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 154.7,
+          "min": 150.5,
+          "max": 184.9,
+          "spread_pct": 22.24,
+          "stdev": 13.84,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 238.9,
+          "min": 236.9,
+          "max": 294.4,
+          "spread_pct": 24.07,
+          "stdev": 24.49,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 304.6,
+          "min": 295.5,
+          "max": 384.1,
+          "spread_pct": 29.09,
+          "stdev": 36.91,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 37924864,
+          "min": 36896768,
+          "max": 38072320,
+          "spread_pct": 3.1,
+          "stdev": 557209.58,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 37924864,
+          "min": 36896768,
+          "max": 38072320,
+          "spread_pct": 3.1,
+          "stdev": 557209.58,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.05941,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 109222.2,
+            "mean": 159.77,
+            "p50": 150.5,
+            "p95": 236.9,
+            "p99": 304.6,
+            "p999": 448.3
+          },
+          "ops": 1927360,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 37924864,
+            "peak": 37924864,
+            "samples": 72,
+            "start": 18386944
+          },
+          "throughput_ops_s": 380945.33,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2578.3,
+            "mean": 162.06,
+            "p50": 154.7,
+            "p95": 237.9,
+            "p99": 299.0,
+            "p999": 448.5
+          },
+          "ops": 1894864,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 37146624,
+            "peak": 37146624,
+            "samples": 71,
+            "start": 18599936
+          },
+          "throughput_ops_s": 378965.24,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00019,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2990.5,
+            "mean": 196.21,
+            "p50": 184.9,
+            "p95": 294.4,
+            "p99": 384.1,
+            "p999": 676.8
+          },
+          "ops": 1569664,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 38064128,
+            "peak": 38064128,
+            "samples": 62,
+            "start": 18501632
+          },
+          "throughput_ops_s": 313920.97,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00021,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2244.8,
+            "mean": 168.56,
+            "p50": 160.7,
+            "p95": 250.1,
+            "p99": 311.9,
+            "p999": 469.5
+          },
+          "ops": 1821776,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 38072320,
+            "peak": 38072320,
+            "samples": 67,
+            "start": 20471808
+          },
+          "throughput_ops_s": 364339.67,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.0002200000000006,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1698.6,
+            "mean": 161.77,
+            "p50": 154.3,
+            "p95": 238.9,
+            "p99": 295.5,
+            "p999": 436.9
+          },
+          "ops": 1896672,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 36896768,
+            "peak": 36896768,
+            "samples": 64,
+            "start": 19959808
+          },
+          "throughput_ops_s": 379317.63,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "off",
+      "protocol": "synaprpc",
+      "workload": "get",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 33104.13,
+          "min": 32728.3,
+          "max": 34652.63,
+          "spread_pct": 5.81,
+          "stdev": 753.82,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 111.8,
+          "min": 108.1,
+          "max": 113.6,
+          "spread_pct": 4.92,
+          "stdev": 2.11,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 180.5,
+          "min": 173.6,
+          "max": 183.2,
+          "spread_pct": 5.32,
+          "stdev": 3.72,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 223.8,
+          "min": 218.6,
+          "max": 239.2,
+          "spread_pct": 9.2,
+          "stdev": 8.95,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35672064,
+          "min": 35586048,
+          "max": 36245504,
+          "spread_pct": 1.85,
+          "stdev": 266658.72,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35672064,
+          "min": 35586048,
+          "max": 36245504,
+          "spread_pct": 1.85,
+          "stdev": 266658.72,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.0004,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1304.8,
+            "mean": 118.3,
+            "p50": 111.8,
+            "p95": 181.9,
+            "p99": 233.7,
+            "p999": 342.9
+          },
+          "ops": 165534,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35672064,
+            "peak": 35672064,
+            "samples": 69,
+            "start": 35672064
+          },
+          "throughput_ops_s": 33104.13,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3101.8,
+            "mean": 118.43,
+            "p50": 112.7,
+            "p95": 179.1,
+            "p99": 220.2,
+            "p999": 326.7
+          },
+          "ops": 165408,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35586048,
+            "peak": 35586048,
+            "samples": 66,
+            "start": 35577856
+          },
+          "throughput_ops_s": 33080.95,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 5551.7,
+            "mean": 118.32,
+            "p50": 111.0,
+            "p95": 183.2,
+            "p99": 239.2,
+            "p999": 430.1
+          },
+          "ops": 165551,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35647488,
+            "peak": 35647488,
+            "samples": 69,
+            "start": 35639296
+          },
+          "throughput_ops_s": 33109.45,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2700.2,
+            "mean": 113.03,
+            "p50": 108.1,
+            "p95": 173.6,
+            "p99": 218.6,
+            "p999": 321.1
+          },
+          "ops": 173267,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35749888,
+            "peak": 35749888,
+            "samples": 68,
+            "start": 35721216
+          },
+          "throughput_ops_s": 34652.63,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00008,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3278.7,
+            "mean": 119.45,
+            "p50": 113.6,
+            "p95": 180.5,
+            "p99": 223.8,
+            "p999": 336.5
+          },
+          "ops": 163644,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 36245504,
+            "peak": 36245504,
+            "samples": 65,
+            "start": 36220928
+          },
+          "throughput_ops_s": 32728.3,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        }
+      ]
+    },
+    {
+      "durability": "off",
+      "protocol": "synaprpc",
+      "workload": "set",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 31788.23,
+          "min": 31382.96,
+          "max": 34329.98,
+          "spread_pct": 9.27,
+          "stdev": 1273.45,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 115.4,
+          "min": 107.4,
+          "max": 117.8,
+          "spread_pct": 9.01,
+          "stdev": 4.35,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 186.7,
+          "min": 171.5,
+          "max": 190.3,
+          "spread_pct": 10.07,
+          "stdev": 8.11,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 235.2,
+          "min": 210.9,
+          "max": 238.8,
+          "spread_pct": 11.86,
+          "stdev": 12.99,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35155968,
+          "min": 35037184,
+          "max": 35475456,
+          "spread_pct": 1.25,
+          "stdev": 178737.73,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35155968,
+          "min": 35037184,
+          "max": 35475456,
+          "spread_pct": 1.25,
+          "stdev": 178737.73,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00007,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1270.5,
+            "mean": 122.8,
+            "p50": 116.4,
+            "p95": 187.5,
+            "p99": 235.2,
+            "p999": 374.2
+          },
+          "ops": 158179,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35041280,
+            "peak": 35041280,
+            "samples": 69,
+            "start": 15863808
+          },
+          "throughput_ops_s": 31635.34,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 8357.1,
+            "mean": 122.13,
+            "p50": 115.4,
+            "p95": 186.7,
+            "p99": 235.2,
+            "p999": 393.2
+          },
+          "ops": 158944,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35196928,
+            "peak": 35196928,
+            "samples": 67,
+            "start": 16011264
+          },
+          "throughput_ops_s": 31788.23,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 4040.8,
+            "mean": 113.0,
+            "p50": 107.4,
+            "p95": 171.5,
+            "p99": 210.9,
+            "p999": 320.4
+          },
+          "ops": 171653,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35037184,
+            "peak": 35037184,
+            "samples": 68,
+            "start": 15978496
+          },
+          "throughput_ops_s": 34329.98,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.0001999999999995,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1944.2,
+            "mean": 123.75,
+            "p50": 117.8,
+            "p95": 190.3,
+            "p99": 238.8,
+            "p999": 365.7
+          },
+          "ops": 156921,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35155968,
+            "peak": 35155968,
+            "samples": 68,
+            "start": 16019456
+          },
+          "throughput_ops_s": 31382.96,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3493.3,
+            "mean": 116.56,
+            "p50": 110.7,
+            "p95": 176.3,
+            "p99": 215.1,
+            "p999": 330.9
+          },
+          "ops": 166493,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35475456,
+            "peak": 35475456,
+            "samples": 66,
+            "start": 16105472
+          },
+          "throughput_ops_s": 33297.94,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "off",
+      "protocol": "synaprpc",
+      "workload": "list",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 33713.77,
+          "min": 32108.49,
+          "max": 34394.52,
+          "spread_pct": 6.78,
+          "stdev": 925.29,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 109.9,
+          "min": 107.6,
+          "max": 115.1,
+          "spread_pct": 6.82,
+          "stdev": 2.88,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 177.0,
+          "min": 173.6,
+          "max": 184.5,
+          "spread_pct": 6.16,
+          "stdev": 4.38,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 220.6,
+          "min": 213.9,
+          "max": 230.3,
+          "spread_pct": 7.43,
+          "stdev": 6.37,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 15691776,
+          "min": 15593472,
+          "max": 15814656,
+          "spread_pct": 1.41,
+          "stdev": 85064.76,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 15659008,
+          "min": 15593472,
+          "max": 15691776,
+          "spread_pct": 0.63,
+          "stdev": 38270.76,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00008,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1130.2,
+            "mean": 121.34,
+            "p50": 115.1,
+            "p95": 184.5,
+            "p99": 230.3,
+            "p999": 360.7
+          },
+          "ops": 160545,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15659008,
+            "peak": 15814656,
+            "samples": 65,
+            "start": 15765504
+          },
+          "throughput_ops_s": 32108.49,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00027,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1167.1,
+            "mean": 115.61,
+            "p50": 109.9,
+            "p95": 174.6,
+            "p99": 213.9,
+            "p999": 319.1
+          },
+          "ops": 168578,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15671296,
+            "peak": 15671296,
+            "samples": 69,
+            "start": 15654912
+          },
+          "throughput_ops_s": 33713.77,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00013,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1774.2,
+            "mean": 113.26,
+            "p50": 107.6,
+            "p95": 173.6,
+            "p99": 216.4,
+            "p999": 323.7
+          },
+          "ops": 171977,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15593472,
+            "peak": 15593472,
+            "samples": 67,
+            "start": 15548416
+          },
+          "throughput_ops_s": 34394.52,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2162.6,
+            "mean": 114.82,
+            "p50": 109.8,
+            "p95": 177.0,
+            "p99": 223.1,
+            "p999": 331.3
+          },
+          "ops": 169785,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15630336,
+            "peak": 15761408,
+            "samples": 65,
+            "start": 15712256
+          },
+          "throughput_ops_s": 33956.34,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00015,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 77322.7,
+            "mean": 118.8,
+            "p50": 112.5,
+            "p95": 179.6,
+            "p99": 220.6,
+            "p999": 323.3
+          },
+          "ops": 164006,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15691776,
+            "peak": 15691776,
+            "samples": 62,
+            "start": 15634432
+          },
+          "throughput_ops_s": 32800.22,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        }
+      ]
+    },
+    {
+      "durability": "off",
+      "protocol": "synaprpc",
+      "workload": "set-pipelined",
+      "pipeline": 16,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 336556.74,
+          "min": 325590.39,
+          "max": 343454.38,
+          "spread_pct": 5.31,
+          "stdev": 8079.39,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 164.3,
+          "min": 160.0,
+          "max": 169.5,
+          "spread_pct": 5.78,
+          "stdev": 4.07,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 256.3,
+          "min": 251.2,
+          "max": 263.4,
+          "spread_pct": 4.76,
+          "stdev": 5.36,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 314.6,
+          "min": 308.0,
+          "max": 322.0,
+          "spread_pct": 4.45,
+          "stdev": 5.38,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 37478400,
+          "min": 37273600,
+          "max": 37822464,
+          "spread_pct": 1.46,
+          "stdev": 261175.81,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 37478400,
+          "min": 37273600,
+          "max": 37822464,
+          "spread_pct": 1.46,
+          "stdev": 261175.81,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00019,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1696.5,
+            "mean": 173.29,
+            "p50": 164.3,
+            "p95": 256.3,
+            "p99": 314.6,
+            "p999": 468.5
+          },
+          "ops": 1682848,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37294080,
+            "peak": 37294080,
+            "samples": 69,
+            "start": 18534400
+          },
+          "throughput_ops_s": 336556.74,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00013,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2138.6,
+            "mean": 169.91,
+            "p50": 161.4,
+            "p95": 251.2,
+            "p99": 308.0,
+            "p999": 415.4
+          },
+          "ops": 1709920,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37273600,
+            "peak": 37273600,
+            "samples": 71,
+            "start": 18718720
+          },
+          "throughput_ops_s": 341974.87,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00012,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 21935.2,
+            "mean": 169.64,
+            "p50": 160.0,
+            "p95": 251.6,
+            "p99": 311.1,
+            "p999": 436.7
+          },
+          "ops": 1717312,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37822464,
+            "peak": 37822464,
+            "samples": 68,
+            "start": 18849792
+          },
+          "throughput_ops_s": 343454.38,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00018,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 50313.0,
+            "mean": 176.44,
+            "p50": 167.9,
+            "p95": 260.4,
+            "p99": 316.9,
+            "p999": 430.1
+          },
+          "ops": 1639680,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37781504,
+            "peak": 37781504,
+            "samples": 69,
+            "start": 18972672
+          },
+          "throughput_ops_s": 327924.21,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00015,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 8127.6,
+            "mean": 178.29,
+            "p50": 169.5,
+            "p95": 263.4,
+            "p99": 322.0,
+            "p999": 453.3
+          },
+          "ops": 1628000,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37478400,
+            "peak": 37478400,
+            "samples": 69,
+            "start": 18526208
+          },
+          "throughput_ops_s": 325590.39,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "never",
+      "protocol": "resp3",
+      "workload": "get",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 35334.71,
+          "min": 35261.28,
+          "max": 37278.2,
+          "spread_pct": 5.71,
+          "stdev": 882.4,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 105.8,
+          "min": 100.8,
+          "max": 107.1,
+          "spread_pct": 5.95,
+          "stdev": 2.57,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 166.4,
+          "min": 156.7,
+          "max": 169.7,
+          "spread_pct": 7.81,
+          "stdev": 5.23,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 213.4,
+          "min": 198.3,
+          "max": 219.0,
+          "spread_pct": 9.7,
+          "stdev": 8.43,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35635200,
+          "min": 35164160,
+          "max": 35913728,
+          "spread_pct": 2.1,
+          "stdev": 277011.97,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35635200,
+          "min": 35164160,
+          "max": 35913728,
+          "spread_pct": 2.1,
+          "stdev": 277011.97,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00013,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1649.0,
+            "mean": 111.36,
+            "p50": 106.0,
+            "p95": 166.4,
+            "p99": 213.4,
+            "p999": 353.2
+          },
+          "ops": 176678,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35913728,
+            "peak": 35913728,
+            "samples": 71,
+            "start": 35909632
+          },
+          "throughput_ops_s": 35334.71,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00008,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1962.5,
+            "mean": 105.5,
+            "p50": 100.8,
+            "p95": 156.7,
+            "p99": 198.3,
+            "p999": 308.8
+          },
+          "ops": 186394,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35164160,
+            "peak": 35164160,
+            "samples": 71,
+            "start": 35160064
+          },
+          "throughput_ops_s": 37278.2,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00008,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2300.6,
+            "mean": 108.42,
+            "p50": 103.1,
+            "p95": 163.6,
+            "p99": 211.2,
+            "p999": 328.2
+          },
+          "ops": 181412,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35618816,
+            "peak": 35618816,
+            "samples": 68,
+            "start": 35614720
+          },
+          "throughput_ops_s": 36281.83,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2375.6,
+            "mean": 111.73,
+            "p50": 107.1,
+            "p95": 169.7,
+            "p99": 218.7,
+            "p999": 336.2
+          },
+          "ops": 176310,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35635200,
+            "peak": 35635200,
+            "samples": 69,
+            "start": 35631104
+          },
+          "throughput_ops_s": 35261.28,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00005,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1319.6,
+            "mean": 111.4,
+            "p50": 105.8,
+            "p95": 168.8,
+            "p99": 219.0,
+            "p999": 341.3
+          },
+          "ops": 176578,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35733504,
+            "peak": 35733504,
+            "samples": 64,
+            "start": 35733504
+          },
+          "throughput_ops_s": 35315.25,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        }
+      ]
+    },
+    {
+      "durability": "never",
+      "protocol": "resp3",
+      "workload": "set",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 35570.85,
+          "min": 33787.0,
+          "max": 36096.56,
+          "spread_pct": 6.49,
+          "stdev": 1122.58,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 105.4,
+          "min": 103.6,
+          "max": 111.1,
+          "spread_pct": 7.12,
+          "stdev": 3.28,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 166.0,
+          "min": 163.6,
+          "max": 178.0,
+          "spread_pct": 8.67,
+          "stdev": 6.27,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 215.6,
+          "min": 212.8,
+          "max": 230.2,
+          "spread_pct": 8.07,
+          "stdev": 7.43,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35336192,
+          "min": 35069952,
+          "max": 35663872,
+          "spread_pct": 1.68,
+          "stdev": 226716.47,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35336192,
+          "min": 35069952,
+          "max": 35663872,
+          "spread_pct": 1.68,
+          "stdev": 226716.47,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1308.3,
+            "mean": 110.56,
+            "p50": 105.4,
+            "p95": 165.3,
+            "p99": 213.3,
+            "p999": 337.7
+          },
+          "ops": 177858,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35373056,
+            "peak": 35373056,
+            "samples": 71,
+            "start": 15904768
+          },
+          "throughput_ops_s": 35570.85,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00012,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1449.1,
+            "mean": 116.08,
+            "p50": 109.9,
+            "p95": 178.0,
+            "p99": 230.2,
+            "p999": 351.3
+          },
+          "ops": 169445,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35663872,
+            "peak": 35663872,
+            "samples": 69,
+            "start": 16064512
+          },
+          "throughput_ops_s": 33888.22,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00006,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1763.5,
+            "mean": 108.94,
+            "p50": 103.6,
+            "p95": 163.6,
+            "p99": 212.8,
+            "p999": 332.8
+          },
+          "ops": 180485,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35336192,
+            "peak": 35336192,
+            "samples": 71,
+            "start": 16109568
+          },
+          "throughput_ops_s": 36096.56,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1447.5,
+            "mean": 109.65,
+            "p50": 105.1,
+            "p95": 166.0,
+            "p99": 215.6,
+            "p999": 337.5
+          },
+          "ops": 179523,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35172352,
+            "peak": 35172352,
+            "samples": 70,
+            "start": 16097280
+          },
+          "throughput_ops_s": 35903.98,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00012,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 4378.4,
+            "mean": 116.42,
+            "p50": 111.1,
+            "p95": 174.0,
+            "p99": 222.6,
+            "p999": 323.8
+          },
+          "ops": 168939,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35069952,
+            "peak": 35069952,
+            "samples": 68,
+            "start": 16019456
+          },
+          "throughput_ops_s": 33787.0,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "never",
+      "protocol": "resp3",
+      "workload": "list",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 35489.27,
+          "min": 35282.39,
+          "max": 38398.62,
+          "spread_pct": 8.78,
+          "stdev": 1341.33,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 105.9,
+          "min": 98.7,
+          "max": 107.6,
+          "spread_pct": 8.4,
+          "stdev": 3.54,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 166.7,
+          "min": 153.3,
+          "max": 169.1,
+          "spread_pct": 9.48,
+          "stdev": 6.44,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 214.2,
+          "min": 197.1,
+          "max": 216.5,
+          "spread_pct": 9.06,
+          "stdev": 8.09,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 15831040,
+          "min": 15626240,
+          "max": 15863808,
+          "spread_pct": 1.5,
+          "stdev": 96147.0,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 15683584,
+          "min": 15568896,
+          "max": 15831040,
+          "spread_pct": 1.67,
+          "stdev": 113304.57,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1653.3,
+            "mean": 111.05,
+            "p50": 105.9,
+            "p95": 165.4,
+            "p99": 213.4,
+            "p999": 351.0
+          },
+          "ops": 177809,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15831040,
+            "peak": 15831040,
+            "samples": 67,
+            "start": 15822848
+          },
+          "throughput_ops_s": 35561.17,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00008,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1631.4,
+            "mean": 111.89,
+            "p50": 106.5,
+            "p95": 168.2,
+            "p99": 216.5,
+            "p999": 341.2
+          },
+          "ops": 176556,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15626240,
+            "peak": 15626240,
+            "samples": 68,
+            "start": 15613952
+          },
+          "throughput_ops_s": 35310.63,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00005,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3443.5,
+            "mean": 102.86,
+            "p50": 98.7,
+            "p95": 153.3,
+            "p99": 197.1,
+            "p999": 314.6
+          },
+          "ops": 191995,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15568896,
+            "peak": 15843328,
+            "samples": 75,
+            "start": 15835136
+          },
+          "throughput_ops_s": 38398.62,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2165.7,
+            "mean": 112.06,
+            "p50": 107.6,
+            "p95": 169.1,
+            "p99": 215.8,
+            "p999": 324.1
+          },
+          "ops": 176415,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15683584,
+            "peak": 15863808,
+            "samples": 68,
+            "start": 15855616
+          },
+          "throughput_ops_s": 35282.39,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00016,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 73991.8,
+            "mean": 111.3,
+            "p50": 105.8,
+            "p95": 166.7,
+            "p99": 214.2,
+            "p999": 325.0
+          },
+          "ops": 177452,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15806464,
+            "peak": 15806464,
+            "samples": 69,
+            "start": 15790080
+          },
+          "throughput_ops_s": 35489.27,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        }
+      ]
+    },
+    {
+      "durability": "never",
+      "protocol": "resp3",
+      "workload": "set-pipelined",
+      "pipeline": 16,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 388981.22,
+          "min": 371402.98,
+          "max": 411358.42,
+          "spread_pct": 10.27,
+          "stdev": 14796.9,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 150.4,
+          "min": 142.1,
+          "max": 157.7,
+          "spread_pct": 10.37,
+          "stdev": 5.84,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 232.2,
+          "min": 219.3,
+          "max": 244.7,
+          "spread_pct": 10.94,
+          "stdev": 9.36,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 290.8,
+          "min": 280.3,
+          "max": 307.7,
+          "spread_pct": 9.42,
+          "stdev": 10.18,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 37478400,
+          "min": 37105664,
+          "max": 37625856,
+          "spread_pct": 1.39,
+          "stdev": 224103.99,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 37478400,
+          "min": 37105664,
+          "max": 37625856,
+          "spread_pct": 1.39,
+          "stdev": 224103.99,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00014,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1267.1,
+            "mean": 157.95,
+            "p50": 150.4,
+            "p95": 233.5,
+            "p99": 293.9,
+            "p999": 460.5
+          },
+          "ops": 1943216,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 37105664,
+            "peak": 37105664,
+            "samples": 71,
+            "start": 18284544
+          },
+          "throughput_ops_s": 388632.34,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00014,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2672.2,
+            "mean": 157.79,
+            "p50": 150.5,
+            "p95": 232.2,
+            "p99": 290.8,
+            "p999": 402.0
+          },
+          "ops": 1944960,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 37625856,
+            "peak": 37625856,
+            "samples": 68,
+            "start": 18968576
+          },
+          "throughput_ops_s": 388981.22,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00014,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1560.4,
+            "mean": 149.16,
+            "p50": 142.1,
+            "p95": 219.3,
+            "p99": 280.3,
+            "p999": 406.6
+          },
+          "ops": 2056848,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 37482496,
+            "peak": 37482496,
+            "samples": 73,
+            "start": 18984960
+          },
+          "throughput_ops_s": 411358.42,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00015,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 5754.9,
+            "mean": 165.18,
+            "p50": 157.7,
+            "p95": 244.7,
+            "p99": 307.7,
+            "p999": 441.1
+          },
+          "ops": 1857072,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 37167104,
+            "peak": 37167104,
+            "samples": 64,
+            "start": 20520960
+          },
+          "throughput_ops_s": 371402.98,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.0001999999999995,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 33805.7,
+            "mean": 153.58,
+            "p50": 145.9,
+            "p95": 226.7,
+            "p99": 286.9,
+            "p999": 423.3
+          },
+          "ops": 1997616,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 37478400,
+            "peak": 37478400,
+            "samples": 71,
+            "start": 18890752
+          },
+          "throughput_ops_s": 399507.06,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "never",
+      "protocol": "synaprpc",
+      "workload": "get",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 35046.22,
+          "min": 33109.3,
+          "max": 35366.55,
+          "spread_pct": 6.44,
+          "stdev": 939.81,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 106.8,
+          "min": 105.1,
+          "max": 112.3,
+          "spread_pct": 6.74,
+          "stdev": 2.87,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 171.3,
+          "min": 167.0,
+          "max": 179.3,
+          "spread_pct": 7.18,
+          "stdev": 4.54,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 215.7,
+          "min": 209.3,
+          "max": 222.9,
+          "spread_pct": 6.31,
+          "stdev": 4.89,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35741696,
+          "min": 35360768,
+          "max": 35856384,
+          "spread_pct": 1.39,
+          "stdev": 187979.18,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35741696,
+          "min": 35360768,
+          "max": 35856384,
+          "spread_pct": 1.39,
+          "stdev": 187979.18,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00006,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1483.3,
+            "mean": 110.75,
+            "p50": 105.1,
+            "p95": 167.0,
+            "p99": 209.3,
+            "p999": 332.5
+          },
+          "ops": 176835,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35741696,
+            "peak": 35741696,
+            "samples": 73,
+            "start": 35733504
+          },
+          "throughput_ops_s": 35366.55,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00014,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1130.7,
+            "mean": 118.29,
+            "p50": 112.3,
+            "p95": 179.3,
+            "p99": 222.9,
+            "p999": 346.9
+          },
+          "ops": 165551,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35741696,
+            "peak": 35741696,
+            "samples": 66,
+            "start": 35733504
+          },
+          "throughput_ops_s": 33109.3,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1681.2,
+            "mean": 111.59,
+            "p50": 105.8,
+            "p95": 170.2,
+            "p99": 214.7,
+            "p999": 331.6
+          },
+          "ops": 175608,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35856384,
+            "peak": 35856384,
+            "samples": 71,
+            "start": 35848192
+          },
+          "throughput_ops_s": 35120.93,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 8057.1,
+            "mean": 111.78,
+            "p50": 106.8,
+            "p95": 171.3,
+            "p99": 217.2,
+            "p999": 317.6
+          },
+          "ops": 175235,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35360768,
+            "peak": 35360768,
+            "samples": 69,
+            "start": 35356672
+          },
+          "throughput_ops_s": 35046.22,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00007,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 75721.0,
+            "mean": 114.74,
+            "p50": 108.5,
+            "p95": 172.7,
+            "p99": 215.7,
+            "p999": 321.2
+          },
+          "ops": 170415,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35643392,
+            "peak": 35643392,
+            "samples": 70,
+            "start": 35639296
+          },
+          "throughput_ops_s": 34082.51,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        }
+      ]
+    },
+    {
+      "durability": "never",
+      "protocol": "synaprpc",
+      "workload": "set",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 33031.26,
+          "min": 31641.27,
+          "max": 36488.7,
+          "spread_pct": 14.68,
+          "stdev": 1903.85,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 111.0,
+          "min": 101.6,
+          "max": 116.5,
+          "spread_pct": 13.42,
+          "stdev": 5.84,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 179.1,
+          "min": 161.8,
+          "max": 186.7,
+          "spread_pct": 13.9,
+          "stdev": 10.03,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 223.5,
+          "min": 199.0,
+          "max": 233.3,
+          "spread_pct": 15.35,
+          "stdev": 13.99,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35377152,
+          "min": 35069952,
+          "max": 36061184,
+          "spread_pct": 2.8,
+          "stdev": 365777.62,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35377152,
+          "min": 35069952,
+          "max": 36061184,
+          "spread_pct": 2.8,
+          "stdev": 365777.62,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00017,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2012.6,
+            "mean": 116.64,
+            "p50": 110.9,
+            "p95": 176.6,
+            "p99": 217.9,
+            "p999": 309.1
+          },
+          "ops": 166557,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35356672,
+            "peak": 35356672,
+            "samples": 71,
+            "start": 16154624
+          },
+          "throughput_ops_s": 33310.28,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00008,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1697.3,
+            "mean": 122.65,
+            "p50": 116.5,
+            "p95": 186.7,
+            "p99": 232.5,
+            "p999": 350.6
+          },
+          "ops": 158209,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35069952,
+            "peak": 35069952,
+            "samples": 66,
+            "start": 16412672
+          },
+          "throughput_ops_s": 31641.27,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 25042.9,
+            "mean": 106.48,
+            "p50": 101.6,
+            "p95": 161.8,
+            "p99": 199.0,
+            "p999": 295.4
+          },
+          "ops": 182447,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 36061184,
+            "peak": 36061184,
+            "samples": 75,
+            "start": 16011264
+          },
+          "throughput_ops_s": 36488.7,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2731.3,
+            "mean": 121.03,
+            "p50": 115.2,
+            "p95": 185.8,
+            "p99": 233.3,
+            "p999": 353.5
+          },
+          "ops": 160364,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35377152,
+            "peak": 35377152,
+            "samples": 67,
+            "start": 16142336
+          },
+          "throughput_ops_s": 32072.23,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00035,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 48626.6,
+            "mean": 117.51,
+            "p50": 111.0,
+            "p95": 179.1,
+            "p99": 223.5,
+            "p999": 341.0
+          },
+          "ops": 165168,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35393536,
+            "peak": 35393536,
+            "samples": 67,
+            "start": 16121856
+          },
+          "throughput_ops_s": 33031.26,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "never",
+      "protocol": "synaprpc",
+      "workload": "list",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 33619.03,
+          "min": 32642.81,
+          "max": 34477.62,
+          "spread_pct": 5.46,
+          "stdev": 704.14,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 110.5,
+          "min": 107.4,
+          "max": 113.4,
+          "spread_pct": 5.43,
+          "stdev": 2.32,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 176.6,
+          "min": 172.3,
+          "max": 181.4,
+          "spread_pct": 5.15,
+          "stdev": 3.36,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 219.4,
+          "min": 212.0,
+          "max": 223.5,
+          "spread_pct": 5.24,
+          "stdev": 4.33,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 15810560,
+          "min": 15765504,
+          "max": 16007168,
+          "spread_pct": 1.53,
+          "stdev": 96364.87,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 15810560,
+          "min": 15765504,
+          "max": 15831040,
+          "spread_pct": 0.41,
+          "stdev": 26481.84,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1631.3,
+            "mean": 117.08,
+            "p50": 111.5,
+            "p95": 176.6,
+            "p99": 217.8,
+            "p999": 310.1
+          },
+          "ops": 166442,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15810560,
+            "peak": 15810560,
+            "samples": 68,
+            "start": 15790080
+          },
+          "throughput_ops_s": 33287.66,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00012,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1751.9,
+            "mean": 119.45,
+            "p50": 113.4,
+            "p95": 181.4,
+            "p99": 223.5,
+            "p999": 321.3
+          },
+          "ops": 163218,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15790080,
+            "peak": 15790080,
+            "samples": 68,
+            "start": 15716352
+          },
+          "throughput_ops_s": 32642.81,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00008,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 34042.1,
+            "mean": 113.22,
+            "p50": 107.4,
+            "p95": 174.8,
+            "p99": 219.4,
+            "p999": 315.3
+          },
+          "ops": 172391,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15831040,
+            "peak": 16007168,
+            "samples": 72,
+            "start": 15953920
+          },
+          "throughput_ops_s": 34477.62,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00006,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 57485.0,
+            "mean": 115.96,
+            "p50": 110.5,
+            "p95": 177.2,
+            "p99": 221.1,
+            "p999": 325.1
+          },
+          "ops": 168097,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15765504,
+            "peak": 15765504,
+            "samples": 69,
+            "start": 15699968
+          },
+          "throughput_ops_s": 33619.03,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3666.4,
+            "mean": 114.46,
+            "p50": 108.9,
+            "p95": 172.3,
+            "p99": 212.0,
+            "p999": 312.5
+          },
+          "ops": 170239,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15822848,
+            "peak": 15822848,
+            "samples": 68,
+            "start": 15761408
+          },
+          "throughput_ops_s": 34047.22,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        }
+      ]
+    },
+    {
+      "durability": "never",
+      "protocol": "synaprpc",
+      "workload": "set-pipelined",
+      "pipeline": 16,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 333765.86,
+          "min": 319017.0,
+          "max": 345938.05,
+          "spread_pct": 8.07,
+          "stdev": 10604.43,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 165.4,
+          "min": 158.8,
+          "max": 172.6,
+          "spread_pct": 8.34,
+          "stdev": 5.47,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 257.2,
+          "min": 247.8,
+          "max": 272.4,
+          "spread_pct": 9.56,
+          "stdev": 9.65,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 313.6,
+          "min": 305.3,
+          "max": 337.5,
+          "spread_pct": 10.27,
+          "stdev": 12.85,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 37588992,
+          "min": 37380096,
+          "max": 38322176,
+          "spread_pct": 2.51,
+          "stdev": 406433.84,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 37588992,
+          "min": 37380096,
+          "max": 38322176,
+          "spread_pct": 2.51,
+          "stdev": 406433.84,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.0001999999999995,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2130.2,
+            "mean": 176.16,
+            "p50": 167.4,
+            "p95": 258.9,
+            "p99": 318.2,
+            "p999": 451.2
+          },
+          "ops": 1649680,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37552128,
+            "peak": 37552128,
+            "samples": 69,
+            "start": 18620416
+          },
+          "throughput_ops_s": 329922.61,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00026,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 5142.6,
+            "mean": 182.18,
+            "p50": 172.6,
+            "p95": 272.4,
+            "p99": 337.5,
+            "p999": 473.6
+          },
+          "ops": 1595168,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 38125568,
+            "peak": 38125568,
+            "samples": 69,
+            "start": 18747392
+          },
+          "throughput_ops_s": 319017.0,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00016,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 84328.4,
+            "mean": 168.24,
+            "p50": 158.8,
+            "p95": 247.8,
+            "p99": 305.3,
+            "p999": 427.4
+          },
+          "ops": 1729744,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37588992,
+            "peak": 37588992,
+            "samples": 72,
+            "start": 20439040
+          },
+          "throughput_ops_s": 345938.05,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.0001999999999995,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1884.1,
+            "mean": 173.29,
+            "p50": 165.4,
+            "p95": 257.2,
+            "p99": 313.6,
+            "p999": 412.3
+          },
+          "ops": 1668896,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37380096,
+            "peak": 37380096,
+            "samples": 69,
+            "start": 18964480
+          },
+          "throughput_ops_s": 333765.86,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2486.5,
+            "mean": 169.45,
+            "p50": 160.8,
+            "p95": 250.1,
+            "p99": 307.4,
+            "p999": 439.6
+          },
+          "ops": 1710736,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 38322176,
+            "peak": 38322176,
+            "samples": 68,
+            "start": 18849792
+          },
+          "throughput_ops_s": 342139.5,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "periodic",
+      "protocol": "resp3",
+      "workload": "get",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 36589.37,
+          "min": 34779.7,
+          "max": 37437.07,
+          "spread_pct": 7.26,
+          "stdev": 972.93,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 102.9,
+          "min": 100.4,
+          "max": 107.7,
+          "spread_pct": 7.09,
+          "stdev": 2.66,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 161.5,
+          "min": 157.0,
+          "max": 169.7,
+          "spread_pct": 7.86,
+          "stdev": 4.75,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 205.7,
+          "min": 201.1,
+          "max": 219.3,
+          "spread_pct": 8.85,
+          "stdev": 7.53,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35500032,
+          "min": 35368960,
+          "max": 35639296,
+          "spread_pct": 0.76,
+          "stdev": 103435.15,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35500032,
+          "min": 35368960,
+          "max": 35639296,
+          "spread_pct": 0.76,
+          "stdev": 103435.15,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1716.4,
+            "mean": 113.1,
+            "p50": 107.7,
+            "p95": 169.7,
+            "p99": 219.3,
+            "p999": 337.7
+          },
+          "ops": 173902,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35471360,
+            "peak": 35471360,
+            "samples": 66,
+            "start": 35467264
+          },
+          "throughput_ops_s": 34779.7,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00014,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1894.1,
+            "mean": 107.52,
+            "p50": 102.7,
+            "p95": 160.0,
+            "p99": 203.3,
+            "p999": 317.9
+          },
+          "ops": 182952,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35639296,
+            "peak": 35639296,
+            "samples": 68,
+            "start": 35635200
+          },
+          "throughput_ops_s": 36589.37,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 19594.0,
+            "mean": 105.11,
+            "p50": 100.4,
+            "p95": 157.0,
+            "p99": 201.1,
+            "p999": 316.3
+          },
+          "ops": 187189,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35577856,
+            "peak": 35577856,
+            "samples": 73,
+            "start": 35573760
+          },
+          "throughput_ops_s": 37437.07,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00007,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2092.1,
+            "mean": 107.53,
+            "p50": 103.2,
+            "p95": 163.5,
+            "p99": 213.0,
+            "p999": 338.1
+          },
+          "ops": 183133,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35368960,
+            "peak": 35368960,
+            "samples": 68,
+            "start": 35364864
+          },
+          "throughput_ops_s": 36626.08,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1085.5,
+            "mean": 107.95,
+            "p50": 102.9,
+            "p95": 161.5,
+            "p99": 205.7,
+            "p999": 307.2
+          },
+          "ops": 182209,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35500032,
+            "peak": 35500032,
+            "samples": 71,
+            "start": 35487744
+          },
+          "throughput_ops_s": 36441.15,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        }
+      ]
+    },
+    {
+      "durability": "periodic",
+      "protocol": "resp3",
+      "workload": "set",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 35760.87,
+          "min": 34376.89,
+          "max": 36618.31,
+          "spread_pct": 6.27,
+          "stdev": 883.35,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 105.0,
+          "min": 102.3,
+          "max": 108.8,
+          "spread_pct": 6.19,
+          "stdev": 2.39,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 165.4,
+          "min": 159.8,
+          "max": 172.6,
+          "spread_pct": 7.74,
+          "stdev": 4.77,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 214.3,
+          "min": 203.7,
+          "max": 222.4,
+          "spread_pct": 8.73,
+          "stdev": 7.93,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35635200,
+          "min": 35065856,
+          "max": 36085760,
+          "spread_pct": 2.86,
+          "stdev": 400062.0,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35635200,
+          "min": 35065856,
+          "max": 36085760,
+          "spread_pct": 2.86,
+          "stdev": 400062.0,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00012,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1304.1,
+            "mean": 111.57,
+            "p50": 105.9,
+            "p95": 168.4,
+            "p99": 221.4,
+            "p999": 373.6
+          },
+          "ops": 176240,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35241984,
+            "peak": 35241984,
+            "samples": 68,
+            "start": 16056320
+          },
+          "throughput_ops_s": 35247.15,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1637.9,
+            "mean": 114.42,
+            "p50": 108.8,
+            "p95": 172.6,
+            "p99": 222.4,
+            "p999": 345.9
+          },
+          "ops": 171888,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 36085760,
+            "peak": 36085760,
+            "samples": 70,
+            "start": 16027648
+          },
+          "throughput_ops_s": 34376.89,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 56808.3,
+            "mean": 107.37,
+            "p50": 102.3,
+            "p95": 159.8,
+            "p99": 203.7,
+            "p999": 315.0
+          },
+          "ops": 183095,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35635200,
+            "peak": 35635200,
+            "samples": 71,
+            "start": 15962112
+          },
+          "throughput_ops_s": 36618.31,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2951.8,
+            "mean": 108.47,
+            "p50": 104.2,
+            "p95": 165.4,
+            "p99": 214.3,
+            "p999": 326.7
+          },
+          "ops": 181369,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35065856,
+            "peak": 35065856,
+            "samples": 66,
+            "start": 16015360
+          },
+          "throughput_ops_s": 36273.18,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00013,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2548.9,
+            "mean": 109.93,
+            "p50": 105.0,
+            "p95": 164.3,
+            "p99": 209.5,
+            "p999": 311.8
+          },
+          "ops": 178809,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35680256,
+            "peak": 35680256,
+            "samples": 69,
+            "start": 16183296
+          },
+          "throughput_ops_s": 35760.87,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "periodic",
+      "protocol": "resp3",
+      "workload": "list",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 36625.42,
+          "min": 33916.38,
+          "max": 38003.81,
+          "spread_pct": 11.16,
+          "stdev": 1590.72,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 102.9,
+          "min": 99.3,
+          "max": 111.0,
+          "spread_pct": 11.37,
+          "stdev": 4.41,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 161.3,
+          "min": 155.2,
+          "max": 174.7,
+          "spread_pct": 12.09,
+          "stdev": 7.52,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 205.8,
+          "min": 198.5,
+          "max": 224.0,
+          "spread_pct": 12.39,
+          "stdev": 10.11,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 15753216,
+          "min": 15699968,
+          "max": 15876096,
+          "spread_pct": 1.12,
+          "stdev": 83612.59,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 15699968,
+          "min": 15646720,
+          "max": 15753216,
+          "spread_pct": 0.68,
+          "stdev": 38161.01,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2053.9,
+            "mean": 111.71,
+            "p50": 106.2,
+            "p95": 168.1,
+            "p99": 216.6,
+            "p999": 344.6
+          },
+          "ops": 176796,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15699968,
+            "peak": 15699968,
+            "samples": 71,
+            "start": 15663104
+          },
+          "throughput_ops_s": 35358.55,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00024,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2212.8,
+            "mean": 116.5,
+            "p50": 111.0,
+            "p95": 174.7,
+            "p99": 224.0,
+            "p999": 348.7
+          },
+          "ops": 169590,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15753216,
+            "peak": 15753216,
+            "samples": 66,
+            "start": 15728640
+          },
+          "throughput_ops_s": 33916.38,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1167.0,
+            "mean": 103.89,
+            "p50": 99.3,
+            "p95": 155.2,
+            "p99": 198.5,
+            "p999": 316.3
+          },
+          "ops": 190023,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15646720,
+            "peak": 15863808,
+            "samples": 72,
+            "start": 15847424
+          },
+          "throughput_ops_s": 38003.81,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3303.1,
+            "mean": 106.61,
+            "p50": 102.7,
+            "p95": 161.3,
+            "p99": 205.8,
+            "p999": 328.3
+          },
+          "ops": 185374,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15695872,
+            "peak": 15876096,
+            "samples": 69,
+            "start": 15843328
+          },
+          "throughput_ops_s": 37074.06,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00008,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1748.4,
+            "mean": 107.83,
+            "p50": 102.9,
+            "p95": 160.8,
+            "p99": 205.6,
+            "p999": 317.3
+          },
+          "ops": 183130,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15712256,
+            "peak": 15712256,
+            "samples": 72,
+            "start": 15683584
+          },
+          "throughput_ops_s": 36625.42,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        }
+      ]
+    },
+    {
+      "durability": "periodic",
+      "protocol": "resp3",
+      "workload": "set-pipelined",
+      "pipeline": 16,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 382959.31,
+          "min": 371099.79,
+          "max": 393883.86,
+          "spread_pct": 5.95,
+          "stdev": 9948.09,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 152.2,
+          "min": 148.4,
+          "max": 157.6,
+          "spread_pct": 6.04,
+          "stdev": 3.7,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 236.1,
+          "min": 233.0,
+          "max": 246.2,
+          "spread_pct": 5.59,
+          "stdev": 5.72,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 296.8,
+          "min": 292.5,
+          "max": 307.9,
+          "spread_pct": 5.19,
+          "stdev": 7.24,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 37588992,
+          "min": 37388288,
+          "max": 37900288,
+          "spread_pct": 1.36,
+          "stdev": 252304.96,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 37404672,
+          "min": 35213312,
+          "max": 37896192,
+          "spread_pct": 7.17,
+          "stdev": 1073376.32,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00014,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1993.0,
+            "mean": 165.6,
+            "p50": 157.6,
+            "p95": 246.2,
+            "p99": 307.9,
+            "p999": 444.4
+          },
+          "ops": 1855552,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 37404672,
+            "peak": 37404672,
+            "samples": 70,
+            "start": 20795392
+          },
+          "throughput_ops_s": 371099.79,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00012,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 186534.8,
+            "mean": 162.82,
+            "p50": 152.9,
+            "p95": 241.7,
+            "p99": 307.6,
+            "p999": 461.4
+          },
+          "ops": 1886048,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 37896192,
+            "peak": 37896192,
+            "samples": 70,
+            "start": 18894848
+          },
+          "throughput_ops_s": 377200.61,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00018,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 7480.3,
+            "mean": 156.23,
+            "p50": 148.4,
+            "p95": 233.0,
+            "p99": 296.8,
+            "p999": 425.1
+          },
+          "ops": 1966160,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35213312,
+            "peak": 37900288,
+            "samples": 72,
+            "start": 18599936
+          },
+          "throughput_ops_s": 393218.14,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.0002200000000006,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1647.1,
+            "mean": 155.92,
+            "p50": 148.9,
+            "p95": 233.4,
+            "p99": 292.5,
+            "p999": 405.4
+          },
+          "ops": 1969504,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 37588992,
+            "peak": 37588992,
+            "samples": 73,
+            "start": 18923520
+          },
+          "throughput_ops_s": 393883.86,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00018,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 63677.4,
+            "mean": 160.37,
+            "p50": 152.2,
+            "p95": 236.1,
+            "p99": 295.2,
+            "p999": 418.9
+          },
+          "ops": 1914864,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 37388288,
+            "peak": 37388288,
+            "samples": 70,
+            "start": 18608128
+          },
+          "throughput_ops_s": 382959.31,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "periodic",
+      "protocol": "synaprpc",
+      "workload": "get",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 35292.05,
+          "min": 33083.57,
+          "max": 36330.19,
+          "spread_pct": 9.2,
+          "stdev": 1287.13,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 105.5,
+          "min": 103.2,
+          "max": 112.7,
+          "spread_pct": 9.0,
+          "stdev": 3.91,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 167.5,
+          "min": 165.9,
+          "max": 178.1,
+          "spread_pct": 7.28,
+          "stdev": 5.36,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 208.9,
+          "min": 205.5,
+          "max": 221.1,
+          "spread_pct": 7.47,
+          "stdev": 6.33,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35733504,
+          "min": 35483648,
+          "max": 35995648,
+          "spread_pct": 1.43,
+          "stdev": 197854.18,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35733504,
+          "min": 35483648,
+          "max": 35995648,
+          "spread_pct": 1.43,
+          "stdev": 197854.18,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3274.3,
+            "mean": 118.4,
+            "p50": 112.7,
+            "p95": 178.1,
+            "p99": 221.1,
+            "p999": 341.3
+          },
+          "ops": 165421,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35577856,
+            "peak": 35577856,
+            "samples": 70,
+            "start": 35565568
+          },
+          "throughput_ops_s": 33083.57,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00008,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1263.0,
+            "mean": 111.0,
+            "p50": 105.5,
+            "p95": 167.5,
+            "p99": 207.6,
+            "p999": 321.4
+          },
+          "ops": 176463,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35786752,
+            "peak": 35786752,
+            "samples": 72,
+            "start": 35782656
+          },
+          "throughput_ops_s": 35292.05,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00013,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1791.0,
+            "mean": 109.85,
+            "p50": 104.4,
+            "p95": 165.9,
+            "p99": 205.5,
+            "p999": 316.3
+          },
+          "ops": 177984,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35483648,
+            "peak": 35483648,
+            "samples": 72,
+            "start": 35483648
+          },
+          "throughput_ops_s": 35595.88,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2118.9,
+            "mean": 107.8,
+            "p50": 103.2,
+            "p95": 166.3,
+            "p99": 208.9,
+            "p999": 310.0
+          },
+          "ops": 181655,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35995648,
+            "peak": 35995648,
+            "samples": 67,
+            "start": 35995648
+          },
+          "throughput_ops_s": 36330.19,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3615.1,
+            "mean": 114.94,
+            "p50": 109.3,
+            "p95": 173.6,
+            "p99": 214.7,
+            "p999": 317.8
+          },
+          "ops": 170485,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35733504,
+            "peak": 35733504,
+            "samples": 66,
+            "start": 35721216
+          },
+          "throughput_ops_s": 34096.22,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        }
+      ]
+    },
+    {
+      "durability": "periodic",
+      "protocol": "synaprpc",
+      "workload": "set",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 32975.07,
+          "min": 30786.63,
+          "max": 33947.47,
+          "spread_pct": 9.59,
+          "stdev": 1240.86,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 111.8,
+          "min": 108.7,
+          "max": 120.1,
+          "spread_pct": 10.2,
+          "stdev": 4.52,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 178.8,
+          "min": 172.9,
+          "max": 192.1,
+          "spread_pct": 10.74,
+          "stdev": 7.31,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 220.4,
+          "min": 212.2,
+          "max": 238.1,
+          "spread_pct": 11.75,
+          "stdev": 10.2,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35479552,
+          "min": 35041280,
+          "max": 36012032,
+          "spread_pct": 2.74,
+          "stdev": 382141.65,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35479552,
+          "min": 35041280,
+          "max": 36012032,
+          "spread_pct": 2.74,
+          "stdev": 382141.65,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00016,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2433.0,
+            "mean": 126.17,
+            "p50": 120.1,
+            "p95": 192.1,
+            "p99": 238.1,
+            "p999": 337.6
+          },
+          "ops": 153938,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35479552,
+            "peak": 35479552,
+            "samples": 65,
+            "start": 16146432
+          },
+          "throughput_ops_s": 30786.63,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00014,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1342.1,
+            "mean": 114.32,
+            "p50": 108.7,
+            "p95": 172.9,
+            "p99": 212.2,
+            "p999": 307.0
+          },
+          "ops": 169742,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35041280,
+            "peak": 35041280,
+            "samples": 70,
+            "start": 15966208
+          },
+          "throughput_ops_s": 33947.47,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00006,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1743.9,
+            "mean": 115.29,
+            "p50": 109.5,
+            "p95": 176.3,
+            "p99": 218.7,
+            "p999": 336.9
+          },
+          "ops": 168378,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 36012032,
+            "peak": 36012032,
+            "samples": 67,
+            "start": 16105472
+          },
+          "throughput_ops_s": 33675.19,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00012,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 875.2,
+            "mean": 118.06,
+            "p50": 112.4,
+            "p95": 181.6,
+            "p99": 230.1,
+            "p999": 346.8
+          },
+          "ops": 164357,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35577856,
+            "peak": 35577856,
+            "samples": 66,
+            "start": 16199680
+          },
+          "throughput_ops_s": 32870.58,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3623.0,
+            "mean": 117.76,
+            "p50": 111.8,
+            "p95": 178.8,
+            "p99": 220.4,
+            "p999": 321.3
+          },
+          "ops": 164879,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35160064,
+            "peak": 35160064,
+            "samples": 72,
+            "start": 16044032
+          },
+          "throughput_ops_s": 32975.07,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "periodic",
+      "protocol": "synaprpc",
+      "workload": "list",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 33332.64,
+          "min": 32806.68,
+          "max": 34973.02,
+          "spread_pct": 6.5,
+          "stdev": 955.77,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 111.0,
+          "min": 106.7,
+          "max": 112.9,
+          "spread_pct": 5.59,
+          "stdev": 2.8,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 177.3,
+          "min": 169.2,
+          "max": 179.9,
+          "spread_pct": 6.03,
+          "stdev": 5.0,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 219.2,
+          "min": 208.5,
+          "max": 226.0,
+          "spread_pct": 7.98,
+          "stdev": 6.91,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 15912960,
+          "min": 15822848,
+          "max": 16023552,
+          "spread_pct": 1.26,
+          "stdev": 86035.5,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 15880192,
+          "min": 15822848,
+          "max": 16023552,
+          "spread_pct": 1.26,
+          "stdev": 79656.41,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2927.7,
+            "mean": 112.4,
+            "p50": 106.8,
+            "p95": 169.2,
+            "p99": 208.5,
+            "p999": 322.5
+          },
+          "ops": 173416,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15912960,
+            "peak": 15912960,
+            "samples": 72,
+            "start": 15863808
+          },
+          "throughput_ops_s": 34682.51,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2290.8,
+            "mean": 118.84,
+            "p50": 112.9,
+            "p95": 179.6,
+            "p99": 222.5,
+            "p999": 332.2
+          },
+          "ops": 164037,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15880192,
+            "peak": 15880192,
+            "samples": 66,
+            "start": 15843328
+          },
+          "throughput_ops_s": 32806.68,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3359.7,
+            "mean": 117.21,
+            "p50": 111.0,
+            "p95": 179.9,
+            "p99": 226.0,
+            "p999": 323.5
+          },
+          "ops": 166289,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15839232,
+            "peak": 16011264,
+            "samples": 67,
+            "start": 15986688
+          },
+          "throughput_ops_s": 33257.18,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1097.7,
+            "mean": 111.58,
+            "p50": 106.7,
+            "p95": 170.9,
+            "p99": 214.1,
+            "p999": 320.6
+          },
+          "ops": 174869,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 16023552,
+            "peak": 16023552,
+            "samples": 70,
+            "start": 16011264
+          },
+          "throughput_ops_s": 34973.02,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00008,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 4594.7,
+            "mean": 116.91,
+            "p50": 111.1,
+            "p95": 177.3,
+            "p99": 219.2,
+            "p999": 320.5
+          },
+          "ops": 166666,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15822848,
+            "peak": 15822848,
+            "samples": 66,
+            "start": 15761408
+          },
+          "throughput_ops_s": 33332.64,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        }
+      ]
+    },
+    {
+      "durability": "periodic",
+      "protocol": "synaprpc",
+      "workload": "set-pipelined",
+      "pipeline": 16,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 330803.75,
+          "min": 308636.85,
+          "max": 345874.68,
+          "spread_pct": 11.26,
+          "stdev": 13366.0,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 165.7,
+          "min": 159.7,
+          "max": 177.6,
+          "spread_pct": 10.8,
+          "stdev": 6.52,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 259.4,
+          "min": 248.4,
+          "max": 279.9,
+          "spread_pct": 12.14,
+          "stdev": 11.51,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 318.0,
+          "min": 303.4,
+          "max": 349.9,
+          "spread_pct": 14.62,
+          "stdev": 17.44,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 37564416,
+          "min": 37269504,
+          "max": 37638144,
+          "spread_pct": 0.98,
+          "stdev": 144769.12,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 37564416,
+          "min": 37269504,
+          "max": 37638144,
+          "spread_pct": 0.98,
+          "stdev": 144769.12,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00019,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2543.7,
+            "mean": 168.16,
+            "p50": 159.7,
+            "p95": 248.4,
+            "p99": 303.4,
+            "p999": 428.7
+          },
+          "ops": 1729440,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37269504,
+            "peak": 37269504,
+            "samples": 73,
+            "start": 18579456
+          },
+          "throughput_ops_s": 345874.68,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00021,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 7777.1,
+            "mean": 188.56,
+            "p50": 177.6,
+            "p95": 279.9,
+            "p99": 349.9,
+            "p999": 580.5
+          },
+          "ops": 1543248,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37588992,
+            "peak": 37588992,
+            "samples": 66,
+            "start": 18575360
+          },
+          "throughput_ops_s": 308636.85,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.0001999999999995,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 83395.6,
+            "mean": 176.35,
+            "p50": 165.5,
+            "p95": 262.2,
+            "p99": 324.4,
+            "p999": 457.1
+          },
+          "ops": 1647680,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37564416,
+            "peak": 37564416,
+            "samples": 69,
+            "start": 20897792
+          },
+          "throughput_ops_s": 329523.15,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00014,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1280.6,
+            "mean": 174.4,
+            "p50": 166.2,
+            "p95": 257.6,
+            "p99": 313.6,
+            "p999": 424.8
+          },
+          "ops": 1654064,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37638144,
+            "peak": 37638144,
+            "samples": 71,
+            "start": 18927616
+          },
+          "throughput_ops_s": 330803.75,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00015,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 54594.1,
+            "mean": 174.93,
+            "p50": 165.7,
+            "p95": 259.4,
+            "p99": 318.0,
+            "p999": 431.8
+          },
+          "ops": 1662960,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37490688,
+            "peak": 37490688,
+            "samples": 67,
+            "start": 18821120
+          },
+          "throughput_ops_s": 332582.1,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "always",
+      "protocol": "resp3",
+      "workload": "get",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 35568.86,
+          "min": 27590.07,
+          "max": 37293.62,
+          "spread_pct": 27.28,
+          "stdev": 3863.53,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 105.0,
+          "min": 100.7,
+          "max": 132.0,
+          "spread_pct": 29.81,
+          "stdev": 12.7,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 167.2,
+          "min": 157.1,
+          "max": 228.0,
+          "spread_pct": 42.4,
+          "stdev": 29.06,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 216.5,
+          "min": 200.2,
+          "max": 333.9,
+          "spread_pct": 61.76,
+          "stdev": 55.23,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35819520,
+          "min": 35377152,
+          "max": 36069376,
+          "spread_pct": 1.93,
+          "stdev": 284920.89,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35819520,
+          "min": 35377152,
+          "max": 36069376,
+          "spread_pct": 1.93,
+          "stdev": 284920.89,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3140.7,
+            "mean": 105.5,
+            "p50": 100.7,
+            "p95": 157.1,
+            "p99": 200.2,
+            "p999": 316.8
+          },
+          "ops": 186472,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 36069376,
+            "peak": 36069376,
+            "samples": 73,
+            "start": 36065280
+          },
+          "throughput_ops_s": 37293.62,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 6394.7,
+            "mean": 142.81,
+            "p50": 132.0,
+            "p95": 228.0,
+            "p99": 333.9,
+            "p999": 901.4
+          },
+          "ops": 137953,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35377152,
+            "peak": 35377152,
+            "samples": 53,
+            "start": 35373056
+          },
+          "throughput_ops_s": 27590.07,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2017.9,
+            "mean": 110.63,
+            "p50": 105.0,
+            "p95": 167.2,
+            "p99": 216.5,
+            "p999": 345.5
+          },
+          "ops": 177848,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35819520,
+            "peak": 35819520,
+            "samples": 70,
+            "start": 35815424
+          },
+          "throughput_ops_s": 35568.86,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2898.1,
+            "mean": 111.34,
+            "p50": 106.6,
+            "p95": 168.5,
+            "p99": 221.0,
+            "p999": 336.4
+          },
+          "ops": 176849,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35561472,
+            "peak": 35561472,
+            "samples": 64,
+            "start": 35553280
+          },
+          "throughput_ops_s": 35369.16,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00012,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 82364.9,
+            "mean": 109.21,
+            "p50": 103.8,
+            "p95": 162.4,
+            "p99": 209.0,
+            "p999": 323.3
+          },
+          "ops": 180156,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35958784,
+            "peak": 35958784,
+            "samples": 70,
+            "start": 35954688
+          },
+          "throughput_ops_s": 36030.35,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        }
+      ]
+    },
+    {
+      "durability": "always",
+      "protocol": "resp3",
+      "workload": "set",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 35393.7,
+          "min": 33139.17,
+          "max": 36203.18,
+          "spread_pct": 8.66,
+          "stdev": 1246.16,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 105.6,
+          "min": 103.8,
+          "max": 112.9,
+          "spread_pct": 8.62,
+          "stdev": 3.91,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 167.2,
+          "min": 161.2,
+          "max": 179.8,
+          "spread_pct": 11.12,
+          "stdev": 7.7,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 218.1,
+          "min": 205.0,
+          "max": 231.8,
+          "spread_pct": 12.29,
+          "stdev": 11.61,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35299328,
+          "min": 34951168,
+          "max": 35565568,
+          "spread_pct": 1.74,
+          "stdev": 253727.28,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35299328,
+          "min": 34951168,
+          "max": 35565568,
+          "spread_pct": 1.74,
+          "stdev": 253727.28,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1629.7,
+            "mean": 108.59,
+            "p50": 103.8,
+            "p95": 161.2,
+            "p99": 205.0,
+            "p999": 317.6
+          },
+          "ops": 181020,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35000320,
+            "peak": 35000320,
+            "samples": 67,
+            "start": 16048128
+          },
+          "throughput_ops_s": 36203.18,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1805.7,
+            "mean": 118.72,
+            "p50": 112.9,
+            "p95": 179.8,
+            "p99": 230.2,
+            "p999": 349.4
+          },
+          "ops": 165699,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35299328,
+            "peak": 35299328,
+            "samples": 65,
+            "start": 16240640
+          },
+          "throughput_ops_s": 33139.17,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 4638.2,
+            "mean": 110.91,
+            "p50": 105.2,
+            "p95": 167.2,
+            "p99": 218.1,
+            "p999": 357.3
+          },
+          "ops": 177310,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35328000,
+            "peak": 35328000,
+            "samples": 67,
+            "start": 16105472
+          },
+          "throughput_ops_s": 35461.34,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00007,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2154.1,
+            "mean": 115.89,
+            "p50": 110.6,
+            "p95": 176.4,
+            "p99": 231.8,
+            "p999": 363.7
+          },
+          "ops": 169820,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 34951168,
+            "peak": 34951168,
+            "samples": 65,
+            "start": 16060416
+          },
+          "throughput_ops_s": 33963.51,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00007,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 63276.2,
+            "mean": 111.08,
+            "p50": 105.6,
+            "p95": 166.1,
+            "p99": 211.7,
+            "p999": 334.8
+          },
+          "ops": 176971,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 35565568,
+            "peak": 35565568,
+            "samples": 65,
+            "start": 16007168
+          },
+          "throughput_ops_s": 35393.7,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "always",
+      "protocol": "resp3",
+      "workload": "list",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 34955.58,
+          "min": 33104.63,
+          "max": 37557.01,
+          "spread_pct": 12.74,
+          "stdev": 1824.09,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 107.2,
+          "min": 100.8,
+          "max": 112.8,
+          "spread_pct": 11.19,
+          "stdev": 5.18,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 169.6,
+          "min": 155.7,
+          "max": 184.3,
+          "spread_pct": 16.86,
+          "stdev": 11.38,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 218.7,
+          "min": 196.8,
+          "max": 241.2,
+          "spread_pct": 20.3,
+          "stdev": 16.7,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 15839232,
+          "min": 15745024,
+          "max": 15917056,
+          "spread_pct": 1.09,
+          "stdev": 78286.12,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 15745024,
+          "min": 15708160,
+          "max": 15839232,
+          "spread_pct": 0.83,
+          "stdev": 48585.54,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00013,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1436.5,
+            "mean": 105.12,
+            "p50": 100.8,
+            "p95": 155.7,
+            "p99": 196.8,
+            "p999": 289.2
+          },
+          "ops": 187790,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15708160,
+            "peak": 15880192,
+            "samples": 71,
+            "start": 15851520
+          },
+          "throughput_ops_s": 37557.01,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3192.7,
+            "mean": 119.35,
+            "p50": 112.8,
+            "p95": 184.3,
+            "p99": 241.2,
+            "p999": 374.0
+          },
+          "ops": 165526,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15745024,
+            "peak": 15745024,
+            "samples": 61,
+            "start": 15720448
+          },
+          "throughput_ops_s": 33104.63,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00005,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 4327.0,
+            "mean": 107.67,
+            "p50": 102.4,
+            "p95": 161.3,
+            "p99": 212.1,
+            "p999": 346.1
+          },
+          "ops": 183385,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15753216,
+            "peak": 15917056,
+            "samples": 72,
+            "start": 15904768
+          },
+          "throughput_ops_s": 36676.62,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2508.2,
+            "mean": 115.83,
+            "p50": 110.8,
+            "p95": 175.9,
+            "p99": 228.1,
+            "p999": 335.5
+          },
+          "ops": 170623,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15745024,
+            "peak": 15745024,
+            "samples": 66,
+            "start": 15740928
+          },
+          "throughput_ops_s": 34123.92,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 77942.8,
+            "mean": 113.0,
+            "p50": 107.2,
+            "p95": 169.6,
+            "p99": 218.7,
+            "p999": 331.5
+          },
+          "ops": 174781,
+          "pipeline": 1,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 15839232,
+            "peak": 15839232,
+            "samples": 68,
+            "start": 15814656
+          },
+          "throughput_ops_s": 34955.58,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        }
+      ]
+    },
+    {
+      "durability": "always",
+      "protocol": "resp3",
+      "workload": "set-pipelined",
+      "pipeline": 16,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 383620.69,
+          "min": 364072.74,
+          "max": 407349.14,
+          "spread_pct": 11.28,
+          "stdev": 18329.94,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 152.6,
+          "min": 143.6,
+          "max": 158.0,
+          "spread_pct": 9.44,
+          "stdev": 6.67,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 236.4,
+          "min": 219.2,
+          "max": 248.8,
+          "spread_pct": 12.52,
+          "stdev": 12.31,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 296.2,
+          "min": 273.9,
+          "max": 315.6,
+          "spread_pct": 14.08,
+          "stdev": 16.22,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 36995072,
+          "min": 36380672,
+          "max": 38232064,
+          "spread_pct": 5.0,
+          "stdev": 705002.4,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 36995072,
+          "min": 36380672,
+          "max": 38232064,
+          "spread_pct": 5.0,
+          "stdev": 705002.4,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00013,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3125.9,
+            "mean": 150.47,
+            "p50": 143.6,
+            "p95": 219.2,
+            "p99": 273.9,
+            "p999": 396.3
+          },
+          "ops": 2036800,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 36995072,
+            "peak": 36995072,
+            "samples": 69,
+            "start": 19066880
+          },
+          "throughput_ops_s": 407349.14,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000229999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 241903.1,
+            "mean": 168.77,
+            "p50": 158.0,
+            "p95": 248.8,
+            "p99": 315.6,
+            "p999": 471.8
+          },
+          "ops": 1820448,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 37511168,
+            "peak": 37511168,
+            "samples": 66,
+            "start": 18673664
+          },
+          "throughput_ops_s": 364072.74,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000229999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2008.8,
+            "mean": 153.5,
+            "p50": 145.8,
+            "p95": 227.7,
+            "p99": 289.0,
+            "p999": 428.2
+          },
+          "ops": 1999168,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 36864000,
+            "peak": 36864000,
+            "samples": 72,
+            "start": 18989056
+          },
+          "throughput_ops_s": 399815.03,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00017,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1540.5,
+            "mean": 165.29,
+            "p50": 157.8,
+            "p95": 245.6,
+            "p99": 307.5,
+            "p999": 437.7
+          },
+          "ops": 1856976,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 36380672,
+            "peak": 36380672,
+            "samples": 68,
+            "start": 18669568
+          },
+          "throughput_ops_s": 371382.66,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2061.2,
+            "mean": 159.99,
+            "p50": 152.6,
+            "p95": 236.4,
+            "p99": 296.2,
+            "p999": 420.7
+          },
+          "ops": 1918144,
+          "pipeline": 16,
+          "protocol": "resp3",
+          "rss_bytes": {
+            "end": 38232064,
+            "peak": 38232064,
+            "samples": 66,
+            "start": 19243008
+          },
+          "throughput_ops_s": 383620.69,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "always",
+      "protocol": "synaprpc",
+      "workload": "get",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 34190.48,
+          "min": 31823.3,
+          "max": 34694.7,
+          "spread_pct": 8.4,
+          "stdev": 1126.89,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 108.8,
+          "min": 108.0,
+          "max": 116.9,
+          "spread_pct": 8.18,
+          "stdev": 3.69,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 175.0,
+          "min": 173.1,
+          "max": 187.5,
+          "spread_pct": 8.23,
+          "stdev": 5.86,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 220.3,
+          "min": 213.7,
+          "max": 235.5,
+          "spread_pct": 9.9,
+          "stdev": 8.1,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35889152,
+          "min": 35835904,
+          "max": 36159488,
+          "spread_pct": 0.9,
+          "stdev": 129429.71,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35889152,
+          "min": 35835904,
+          "max": 36159488,
+          "spread_pct": 0.9,
+          "stdev": 129429.71,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1621.9,
+            "mean": 114.37,
+            "p50": 108.8,
+            "p95": 173.1,
+            "p99": 213.7,
+            "p999": 319.6
+          },
+          "ops": 171285,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35917824,
+            "peak": 35917824,
+            "samples": 71,
+            "start": 35909632
+          },
+          "throughput_ops_s": 34256.33,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00008,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1517.6,
+            "mean": 123.15,
+            "p50": 116.9,
+            "p95": 187.5,
+            "p99": 235.5,
+            "p999": 347.5
+          },
+          "ops": 159119,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35889152,
+            "peak": 35889152,
+            "samples": 66,
+            "start": 35889152
+          },
+          "throughput_ops_s": 31823.3,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000109999999999,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2165.2,
+            "mean": 114.54,
+            "p50": 108.4,
+            "p95": 175.0,
+            "p99": 220.3,
+            "p999": 343.7
+          },
+          "ops": 170956,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35868672,
+            "peak": 35868672,
+            "samples": 70,
+            "start": 35864576
+          },
+          "throughput_ops_s": 34190.48,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00025,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2606.4,
+            "mean": 112.91,
+            "p50": 108.0,
+            "p95": 174.1,
+            "p99": 219.5,
+            "p999": 326.9
+          },
+          "ops": 173482,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35835904,
+            "peak": 35835904,
+            "samples": 66,
+            "start": 35831808
+          },
+          "throughput_ops_s": 34694.7,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2562.1,
+            "mean": 116.7,
+            "p50": 110.8,
+            "p95": 176.9,
+            "p99": 220.5,
+            "p999": 330.9
+          },
+          "ops": 167828,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 36159488,
+            "peak": 36159488,
+            "samples": 69,
+            "start": 36155392
+          },
+          "throughput_ops_s": 33565.01,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "get"
+        }
+      ]
+    },
+    {
+      "durability": "always",
+      "protocol": "synaprpc",
+      "workload": "set",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 33620.11,
+          "min": 32112.24,
+          "max": 33995.58,
+          "spread_pct": 5.6,
+          "stdev": 900.76,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 110.2,
+          "min": 108.2,
+          "max": 114.5,
+          "spread_pct": 5.72,
+          "stdev": 2.83,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 177.3,
+          "min": 173.1,
+          "max": 185.3,
+          "spread_pct": 6.88,
+          "stdev": 5.4,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 221.0,
+          "min": 214.1,
+          "max": 234.3,
+          "spread_pct": 9.14,
+          "stdev": 8.4,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 35680256,
+          "min": 34959360,
+          "max": 36163584,
+          "spread_pct": 3.38,
+          "stdev": 539634.59,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 35680256,
+          "min": 34959360,
+          "max": 36163584,
+          "spread_pct": 3.38,
+          "stdev": 539634.59,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 4334.8,
+            "mean": 115.47,
+            "p50": 109.7,
+            "p95": 174.3,
+            "p99": 214.1,
+            "p999": 323.1
+          },
+          "ops": 168104,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35885056,
+            "peak": 35885056,
+            "samples": 71,
+            "start": 16203776
+          },
+          "throughput_ops_s": 33620.11,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 69523.0,
+            "mean": 120.73,
+            "p50": 114.2,
+            "p95": 183.2,
+            "p99": 226.3,
+            "p999": 341.5
+          },
+          "ops": 160826,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 36163584,
+            "peak": 36163584,
+            "samples": 69,
+            "start": 16203776
+          },
+          "throughput_ops_s": 32164.61,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00015,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2718.7,
+            "mean": 120.94,
+            "p50": 114.5,
+            "p95": 185.3,
+            "p99": 234.3,
+            "p999": 369.0
+          },
+          "ops": 160566,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 34959360,
+            "peak": 34959360,
+            "samples": 68,
+            "start": 16326656
+          },
+          "throughput_ops_s": 32112.24,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.000100000000001,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1994.6,
+            "mean": 115.37,
+            "p50": 110.2,
+            "p95": 177.3,
+            "p99": 221.0,
+            "p999": 321.3
+          },
+          "ops": 168345,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 34992128,
+            "peak": 34992128,
+            "samples": 70,
+            "start": 16035840
+          },
+          "throughput_ops_s": 33668.33,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00012,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2747.7,
+            "mean": 114.17,
+            "p50": 108.2,
+            "p95": 173.1,
+            "p99": 215.0,
+            "p999": 322.0
+          },
+          "ops": 169982,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 35680256,
+            "peak": 35680256,
+            "samples": 69,
+            "start": 16093184
+          },
+          "throughput_ops_s": 33995.58,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    },
+    {
+      "durability": "always",
+      "protocol": "synaprpc",
+      "workload": "list",
+      "pipeline": 1,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 32375.65,
+          "min": 28614.4,
+          "max": 35343.79,
+          "spread_pct": 20.79,
+          "stdev": 2768.68,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 112.3,
+          "min": 105.5,
+          "max": 130.4,
+          "spread_pct": 22.17,
+          "stdev": 10.19,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 181.1,
+          "min": 169.2,
+          "max": 210.9,
+          "spread_pct": 23.03,
+          "stdev": 17.34,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 225.8,
+          "min": 209.8,
+          "max": 260.0,
+          "spread_pct": 22.23,
+          "stdev": 21.84,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 15872000,
+          "min": 15859712,
+          "max": 15917056,
+          "spread_pct": 0.36,
+          "stdev": 22694.95,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 15872000,
+          "min": 15859712,
+          "max": 15917056,
+          "spread_pct": 0.36,
+          "stdev": 22694.95,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00014,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1593.9,
+            "mean": 136.64,
+            "p50": 130.4,
+            "p95": 210.9,
+            "p99": 260.0,
+            "p999": 359.4
+          },
+          "ops": 143076,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15867904,
+            "peak": 15867904,
+            "samples": 70,
+            "start": 15806464
+          },
+          "throughput_ops_s": 28614.4,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00012,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 326574.8,
+            "mean": 120.46,
+            "p50": 112.3,
+            "p95": 181.1,
+            "p99": 225.8,
+            "p999": 339.9
+          },
+          "ops": 161882,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15859712,
+            "peak": 15859712,
+            "samples": 68,
+            "start": 15843328
+          },
+          "throughput_ops_s": 32375.65,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.04666,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 70530.2,
+            "mean": 124.8,
+            "p50": 117.6,
+            "p95": 191.8,
+            "p99": 246.3,
+            "p999": 379.6
+          },
+          "ops": 156638,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15888384,
+            "peak": 15888384,
+            "samples": 64,
+            "start": 15839232
+          },
+          "throughput_ops_s": 31037.95,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00014,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1836.2,
+            "mean": 110.29,
+            "p50": 105.5,
+            "p95": 170.1,
+            "p99": 212.1,
+            "p999": 319.7
+          },
+          "ops": 176724,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15872000,
+            "peak": 15872000,
+            "samples": 69,
+            "start": 15855616
+          },
+          "throughput_ops_s": 35343.79,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00012,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2641.0,
+            "mean": 112.0,
+            "p50": 106.3,
+            "p95": 169.2,
+            "p99": 209.8,
+            "p999": 312.7
+          },
+          "ops": 174063,
+          "pipeline": 1,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 15917056,
+            "peak": 15917056,
+            "samples": 72,
+            "start": 15851520
+          },
+          "throughput_ops_s": 34811.78,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "list"
+        }
+      ]
+    },
+    {
+      "durability": "always",
+      "protocol": "synaprpc",
+      "workload": "set-pipelined",
+      "pipeline": 16,
+      "clients": 4,
+      "failed_runs": [],
+      "summary": {
+        "throughput_ops_s": {
+          "median": 334527.04,
+          "min": 311172.48,
+          "max": 342949.04,
+          "spread_pct": 9.5,
+          "stdev": 12826.45,
+          "n": 5
+        },
+        "p50_us": {
+          "median": 164.6,
+          "min": 161.2,
+          "max": 175.9,
+          "spread_pct": 8.93,
+          "stdev": 5.93,
+          "n": 5
+        },
+        "p95_us": {
+          "median": 256.8,
+          "min": 251.0,
+          "max": 279.8,
+          "spread_pct": 11.21,
+          "stdev": 11.94,
+          "n": 5
+        },
+        "p99_us": {
+          "median": 314.5,
+          "min": 306.2,
+          "max": 346.9,
+          "spread_pct": 12.94,
+          "stdev": 17.39,
+          "n": 5
+        },
+        "rss_peak_bytes": {
+          "median": 37965824,
+          "min": 37429248,
+          "max": 37982208,
+          "spread_pct": 1.46,
+          "stdev": 243245.16,
+          "n": 5
+        },
+        "rss_end_bytes": {
+          "median": 37965824,
+          "min": 37429248,
+          "max": 37982208,
+          "spread_pct": 1.46,
+          "stdev": 243245.16,
+          "n": 5
+        }
+      },
+      "runs": [
+        {
+          "run": 1,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00016,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3417.6,
+            "mean": 170.35,
+            "p50": 161.9,
+            "p95": 251.3,
+            "p99": 307.8,
+            "p999": 407.6
+          },
+          "ops": 1714800,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37699584,
+            "peak": 37699584,
+            "samples": 71,
+            "start": 18960384
+          },
+          "throughput_ops_s": 342949.04,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 2,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00019,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 58518.3,
+            "mean": 186.37,
+            "p50": 175.9,
+            "p95": 279.8,
+            "p99": 346.9,
+            "p999": 485.3
+          },
+          "ops": 1555920,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37969920,
+            "peak": 37969920,
+            "samples": 65,
+            "start": 18874368
+          },
+          "throughput_ops_s": 311172.48,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 3,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00017,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 3954.1,
+            "mean": 174.67,
+            "p50": 164.9,
+            "p95": 263.6,
+            "p99": 331.2,
+            "p999": 484.8
+          },
+          "ops": 1669248,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37965824,
+            "peak": 37965824,
+            "samples": 72,
+            "start": 18788352
+          },
+          "throughput_ops_s": 333838.58,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 4,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00016,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 1723.4,
+            "mean": 172.78,
+            "p50": 164.6,
+            "p95": 256.8,
+            "p99": 314.5,
+            "p999": 427.0
+          },
+          "ops": 1672688,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37429248,
+            "peak": 37429248,
+            "samples": 72,
+            "start": 18911232
+          },
+          "throughput_ops_s": 334527.04,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        },
+        {
+          "run": 5,
+          "clients": 4,
+          "duration_s": 5.0,
+          "elapsed_s": 5.00009,
+          "errors": 0,
+          "keyspace": 100000,
+          "latency_us": {
+            "max": 2643.8,
+            "mean": 169.72,
+            "p50": 161.2,
+            "p95": 251.0,
+            "p99": 306.2,
+            "p999": 415.4
+          },
+          "ops": 1709664,
+          "pipeline": 16,
+          "protocol": "synaprpc",
+          "rss_bytes": {
+            "end": 37982208,
+            "peak": 37982208,
+            "samples": 70,
+            "start": 18898944
+          },
+          "throughput_ops_s": 341926.41,
+          "value_size": 64,
+          "warmup_s": 1.0,
+          "workload": "set"
+        }
+      ]
+    }
+  ]
+}

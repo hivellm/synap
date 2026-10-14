@@ -53,7 +53,7 @@ public sealed class BitmapManager
         };
 
         using var response = await _client.ExecuteAsync("bitmap.setbit", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("old_value", out var oldValue))
+        if (response.RootElement.TryGetProperty("old_value", out var oldValue))
         {
             return oldValue.GetByte();
         }
@@ -74,7 +74,7 @@ public sealed class BitmapManager
     {
         var data = new Dictionary<string, object?> { ["key"] = key, ["offset"] = offset };
         using var response = await _client.ExecuteAsync("bitmap.getbit", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("value", out var value))
+        if (response.RootElement.TryGetProperty("value", out var value))
         {
             return value.GetByte();
         }
@@ -106,7 +106,7 @@ public sealed class BitmapManager
         }
 
         using var response = await _client.ExecuteAsync("bitmap.bitcount", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("count", out var count))
+        if (response.RootElement.TryGetProperty("count", out var count))
         {
             return count.GetInt32();
         }
@@ -145,7 +145,7 @@ public sealed class BitmapManager
         }
 
         using var response = await _client.ExecuteAsync("bitmap.bitpos", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("position", out var position))
+        if (response.RootElement.TryGetProperty("position", out var position))
         {
             if (position.ValueKind == JsonValueKind.Null)
             {
@@ -190,7 +190,7 @@ public sealed class BitmapManager
         };
 
         using var response = await _client.ExecuteAsync("bitmap.bitop", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("length", out var length))
+        if (response.RootElement.TryGetProperty("length", out var length))
         {
             return length.GetInt32();
         }
@@ -250,7 +250,7 @@ public sealed class BitmapManager
         };
 
         using var response = await _client.ExecuteAsync("bitmap.bitfield", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("results", out var results))
+        if (response.RootElement.TryGetProperty("results", out var results))
         {
             var resultList = new List<long>();
             foreach (var result in results.EnumerateArray())
@@ -270,11 +270,7 @@ public sealed class BitmapManager
     public async Task<BitmapStats> StatsAsync(CancellationToken cancellationToken = default)
     {
         using var response = await _client.ExecuteAsync("bitmap.stats", string.Empty, null, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload))
-        {
-            return JsonSerializer.Deserialize<BitmapStats>(payload.GetRawText()) ?? new BitmapStats();
-        }
-        return new BitmapStats();
+        return JsonSerializer.Deserialize<BitmapStats>(response.RootElement.GetRawText()) ?? new BitmapStats();
     }
 }
 

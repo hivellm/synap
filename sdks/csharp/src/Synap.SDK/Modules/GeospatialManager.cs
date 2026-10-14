@@ -144,7 +144,7 @@ public sealed class GeospatialManager
         };
 
         using var response = await _client.ExecuteAsync("geospatial.geoadd", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("added", out var added))
+        if (response.RootElement.TryGetProperty("added", out var added))
         {
             return added.GetInt32();
         }
@@ -170,7 +170,7 @@ public sealed class GeospatialManager
         };
 
         using var response = await _client.ExecuteAsync("geospatial.geodist", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("distance", out var distance))
+        if (response.RootElement.TryGetProperty("distance", out var distance))
         {
             if (distance.ValueKind == JsonValueKind.Null)
             {
@@ -229,7 +229,7 @@ public sealed class GeospatialManager
         }
 
         using var response = await _client.ExecuteAsync("geospatial.georadius", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("results", out var results))
+        if (response.RootElement.TryGetProperty("results", out var results))
         {
             return JsonSerializer.Deserialize<List<GeoradiusResult>>(results.GetRawText()) ?? new List<GeoradiusResult>();
         }
@@ -271,7 +271,7 @@ public sealed class GeospatialManager
         }
 
         using var response = await _client.ExecuteAsync("geospatial.georadiusbymember", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("results", out var results))
+        if (response.RootElement.TryGetProperty("results", out var results))
         {
             return JsonSerializer.Deserialize<List<GeoradiusResult>>(results.GetRawText()) ?? new List<GeoradiusResult>();
         }
@@ -296,7 +296,7 @@ public sealed class GeospatialManager
         };
 
         using var response = await _client.ExecuteAsync("geospatial.geopos", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("coordinates", out var coordinates))
+        if (response.RootElement.TryGetProperty("coordinates", out var coordinates))
         {
             return JsonSerializer.Deserialize<List<Coordinate?>>(coordinates.GetRawText()) ?? new List<Coordinate?>();
         }
@@ -321,7 +321,7 @@ public sealed class GeospatialManager
         };
 
         using var response = await _client.ExecuteAsync("geospatial.geohash", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("geohashes", out var geohashes))
+        if (response.RootElement.TryGetProperty("geohashes", out var geohashes))
         {
             return JsonSerializer.Deserialize<List<string?>>(geohashes.GetRawText()) ?? new List<string?>();
         }
@@ -389,7 +389,7 @@ public sealed class GeospatialManager
         }
 
         using var response = await _client.ExecuteAsync("geospatial.geosearch", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload) && payload.TryGetProperty("results", out var results))
+        if (response.RootElement.TryGetProperty("results", out var results))
         {
             return JsonSerializer.Deserialize<List<GeoradiusResult>>(results.GetRawText()) ?? new List<GeoradiusResult>();
         }
@@ -403,11 +403,7 @@ public sealed class GeospatialManager
     {
         var data = new Dictionary<string, object?>();
         using var response = await _client.ExecuteAsync("geospatial.stats", string.Empty, data, cancellationToken).ConfigureAwait(false);
-        if (response.RootElement.TryGetProperty("payload", out var payload))
-        {
-            return JsonSerializer.Deserialize<GeospatialStats>(payload.GetRawText()) ?? new GeospatialStats();
-        }
-        return new GeospatialStats();
+        return JsonSerializer.Deserialize<GeospatialStats>(response.RootElement.GetRawText()) ?? new GeospatialStats();
     }
 }
 

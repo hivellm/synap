@@ -22,18 +22,27 @@
 //! never be mistaken for a versioned one: its first 8 bytes are a frame length,
 //! and no frame is `0x53594E415057414C` bytes long.
 //!
-//! The scanner verifies every frame's length, checksum and payload. The first
-//! invalid frame is classified before anything is appended:
+//! The scanner verifies every frame's length, checksum and payload. A frame is
+//! *intact* when it is complete and its checksum matches a payload long enough
+//! to hold a record, whether or not this release decodes that record; a
+//! crash's leftovers never are. The first invalid frame is classified before
+//! anything is appended:
 //!
-//! - **Torn tail** — no complete, valid frame follows it. This is what a crash
-//!   in the middle of an append leaves behind. [`repair`] truncates the file to
-//!   the end of the last valid frame, so new frames never land after garbage.
-//!   The scan reports what the first invalid bytes are ([`TailKind`]), which
-//!   tells a crash's leftovers from a complete record this release cannot
-//!   decode.
-//! - **Interior corruption** — a valid frame follows it. Truncating would
-//!   discard acknowledged history, so the scan fails with
-//!   [`PersistenceError::WALInteriorCorruption`] carrying the byte position.
+//! - **Torn tail** — the frame is not intact and no intact frame follows it.
+//!   This is what a crash in the middle of an append leaves behind. [`repair`]
+//!   truncates the file to the end of the last valid frame, so new frames never
+//!   land after garbage. The scan reports what the first invalid bytes are
+//!   ([`TailKind`]).
+//! - **Interior corruption** — the frame is not intact and an intact frame
+//!   follows it. Truncating would discard acknowledged history, so the scan
+//!   fails with [`PersistenceError::WALInteriorCorruption`] carrying the byte
+//!   position.
+//! - **Unreadable record** — the frame is intact but its record does not
+//!   decode: a record this release cannot read, such as one of a type a newer
+//!   release added. A crash does not leave one, so it is never truncated: the
+//!   scan fails with [`PersistenceError::WALUnreadableRecord`] when an intact
+//!   frame follows it, and otherwise ends with it as the tail
+//!   ([`TailKind::Unreadable`]), which [`repair`] refuses with the same error.
 
 use super::types::{PersistenceError, Result, WALEntry};
 use std::fs::{File, OpenOptions};
@@ -138,8 +147,9 @@ pub enum ScanEnd {
     /// Every byte of the file belongs to a valid frame.
     Clean,
     /// The bytes from `valid_len` to `file_len` hold an incomplete or invalid
-    /// frame with no valid frame after it. `kind` says what that first frame
-    /// is; [`repair`] removes the bytes whatever it is.
+    /// frame with no intact frame after it. `kind` says what that first frame
+    /// is; [`repair`] removes the bytes when a crash can leave them
+    /// ([`TailKind::is_torn`]) and refuses to otherwise.
     TornTail {
         valid_len: u64,
         file_len: u64,
@@ -201,10 +211,13 @@ impl ScanReport {
 ///
 /// Returns [`PersistenceError::WALUnsupportedVersion`] when the header declares
 /// a version newer than [`WAL_FORMAT_VERSION`],
-/// [`PersistenceError::WALCorrupted`] when the header is damaged, and
-/// [`PersistenceError::WALInteriorCorruption`] when an invalid frame is
-/// followed by a valid one. A torn tail (including a torn header) is reported
-/// in [`ScanReport::end`] and left on disk; use [`repair`] to remove it.
+/// [`PersistenceError::WALCorrupted`] when the header is damaged,
+/// [`PersistenceError::WALInteriorCorruption`] when a frame that is not intact
+/// is followed by an intact one, and [`PersistenceError::WALUnreadableRecord`]
+/// when an intact frame whose record does not decode is followed by another
+/// intact one. A tail with no intact frame after it (including a torn header)
+/// is reported in [`ScanReport::end`] and left on disk; use [`repair`] to
+/// remove it.
 pub fn scan(path: &Path, mut visit: impl FnMut(WALEntry)) -> Result<ScanReport> {
     let mut file = match File::open(path) {
         Ok(file) => file,
@@ -259,7 +272,15 @@ pub fn scan(path: &Path, mut visit: impl FnMut(WALEntry)) -> Result<ScanReport> 
                 frame_len,
             } => {
                 let mut file = reader.into_inner();
-                if let Some(next_valid) = find_valid_frame(&mut file, pos, frame_len, file_len)? {
+                if let Some(next_valid) = find_intact_frame(&mut file, pos, frame_len, file_len)? {
+                    // An intact record is not damage: name what it is.
+                    if !kind.is_torn() {
+                        return Err(PersistenceError::WALUnreadableRecord {
+                            path: path.to_path_buf(),
+                            position: pos,
+                            reason,
+                        });
+                    }
                     return Err(PersistenceError::WALInteriorCorruption {
                         path: path.to_path_buf(),
                         position: pos,
@@ -281,17 +302,28 @@ pub fn scan(path: &Path, mut visit: impl FnMut(WALEntry)) -> Result<ScanReport> 
 }
 
 /// Scan the WAL at `path` and truncate a torn tail to the end of the last valid
-/// frame, so the next append starts on a frame boundary. Fails on interior
-/// corruption without modifying the file.
+/// frame, so the next append starts on a frame boundary. Fails without
+/// modifying the file on interior corruption, and with
+/// [`PersistenceError::WALUnreadableRecord`] when the first invalid frame is a
+/// complete record this release cannot decode ([`TailKind::Unreadable`]),
+/// whether it ends the file or more frames follow: a crash does not leave one,
+/// so truncating it would delete an acknowledged write.
 pub fn repair(path: &Path) -> Result<ScanReport> {
     let report = scan(path, |_| {})?;
     if let ScanEnd::TornTail {
         valid_len,
         file_len,
         reason,
-        ..
+        kind,
     } = &report.end
     {
+        if !kind.is_torn() {
+            return Err(PersistenceError::WALUnreadableRecord {
+                path: path.to_path_buf(),
+                position: *valid_len,
+                reason: reason.clone(),
+            });
+        }
         let file = OpenOptions::new().write(true).open(path)?;
         file.set_len(*valid_len)?;
         file.sync_all()?;
@@ -312,8 +344,9 @@ pub fn repair(path: &Path) -> Result<ScanReport> {
 ///
 /// The returned report describes the frames found by the scan; its
 /// [`ScanReport::format`] is the format on disk afterwards. Fails without
-/// modifying the file on interior corruption, a damaged header, or a format
-/// version newer than this server reads.
+/// modifying the file on interior corruption, a damaged header, a format
+/// version newer than this server reads, or a complete record this server
+/// cannot decode.
 pub fn prepare(path: &Path) -> Result<ScanReport> {
     let mut report = repair(path)?;
     match report.format {
@@ -562,13 +595,17 @@ fn decode_payload(
         })
 }
 
-/// Find the position of a complete, valid frame after the invalid frame at
-/// `pos`, or `None` when the rest of the file holds none.
+/// Find the position of an intact frame (complete, with a checksum matching a
+/// payload long enough to hold a record, decodable or not) after the invalid
+/// frame at `pos`, or `None` when the rest of the file holds none. A record
+/// this release cannot decode counts: whatever comes before it, it is data a
+/// crash does not leave, so it must stop the bytes before it from being
+/// truncated as a torn tail.
 ///
 /// When the invalid frame's length was usable, its natural successor is
 /// checked first. A corrupt length hides the boundary, so the rest of the file
 /// is then searched byte by byte.
-fn find_valid_frame(
+fn find_intact_frame(
     file: &mut File,
     pos: u64,
     frame_len: Option<u64>,
@@ -576,7 +613,7 @@ fn find_valid_frame(
 ) -> io::Result<Option<u64>> {
     if let Some(len) = frame_len {
         let next = pos + len;
-        if next < file_len && frame_is_valid_at(file, next, file_len)? {
+        if next < file_len && frame_is_intact_at(file, next, file_len)? {
             return Ok(Some(next));
         }
     }
@@ -597,13 +634,16 @@ fn find_valid_frame(
         if let Some((len, checksum)) = candidate_header(&window[at..], file_len - candidate) {
             let payload_start = at + FRAME_HEADER_LEN as usize;
             let in_window = payload_start as u64 + len <= window.len() as u64;
-            let valid = if in_window {
+            let intact = if in_window {
                 let payload = &window[payload_start..payload_start + len as usize];
-                decode_payload(payload, checksum).is_ok()
+                matches!(
+                    decode_payload(payload, checksum),
+                    Ok(_) | Err((TailKind::Unreadable, _))
+                )
             } else {
-                frame_is_valid_at(file, candidate, file_len)?
+                frame_is_intact_at(file, candidate, file_len)?
             };
-            if valid {
+            if intact {
                 return Ok(Some(candidate));
             }
         }
@@ -626,13 +666,17 @@ fn candidate_header(bytes: &[u8], remaining: u64) -> Option<(u64, u32)> {
     (u32::from_le_bytes(tag) < MAX_OPERATION_TAG).then_some((len, checksum))
 }
 
-/// Whether a complete, valid frame starts at byte `at`.
-fn frame_is_valid_at(file: &mut File, at: u64, file_len: u64) -> io::Result<bool> {
+/// Whether an intact frame, decodable or not, starts at byte `at`.
+fn frame_is_intact_at(file: &mut File, at: u64, file_len: u64) -> io::Result<bool> {
     file.seek(SeekFrom::Start(at))?;
     let mut reader = BufReader::with_capacity(SCAN_BUFFER, &mut *file);
     Ok(matches!(
         read_frame(&mut reader, file_len - at)?,
         Frame::Valid { .. }
+            | Frame::Invalid {
+                kind: TailKind::Unreadable,
+                ..
+            }
     ))
 }
 
@@ -776,6 +820,17 @@ mod tests {
         }
     }
 
+    /// A complete frame whose checksum matches and whose record type this
+    /// release does not know, as a newer release would append one.
+    fn unknown_record_frame(offset: u64) -> Vec<u8> {
+        let mut frame = encode_frame(&entry(offset, "new")).unwrap();
+        let header = FRAME_HEADER_LEN as usize;
+        frame[header..][TAG_RANGE].copy_from_slice(&(MAX_OPERATION_TAG - 1).to_le_bytes());
+        let checksum = crc32fast::hash(&frame[header..]);
+        frame[8..12].copy_from_slice(&checksum.to_be_bytes());
+        frame
+    }
+
     /// A complete frame whose checksum matches but whose record type this
     /// release does not know (as a newer release would append one) ends the
     /// scan as an unreadable record, not as a crash's leftovers.
@@ -784,13 +839,8 @@ mod tests {
         let dir = fresh_dir("unknown_record");
         let path = dir.join("wal.log");
         let (valid, _) = frames(2);
-        let mut unknown = encode_frame(&entry(3, "new")).unwrap();
-        let header = FRAME_HEADER_LEN as usize;
-        unknown[header..][TAG_RANGE].copy_from_slice(&(MAX_OPERATION_TAG - 1).to_le_bytes());
-        let checksum = crc32fast::hash(&unknown[header..]);
-        unknown[8..12].copy_from_slice(&checksum.to_be_bytes());
         let mut bytes = valid.clone();
-        bytes.extend_from_slice(&unknown);
+        bytes.extend_from_slice(&unknown_record_frame(3));
         std::fs::write(&path, &bytes).unwrap();
 
         let (keys, report) = keys(&path);
@@ -809,6 +859,132 @@ mod tests {
                 assert!(reason.contains("undecodable payload"), "{reason}");
             }
             other => panic!("expected an unreadable tail, got {other:?}"),
+        }
+    }
+
+    /// `repair` and `prepare` refuse a WAL holding a record this release
+    /// cannot decode, naming the file and the record's byte position, and
+    /// leave every byte in place: in a legacy or versioned file, when a crash
+    /// cut the append after it short, and when a valid frame or another
+    /// unreadable record follows it.
+    #[test]
+    fn an_unreadable_record_is_refused_and_kept() {
+        let (valid, _) = frames(2);
+        let mut legacy = valid.clone();
+        legacy.extend_from_slice(&unknown_record_frame(3));
+        let mut versioned_file = versioned(&valid);
+        versioned_file.extend_from_slice(&unknown_record_frame(3));
+        let mut torn_after = versioned_file.clone();
+        torn_after.extend_from_slice(&encode_frame(&entry(4, "torn")).unwrap()[..9]);
+        let mut valid_after = versioned_file.clone();
+        valid_after.extend_from_slice(&encode_frame(&entry(4, "after")).unwrap());
+        let mut unreadable_after = versioned_file.clone();
+        unreadable_after.extend_from_slice(&unknown_record_frame(4));
+        let cases = [
+            ("legacy", legacy, valid.len() as u64),
+            (
+                "versioned",
+                versioned_file,
+                FILE_HEADER_LEN + valid.len() as u64,
+            ),
+            (
+                "torn_after",
+                torn_after,
+                FILE_HEADER_LEN + valid.len() as u64,
+            ),
+            (
+                "valid_after",
+                valid_after,
+                FILE_HEADER_LEN + valid.len() as u64,
+            ),
+            (
+                "unreadable_after",
+                unreadable_after,
+                FILE_HEADER_LEN + valid.len() as u64,
+            ),
+        ];
+        for (name, bytes, position) in cases {
+            let dir = fresh_dir(&format!("unreadable_{name}"));
+            let path = dir.join("wal.log");
+            std::fs::write(&path, &bytes).unwrap();
+
+            for err in [repair(&path).unwrap_err(), prepare(&path).unwrap_err()] {
+                match &err {
+                    PersistenceError::WALUnreadableRecord {
+                        path: reported,
+                        position: at,
+                        reason,
+                    } => {
+                        assert_eq!(reported, &path, "{name}");
+                        assert_eq!(*at, position, "{name}");
+                        assert!(reason.contains("undecodable payload"), "{name}: {reason}");
+                    }
+                    other => panic!("{name}: expected an unreadable record, got {other:?}"),
+                }
+                assert!(err.refuses_startup(), "{name}");
+                let message = err.to_string();
+                assert!(message.contains("wal.log"), "{name}: {message}");
+                assert!(
+                    message.contains(&format!("at byte {position}")),
+                    "{name}: {message}"
+                );
+                assert!(message.contains("newer Synap release"), "{name}: {message}");
+            }
+            assert_eq!(std::fs::read(&path).unwrap(), bytes, "{name}");
+            assert!(!dir.join("wal.log.upgrade").exists(), "{name}");
+        }
+    }
+
+    /// A damaged frame (failing its checksum, zero fill, or a corrupt length)
+    /// followed by a record this release cannot decode is interior corruption,
+    /// as when a decodable record follows: `repair` and `prepare` name both
+    /// positions and leave every byte in place, so the record is not truncated
+    /// with the damage.
+    #[test]
+    fn a_damaged_frame_before_an_unreadable_record_is_interior_corruption() {
+        let (valid, _) = frames(2);
+        let mut bad_checksum = encode_frame(&entry(3, "torn")).unwrap();
+        bad_checksum[8] ^= 0xFF;
+        let mut corrupt_length = (1u64 << 60).to_be_bytes().to_vec();
+        corrupt_length.extend_from_slice(&[0xAB; 4]);
+        let damages = [
+            ("checksum_mismatch", bad_checksum),
+            ("blank", vec![0u8; FRAME_HEADER_LEN as usize]),
+            ("corrupt_length", corrupt_length),
+        ];
+        for (damage, bad) in damages {
+            for legacy in [false, true] {
+                let name = format!("{damage}_{}", if legacy { "legacy" } else { "versioned" });
+                let mut bytes = if legacy {
+                    valid.clone()
+                } else {
+                    versioned(&valid)
+                };
+                let position = bytes.len() as u64;
+                bytes.extend_from_slice(&bad);
+                let next = bytes.len() as u64;
+                bytes.extend_from_slice(&unknown_record_frame(4));
+                let dir = fresh_dir(&format!("damaged_then_unreadable_{name}"));
+                let path = dir.join("wal.log");
+                std::fs::write(&path, &bytes).unwrap();
+
+                for err in [repair(&path).unwrap_err(), prepare(&path).unwrap_err()] {
+                    match &err {
+                        PersistenceError::WALInteriorCorruption {
+                            position: at,
+                            next_valid,
+                            ..
+                        } => {
+                            assert_eq!(*at, position, "{name}");
+                            assert_eq!(*next_valid, next, "{name}");
+                        }
+                        other => panic!("{name}: expected interior corruption, got {other:?}"),
+                    }
+                    assert!(err.refuses_startup(), "{name}");
+                }
+                assert_eq!(std::fs::read(&path).unwrap(), bytes, "{name}");
+                assert!(!dir.join("wal.log.upgrade").exists(), "{name}");
+            }
         }
     }
 

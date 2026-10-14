@@ -112,6 +112,24 @@ async def test_execute_handles_empty_response(config: SynapConfig) -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_error_status_with_an_empty_body_raises(config: SynapConfig) -> None:
+    """A bodiless 401 (refused credentials) is an error, not an empty result."""
+    mock_response = MagicMock()
+    mock_response.text = ""
+    mock_response.is_success = False
+    mock_response.status_code = 401
+
+    with patch.object(httpx.AsyncClient, "post", new_callable=AsyncMock) as mock_post:
+        mock_post.return_value = mock_response
+
+        async with SynapClient(config) as client:
+            with pytest.raises(SynapException, match=r"HTTP Error \(401\)"):
+                await client.send_command("kv.set", {"key": "k", "value": "v"})
+            with pytest.raises(SynapException, match=r"HTTP Error \(401\)"):
+                await client.execute("kv.set", "test-key")
+
+
+@pytest.mark.asyncio
 async def test_execute_raises_on_server_error(config: SynapConfig) -> None:
     """Test execute raises on server error."""
     mock_response = MagicMock()
