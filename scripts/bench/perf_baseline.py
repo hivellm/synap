@@ -23,6 +23,7 @@ Usage::
     python scripts/bench/perf_baseline.py --runs 1 --duration 1 --warmup 0.2
     python scripts/bench/perf_baseline.py --server-bin /path/to/synap-server-1.3.2 \\
         --server-git-sha <sha> --server-profile release
+    python scripts/bench/perf_baseline.py --merge a.json b.json c.json   # one report from several
 """
 
 from __future__ import annotations
@@ -133,6 +134,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--runner-class", choices=sorted(RUNNER_CLASSES), default="local",
                    help="where this runs; only 'controlled' marks the numbers comparable (default local)")
     p.add_argument("--out-dir", type=Path, default=REPO / "target" / "perf-baseline")
+    p.add_argument("--merge", type=Path, nargs="+", metavar="REPORT",
+                   help="measure nothing: combine JSON reports of one server binary into one report, "
+                        "runs renumbered in start order (to interleave two binaries, see the README)")
     args = p.parse_args(argv)
     if args.runs < 1 or args.clients < 1 or args.pipeline < 1 or args.keyspace < 1:
         p.error("--runs, --clients, --pipeline and --keyspace must be at least 1")
@@ -442,6 +446,87 @@ def aggregate(args: argparse.Namespace, rows: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Merge
+# ---------------------------------------------------------------------------
+# What must be identical for reports to merge: one binary, measured the same
+# way, on the same machine, over the same matrix.
+MERGE_KEYS = ("schema", "runner", "build", "hardware", "durability_modes", "workloads")
+
+
+def cell_keys(report: dict) -> list[tuple[str, str, str]]:
+    return [(c["durability"], c["protocol"], c["workload"]) for c in report["results"]]
+
+
+def merge_reports(paths: list[Path]) -> dict:
+    """One report from several reports of the same server binary.
+
+    Comparing two binaries fairly means alternating them, so a drift of the
+    machine lands on both: run each with ``--runs 1`` in turn, then merge each
+    binary's reports. The runs are renumbered in the order the reports
+    started, and the cells are aggregated exactly as one ``--runs N``
+    measurement would be.
+    """
+    loaded = [(path, json.loads(path.read_text(encoding="utf-8"))) for path in paths]
+    loaded.sort(key=lambda item: item[1]["started_at"])
+    first = loaded[0][1]
+    if first.get("schema") != SCHEMA:
+        raise SystemExit(f"{loaded[0][0]}: schema {first.get('schema')!r}, expected {SCHEMA!r}")
+    if any("merged_from" in report for _, report in loaded):
+        raise SystemExit("merge the measured reports themselves, not a merged report")
+    same_parameters = {k: v for k, v in first["parameters"].items() if k != "runs"}
+    for path, report in loaded[1:]:
+        for key in MERGE_KEYS:
+            if report.get(key) != first.get(key):
+                raise SystemExit(f"{path}: `{key}` differs from {loaded[0][0]}; "
+                                 "only reports of one binary measured the same way merge")
+        if {k: v for k, v in report["parameters"].items() if k != "runs"} != same_parameters:
+            raise SystemExit(f"{path}: `parameters` differ from {loaded[0][0]}")
+        if cell_keys(report) != cell_keys(first):
+            raise SystemExit(f"{path}: the matrix of cells differs from {loaded[0][0]}")
+
+    rows: list[dict] = []
+    offset = 0
+    for _, report in loaded:
+        for cell in report["results"]:
+            key = {"durability": cell["durability"], "protocol": cell["protocol"], "workload": cell["workload"]}
+            for run in cell["runs"]:
+                result = {name: value for name, value in run.items() if name != "run"}
+                rows.append({"run": offset + run["run"], **key, "result": result})
+            for failed in cell["failed_runs"]:
+                rows.append({"run": offset + failed["run"], **key, "error": failed["error"]})
+        offset += report["parameters"]["runs"]
+
+    cells = cell_keys(first)
+    matrix = argparse.Namespace(
+        durability=list(dict.fromkeys(mode for mode, _, _ in cells)),
+        protocols=list(dict.fromkeys(protocol for _, protocol, _ in cells)),
+        workloads=list(dict.fromkeys(workload for _, _, workload in cells)),
+        pipeline=first["parameters"]["pipeline"],
+        clients=first["parameters"]["clients"],
+    )
+    return {
+        "schema": SCHEMA,
+        "started_at": first["started_at"],
+        "finished_at": loaded[-1][1]["finished_at"],
+        "runner": first["runner"],
+        "build": first["build"],
+        "hardware": first["hardware"],
+        "parameters": {
+            **first["parameters"],
+            "runs": offset,
+            "order": f"{len(loaded)} reports merged in start order, so run k is the k-th one measured; "
+                     f"within each report: {first['parameters']['order']}",
+        },
+        "merged_from": [{"started_at": report["started_at"], "runs": report["parameters"]["runs"]}
+                        for _, report in loaded],
+        "durability_modes": first["durability_modes"],
+        "workloads": first["workloads"],
+        "failures": sum(1 for row in rows if "error" in row),
+        "results": aggregate(matrix, rows),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
 def mib(value: float | None) -> str:
@@ -461,6 +546,8 @@ def render_summary(report: dict) -> str:
         f"- Runner: {runner['class']} - {runner['note']}",
         f"- {p['runs']} run(s); {p['clients']} clients; {p['duration_s']} s measured after {p['warmup_s']} s warmup; "
         f"keyspace {p['keyspace']}; {p['value_size']}-byte values; pipelined depth {p['pipeline']}",
+        *([f"- Merged from {len(report['merged_from'])} reports; run k is the k-th one measured"]
+          if "merged_from" in report else []),
         "- Medians across runs; the spread is (max - min) / median. RSS is the server's, sampled.",
         "",
         "| durability | protocol | workload | ops/s (spread) | p50 us | p95 us | p99 us | peak RSS |",
@@ -484,13 +571,12 @@ def render_summary(report: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv)
+def measured_report(args: argparse.Namespace) -> dict:
     started = dt.datetime.now(dt.timezone.utc)
     server_bin, loadgen = build_binaries(args)
     rows, version = measure(args, server_bin, loadgen)
     cells = aggregate(args, rows)
-    report = {
+    return {
         "schema": SCHEMA,
         "started_at": started.isoformat(timespec="seconds"),
         "finished_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
@@ -509,8 +595,17 @@ def main(argv: list[str] | None = None) -> int:
         "failures": sum(1 for r in rows if "error" in r),
         "results": cells,
     }
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
+    report = merge_reports(args.merge) if args.merge else measured_report(args)
+    started = dt.datetime.fromisoformat(report["started_at"])
+    # A merged report starts when its earliest source did; the suffix keeps it
+    # from overwriting that source in the same directory.
+    suffix = "-merged" if args.merge else ""
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    stem = args.out_dir / f"perf-baseline-{started.strftime('%Y%m%dT%H%M%SZ')}"
+    stem = args.out_dir / f"perf-baseline-{started.strftime('%Y%m%dT%H%M%SZ')}{suffix}"
     summary = render_summary(report)
     stem.with_suffix(".json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     stem.with_suffix(".md").write_text(summary, encoding="utf-8")

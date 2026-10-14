@@ -4,6 +4,14 @@ This directory contains comprehensive benchmark results and performance analysis
 
 ## Available Benchmarks
 
+### [1.4.0 Performance Baseline](BASELINE_1_4_0.md)
+Client-side throughput, p50/p95/p99 latency and server memory of the 1.4.0
+release next to 1.3.2, recorded with `scripts/bench/perf_baseline.py`:
+- RESP3 and SynapRPC, GET / SET / list / pipelined SET
+- Every durability mode (`off`, `never`, `periodic`, `always`)
+- What the cost of logging every write is, and which part of it is avoidable
+- Raw reports in [`reports/`](reports/)
+
 ### [Benchmark Results Extended](BENCHMARK_RESULTS_EXTENDED.md)
 Extended performance benchmarks covering all major components:
 - Key-Value Store operations
@@ -31,7 +39,8 @@ Queue system concurrency and parallelism analysis:
 
 ## Benchmark Environment
 
-All benchmarks are conducted under controlled conditions:
+The 1.4.0 baseline states its own machine and method. The other benchmarks
+were conducted under these conditions:
 - **Hardware**: AMD Ryzen 9 5950X, 64GB RAM, NVMe SSD
 - **OS**: Linux (Ubuntu 22.04 LTS)
 - **Rust**: 1.85+ nightly (edition 2024)

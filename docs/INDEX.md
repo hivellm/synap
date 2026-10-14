@@ -77,6 +77,7 @@ How the engine works inside — for contributors and the curious:
 
 ## Benchmarks
 
+- **[1.4.0 Performance Baseline](benchmarks/BASELINE_1_4_0.md)** - 1.4.0 vs 1.3.2 per durability mode, protocol and workload
 - **[Benchmark Results](benchmarks/BENCHMARK_RESULTS_EXTENDED.md)** - Extended performance benchmarks
 - **[Persistence Benchmarks](benchmarks/PERSISTENCE_BENCHMARKS.md)** - WAL and snapshot performance
 - **[Compression Benchmarks](benchmarks/COMPRESSION_BENCHMARKS.md)** - LZ4/Zstd throughput and ratios
@@ -237,7 +238,7 @@ Where each directory lives and how much is in it (2026-07-19):
 | `features/` | 7 | User-visible capabilities |
 | `guides/` | 7 | Using Synap (user/admin how-to) |
 | `protocol/` | 7 | Wire protocols and transports |
-| `benchmarks/` | 7 | Performance data and comparisons |
+| `benchmarks/` | 8 | Performance data and comparisons |
 | `development/` | 6 | Working on Synap (build, test, release) |
 | `internals/` | 5 | How the engine works inside |
 | `project/` | 5 | Project meta and dated status snapshots |
@@ -247,7 +248,7 @@ Where each directory lives and how much is in it (2026-07-19):
 | `sdks/` | 3 | Per-language SDK documentation |
 | `operations/` | 2 | Running a server in production |
 
-**Total**: 179 documents. See
+**Total**: 180 documents. See
 **[Documentation Organization](project/ORGANIZATION.md)** for the rules on where
 new documentation belongs.
 
