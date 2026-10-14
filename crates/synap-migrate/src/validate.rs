@@ -1,28 +1,38 @@
 //! Validation logic for migration
 
 use crate::snapshot;
+use crate::source::{self, Layout, Source};
 use anyhow::{Context, Result, bail};
 use std::path::Path;
+use synap_server::QueueConfig;
+use synap_server::persistence::SnapshotImage;
 use tracing::info;
 use uuid::Uuid;
+
+/// The KV, queue and stream names of the data directory `data_dir`, read as
+/// the server would recover it.
+async fn read_names(data_dir: &Path) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
+    let source: Source = source::read(&Layout::of(data_dir), QueueConfig::default()).await?;
+    let image = SnapshotImage::capture(source.store_refs())
+        .await
+        .context("cannot copy the rebuilt stores")?;
+    let kv = image.kv.into_iter().map(|(key, _, _)| key).collect();
+    let queues = image.queues.into_keys().collect();
+    let streams = source.streams.into_keys().collect();
+    Ok((kv, queues, streams))
+}
 
 /// Validate that migration was successful
 pub async fn validate_migration(data_dir: &Path, user_id: &Uuid) -> Result<()> {
     info!("Validating migration for user {}", user_id);
 
-    // Find and read the latest snapshot
-    let snapshot = match snapshot::load_latest(data_dir)
-        .await
-        .context("Failed to read snapshot")?
-    {
-        Some((snapshot, _)) => snapshot,
-        None => bail!("No snapshot found"),
-    };
+    let (kv_keys, queue_names, stream_names) =
+        read_names(data_dir).await.context("Failed to read data")?;
 
     let expected_prefix = format!("user_{}:", user_id.as_simple());
 
     // Validate KV keys
-    for key in snapshot.kv_data.keys() {
+    for key in &kv_keys {
         if !key.starts_with(&expected_prefix) {
             bail!(
                 "KV key '{}' does not have expected user prefix '{}'",
@@ -33,7 +43,7 @@ pub async fn validate_migration(data_dir: &Path, user_id: &Uuid) -> Result<()> {
     }
 
     // Validate queue names
-    for queue_name in snapshot.queue_data.keys() {
+    for queue_name in &queue_names {
         if !queue_name.starts_with(&expected_prefix) {
             bail!(
                 "Queue '{}' does not have expected user prefix '{}'",
@@ -44,7 +54,7 @@ pub async fn validate_migration(data_dir: &Path, user_id: &Uuid) -> Result<()> {
     }
 
     // Validate stream names
-    for stream_name in snapshot.stream_data.keys() {
+    for stream_name in &stream_names {
         if !stream_name.starts_with(&expected_prefix) {
             bail!(
                 "Stream '{}' does not have expected user prefix '{}'",
@@ -55,9 +65,9 @@ pub async fn validate_migration(data_dir: &Path, user_id: &Uuid) -> Result<()> {
     }
 
     info!("Validation successful:");
-    info!("  - {} KV entries validated", snapshot.kv_data.len());
-    info!("  - {} queues validated", snapshot.queue_data.len());
-    info!("  - {} streams validated", snapshot.stream_data.len());
+    info!("  - {} KV entries validated", kv_keys.len());
+    info!("  - {} queues validated", queue_names.len());
+    info!("  - {} streams validated", stream_names.len());
 
     Ok(())
 }
@@ -66,20 +76,14 @@ pub async fn validate_migration(data_dir: &Path, user_id: &Uuid) -> Result<()> {
 pub async fn check_status(data_dir: &Path) -> Result<String> {
     info!("Checking migration status");
 
-    // Find and read the latest snapshot
-    let snapshot = match snapshot::load_latest(data_dir).await? {
-        Some((snapshot, _)) => snapshot,
-        None => {
-            return Ok("Status: No snapshot found (likely fresh install)".to_string());
-        }
-    };
+    let (kv_keys, queue_names, stream_names) = read_names(data_dir).await?;
 
     // Check for scoped resources
     let mut scoped_count = 0;
     let mut unscoped_count = 0;
     let mut user_ids = std::collections::HashSet::new();
 
-    for key in snapshot.kv_data.keys() {
+    for key in &kv_keys {
         if snapshot::is_scoped(key) {
             scoped_count += 1;
             if let Some(user_id_str) = extract_user_id_from_key(key) {
@@ -90,7 +94,7 @@ pub async fn check_status(data_dir: &Path) -> Result<String> {
         }
     }
 
-    for queue_name in snapshot.queue_data.keys() {
+    for queue_name in &queue_names {
         if snapshot::is_scoped(queue_name) {
             scoped_count += 1;
             if let Some(user_id_str) = extract_user_id_from_key(queue_name) {
@@ -101,7 +105,7 @@ pub async fn check_status(data_dir: &Path) -> Result<String> {
         }
     }
 
-    for stream_name in snapshot.stream_data.keys() {
+    for stream_name in &stream_names {
         if snapshot::is_scoped(stream_name) {
             scoped_count += 1;
             if let Some(user_id_str) = extract_user_id_from_key(stream_name) {

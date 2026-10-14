@@ -8,73 +8,32 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use synap_server::QueueConfig;
 use synap_server::hub::MultiTenant;
-use synap_server::persistence::types::SnapshotConfig;
-use synap_server::persistence::{Snapshot, SnapshotImage, SnapshotManager};
+use synap_server::persistence::types::{SnapshotConfig, StreamEvent};
+use synap_server::persistence::{SnapshotImage, SnapshotManager};
 use uuid::Uuid;
 
-/// The snapshot manager of the data directory `data_dir`, whose snapshots
-/// live in `<data_dir>/snapshots` (the server's default layout).
-pub fn manager(data_dir: &Path) -> SnapshotManager {
+/// The server's snapshot manager over `snapshot_dir`.
+pub fn manager(snapshot_dir: &Path) -> SnapshotManager {
     SnapshotManager::new(SnapshotConfig {
-        directory: data_dir.join("snapshots"),
+        directory: snapshot_dir.to_path_buf(),
         ..SnapshotConfig::default()
     })
 }
 
-/// Load the newest snapshot of `data_dir`, in any format the server reads.
-pub async fn load_latest(data_dir: &Path) -> Result<Option<(Snapshot, PathBuf)>> {
-    manager(data_dir)
-        .load_latest()
+/// Write `image` and the stream section `streams` into `snapshot_dir` in the
+/// format and under the name the server writes, with WAL replay starting at
+/// `wal_offset`.
+pub async fn write(
+    snapshot_dir: &Path,
+    image: SnapshotImage,
+    streams: HashMap<String, Vec<StreamEvent>>,
+    wal_offset: u64,
+) -> Result<PathBuf> {
+    manager(snapshot_dir)
+        .write_snapshot(image, streams, wal_offset)
         .await
-        .context("Failed to load the latest snapshot")
-}
-
-/// Write `snapshot` into `data_dir` in the format and under the name the
-/// server writes, keeping its WAL cutoff. Queues the snapshot stores without
-/// a configuration (v4 and older) get the server's default.
-pub async fn write(data_dir: &Path, snapshot: Snapshot) -> Result<PathBuf> {
-    let Snapshot {
-        wal_offset,
-        kv_data,
-        kv_expires_at_ms,
-        queue_data,
-        stream_data,
-        list_data,
-        set_data,
-        sorted_set_data,
-        hash_data,
-        hyperloglog_data,
-        bitmap_data,
-        ..
-    } = snapshot;
-    let kv = kv_data
-        .into_iter()
-        .map(|(key, value)| {
-            let expires_at_ms = kv_expires_at_ms.get(&key).copied();
-            (key, Arc::<[u8]>::from(value), expires_at_ms)
-        })
-        .collect();
-    let queues = queue_data
-        .into_iter()
-        .map(|(name, image)| (name, image.into_state(QueueConfig::default())))
-        .collect::<HashMap<_, _>>();
-    let image = SnapshotImage {
-        kv,
-        queues,
-        hashes: hash_data,
-        lists: list_data,
-        sets: set_data,
-        sorted_sets: sorted_set_data,
-        hyperloglogs: hyperloglog_data,
-        bitmaps: bitmap_data,
-    };
-    manager(data_dir)
-        .write_snapshot(image, stream_data, wal_offset)
-        .await
-        .context("Failed to write the snapshot")
+        .with_context(|| format!("cannot write a snapshot into {}", snapshot_dir.display()))
 }
 
 /// Apply user namespace prefix to resource names
@@ -90,17 +49,20 @@ pub fn is_scoped(resource_name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source::{self, Layout};
+    use synap_server::QueueConfig;
     use synap_server::core::{Expiry, HashStore, HyperLogLogStore, SetOptions};
     use synap_server::persistence::StoreRefs;
     use synap_server::{KVConfig, KVStore, QueueManager};
 
-    /// A snapshot the server wrote reads back through this module and is
+    /// A snapshot the server wrote is read through the server's codec and
     /// written again in the server's format, which the server loads with every
     /// section intact.
     #[tokio::test]
     async fn server_snapshots_round_trip_through_the_shared_codec() {
-        let source = tempfile::tempdir().unwrap();
+        let source_dir = tempfile::tempdir().unwrap();
         let output = tempfile::tempdir().unwrap();
+        let layout = Layout::of(source_dir.path());
         let kv = KVStore::new(KVConfig::default());
         let deadline = 4_102_444_800_000; // 2100-01-01
         kv.set_with_opts(
@@ -128,13 +90,15 @@ mod tests {
             queue_manager: Some(&queues),
             ..StoreRefs::kv_only(&kv)
         };
-        manager(source.path())
+        manager(&layout.snapshot_dir)
             .create_snapshot(stores, 12)
             .await
             .unwrap();
 
-        let (snapshot, _) = load_latest(source.path()).await.unwrap().unwrap();
-        let written = write(output.path(), snapshot).await.unwrap();
+        let read = source::read(&layout, QueueConfig::default()).await.unwrap();
+        assert_eq!(read.snapshot.as_ref().unwrap().version, 5);
+        let image = SnapshotImage::capture(read.store_refs()).await.unwrap();
+        let written = write(output.path(), image, read.streams, 12).await.unwrap();
         assert_eq!(
             written.file_name().unwrap(),
             "snapshot-v5-00000000000000000001.bin"

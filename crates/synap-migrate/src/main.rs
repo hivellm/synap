@@ -13,6 +13,7 @@ mod backup;
 mod migrate;
 mod rollback;
 mod snapshot;
+mod source;
 mod validate;
 
 #[derive(Parser)]
