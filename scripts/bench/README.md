@@ -134,3 +134,13 @@ throughput threshold exists; comparing two reports is a human decision.
 
 The scheduled workflow that runs this script is described in
 [docs/development/CI_GATES.md](../../docs/development/CI_GATES.md#performance-baseline).
+
+### Recorded baselines
+
+[docs/benchmarks/BASELINE_1_4_0.md](../../docs/benchmarks/BASELINE_1_4_0.md)
+holds the 1.4.0 baseline next to 1.3.2. Both were measured with this script,
+in five alternating runs merged with `--merge`. The page also explains why
+writes with the WAL on are slower in 1.4.0. Its WAL measurements come from
+`crates/synap-server/examples/wal_ack_probe.rs`, which times the server's
+`AsyncWAL` acknowledgement path without a server
+(`cargo run --release --locked -p synap-server --example wal_ack_probe`).
