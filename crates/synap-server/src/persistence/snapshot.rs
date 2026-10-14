@@ -36,16 +36,20 @@ const SNAPSHOT_MAGIC_V2: &[u8; 8] = b"SYNAP002";
 /// the file is written.
 ///
 /// The replication full sync captures the same image under the same barrier
-/// (phase31) and reads its fields to build the replica's image.
+/// (phase31) and reads its fields to build the replica's image; `synap-migrate`
+/// captures it from a rebuilt data directory and renames its entries.
 pub struct SnapshotImage {
-    pub(crate) kv: Vec<(String, Arc<[u8]>, Option<u64>)>,
-    pub(crate) queues: HashMap<String, QueueState>,
-    pub(crate) hashes: HashMap<String, HashMap<String, Vec<u8>>>,
-    pub(crate) lists: HashMap<String, ListValue>,
-    pub(crate) sets: HashMap<String, SetValue>,
-    pub(crate) sorted_sets: HashMap<String, Vec<(Vec<u8>, f64)>>,
-    pub(crate) hyperloglogs: HashMap<String, HyperLogLogValue>,
-    pub(crate) bitmaps: HashMap<String, BitmapValue>,
+    /// Every live KV key with its value and absolute expiry (Unix ms).
+    pub kv: Vec<(String, Arc<[u8]>, Option<u64>)>,
+    /// Every queue whole: configuration, ready, in-flight and dead letters.
+    pub queues: HashMap<String, QueueState>,
+    pub hashes: HashMap<String, HashMap<String, Vec<u8>>>,
+    pub lists: HashMap<String, ListValue>,
+    pub sets: HashMap<String, SetValue>,
+    /// Sorted sets (geospatial indexes included) as `(member, score)` pairs.
+    pub sorted_sets: HashMap<String, Vec<(Vec<u8>, f64)>>,
+    pub hyperloglogs: HashMap<String, HyperLogLogValue>,
+    pub bitmaps: HashMap<String, BitmapValue>,
 }
 
 impl SnapshotImage {
@@ -163,9 +167,27 @@ impl SnapshotManager {
             .await
     }
 
-    /// Serialize `image` (plus the current stream events) as a v5 snapshot
-    /// whose WAL replay starts at `wal_offset`, publish it atomically and
-    /// prune old files.
+    /// Serialize `image` plus the current events of `stream_manager` as a v5
+    /// snapshot whose WAL replay starts at `wal_offset` (see
+    /// [`write_snapshot`](Self::write_snapshot)).
+    pub async fn write_image(
+        &self,
+        image: SnapshotImage,
+        stream_manager: Option<&StreamManager>,
+        wal_offset: u64,
+    ) -> Result<PathBuf> {
+        // Streams are not in the WAL, so they are read here, outside the
+        // snapshot barrier.
+        let streams = match stream_manager {
+            Some(sm) => stream_section(sm.get_all_events().await),
+            None => HashMap::new(),
+        };
+        self.write_snapshot(image, streams, wal_offset).await
+    }
+
+    /// Serialize `image` and the stream section `streams` (room -> events) as
+    /// a v5 snapshot whose WAL replay starts at `wal_offset`, publish it
+    /// atomically and prune old files.
     ///
     /// The bytes go to `<final name>.tmp` in the snapshot directory. That file
     /// is fsynced, renamed to the final name, and the directory is fsynced
@@ -174,10 +196,10 @@ impl SnapshotManager {
     /// file, which recovery ignores and the next write removes — or the
     /// complete one. Old snapshots are removed only after that, and never the
     /// one just written.
-    pub async fn write_image(
+    pub async fn write_snapshot(
         &self,
         image: SnapshotImage,
-        stream_manager: Option<&StreamManager>,
+        streams: HashMap<String, Vec<StreamEvent>>,
         wal_offset: u64,
     ) -> Result<PathBuf> {
         let _writing = self.write_lock.lock().await;
@@ -187,7 +209,7 @@ impl SnapshotManager {
         let temp = temp_path(&path);
 
         info!("Creating streaming snapshot at {:?}", path);
-        let checksum = match write_snapshot_file(&temp, image, stream_manager, wal_offset).await {
+        let checksum = match write_snapshot_file(&temp, image, streams, wal_offset).await {
             Ok(checksum) => checksum,
             Err(e) => {
                 remove_temp(&temp).await;
@@ -270,8 +292,9 @@ impl SnapshotManager {
     ///
     /// A truncated file, an unknown magic, a version byte that does not match
     /// it, a checksum mismatch or a record that does not decode returns
-    /// [`PersistenceError::SnapshotCorrupted`]. Other I/O errors (permissions,
-    /// device errors) are returned as they are: the file may be intact.
+    /// [`PersistenceError::SnapshotCorrupted`] with the reason. Other I/O
+    /// errors (permissions, device errors) are returned as they are: the file
+    /// may be intact.
     pub async fn load(&self, path: &Path) -> Result<Snapshot> {
         info!("Loading snapshot from {:?}", path);
         let file = File::open(path).await?;
@@ -285,7 +308,7 @@ impl SnapshotManager {
                 ) =>
             {
                 warn!("Snapshot {:?} is damaged: {}", path, e);
-                Err(PersistenceError::SnapshotCorrupted(path.to_path_buf()))
+                Err(corrupted(path, e.to_string()))
             }
             other => other,
         }
@@ -386,12 +409,43 @@ async fn remove_temp(temp: &Path) {
     }
 }
 
-/// Stream `image` (plus the current stream events) to `path` as a v5
+/// A [`PersistenceError::SnapshotCorrupted`] for `path`.
+fn corrupted(path: &Path, reason: String) -> PersistenceError {
+    PersistenceError::SnapshotCorrupted {
+        path: path.to_path_buf(),
+        reason,
+    }
+}
+
+/// The snapshot stream section for `events` (room -> the stream manager's
+/// events): each event keeps its ID, offset, type, data and timestamp.
+fn stream_section(
+    events: HashMap<String, Vec<crate::core::stream::StreamEvent>>,
+) -> HashMap<String, Vec<StreamEvent>> {
+    events
+        .into_iter()
+        .map(|(room, events)| {
+            let events = events
+                .into_iter()
+                .map(|event| StreamEvent {
+                    id: event.id,
+                    offset: event.offset,
+                    event_type: event.event,
+                    data: event.data,
+                    timestamp: event.timestamp,
+                })
+                .collect();
+            (room, events)
+        })
+        .collect()
+}
+
+/// Stream `image` and the stream section `stream_data` to `path` as a v5
 /// snapshot and fsync it. Returns the checksum written at the end.
 async fn write_snapshot_file(
     path: &Path,
     image: SnapshotImage,
-    stream_manager: Option<&StreamManager>,
+    stream_data: HashMap<String, Vec<StreamEvent>>,
     wal_offset: u64,
 ) -> Result<u64> {
     let SnapshotImage {
@@ -472,14 +526,6 @@ async fn write_snapshot_file(
         }
     }
 
-    // Streams are not in the WAL, so they are read here, outside the
-    // snapshot barrier.
-    let stream_data = if let Some(sm) = stream_manager {
-        sm.get_all_events().await
-    } else {
-        HashMap::new()
-    };
-
     let stream_count = stream_data.len() as u64;
     writer.write_u64(stream_count).await?;
     checksum.update(&stream_count.to_le_bytes());
@@ -504,18 +550,8 @@ async fn write_snapshot_file(
 
         // Serialize each event
         for event in events {
-            // Convert to snapshot StreamEvent
-            let snapshot_event = StreamEvent {
-                id: event.id,
-                offset: event.offset,
-                event_type: event.event,
-                data: event.data,
-                timestamp: event.timestamp,
-            };
-
-            let event_data =
-                bincode::serde::encode_to_vec(&snapshot_event, bincode::config::legacy())
-                    .map_err(std::io::Error::other)?;
+            let event_data = bincode::serde::encode_to_vec(&event, bincode::config::legacy())
+                .map_err(std::io::Error::other)?;
             let event_len = event_data.len() as u32;
 
             writer.write_u32(event_len).await?;
@@ -569,7 +605,14 @@ async fn read_snapshot(r: &mut SnapshotReader, path: &Path) -> Result<Snapshot> 
         2
     } else {
         warn!("Snapshot {:?} does not start with a known magic", path);
-        return Err(PersistenceError::SnapshotCorrupted(path.to_path_buf()));
+        return Err(corrupted(
+            path,
+            format!(
+                "unknown magic {:?}: not a Synap snapshot, or one written by a newer release (this one reads formats 2 to {})",
+                String::from_utf8_lossy(&magic),
+                SNAPSHOT_VERSION
+            ),
+        ));
     };
 
     let version = r.u8().await?;
@@ -578,7 +621,10 @@ async fn read_snapshot(r: &mut SnapshotReader, path: &Path) -> Result<Snapshot> 
             "Snapshot version byte {} does not match its magic (version {})",
             version, expected_version
         );
-        return Err(PersistenceError::SnapshotCorrupted(path.to_path_buf()));
+        return Err(corrupted(
+            path,
+            format!("version byte {version} does not match its magic (version {expected_version})"),
+        ));
     }
     let has_collections = version >= 3;
     let has_expiry_and_hll_bitmap = version >= 4;
@@ -676,7 +722,12 @@ async fn read_snapshot(r: &mut SnapshotReader, path: &Path) -> Result<Snapshot> 
             "Snapshot checksum mismatch at {:?} (stored={:#x}, computed={:#x})",
             path, stored_checksum, computed_checksum
         );
-        return Err(PersistenceError::SnapshotCorrupted(path.to_path_buf()));
+        return Err(corrupted(
+            path,
+            format!(
+                "checksum mismatch (stored {stored_checksum:#x}, computed {computed_checksum:#x})"
+            ),
+        ));
     }
 
     info!(
@@ -1172,10 +1223,75 @@ mod tests {
             assert!(
                 matches!(
                     mgr.load(&path).await,
-                    Err(PersistenceError::SnapshotCorrupted(_))
+                    Err(PersistenceError::SnapshotCorrupted { .. })
                 ),
                 "cut at {len}"
             );
+        }
+    }
+
+    /// `write_snapshot` stores the stream section it is given event for event
+    /// (ID, offset, type, data, timestamp), and a damaged file names its
+    /// reason.
+    #[tokio::test]
+    async fn write_snapshot_keeps_the_given_stream_section() {
+        let mgr = manager("stream_section");
+        let kv = KVStore::new(KVConfig::default());
+        let image = SnapshotImage::capture(StoreRefs::kv_only(&kv))
+            .await
+            .unwrap();
+        let events = vec![
+            StreamEvent {
+                id: "e-7".into(),
+                offset: 7,
+                event_type: "created".into(),
+                data: b"{}".to_vec(),
+                timestamp: 1_700_000_007,
+            },
+            StreamEvent {
+                id: "e-8".into(),
+                offset: 8,
+                event_type: "updated".into(),
+                data: b"x".to_vec(),
+                timestamp: 1_700_000_008,
+            },
+        ];
+        let streams = HashMap::from([("room".to_string(), events.clone())]);
+        let path = mgr.write_snapshot(image, streams, 3).await.unwrap();
+
+        let snapshot = mgr.load(&path).await.unwrap();
+        assert_eq!(snapshot.wal_offset, 3);
+        let loaded = &snapshot.stream_data["room"];
+        assert_eq!(loaded.len(), 2);
+        for (loaded, written) in loaded.iter().zip(&events) {
+            assert_eq!(loaded.id, written.id);
+            assert_eq!(loaded.offset, written.offset);
+            assert_eq!(loaded.event_type, written.event_type);
+            assert_eq!(loaded.data, written.data);
+            assert_eq!(loaded.timestamp, written.timestamp);
+        }
+
+        let mut bytes = std::fs::read(&path).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xFF;
+        std::fs::write(&path, &bytes).unwrap();
+        match mgr.load(&path).await {
+            Err(PersistenceError::SnapshotCorrupted {
+                path: named,
+                reason,
+            }) => {
+                assert_eq!(named, path);
+                assert!(reason.contains("checksum mismatch"), "{reason}");
+            }
+            other => panic!("expected a damaged snapshot, got {other:?}"),
+        }
+        bytes[..8].copy_from_slice(b"SYNAP009");
+        std::fs::write(&path, &bytes).unwrap();
+        match mgr.load(&path).await {
+            Err(PersistenceError::SnapshotCorrupted { reason, .. }) => {
+                assert!(reason.contains("unknown magic \"SYNAP009\""), "{reason}");
+            }
+            other => panic!("expected a damaged snapshot, got {other:?}"),
         }
     }
 
@@ -1332,7 +1448,7 @@ mod tests {
             std::fs::write(&path, &bytes[..len]).unwrap();
             let result = mgr.load(&path).await;
             assert!(
-                matches!(result, Err(PersistenceError::SnapshotCorrupted(_))),
+                matches!(result, Err(PersistenceError::SnapshotCorrupted { .. })),
                 "cut at {len}: {result:?}"
             );
         }
@@ -1344,7 +1460,7 @@ mod tests {
         std::fs::write(&path, &overlong).unwrap();
         assert!(matches!(
             mgr.load(&path).await,
-            Err(PersistenceError::SnapshotCorrupted(_))
+            Err(PersistenceError::SnapshotCorrupted { .. })
         ));
 
         std::fs::write(&path, &bytes).unwrap();

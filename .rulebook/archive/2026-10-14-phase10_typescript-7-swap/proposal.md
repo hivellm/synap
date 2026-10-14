@@ -1,3 +1,5 @@
+> **Status: abandoned (2026-10-14).** Archived by the maintainer's decision without implementation; the TypeScript 7 swap will not be done. The checklist below was never executed.
+
 # Proposal: phase10_typescript-7-swap
 
 ## Why

@@ -228,7 +228,10 @@ async fn test_snapshot_rejects_corrupted_checksum() {
     // Load must fail with a corruption error rather than returning bad data.
     let result = snapshot_mgr.load_latest().await;
     assert!(
-        matches!(result, Err(types::PersistenceError::SnapshotCorrupted(_))),
+        matches!(
+            result,
+            Err(types::PersistenceError::SnapshotCorrupted { .. })
+        ),
         "expected SnapshotCorrupted, got {result:?}"
     );
 
@@ -543,4 +546,66 @@ async fn interior_corruption_fails_startup_with_the_byte_position() {
     assert!(err.to_string().contains(&expected), "{err}");
     // Nothing was truncated or appended.
     assert_eq!(std::fs::read(&config.wal.path).unwrap(), bytes);
+}
+
+/// The newest snapshot's stream rooms come back at startup: every event with
+/// its ID, offset, type, data and timestamp, publishes continuing after the
+/// last offset, each room a new incarnation. A room the manager already has
+/// is skipped rather than merged.
+#[tokio::test]
+async fn snapshot_stream_rooms_are_restored_at_startup() {
+    use crate::core::stream::{StreamConfig, StreamManager};
+
+    let mut config = restart_config("restart_streams");
+    config.snapshot.enabled = true;
+    let before = StreamManager::new(StreamConfig::default());
+    before.create_room("feed").await.unwrap();
+    for body in ["a", "b", "c"] {
+        before
+            .publish("feed", "created", body.as_bytes().to_vec())
+            .await
+            .unwrap();
+    }
+    let published = before.consume("feed", "c", 0, 10).await.unwrap();
+    let kv = KVStore::new(KVConfig::default());
+    SnapshotManager::new(config.snapshot.clone())
+        .create_snapshot(
+            StoreRefs {
+                stream_manager: Some(&before),
+                ..StoreRefs::kv_only(&kv)
+            },
+            1,
+        )
+        .await
+        .unwrap();
+
+    let recovered = recover_all(&config, KVConfig::default(), QueueConfig::default())
+        .await
+        .unwrap();
+    assert_eq!(recovered.streams.len(), 1);
+    let after = StreamManager::new(StreamConfig::default());
+    assert_eq!(restore_streams(&after, recovered.streams.clone()).await, 1);
+    let restored = after.consume("feed", "c", 0, 10).await.unwrap();
+    assert_eq!(restored.len(), 3);
+    for (event, original) in restored.iter().zip(&published) {
+        assert_eq!(event.id, original.id);
+        assert_eq!(event.offset, original.offset);
+        assert_eq!(event.event, original.event);
+        assert_eq!(event.data, original.data);
+        assert_eq!(event.timestamp, original.timestamp);
+    }
+    assert_eq!(
+        after
+            .publish("feed", "created", b"d".to_vec())
+            .await
+            .unwrap(),
+        3
+    );
+    assert!(
+        after.room_stats("feed").await.unwrap().generation
+            > before.room_stats("feed").await.unwrap().generation
+    );
+
+    assert_eq!(restore_streams(&after, recovered.streams).await, 0);
+    assert_eq!(after.consume("feed", "c", 0, 10).await.unwrap().len(), 4);
 }

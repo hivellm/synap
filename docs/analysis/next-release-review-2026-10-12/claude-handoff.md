@@ -1,5 +1,17 @@
 # Claude handoff: next-release tasks
 
+> **Historical analysis.** Describes Synap 1.3.2: reviewed 2026-10-12 against
+> `5b1efd1` plus the uncommitted 1.3.2 update, committed in `bfecd0c`
+> (2026-10-13). The 1.4.0 release was built from this review (see
+> `CHANGELOG.md`, section `[1.4.0]`); its file and line references point at the
+> 1.3.2 tree. The code has moved since: paths, line numbers and findings
+> describe that revision, not the current tree. Current behavior:
+> [1.4.0 guarantees](../../operations/guarantees.md). Current design:
+> [persistence](../../specs/PERSISTENCE.md),
+> [transports](../../protocol/transports.md),
+> [KV store internals](../../internals/kv-store.md) and the
+> [documentation index](../../INDEX.md).
+
 ## Requested outcome
 
 The user requested a general project review, improvement recommendations, and delivery to Claude to open tasks for the next release. Read this directory's README.md, security.md, durability.md and ecosystem.md. Create actionable Rulebook tasks from the evidence. This is planning, not authorization to implement fixes or ship a release.

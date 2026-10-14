@@ -95,8 +95,8 @@ stop further drops while the gap closes.
 
 Not measured: the integration suites (`cargo test-full`) under coverage, the
 GUI (its tests are contract tests and it has no coverage tooling), the PHP and
-Go SDKs (separate repositories), synap-cli and synap-migrate (no unit tests
-under `--lib`). Two Linux runs of the Rust measurement differed by one line of
+Go SDKs (separate repositories), synap-cli (no unit tests under `--lib`) and
+synap-migrate (its unit tests run under `--lib`, but it has no floor yet). Two Linux runs of the Rust measurement differed by one line of
 synap-server, which the one-decimal truncation absorbs.
 
 When coverage rises, raise the floor in the same pull request; the gate
@@ -114,6 +114,39 @@ python scripts/ci/coverage_gate.py sdk-typescript
 
 The Rust floors were measured on Linux; on Windows and macOS different
 `cfg` branches compile, so local numbers there differ slightly.
+
+## Performance baseline
+
+`perf-baseline.yml` runs `scripts/bench/perf_baseline.py` (see
+[scripts/bench/README.md](../../scripts/bench/README.md)) on a schedule
+(Mondays 04:17 UTC) and on manual dispatch. It never runs on pull requests
+and has **no latency or throughput gate**: a job fails only when the
+measurement itself breaks (a server that does not start or exits, a load
+generator failure, error replies). Numbers are compared by a person, between
+reports from the same runner.
+
+Which job runs depends on the repository variable `PERF_BENCH_RUNNER`
+(Settings > Secrets and variables > Actions > Variables):
+
+| `PERF_BENCH_RUNNER` | Job | Runs on | What it runs | Artifact |
+|---|---|---|---|---|
+| set, e.g. `synap-perf` | `baseline` | that runner label | the full matrix, 5 runs (dispatch inputs `runs`, `duration`), `--runner-class controlled` | `perf-baseline-<run id>`, kept 90 days |
+| unset | `smoke` | `ubuntu-latest` | one 1-second run of the matrix, `--runner-class shared` | `perf-smoke-not-comparable-<run id>`, kept 14 days |
+
+The controlled runner is a machine reserved for this job: register a
+self-hosted runner with a label of its own (for example `synap-perf`) on
+hardware that runs nothing else while the job is active, then set
+`PERF_BENCH_RUNNER` to that label. Any OS works as long as `bash` is on the
+`PATH` (Git Bash on Windows): the job runs its steps in bash, as
+`.github/actions/setup-rust` already requires. Its reports carry `runner.comparable: true`.
+The smoke job only proves that the script, the load generator and the server
+still work together on a shared runner, where neighbouring jobs make timing
+meaningless; its report says `comparable: false` and its artifact name says so
+too.
+
+Both jobs install the pinned toolchain through `.github/actions/setup-rust`
+and build with `cargo build --release --locked --package synap-server --bin
+synap-server --example bench_loadgen`, then run the script with `--no-build`.
 
 ## Before publishing
 

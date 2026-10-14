@@ -22,7 +22,7 @@ pub mod wal_optimized;
 pub use apply::{StoreArcs, StoreRefs};
 pub use layer::PersistenceLayer;
 pub use queue_persistence::QueuePersistence;
-pub use recovery::{RecoveredStores, recover, recover_all};
+pub use recovery::{RecoveredStores, recover, recover_all, restore_streams};
 pub use snapshot::{SnapshotImage, SnapshotManager};
 pub use stream_persistence::{StreamEvent, StreamPersistence};
 pub use types::{

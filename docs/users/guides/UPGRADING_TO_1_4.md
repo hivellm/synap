@@ -169,10 +169,13 @@ RESP3 or SynapRPC command outside a transaction, a script, or a hash, list, set
 or sorted-set write outside a transaction. Such a write never reached replicas,
 and a restart lost it unless a snapshot taken after it held it.
 
-Event streams, partitioned topics and consumer groups are unchanged and stay
-in memory: their writes are not recorded in the WAL and are not sent to
-replicas as they happen (a replica receives the master's stream events only in
-a full sync), and none of them is restored after a restart.
+Event streams, partitioned topics and consumer groups are still not recorded
+in the WAL and are not sent to replicas as they happen (a replica receives the
+master's stream events only in a full sync). New in 1.4.0: stream rooms come
+back at startup from the newest snapshot, so a restart keeps the events that
+snapshot holds and loses only those published after it (1.3.x wrote them to
+the snapshot but never read them back). Partitioned topics and consumer groups
+are not restored.
 
 If the WAL cannot record a write, the client gets an error saying the write is
 applied in memory but not durable. A failed WAL write, flush or fsync fails

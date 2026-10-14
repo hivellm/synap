@@ -1,4 +1,4 @@
-use super::types::{PersistenceConfig, PersistenceError, Result, Snapshot, WALEntry};
+use super::types::{PersistenceConfig, PersistenceError, Result, Snapshot, StreamEvent, WALEntry};
 use super::wal_frame::{self, ScanEnd};
 use super::{SnapshotManager, WriteAheadLog};
 use crate::core::QueueConfig;
@@ -8,8 +8,10 @@ use crate::core::list::ListStore;
 use crate::core::queue::QueueManager;
 use crate::core::set::SetStore;
 use crate::core::sorted_set::{SortedSetStore, ZAddOptions};
+use crate::core::stream::StreamManager;
 use crate::core::types::KVConfig;
 use crate::core::{BitmapStore, Expiry, HyperLogLogStore, SetOptions};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, warn};
@@ -25,6 +27,11 @@ pub struct RecoveredStores {
     pub queue_manager: Option<QueueManager>,
     pub hyperloglog_store: HyperLogLogStore,
     pub bitmap_store: BitmapStore,
+    /// The loaded snapshot's stream section (room -> events; empty without a
+    /// snapshot). Streams are not in the WAL, so this is every event that
+    /// survives the restart; hand it to [`restore_streams`] once the stream
+    /// manager exists.
+    pub streams: HashMap<String, Vec<StreamEvent>>,
     /// Offset the next WAL record must get: past every record in the WAL and
     /// never below the loaded snapshot's cutoff. Hand it to
     /// [`PersistenceLayer::continue_wal_at`](super::PersistenceLayer::continue_wal_at).
@@ -99,6 +106,7 @@ pub async fn recover_all(
             queue_manager: Some(QueueManager::new(queue_config)),
             hyperloglog_store: HyperLogLogStore::new(),
             bitmap_store: BitmapStore::new(),
+            streams: HashMap::new(),
             wal_offset: 0,
         });
     }
@@ -109,8 +117,6 @@ pub async fn recover_all(
     // Opening the WAL repairs a torn tail and upgrades a 1.3.x file before it
     // is read below.
     WriteAheadLog::open(config.wal.clone()).await?;
-    let hyperloglog_store = HyperLogLogStore::new();
-    let bitmap_store = BitmapStore::new();
 
     // Step 1: pick the newest valid snapshot and check that skipping any
     // damaged newer file loses nothing.
@@ -132,14 +138,44 @@ pub async fn recover_all(
         );
     }
 
+    // Steps 2 and 3: restore the snapshot, then replay the WAL from its
+    // cutoff.
+    let snapshot = choice.loaded.map(|(snapshot, path)| {
+        info!(
+            "Loaded snapshot from {:?} at offset {}",
+            path, snapshot.wal_offset
+        );
+        snapshot
+    });
+    let next_offset = wal.next_offset(cutoff);
+    rebuild(snapshot, wal.entries, next_offset, kv_config, queue_config).await
+}
+
+/// Rebuild every store from `snapshot` (when there is one) plus the WAL
+/// records `entries` written after its cutoff, applied in order: steps 2 and 3
+/// of [`recover_all`], which calls it once it has read the data directory.
+///
+/// It reads and writes no file, so `synap-migrate` rebuilds a data directory
+/// it must leave untouched with the same code the server starts from. The
+/// snapshot's stream section is returned as [`RecoveredStores::streams`] for
+/// [`restore_streams`], and `next_offset` as [`RecoveredStores::wal_offset`].
+pub async fn rebuild(
+    mut snapshot: Option<Snapshot>,
+    entries: Vec<WALEntry>,
+    next_offset: u64,
+    kv_config: KVConfig,
+    queue_config: QueueConfig,
+) -> Result<RecoveredStores> {
+    let hyperloglog_store = HyperLogLogStore::new();
+    let bitmap_store = BitmapStore::new();
+    let streams = snapshot
+        .as_mut()
+        .map(|snapshot| std::mem::take(&mut snapshot.stream_data))
+        .unwrap_or_default();
+
     // Step 2: restore the snapshot
     let (kv_store, hash_store, list_store, set_store, sorted_set_store, queue_manager, last_offset) =
-        if let Some((snapshot, path)) = choice.loaded {
-            info!(
-                "Loaded snapshot from {:?} at offset {}",
-                path, snapshot.wal_offset
-            );
-
+        if let Some(snapshot) = snapshot {
             // Restore KV store, each key with its absolute expiry; keys that
             // expired while the server was down are left out.
             let kv = KVStore::new(kv_config);
@@ -248,10 +284,9 @@ pub async fn recover_all(
 
     // Step 3: replay the WAL from the snapshot's cutoff
     info!("Replaying WAL from offset {}...", last_offset);
-    let next_offset = wal.next_offset(last_offset);
     let mut replayed = 0;
 
-    for entry in wal.entries {
+    for entry in entries {
         // Records written before phase23 carry TTLs relative to when they were
         // written; anchor them at the entry's timestamp.
         crate::persistence::apply::apply_operation(
@@ -283,8 +318,49 @@ pub async fn recover_all(
         queue_manager,
         hyperloglog_store,
         bitmap_store,
+        streams,
         wal_offset: next_offset,
     })
+}
+
+/// Restore the stream rooms of a snapshot's stream section
+/// ([`RecoveredStores::streams`]) into `manager` at startup. Each event keeps
+/// its ID, offset, type, data and timestamp, so consumers resume at the
+/// offsets they had; events published after the snapshot are lost, since
+/// streams are not in the WAL, and each room is a new incarnation (a new
+/// `generation`). The manager's retention then applies as to any event.
+///
+/// A room the manager refuses (it exists already, or its offsets are not
+/// contiguous) is skipped with a warning naming it; streams are a bounded
+/// buffer, so the other rooms and every other store still come back. Returns
+/// the number of rooms restored.
+pub async fn restore_streams(
+    manager: &StreamManager,
+    streams: HashMap<String, Vec<StreamEvent>>,
+) -> usize {
+    let mut restored = 0;
+    for (room, events) in streams {
+        let events = events
+            .into_iter()
+            .map(|event| crate::core::stream::StreamEvent {
+                id: event.id,
+                offset: event.offset,
+                room: room.clone(),
+                event: event.event_type,
+                data: event.data,
+                timestamp: event.timestamp,
+                metadata: HashMap::new(),
+            })
+            .collect();
+        match manager.restore_events(&room, events).await {
+            Ok(()) => restored += 1,
+            Err(e) => warn!(
+                "Stream room {:?} from the snapshot was not restored: {}",
+                room, e
+            ),
+        }
+    }
+    restored
 }
 
 /// The snapshot recovery starts from, and the damaged newer files it skipped.
@@ -313,7 +389,7 @@ async fn load_newest_valid(mgr: &SnapshotManager, dir: &Path) -> Result<Snapshot
                     damaged,
                 });
             }
-            Err(PersistenceError::SnapshotCorrupted(_)) => damaged.push(path),
+            Err(PersistenceError::SnapshotCorrupted { .. }) => damaged.push(path),
             Err(e) => {
                 return Err(PersistenceError::SnapshotUnrecoverable(format!(
                     "cannot read snapshot {path:?}: {e}"

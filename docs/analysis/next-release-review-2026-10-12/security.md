@@ -1,5 +1,17 @@
 # Security and transport authorization review
 
+> **Historical analysis.** Describes Synap 1.3.2: reviewed 2026-10-12 against
+> `5b1efd1` plus the uncommitted 1.3.2 update, committed in `bfecd0c`
+> (2026-10-13). The 1.4.0 release was built from this review (see
+> `CHANGELOG.md`, section `[1.4.0]`); its file and line references point at the
+> 1.3.2 tree. The code has moved since: paths, line numbers and findings
+> describe that revision, not the current tree. Current behavior:
+> [1.4.0 guarantees](../../operations/guarantees.md). Current design:
+> [persistence](../../specs/PERSISTENCE.md),
+> [transports](../../protocol/transports.md),
+> [KV store internals](../../internals/kv-store.md) and the
+> [documentation index](../../INDEX.md).
+
 Reviewed: 2026-10-12. Baseline: current 1.3.2 working tree, including external dependency/version updates and MCP ServerConfig migration. Existing changes were preserved.
 
 Evidence below is static source inspection, revalidated after those updates. No exploit was executed, no server was launched, and no cargo command was run for this report. Scenarios describe behavior implied by the inspected paths; acceptance criteria are proposed regression tests, not completed validation.

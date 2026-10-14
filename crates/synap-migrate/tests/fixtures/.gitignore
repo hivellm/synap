@@ -1,0 +1,3 @@
+# The fixtures are data directories; the repository-wide data/ ignore rule
+# must not hide them.
+!data/

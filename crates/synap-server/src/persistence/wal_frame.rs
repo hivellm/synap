@@ -28,6 +28,9 @@
 //! - **Torn tail** — no complete, valid frame follows it. This is what a crash
 //!   in the middle of an append leaves behind. [`repair`] truncates the file to
 //!   the end of the last valid frame, so new frames never land after garbage.
+//!   The scan reports what the first invalid bytes are ([`TailKind`]), which
+//!   tells a crash's leftovers from a complete record this release cannot
+//!   decode.
 //! - **Interior corruption** — a valid frame follows it. Truncating would
 //!   discard acknowledged history, so the scan fails with
 //!   [`PersistenceError::WALInteriorCorruption`] carrying the byte position.
@@ -135,12 +138,42 @@ pub enum ScanEnd {
     /// Every byte of the file belongs to a valid frame.
     Clean,
     /// The bytes from `valid_len` to `file_len` hold an incomplete or invalid
-    /// frame with no valid frame after it.
+    /// frame with no valid frame after it. `kind` says what that first frame
+    /// is; [`repair`] removes the bytes whatever it is.
     TornTail {
         valid_len: u64,
         file_len: u64,
         reason: String,
+        kind: TailKind,
     },
+}
+
+/// What the invalid bytes a scan stopped at are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TailKind {
+    /// The file ends inside the file header, a frame header, or the payload a
+    /// frame header declares: an append, or the creation of the file, was cut
+    /// short.
+    Incomplete,
+    /// A complete frame whose payload does not match its checksum: an append
+    /// whose bytes did not all reach the disk.
+    ChecksumMismatch,
+    /// A complete frame whose checksum matches a payload too short to hold any
+    /// record. Zero-filled bytes, which some file systems leave after a crash,
+    /// read as such frames (length 0, and checksum 0 matches no bytes).
+    Blank,
+    /// A complete frame whose checksum matches a payload long enough to hold a
+    /// record, which does not decode: an intact record this release cannot
+    /// read, such as one of a type a newer release added. A crash does not
+    /// leave one.
+    Unreadable,
+}
+
+impl TailKind {
+    /// Whether a crash in the middle of an append can leave these bytes.
+    pub fn is_torn(self) -> bool {
+        self != TailKind::Unreadable
+    }
 }
 
 /// Result of scanning a WAL file.
@@ -197,6 +230,7 @@ pub fn scan(path: &Path, mut visit: impl FnMut(WALEntry)) -> Result<ScanReport> 
                     valid_len: 0,
                     file_len,
                     reason,
+                    kind: TailKind::Incomplete,
                 },
             });
         }
@@ -219,7 +253,11 @@ pub fn scan(path: &Path, mut visit: impl FnMut(WALEntry)) -> Result<ScanReport> 
                 visit(entry);
                 pos += frame_len;
             }
-            Frame::Invalid { reason, frame_len } => {
+            Frame::Invalid {
+                reason,
+                kind,
+                frame_len,
+            } => {
                 let mut file = reader.into_inner();
                 if let Some(next_valid) = find_valid_frame(&mut file, pos, frame_len, file_len)? {
                     return Err(PersistenceError::WALInteriorCorruption {
@@ -233,6 +271,7 @@ pub fn scan(path: &Path, mut visit: impl FnMut(WALEntry)) -> Result<ScanReport> 
                     valid_len: pos,
                     file_len,
                     reason,
+                    kind,
                 };
                 return Ok(report);
             }
@@ -250,6 +289,7 @@ pub fn repair(path: &Path) -> Result<ScanReport> {
         valid_len,
         file_len,
         reason,
+        ..
     } = &report.end
     {
         let file = OpenOptions::new().write(true).open(path)?;
@@ -445,6 +485,7 @@ enum Frame {
     /// known; `None` when the header itself is unusable.
     Invalid {
         reason: String,
+        kind: TailKind,
         frame_len: Option<u64>,
     },
 }
@@ -456,6 +497,7 @@ fn read_frame(reader: &mut impl Read, remaining: u64) -> io::Result<Frame> {
     if remaining < FRAME_HEADER_LEN {
         return Ok(Frame::Invalid {
             reason: format!("incomplete frame header ({remaining} of {FRAME_HEADER_LEN} bytes)"),
+            kind: TailKind::Incomplete,
             frame_len: None,
         });
     }
@@ -466,6 +508,7 @@ fn read_frame(reader: &mut impl Read, remaining: u64) -> io::Result<Frame> {
     let Some(payload_len) = usize::try_from(len).ok().filter(|_| len <= available) else {
         return Ok(Frame::Invalid {
             reason: format!("frame declares {len} payload bytes but only {available} remain"),
+            kind: TailKind::Incomplete,
             frame_len: None,
         });
     };
@@ -477,7 +520,11 @@ fn read_frame(reader: &mut impl Read, remaining: u64) -> io::Result<Frame> {
             entry,
             frame_len: FRAME_HEADER_LEN + len,
         }),
-        Err(reason) => Ok(Frame::Invalid { reason, frame_len }),
+        Err((kind, reason)) => Ok(Frame::Invalid {
+            reason,
+            kind,
+            frame_len,
+        }),
     }
 }
 
@@ -490,17 +537,29 @@ fn parse_header(header: &[u8]) -> (u64, u32) {
     (u64::from_be_bytes(len), u32::from_be_bytes(checksum))
 }
 
-/// Verify `payload` against `checksum` and decode it.
-fn decode_payload(payload: &[u8], checksum: u32) -> std::result::Result<WALEntry, String> {
+/// Verify `payload` against `checksum` and decode it; on failure, say what
+/// the frame is and why.
+fn decode_payload(
+    payload: &[u8],
+    checksum: u32,
+) -> std::result::Result<WALEntry, (TailKind, String)> {
     let actual = crc32fast::hash(payload);
     if actual != checksum {
-        return Err(format!(
-            "checksum mismatch (stored {checksum:#010x}, computed {actual:#010x})"
+        return Err((
+            TailKind::ChecksumMismatch,
+            format!("checksum mismatch (stored {checksum:#010x}, computed {actual:#010x})"),
         ));
     }
     bincode::serde::decode_from_slice::<WALEntry, _>(payload, bincode::config::legacy())
         .map(|(entry, _)| entry)
-        .map_err(|e| format!("undecodable payload: {e}"))
+        .map_err(|e| {
+            let kind = if (payload.len() as u64) < MIN_PAYLOAD_LEN {
+                TailKind::Blank
+            } else {
+                TailKind::Unreadable
+            };
+            (kind, format!("undecodable payload: {e}"))
+        })
 }
 
 /// Find the position of a complete, valid frame after the invalid frame at
@@ -681,15 +740,23 @@ mod tests {
         huge_len.extend_from_slice(&[0xAB; 40]);
         let mut bad_checksum = torn.clone();
         bad_checksum[8] ^= 0xFF;
-        let shapes: Vec<(&str, Vec<u8>)> = vec![
-            ("partial_length", torn[..5].to_vec()),
-            ("partial_checksum", torn[..10].to_vec()),
-            ("partial_payload", torn[..torn.len() - 3].to_vec()),
-            ("corrupt_huge_length", huge_len),
-            ("bad_checksum", bad_checksum),
-            ("zero_fill", vec![0u8; 4096]),
+        let shapes: Vec<(&str, Vec<u8>, TailKind)> = vec![
+            ("partial_length", torn[..5].to_vec(), TailKind::Incomplete),
+            (
+                "partial_checksum",
+                torn[..10].to_vec(),
+                TailKind::Incomplete,
+            ),
+            (
+                "partial_payload",
+                torn[..torn.len() - 3].to_vec(),
+                TailKind::Incomplete,
+            ),
+            ("corrupt_huge_length", huge_len, TailKind::Incomplete),
+            ("bad_checksum", bad_checksum, TailKind::ChecksumMismatch),
+            ("zero_fill", vec![0u8; 4096], TailKind::Blank),
         ];
-        for (name, tail) in shapes {
+        for (name, tail, expected_kind) in shapes {
             let dir = fresh_dir(&format!("torn_{name}"));
             let path = dir.join("wal.log");
             let mut bytes = valid.clone();
@@ -698,7 +765,7 @@ mod tests {
 
             let report = repair(&path).unwrap();
             assert!(
-                matches!(report.end, ScanEnd::TornTail { valid_len, .. } if valid_len == valid.len() as u64),
+                matches!(report.end, ScanEnd::TornTail { valid_len, kind, .. } if valid_len == valid.len() as u64 && kind == expected_kind && kind.is_torn()),
                 "{name}: {:?}",
                 report.end
             );
@@ -706,6 +773,42 @@ mod tests {
             let (keys, after) = keys(&path);
             assert_eq!(keys, ["key1", "key2"], "{name}");
             assert_eq!(after.end, ScanEnd::Clean, "{name}");
+        }
+    }
+
+    /// A complete frame whose checksum matches but whose record type this
+    /// release does not know (as a newer release would append one) ends the
+    /// scan as an unreadable record, not as a crash's leftovers.
+    #[test]
+    fn a_checksum_valid_record_of_an_unknown_type_is_unreadable() {
+        let dir = fresh_dir("unknown_record");
+        let path = dir.join("wal.log");
+        let (valid, _) = frames(2);
+        let mut unknown = encode_frame(&entry(3, "new")).unwrap();
+        let header = FRAME_HEADER_LEN as usize;
+        unknown[header..][TAG_RANGE].copy_from_slice(&(MAX_OPERATION_TAG - 1).to_le_bytes());
+        let checksum = crc32fast::hash(&unknown[header..]);
+        unknown[8..12].copy_from_slice(&checksum.to_be_bytes());
+        let mut bytes = valid.clone();
+        bytes.extend_from_slice(&unknown);
+        std::fs::write(&path, &bytes).unwrap();
+
+        let (keys, report) = keys(&path);
+        assert_eq!(keys, ["key1", "key2"]);
+        match report.end {
+            ScanEnd::TornTail {
+                valid_len,
+                file_len,
+                reason,
+                kind,
+            } => {
+                assert_eq!(valid_len, valid.len() as u64);
+                assert_eq!(file_len, bytes.len() as u64);
+                assert_eq!(kind, TailKind::Unreadable);
+                assert!(!kind.is_torn());
+                assert!(reason.contains("undecodable payload"), "{reason}");
+            }
+            other => panic!("expected an unreadable tail, got {other:?}"),
         }
     }
 

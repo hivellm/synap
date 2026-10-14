@@ -1,5 +1,17 @@
 # Ecosystem review for the next release
 
+> **Historical analysis.** Describes Synap 1.3.2: reviewed 2026-10-12 against
+> `5b1efd1` plus the uncommitted 1.3.2 update, committed in `bfecd0c`
+> (2026-10-13). The 1.4.0 release was built from this review (see
+> `CHANGELOG.md`, section `[1.4.0]`); its file and line references point at the
+> 1.3.2 tree. The code has moved since: paths, line numbers and findings
+> describe that revision, not the current tree. Current behavior:
+> [1.4.0 guarantees](../../operations/guarantees.md). Current design:
+> [persistence](../../specs/PERSISTENCE.md),
+> [transports](../../protocol/transports.md),
+> [KV store internals](../../internals/kv-store.md) and the
+> [documentation index](../../INDEX.md).
+
 Review date: 2026-10-12. Revalidated against the current worktree, including the authorized 1.3.2 dependency/version changes and MCP ServerConfig changes. Findings below remain present. This is static source review, not a claim of executed integration tests. No application code or task state was changed.
 
 Existing work is excluded from proposed new scope: `phase10_typescript-7-swap`, `phase11_v1-3-2-dependabot-fixes`, and `phase12_replace-serde-yaml`. Coordinate CI additions with those tasks; do not recreate dependency upgrades or YAML replacement tasks.
