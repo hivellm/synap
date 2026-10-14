@@ -41,8 +41,15 @@ signal rather than steady-state noise.
 # StreamConfig
 max_buffer_size: 10000          # soft target per room
 max_unread_buffer_size: 100000  # hard cap incl. unread (default 10x soft)
-retention_secs: 3600
+retention_secs: 3600            # time-based; 0 = keep events regardless of age
 ```
+
+Time-based retention runs on compaction (`auto_compact`, every
+`compact_interval_secs`): it removes events older than `retention_secs`, from
+the oldest on, so the offsets left stay contiguous; once every event has
+expired, the room's earliest offset is the next one to be published, and a read
+below it is out of range. `retention_secs: 0` turns time-based retention off;
+the two buffer caps above still apply.
 
 ### Scope
 
