@@ -15,6 +15,12 @@ use uuid::Uuid;
 /// The data directory `data_dir`, read as the server would recover it, as an
 /// image plus its stream section.
 async fn read_image(data_dir: &Path) -> Result<(SnapshotImage, HashMap<String, Vec<StreamEvent>>)> {
+    if !data_dir.is_dir() {
+        bail!(
+            "the data directory {} does not exist or is not a directory",
+            data_dir.display()
+        );
+    }
     let source = source::read(&Layout::of(data_dir), QueueConfig::default()).await?;
     let image = SnapshotImage::capture(source.store_refs())
         .await
@@ -92,4 +98,81 @@ pub async fn check_status(data_dir: &Path) -> Result<String> {
             (unscoped.len() as f64 / total as f64) * 100.0
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::migrate::{self, Migration};
+    use crate::report::QueueDefaults;
+    use crate::snapshot;
+    use synap_server::persistence::StoreRefs;
+    use synap_server::{KVConfig, KVStore, QueueManager};
+
+    fn tenant() -> Uuid {
+        Uuid::parse_str("2c4e6a8b-1d3f-4a5b-8c7d-9e0f1a2b3c4d").unwrap()
+    }
+
+    /// A standalone data directory with a KV key and a queue.
+    async fn standalone(dir: &Path) {
+        let kv = KVStore::new(KVConfig::default());
+        kv.set("k", b"v".to_vec(), None).await.unwrap();
+        let queues = QueueManager::new(QueueConfig::default());
+        queues.create_queue("q", None).await.unwrap();
+        snapshot::manager(&Layout::of(dir).snapshot_dir)
+            .create_snapshot(
+                StoreRefs {
+                    queue_manager: Some(&queues),
+                    ..StoreRefs::kv_only(&kv)
+                },
+                1,
+            )
+            .await
+            .unwrap();
+    }
+
+    /// Status tells a standalone directory from a migrated one, and validate
+    /// accepts only the tenant the directory was migrated for.
+    #[tokio::test]
+    async fn status_and_validate_follow_the_migration() {
+        let source = tempfile::tempdir().unwrap();
+        let scratch = tempfile::tempdir().unwrap();
+        let output = scratch.path().join("migrated");
+        standalone(source.path()).await;
+
+        let status = check_status(source.path()).await.unwrap();
+        assert!(status.starts_with("Status: NOT MIGRATED"), "{status}");
+        assert!(status.contains("Total resources: 2"), "{status}");
+        let error = validate_migration(source.path(), &tenant())
+            .await
+            .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("expected prefix"),
+            "{error:#}"
+        );
+
+        migrate::run(&Migration {
+            source: source.path().to_path_buf(),
+            output: output.clone(),
+            tenant: tenant(),
+            queue_defaults: QueueDefaults::default(),
+            dry_run: false,
+        })
+        .await
+        .unwrap();
+
+        let status = check_status(&output).await.unwrap();
+        assert!(status.starts_with("Status: MIGRATED"), "{status}");
+        assert!(status.contains(&tenant().to_string()), "{status}");
+        validate_migration(&output, &tenant()).await.unwrap();
+        let other = Uuid::parse_str("3d5f7b9c-2e4a-4b6c-9d8e-0f1a2b3c4d5e").unwrap();
+        assert!(validate_migration(&output, &other).await.is_err());
+
+        let empty = scratch.path().join("empty");
+        let error = check_status(&empty).await.unwrap_err();
+        assert!(format!("{error:#}").contains("does not exist"), "{error:#}");
+        std::fs::create_dir_all(&empty).unwrap();
+        let status = check_status(&empty).await.unwrap();
+        assert!(status.starts_with("Status: EMPTY"), "{status}");
+    }
 }

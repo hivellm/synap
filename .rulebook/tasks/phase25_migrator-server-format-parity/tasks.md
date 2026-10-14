@@ -8,5 +8,5 @@
 
 ## 2. Tail (docs + tests — check or waive with tailWaiver)
 - [x] 2.1 Update or create documentation covering the implementation — `crates/synap-migrate/README.md` rewritten (output-only workflow, formats read, older-directory limits, safety, the codec-sharing decision and why not synap-core, how the Hub-mode test boots); `docs/guides/MIGRATION_GUIDE.md` steps, rollback and troubleshooting moved to the new flow (with the hivellm/synap#230 note); `docs/internals/persistence-snapshot-format.md`, `docs/specs/PERSISTENCE.md` and `docs/development/CI_GATES.md` follow the API changes; fixture contents in `tests/fixtures/README.md`
-- [ ] 2.2 Write tests covering the new behavior
+- [x] 2.2 Write tests covering the new behavior — synap-migrate unit tests (shared-codec round trip, WAL tail in legacy and v2 WALs, torn tail without repair, scoping of every structure and `owner`, output-only writes, rejection of damaged/unsupported snapshots and WALs and of misplaced outputs, dry run, `status`/`validate`), the real-server fixture integration test, and a server unit test for `write_snapshot`'s stream section and the reason in `SnapshotCorrupted`
 - [ ] 2.3 Run tests and confirm they pass
