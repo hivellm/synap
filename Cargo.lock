@@ -3368,7 +3368,11 @@ name = "synap-migrate"
 version = "1.3.2"
 dependencies = [
  "anyhow",
+ "axum",
  "clap",
+ "futures-util",
+ "reqwest 0.13.5",
+ "serde_json",
  "synap-server",
  "tempfile",
  "tokio",

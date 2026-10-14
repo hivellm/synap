@@ -331,7 +331,9 @@ def capture_baseline(c, journal, captured_at_ms):
     for key in ("plain", "ttl-long", "deleted", "tail-plain", "ttl-tail", "ttl-short", "tail-deleted"):
         value = c.read("kv.get", key=key)
         ttl = c.read("kv.ttl", key=key)
-        kv[key] = {"get": value, "ttl": ttl}
+        # The TTL is whole seconds remaining when it was read, so the key's
+        # deadline is before ttl_read_at_ms + (ttl + 1) * 1000.
+        kv[key] = {"get": value, "ttl": ttl, "ttl_read_at_ms": int(time.time() * 1000)}
     baseline = {
         "captured_at_ms": captured_at_ms,
         "kv": kv,

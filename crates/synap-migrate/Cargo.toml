@@ -29,5 +29,21 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 # CLI framework
 clap = { version = "4.5", features = ["derive"] }
 
+[features]
+# Build and run the integration tests in tests/. Each file is its own binary
+# that links the whole server, so plain `cargo test` runs the unit tests
+# only; `cargo test-full` (see .cargo/config.toml) turns this on for the
+# release gate and CI, as synap-server's feature of the same name does.
+full-tests = []
+
 [dev-dependencies]
 tempfile = "3.15"
+serde_json.workspace = true
+axum.workspace = true
+futures-util = "0.3"
+reqwest = { version = "0.13", features = ["json"] }
+
+# Integration tests only build with `full-tests` (see [features]).
+[[test]]
+name = "real_server_fixtures_tests"
+required-features = ["full-tests"]
