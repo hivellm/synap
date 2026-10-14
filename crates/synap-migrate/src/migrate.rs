@@ -32,6 +32,9 @@ pub struct Migration {
     /// The Hub tenant (user ID) that owns every migrated resource.
     pub tenant: Uuid,
     pub queue_defaults: QueueDefaults,
+    /// Migrate even when every resource name already looks Hub-scoped, for
+    /// standalone data whose names only look that way.
+    pub allow_scoped_names: bool,
     /// Verify and report without writing the output.
     pub dry_run: bool,
 }
@@ -61,12 +64,28 @@ pub async fn run(migration: &Migration) -> Result<Report> {
     let counts = Counts::of(&image, &source.streams);
     let mut report = Report::new(&source, counts.clone(), &migration.queue_defaults);
 
-    // Data already in a Hub namespace would be scoped twice.
-    if let Some((kind, name)) = scope::names(&image, &source.streams)
-        .into_iter()
-        .find(|(_, name)| scope::owner(name).is_some())
-    {
-        bail!("the input already holds Hub-scoped names ({kind} {name:?}): it was migrated before");
+    // Data already in a Hub namespace would be scoped twice. A migration
+    // writes only Hub-scoped names, but standalone names can look the same
+    // (`user_<UUID>:cart`), and scoping those is correct: the tenant reads
+    // them under their original names. So only input whose names all look
+    // scoped is taken for migrated data.
+    let names = scope::names(&image, &source.streams);
+    let looks_scoped: Vec<(scope::Kind, &str)> = names
+        .iter()
+        .copied()
+        .filter(|(_, name)| scope::owner(name).is_some())
+        .collect();
+    if let Some(&(kind, name)) = looks_scoped.first() {
+        if looks_scoped.len() == names.len() && !migration.allow_scoped_names {
+            bail!(
+                "every resource name in the input is already Hub-scoped (for example {kind} {name:?}), as in a directory migrated before: migrating it would scope each name twice. If it is standalone data whose names only look scoped, run again with --allow-scoped-names"
+            );
+        }
+        report.notes.push(format!(
+            "{} of {} resource names already look Hub-scoped (for example {kind} {name:?}); they are scoped like every other name, so the tenant reads them under their original names",
+            looks_scoped.len(),
+            names.len()
+        ));
     }
 
     if migration.dry_run {
@@ -249,6 +268,7 @@ mod tests {
             output: output.to_path_buf(),
             tenant: tenant(),
             queue_defaults: QueueDefaults::default(),
+            allow_scoped_names: false,
             dry_run: false,
         }
     }
@@ -289,11 +309,68 @@ mod tests {
             assert_eq!(snapshot.kv_data[&scoped], key.as_bytes().to_vec());
         }
 
-        // A second run over the migrated data is refused: it is scoped already.
+        // A second run over the migrated data is refused: every name is
+        // scoped already.
         let again = scratch.path().join("again");
         let error = failure(&migration(&output, &again)).await;
         assert!(error.contains("migrated before"), "{error}");
+        assert!(error.contains("--allow-scoped-names"), "{error}");
         assert!(!again.exists());
+    }
+
+    /// Standalone names shaped like Hub-scoped ones (`user_<UUID>:cart`) are
+    /// scoped like any other, so the tenant reads them under their original
+    /// names. Input whose names all look scoped is refused as migrated data
+    /// unless the caller says it is standalone data.
+    #[tokio::test]
+    async fn standalone_names_that_look_scoped_are_migrated() {
+        let looks_scoped = "user_0123456789abcdef0123456789abcdef:cart";
+        let scratch = tempfile::tempdir().unwrap();
+        let source = scratch.path().join("source");
+        let mut wal = wal_frame::encode_file_header().to_vec();
+        for entry in [set(1, looks_scoped), set(2, "plain")] {
+            wal.extend_from_slice(&wal_frame::encode_frame(&entry).unwrap());
+        }
+        let wal_path = Layout::of(&source).wal_path;
+        std::fs::create_dir_all(wal_path.parent().unwrap()).unwrap();
+        std::fs::write(&wal_path, &wal).unwrap();
+
+        let output = scratch.path().join("mixed");
+        let report = run(&migration(&source, &output)).await.unwrap();
+        assert!(
+            report
+                .notes
+                .iter()
+                .any(|n| n.contains("1 of 2 resource names")),
+            "{:?}",
+            report.notes
+        );
+        let snapshot = snapshot::manager(&output.join("snapshots"))
+            .load(report.written.as_ref().unwrap())
+            .await
+            .unwrap();
+        for key in [looks_scoped, "plain"] {
+            let scoped = MultiTenant::scope_kv_key(Some(&tenant()), key).into_owned();
+            assert_eq!(snapshot.kv_data[&scoped], key.as_bytes().to_vec(), "{key}");
+        }
+
+        // Only names that look scoped: taken for migrated data, unless allowed.
+        let mut wal = wal_frame::encode_file_header().to_vec();
+        wal.extend_from_slice(&wal_frame::encode_frame(&set(1, looks_scoped)).unwrap());
+        std::fs::write(&wal_path, &wal).unwrap();
+        let refused = scratch.path().join("refused");
+        let error = failure(&migration(&source, &refused)).await;
+        assert!(error.contains("already Hub-scoped"), "{error}");
+        assert!(!refused.exists());
+        let allowed = scratch.path().join("allowed");
+        let report = run(&Migration {
+            allow_scoped_names: true,
+            ..migration(&source, &allowed)
+        })
+        .await
+        .unwrap();
+        assert_eq!(report.counts.kv_keys, 1);
+        assert!(report.written.is_some());
     }
 
     /// A damaged snapshot file, even one older than the newest, fails the run

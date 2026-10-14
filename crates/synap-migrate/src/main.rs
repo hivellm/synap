@@ -51,6 +51,13 @@ enum Commands {
         #[arg(long)]
         server_config: Option<PathBuf>,
 
+        /// Migrate even when every resource name already looks Hub-scoped
+        /// (`user_<32 hex digits>:...`), which otherwise means the directory
+        /// was migrated before; for standalone data whose names only look
+        /// scoped
+        #[arg(long)]
+        allow_scoped_names: bool,
+
         /// Verify the input and report what would be migrated, without
         /// writing anything
         #[arg(long)]
@@ -93,6 +100,7 @@ async fn main() -> Result<()> {
             output,
             user_id,
             server_config,
+            allow_scoped_names,
             dry_run,
         } => {
             let queue_defaults = match server_config {
@@ -111,6 +119,7 @@ async fn main() -> Result<()> {
                 output,
                 tenant: user_id,
                 queue_defaults,
+                allow_scoped_names,
                 dry_run,
             };
             let report = migrate::run(&migration)

@@ -311,14 +311,17 @@ Status: NOT MIGRATED
 
 ## Troubleshooting
 
-### Issue: "the input already holds Hub-scoped names"
+### Issue: "every resource name in the input is already Hub-scoped"
 
-**Cause:** Resources already have `user_{user_id}:` prefixes: the directory
-was migrated before.
+**Cause:** Every resource already has a `user_{user_id}:` prefix: the
+directory was migrated before. (A standalone directory where only some names
+have that shape migrates normally; those names are scoped like the others.)
 
 **Solutions:**
 1. Check if this is expected: `synap-migrate status --data-dir ./data`
 2. If accidental: migrate from the original standalone directory instead
+3. If it is standalone data whose names only look scoped (keys built as
+   `user_{uuid}:...`), run again with `--allow-scoped-names`
 
 ### Issue: "the output ... is not empty"
 

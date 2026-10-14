@@ -156,6 +156,7 @@ mod tests {
             output: output.clone(),
             tenant: tenant(),
             queue_defaults: QueueDefaults::default(),
+            allow_scoped_names: false,
             dry_run: false,
         })
         .await

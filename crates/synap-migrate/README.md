@@ -34,6 +34,7 @@ synap-migrate migrate \
 | `--output` | Where to write the migrated data directory. It must not exist yet or be an empty directory, and must not be inside `--data-dir`. Required. |
 | `--user-id` | The Hub user ID (tenant) that owns every migrated resource. |
 | `--server-config` | The configuration file of the server that wrote the data. Its `queue` settings configure the queues the data records no configuration for (snapshots older than v5, queues created implicitly by an old publish record). Without it they get the server's built-in queue defaults. |
+| `--allow-scoped-names` | Migrate even when every resource name already looks Hub-scoped (`user_<32 hex digits>:...`), which otherwise means the directory was migrated before. For standalone data whose names only look that way. |
 | `--dry-run` | Verify the input and print the report without writing anything. |
 
 What it does, in order:
@@ -46,7 +47,11 @@ What it does, in order:
    the reason, and nothing is written.
 3. Rebuilds the state as the server would recover it: the newest snapshot plus
    every WAL record written after it, replayed with the server's own code.
-4. Refuses input that already holds Hub-scoped names (it was migrated before).
+4. Refuses input whose names are **all** Hub-scoped already (it was migrated
+   before), unless `--allow-scoped-names` says it is standalone data. A
+   standalone directory may hold some names of that shape (`user_<UUID>:cart`):
+   they are scoped like every other name, so the tenant reads them under their
+   original names, and a `Note:` says how many there were.
 5. Renames every resource for the tenant and writes
    `<output>/snapshots/snapshot-v5-00000000000000000001.bin`.
 6. Loads the written snapshot back with the server's loader and checks it
@@ -204,7 +209,7 @@ compares it with what the source server served before it stopped.
 |---|---|
 | `the output ... is not empty` | Pick a new directory, or empty that one. |
 | `the output ... is inside the data directory` | The source must stay unchanged; write elsewhere. |
-| `the input already holds Hub-scoped names` | The directory was migrated before (`synap-migrate status` shows it). |
+| `every resource name in the input is already Hub-scoped` | The directory was migrated before (`synap-migrate status` shows MIGRATED). If it is standalone data whose names only look scoped, run again with `--allow-scoped-names`. |
 | `Snapshot "..." is damaged: checksum mismatch ...` | That file is corrupt. Restore it from a backup, or move it out of `snapshots/` if you accept losing what only it holds. |
 | `Snapshot "..." is damaged: unknown magic ...` | Not a snapshot, or one written by a newer Synap: use that release's migrator. |
 | `WAL ... is corrupted at byte N ... interior corruption` | A damaged record is followed by valid ones; restore the WAL from a backup. |
