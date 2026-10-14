@@ -1,5 +1,5 @@
 ## 1. Implementation
-- [ ] 1.1 Bump the Cargo workspace, TypeScript, Python, C# and PHP SDKs and the GUI to 1.4.0
+- [x] 1.1 Bump the Cargo workspace, TypeScript, Python, C# and PHP SDKs and the GUI to 1.4.0 — workspace.package (all five workspace crates, Rust SDK included, inherit it; internal path deps carry no version requirement), Cargo.lock via `cargo update -w --offline`, TypeScript and GUI package.json/package-lock.json, Python pyproject + `__version__`, C# csproj, README badge and Docker publish examples; the PHP SDK is the `hivellm/synap-sdk-php` submodule with no version field (Packagist versions it from that repo's tags), so nothing to bump here; `cargo check --workspace --locked` and full-tests clippy green; remaining `1.3.2` mentions are historical
 - [ ] 1.2 Write the 1.4.0 CHANGELOG entry
 - [ ] 1.3 Write the 1.4.0 migration guide: authorization per transport, WAL and snapshot versions, no-downgrade rule and backup step, Hub listener policy, rate limiting, CLI `PING` exit status, read-only GUI configuration
 - [ ] 1.4 Run `cargo test-full` and the SDK E2E and S2S suites against the release build
