@@ -7,14 +7,19 @@
 //! ones), replayed into the stores by [`recovery::rebuild`]. Startup also
 //! repairs a torn WAL tail and upgrades a 1.3.x WAL in place; this reader does
 //! neither and writes nothing.
+//!
+//! The read is stricter than startup: every snapshot file must load, not only
+//! the newest (startup may fall back past a damaged one), and the whole WAL
+//! must scan. Corrupt or unsupported input fails the read with an error that
+//! names the file and the reason, before the caller writes anything.
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use synap_server::persistence::recovery::{self, RecoveredStores};
-use synap_server::persistence::types::StreamEvent;
+use synap_server::persistence::types::{PersistenceError, StreamEvent};
 use synap_server::persistence::wal_frame::{self, ScanEnd, WalFormat};
-use synap_server::persistence::{Operation, StoreRefs, WALEntry};
+use synap_server::persistence::{Operation, Snapshot, StoreRefs, WALEntry};
 use synap_server::{KVConfig, QueueConfig};
 
 use crate::snapshot;
@@ -101,21 +106,13 @@ fn unbounded_kv_config() -> KVConfig {
     }
 }
 
-/// Read the data directory at `layout` as the server would recover it.
+/// Read the data directory at `layout` as the server would recover it,
+/// verifying every snapshot file and the whole WAL first.
 /// `queue_defaults` is the configuration of queues the directory does not
 /// record one for (snapshots older than v5, queues created implicitly by a
 /// replayed publish), as the server's own queue settings would give them.
 pub async fn read(layout: &Layout, queue_defaults: QueueConfig) -> Result<Source> {
-    let loaded = snapshot::manager(&layout.snapshot_dir)
-        .load_latest()
-        .await
-        .with_context(|| {
-            format!(
-                "cannot read the snapshots in {}",
-                layout.snapshot_dir.display()
-            )
-        })?;
-    let (mut snapshot, snapshot_read) = match loaded {
+    let (mut snapshot, snapshot_read) = match load_every_snapshot(&layout.snapshot_dir).await? {
         Some((snapshot, path)) => {
             let read = SnapshotRead {
                 path,
@@ -153,6 +150,35 @@ pub async fn read(layout: &Layout, queue_defaults: QueueConfig) -> Result<Source
         snapshot: snapshot_read,
         wal,
     })
+}
+
+/// Load and verify every snapshot file in `snapshot_dir`, oldest first, and
+/// return the newest. Any file that does not load fails the read, naming the
+/// file and the reason (a truncated or damaged file, a checksum mismatch, a
+/// format this release does not read).
+async fn load_every_snapshot(snapshot_dir: &Path) -> Result<Option<(Snapshot, PathBuf)>> {
+    let manager = snapshot::manager(snapshot_dir);
+    let files = manager.list_snapshots().await.with_context(|| {
+        format!(
+            "cannot list the snapshot directory {}",
+            snapshot_dir.display()
+        )
+    })?;
+    let newest = files.len().checked_sub(1);
+    let mut loaded = None;
+    for (index, path) in files.into_iter().enumerate() {
+        let snapshot = match manager.load(&path).await {
+            Ok(snapshot) => snapshot,
+            // The error names the file and the reason.
+            Err(e @ PersistenceError::SnapshotCorrupted { .. }) => return Err(e.into()),
+            Err(e) => bail!("cannot read the snapshot {}: {e}", path.display()),
+        };
+        // Only the newest one is kept; the others are dropped once verified.
+        if Some(index) == newest {
+            loaded = Some((snapshot, path));
+        }
+    }
+    Ok(loaded)
 }
 
 /// Stream publish records in `operation`, a transaction's included.

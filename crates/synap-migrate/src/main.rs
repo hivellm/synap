@@ -1,23 +1,22 @@
 //! Synap Migration Tool
 //!
-//! Migrates standalone Synap installations to HiveHub.Cloud SaaS mode
-//! by adding user namespace prefixes to all resources.
+//! Migrates a standalone Synap data directory into one tenant's namespace for
+//! HiveHub.Cloud (Hub) mode, writing the result to a new directory.
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
-use tracing::{info, warn};
+use tracing::info;
 use uuid::Uuid;
 
-mod backup;
 mod migrate;
 mod report;
-mod rollback;
 mod scope;
 mod snapshot;
 mod source;
 mod validate;
 
+use migrate::Migration;
 use report::QueueDefaults;
 
 #[derive(Parser)]
@@ -35,30 +34,22 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Backup existing Synap data before migration
-    Backup {
-        /// Path to Synap data directory
-        #[arg(short, long, default_value = "./data")]
-        data_dir: PathBuf,
-
-        /// Output directory for backup
-        #[arg(short, long, default_value = "./backup")]
-        output: PathBuf,
-    },
-
-    /// Migrate standalone data to user-scoped namespaces
+    /// Migrate a standalone data directory into a tenant's Hub namespace,
+    /// writing the result to a new directory (the source is only read)
     Migrate {
-        /// Path to Synap data directory
+        /// Path to the standalone Synap data directory (`snapshots/`,
+        /// `wal/synap.wal`); it is not modified
         #[arg(short, long, default_value = "./data")]
         data_dir: PathBuf,
 
-        /// User ID to assign ownership to all resources
+        /// Directory to write the migrated data to; it must not exist yet or
+        /// be empty, and must not be inside the data directory
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Hub user ID (tenant) that owns every migrated resource
         #[arg(short, long)]
         user_id: Uuid,
-
-        /// Backup directory (for rollback support)
-        #[arg(short, long, default_value = "./backup")]
-        backup_dir: PathBuf,
 
         /// Configuration file of the server that wrote the data; its queue
         /// settings configure the queues the data does not record a
@@ -66,12 +57,13 @@ enum Commands {
         #[arg(long)]
         server_config: Option<PathBuf>,
 
-        /// Perform dry-run without making changes
+        /// Verify the input and report what would be migrated, without
+        /// writing anything
         #[arg(long)]
         dry_run: bool,
     },
 
-    /// Validate migrated data
+    /// Check that every resource of a data directory belongs to one tenant
     Validate {
         /// Path to Synap data directory
         #[arg(short, long, default_value = "./data")]
@@ -80,21 +72,6 @@ enum Commands {
         /// Expected user ID
         #[arg(short, long)]
         user_id: Uuid,
-    },
-
-    /// Rollback migration to previous state
-    Rollback {
-        /// Path to Synap data directory
-        #[arg(short, long, default_value = "./data")]
-        data_dir: PathBuf,
-
-        /// Backup directory to restore from
-        #[arg(short, long, default_value = "./backup")]
-        backup_dir: PathBuf,
-
-        /// Force rollback without confirmation
-        #[arg(short, long)]
-        force: bool,
     },
 
     /// Show migration status and statistics
@@ -117,67 +94,41 @@ async fn main() -> Result<()> {
         .init();
 
     match cli.command {
-        Commands::Backup { data_dir, output } => {
-            info!("Creating backup of Synap data");
-            backup::create_backup(&data_dir, &output)
-                .await
-                .context("Failed to create backup")?;
-            info!("Backup completed successfully");
-        }
-
         Commands::Migrate {
             data_dir,
+            output,
             user_id,
-            backup_dir,
             server_config,
             dry_run,
         } => {
             let queue_defaults = match server_config {
                 Some(path) => QueueDefaults {
                     config: synap_server::ServerConfig::from_file(&path)
-                        .with_context(|| format!("cannot read the server configuration {path:?}"))?
+                        .with_context(|| {
+                            format!("cannot read the server configuration {}", path.display())
+                        })?
                         .to_queue_config(),
                     origin: format!("the queue settings of {}", path.display()),
                 },
                 None => QueueDefaults::default(),
             };
-            if dry_run {
-                info!("Running migration in DRY-RUN mode (no changes will be made)");
-            } else {
-                info!("Starting migration to user-scoped namespaces");
-            }
-
-            // Create backup first
-            if !dry_run {
-                info!("Creating backup before migration...");
-                backup::create_backup(&data_dir, &backup_dir)
-                    .await
-                    .context("Failed to create backup")?;
-            }
-
-            // Perform migration
-            let report = migrate::migrate_to_hub(&data_dir, &user_id, dry_run, &queue_defaults)
+            let migration = Migration {
+                source: data_dir,
+                output,
+                tenant: user_id,
+                queue_defaults,
+                dry_run,
+            };
+            let report = migrate::run(&migration)
                 .await
-                .context("Migration failed")?;
+                .context("Migration failed (the source directory is unchanged)")?;
             println!("{report}");
-
-            if dry_run {
-                info!("Dry-run completed successfully");
-            } else {
-                info!("Migration completed successfully");
-                info!("Validating migrated data...");
-
-                // Validate migration
-                if let Err(e) = validate::validate_migration(&data_dir, &user_id).await {
-                    warn!("Validation failed: {}", e);
-                    warn!(
-                        "You can rollback using: synap-migrate rollback -d {:?} -b {:?}",
-                        data_dir, backup_dir
-                    );
-                    return Err(e);
-                }
-
-                info!("Validation passed. Migration successful!");
+            if !dry_run {
+                println!(
+                    "The source directory {} is unchanged and stays the rollback. Point the Hub-mode server's persistence at {} (snapshots/ and wal/synap.wal).",
+                    migration.source.display(),
+                    migration.output.display()
+                );
             }
         }
 
@@ -189,26 +140,7 @@ async fn main() -> Result<()> {
             info!("Validation passed successfully");
         }
 
-        Commands::Rollback {
-            data_dir,
-            backup_dir,
-            force,
-        } => {
-            if !force {
-                warn!("This will restore Synap data from backup, overwriting current data.");
-                warn!("Use --force to confirm rollback.");
-                return Ok(());
-            }
-
-            info!("Rolling back migration");
-            rollback::rollback_migration(&data_dir, &backup_dir)
-                .await
-                .context("Rollback failed")?;
-            info!("Rollback completed successfully");
-        }
-
         Commands::Status { data_dir } => {
-            info!("Checking migration status");
             let status = validate::check_status(&data_dir).await?;
             println!("{}", status);
         }
