@@ -8,6 +8,9 @@ license.workspace = true
 repository.workspace = true
 description = "Migration tool for Synap standalone to HiveHub.Cloud SaaS mode"
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "synap-migrate"
 path = "src/main.rs"

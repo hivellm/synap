@@ -9,15 +9,9 @@ use std::path::PathBuf;
 use tracing::info;
 use uuid::Uuid;
 
-mod migrate;
-mod report;
-mod scope;
-mod snapshot;
-mod source;
-mod validate;
-
-use migrate::Migration;
-use report::QueueDefaults;
+use synap_migrate::migrate::{self, Migration};
+use synap_migrate::report::QueueDefaults;
+use synap_migrate::validate;
 
 #[derive(Parser)]
 #[command(name = "synap-migrate")]
