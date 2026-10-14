@@ -11,10 +11,14 @@ use uuid::Uuid;
 
 mod backup;
 mod migrate;
+mod report;
 mod rollback;
+mod scope;
 mod snapshot;
 mod source;
 mod validate;
+
+use report::QueueDefaults;
 
 #[derive(Parser)]
 #[command(name = "synap-migrate")]
@@ -55,6 +59,12 @@ enum Commands {
         /// Backup directory (for rollback support)
         #[arg(short, long, default_value = "./backup")]
         backup_dir: PathBuf,
+
+        /// Configuration file of the server that wrote the data; its queue
+        /// settings configure the queues the data does not record a
+        /// configuration for (snapshots older than v5)
+        #[arg(long)]
+        server_config: Option<PathBuf>,
 
         /// Perform dry-run without making changes
         #[arg(long)]
@@ -119,8 +129,18 @@ async fn main() -> Result<()> {
             data_dir,
             user_id,
             backup_dir,
+            server_config,
             dry_run,
         } => {
+            let queue_defaults = match server_config {
+                Some(path) => QueueDefaults {
+                    config: synap_server::ServerConfig::from_file(&path)
+                        .with_context(|| format!("cannot read the server configuration {path:?}"))?
+                        .to_queue_config(),
+                    origin: format!("the queue settings of {}", path.display()),
+                },
+                None => QueueDefaults::default(),
+            };
             if dry_run {
                 info!("Running migration in DRY-RUN mode (no changes will be made)");
             } else {
@@ -136,9 +156,10 @@ async fn main() -> Result<()> {
             }
 
             // Perform migration
-            migrate::migrate_to_hub(&data_dir, &user_id, dry_run)
+            let report = migrate::migrate_to_hub(&data_dir, &user_id, dry_run, &queue_defaults)
                 .await
                 .context("Migration failed")?;
+            println!("{report}");
 
             if dry_run {
                 info!("Dry-run completed successfully");

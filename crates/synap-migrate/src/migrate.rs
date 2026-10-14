@@ -1,87 +1,64 @@
-//! Migration logic for adding user namespace prefixes
+//! Migration of a standalone data directory into one tenant's Hub namespace.
 
+use crate::report::{Counts, QueueDefaults, Report};
+use crate::scope;
 use crate::snapshot;
-use crate::source::{self, Layout, Source};
+use crate::source::{self, Layout};
 use anyhow::{Context, Result, bail};
 use std::path::Path;
-use synap_server::QueueConfig;
 use synap_server::persistence::SnapshotImage;
-use tracing::{info, warn};
+use tracing::info;
 use uuid::Uuid;
 
-/// Migrate standalone Synap data to user-scoped namespaces
-pub async fn migrate_to_hub(data_dir: &Path, user_id: &Uuid, dry_run: bool) -> Result<()> {
+/// Migrate the data directory `data_dir` into the Hub namespace of `tenant`:
+/// rebuild it as the server would recover it, rename every resource the way
+/// Hub mode names it for that tenant, and write the result as one snapshot.
+pub async fn migrate_to_hub(
+    data_dir: &Path,
+    tenant: &Uuid,
+    dry_run: bool,
+    queue_defaults: &QueueDefaults,
+) -> Result<Report> {
     info!(
-        "Starting migration for user {} (dry_run: {})",
-        user_id, dry_run
+        "Starting migration for tenant {} (dry_run: {})",
+        tenant, dry_run
     );
 
     // Read the directory as the server would recover it: the newest snapshot
     // plus the WAL records written after it.
     let layout = Layout::of(data_dir);
-    let source = source::read(&layout, QueueConfig::default()).await?;
-    log_source(&source);
-    let mut image = SnapshotImage::capture(source.store_refs())
+    let source = source::read(&layout, queue_defaults.config.clone()).await?;
+    let image = SnapshotImage::capture(source.store_refs())
         .await
         .context("cannot copy the rebuilt stores")?;
-    let mut streams = source.streams;
+    let mut report = Report::new(&source, Counts::of(&image, &source.streams), queue_defaults);
 
-    // Display migration plan
-    info!("Migration plan:");
-    info!("  - KV entries: {}", image.kv.len());
-    info!("  - Queues: {}", image.queues.len());
-    info!("  - Streams: {}", streams.len());
-
-    // Check if already migrated
-    let already_scoped = image
-        .kv
-        .iter()
-        .map(|(key, _, _)| key)
-        .chain(image.queues.keys())
-        .chain(streams.keys())
-        .any(|name| snapshot::is_scoped(name));
-    if already_scoped {
-        warn!("Data appears to already be migrated (contains user_ prefixes)");
-        if !dry_run {
-            bail!("Cannot migrate already-migrated data. Use rollback first if needed.");
-        }
-        return Ok(());
+    // Data already in a Hub namespace would be scoped twice.
+    if let Some((kind, name)) = scope::names(&image, &source.streams)
+        .into_iter()
+        .find(|(_, name)| scope::owner(name).is_some())
+    {
+        bail!("the input already holds Hub-scoped names ({kind} {name:?}): it was migrated before");
     }
 
     if dry_run {
-        info!("DRY RUN - No changes will be made");
-        return Ok(());
+        return Ok(report);
     }
 
-    // Scope every name, each KV key keeping its value and expiry.
-    let scope = |name: String| snapshot::scope_resource_name(user_id, &name);
-    image.kv = image
-        .kv
-        .into_iter()
-        .map(|(key, value, expires_at_ms)| (scope(key), value, expires_at_ms))
-        .collect();
-    image.queues = image
-        .queues
-        .into_iter()
-        .map(|(name, queue)| (scope(name), queue))
-        .collect();
-    streams = streams
-        .into_iter()
-        .map(|(name, events)| (scope(name), events))
-        .collect();
+    let scoped = scope::image(image, tenant);
+    let streams = scope::streams(source.streams, tenant);
 
     // The migrated snapshot holds the WAL records too, so its replay starts
     // past them; it gets the next sequence number and is the one the server
     // loads.
-    let migrated_path = snapshot::write(
+    let written = snapshot::write(
         &layout.snapshot_dir,
-        image,
+        scoped,
         streams,
         source.stores.wal_offset,
     )
-    .await
-    .context("Failed to write migrated snapshot")?;
-    info!("Wrote migrated snapshot to {:?}", migrated_path);
+    .await?;
+    info!("Wrote migrated snapshot to {:?}", written);
 
     // Archive the snapshot the migration read
     if let Some(read) = source.snapshot {
@@ -91,30 +68,6 @@ pub async fn migrate_to_hub(data_dir: &Path, user_id: &Uuid, dry_run: bool) -> R
             .await
             .context("Failed to archive old snapshot")?;
     }
-
-    info!("Migration completed successfully");
-
-    Ok(())
-}
-
-/// Log which snapshot and WAL records a read used.
-pub fn log_source(source: &Source) {
-    match &source.snapshot {
-        Some(read) => info!(
-            "Snapshot {:?} (format v{}, WAL replay from offset {})",
-            read.path, read.version, read.wal_offset
-        ),
-        None => info!("No snapshot: the state comes from the WAL alone"),
-    }
-    let wal = &source.wal;
-    info!(
-        "WAL {:?} ({:?}): {} records, {} replayed after the snapshot",
-        wal.path, wal.format, wal.records, wal.replayed
-    );
-    if let Some(torn) = &wal.torn_tail {
-        warn!(
-            "WAL {:?}: {}; the server discards it at startup, and so does this read",
-            wal.path, torn
-        );
-    }
+    report.written = Some(written);
+    Ok(report)
 }

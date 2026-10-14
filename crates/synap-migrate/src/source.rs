@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use synap_server::persistence::recovery::{self, RecoveredStores};
 use synap_server::persistence::types::StreamEvent;
 use synap_server::persistence::wal_frame::{self, ScanEnd, WalFormat};
-use synap_server::persistence::{StoreRefs, WALEntry};
+use synap_server::persistence::{Operation, StoreRefs, WALEntry};
 use synap_server::{KVConfig, QueueConfig};
 
 use crate::snapshot;
@@ -56,6 +56,9 @@ pub struct WalRead {
     pub records: u64,
     /// Records at or after the snapshot cutoff, replayed into the stores.
     pub replayed: usize,
+    /// Stream publish records among them, which replay skips as startup
+    /// does (streams come from the snapshot).
+    pub stream_records: usize,
     /// A torn tail (bytes a crash left in the middle of an append), which the
     /// server discards at startup and this read skips the same way.
     pub torn_tail: Option<String>,
@@ -152,6 +155,15 @@ pub async fn read(layout: &Layout, queue_defaults: QueueConfig) -> Result<Source
     })
 }
 
+/// Stream publish records in `operation`, a transaction's included.
+fn stream_records(operation: &Operation) -> usize {
+    match operation {
+        Operation::StreamPublish { .. } => 1,
+        Operation::Transaction { operations } => operations.iter().map(stream_records).sum(),
+        _ => 0,
+    }
+}
+
 /// Scan the WAL at `path` without repairing it, keeping the records at or
 /// after `cutoff` in file order. Also returns the offset the next record
 /// would get: past every record and never below the cutoff, as startup
@@ -181,6 +193,7 @@ async fn read_wal(path: PathBuf, cutoff: u64) -> Result<(Vec<WALEntry>, WalRead,
             format: report.format,
             records: report.valid_frames,
             replayed: entries.len(),
+            stream_records: entries.iter().map(|e| stream_records(&e.operation)).sum(),
             torn_tail,
         };
         Ok((entries, wal, next_offset))
@@ -193,7 +206,6 @@ async fn read_wal(path: PathBuf, cutoff: u64) -> Result<(Vec<WALEntry>, WalRead,
 mod tests {
     use super::*;
     use synap_server::KVStore;
-    use synap_server::persistence::Operation;
 
     fn set(offset: u64, key: &str, value: &str, ttl: Option<u64>) -> WALEntry {
         WALEntry {

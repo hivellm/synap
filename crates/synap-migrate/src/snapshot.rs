@@ -8,10 +8,8 @@
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use synap_server::hub::MultiTenant;
 use synap_server::persistence::types::{SnapshotConfig, StreamEvent};
 use synap_server::persistence::{SnapshotImage, SnapshotManager};
-use uuid::Uuid;
 
 /// The server's snapshot manager over `snapshot_dir`.
 pub fn manager(snapshot_dir: &Path) -> SnapshotManager {
@@ -34,16 +32,6 @@ pub async fn write(
         .write_snapshot(image, streams, wal_offset)
         .await
         .with_context(|| format!("cannot write a snapshot into {}", snapshot_dir.display()))
-}
-
-/// Apply user namespace prefix to resource names
-pub fn scope_resource_name(user_id: &Uuid, resource_name: &str) -> String {
-    MultiTenant::scope_kv_key(Some(user_id), resource_name).into_owned()
-}
-
-/// Check if a resource name is already scoped
-pub fn is_scoped(resource_name: &str) -> bool {
-    resource_name.starts_with("user_") && resource_name.contains(':')
 }
 
 #[cfg(test)]
