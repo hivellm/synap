@@ -400,4 +400,49 @@ mod tests {
         assert_eq!(get(&source, "kept").await, Some(b"k".to_vec()));
         assert!(source.wal.torn_tail.is_some());
     }
+
+    /// A record of an unknown type is never read as part of a torn tail: after
+    /// a frame failing its checksum the read fails as interior corruption, and
+    /// before a valid record it fails naming the unknown record. Both name the
+    /// WAL and leave it as it was.
+    #[tokio::test]
+    async fn an_unreadable_record_inside_the_wal_fails_the_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::of(dir.path());
+        let mut bytes = write_wal(&layout.wal_path, false, &[set(1, "kept", "k", None)]);
+        let valid_len = bytes.len();
+        let mut damaged = wal_frame::encode_frame(&set(2, "damaged", "d", None)).unwrap();
+        damaged[8] ^= 0xFF;
+        bytes.extend_from_slice(&damaged);
+        bytes.extend_from_slice(&record_frame(1000));
+        std::fs::write(&layout.wal_path, &bytes).unwrap();
+
+        let error = format!(
+            "{:#}",
+            read(&layout, QueueConfig::default()).await.err().unwrap()
+        );
+        assert!(error.contains("synap.wal"), "{error}");
+        assert!(
+            error.contains(&format!("corrupted at byte {valid_len}")),
+            "{error}"
+        );
+        assert!(error.contains("interior corruption"), "{error}");
+        assert_eq!(std::fs::read(&layout.wal_path).unwrap(), bytes);
+
+        bytes.truncate(valid_len);
+        bytes.extend_from_slice(&record_frame(1000));
+        bytes.extend_from_slice(&wal_frame::encode_frame(&set(3, "after", "a", None)).unwrap());
+        std::fs::write(&layout.wal_path, &bytes).unwrap();
+        let error = format!(
+            "{:#}",
+            read(&layout, QueueConfig::default()).await.err().unwrap()
+        );
+        assert!(error.contains("synap.wal"), "{error}");
+        assert!(
+            error.contains(&format!("complete record at byte {valid_len}")),
+            "{error}"
+        );
+        assert!(error.contains("newer Synap release"), "{error}");
+        assert_eq!(std::fs::read(&layout.wal_path).unwrap(), bytes);
+    }
 }

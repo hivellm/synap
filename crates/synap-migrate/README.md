@@ -147,8 +147,9 @@ Everything the server reads, through the server's own code:
   A torn tail (bytes a crash left mid-append) is skipped and reported, as
   startup discards it; unlike startup, the migration does not truncate it.
   A complete record whose checksum matches but which this release cannot
-  decode (a record type a newer release added) is not a torn tail: the run
-  fails instead of dropping it, as server startup refuses it too.
+  decode (a record type a newer release added) is never read as part of a
+  torn tail, wherever it sits in the WAL: the run fails instead of dropping
+  it, as server startup refuses it too.
 
 ### Older data directories
 
@@ -217,9 +218,9 @@ it stopped.
 | `every resource name in the input is already Hub-scoped` | The directory was migrated before (`synap-migrate status` shows MIGRATED). If it is standalone data whose names only look scoped, run again with `--allow-scoped-names`. |
 | `Snapshot "..." is damaged: checksum mismatch ...` | That file is corrupt. Restore it from a backup, or move it out of `snapshots/` if you accept losing what only it holds. |
 | `Snapshot "..." is damaged: unknown magic ...` | Not a snapshot, or one written by a newer Synap: use that release's migrator. |
-| `WAL ... is corrupted at byte N ... interior corruption` | A damaged record is followed by valid ones; restore the WAL from a backup. |
+| `WAL ... is corrupted at byte N ... interior corruption` | A damaged record is followed by complete ones; restore the WAL from a backup. |
 | `WAL ... uses format version N` | Written by a newer Synap: use that release's migrator. |
-| `the WAL ... holds a complete record at byte N that this release cannot read` | The WAL ends with records of a type this release does not know, written by a newer Synap: use that release's migrator. |
+| `... holds a complete record at byte N that this release cannot read` (or `that this server cannot decode`) | The WAL holds records of a type this release does not know, written by a newer Synap: use that release's migrator. |
 
 ## Resource naming
 

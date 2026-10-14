@@ -27,7 +27,7 @@ impl WriteAheadLog {
 
         // Verify every frame, truncate a torn tail, and write or upgrade the
         // format header before opening for append; interior corruption, an
-        // unsupported format version and a last record this server cannot
+        // unsupported format version and a complete record this server cannot
         // decode fail here.
         let report = wal_frame::prepare_async(config.path.clone()).await?;
 

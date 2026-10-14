@@ -567,17 +567,9 @@ async fn interior_corruption_fails_startup_with_the_byte_position() {
 async fn an_unreadable_last_record_refuses_startup_and_is_kept() {
     let config = restart_config("restart_unreadable");
     run_server_and_set(&config, "first").await;
-    let mut unknown = set_frame(2, "from-a-newer-release");
-    // Payload bytes 16..20 hold the operation variant tag (bincode legacy:
-    // offset u64, timestamp u64, then the tag as u32 LE); no variant has this
-    // number. Re-checksum so only the record type is unknown.
-    let payload = wal_frame::FRAME_HEADER_LEN as usize;
-    unknown[payload + 16..payload + 20].copy_from_slice(&1000u32.to_le_bytes());
-    let checksum = crc32fast::hash(&unknown[payload..]);
-    unknown[8..12].copy_from_slice(&checksum.to_be_bytes());
     let mut bytes = std::fs::read(&config.wal.path).unwrap();
     let position = bytes.len() as u64;
-    bytes.extend_from_slice(&unknown);
+    bytes.extend_from_slice(&unknown_record_frame(2));
     std::fs::write(&config.wal.path, &bytes).unwrap();
 
     let path = config.wal.path.display().to_string().replace('\\', "\\\\");
@@ -606,6 +598,74 @@ async fn an_unreadable_last_record_refuses_startup_and_is_kept() {
     );
     check(PersistenceLayer::new(config.clone()).await.err().unwrap());
     assert_eq!(std::fs::read(&config.wal.path).unwrap(), bytes);
+}
+
+/// A complete frame at `offset` whose checksum matches but whose record type
+/// this release does not know, as a newer release would append one.
+fn unknown_record_frame(offset: u64) -> Vec<u8> {
+    let mut unknown = set_frame(offset, "from-a-newer-release");
+    // Payload bytes 16..20 hold the operation variant tag (bincode legacy:
+    // offset u64, timestamp u64, then the tag as u32 LE); no variant has this
+    // number. Re-checksum so only the record type is unknown.
+    let payload = wal_frame::FRAME_HEADER_LEN as usize;
+    unknown[payload + 16..payload + 20].copy_from_slice(&1000u32.to_le_bytes());
+    let checksum = crc32fast::hash(&unknown[payload..]);
+    unknown[8..12].copy_from_slice(&checksum.to_be_bytes());
+    unknown
+}
+
+/// Spec "Damaged frame before a record of an unknown type": a frame failing
+/// its checksum, or zero fill, followed by a record this release cannot decode
+/// is interior corruption, not a torn tail. Recovery and the WAL open refuse
+/// startup with both byte positions and leave the file byte for byte as it
+/// was, so the record is not truncated with the damage.
+#[tokio::test]
+async fn a_damaged_frame_before_an_unreadable_record_refuses_startup_and_is_kept() {
+    let mut bad_checksum = set_frame(2, "damaged");
+    bad_checksum[8] ^= 0xFF;
+    let damages = [
+        ("checksum_mismatch", bad_checksum),
+        ("zero_fill", vec![0u8; wal_frame::FRAME_HEADER_LEN as usize]),
+    ];
+    for (damage, bad) in damages {
+        let config = restart_config(&format!("restart_damaged_then_unreadable_{damage}"));
+        run_server_and_set(&config, "first").await;
+        let mut bytes = std::fs::read(&config.wal.path).unwrap();
+        let position = bytes.len() as u64;
+        bytes.extend_from_slice(&bad);
+        let next = bytes.len() as u64;
+        bytes.extend_from_slice(&unknown_record_frame(3));
+        std::fs::write(&config.wal.path, &bytes).unwrap();
+
+        let check = |err: types::PersistenceError| {
+            assert!(
+                matches!(
+                    &err,
+                    types::PersistenceError::WALInteriorCorruption { position: at, next_valid, .. }
+                        if *at == position && *next_valid == next
+                ),
+                "{damage}: {err:?}"
+            );
+            assert!(err.refuses_startup(), "{damage}: {err}");
+            let message = err.to_string();
+            assert!(
+                message.contains(&format!("at byte {position}")),
+                "{damage}: {message}"
+            );
+            assert!(
+                message.contains(&format!("follows at byte {next}")),
+                "{damage}: {message}"
+            );
+        };
+        check(
+            recover(&config, KVConfig::default(), QueueConfig::default())
+                .await
+                .err()
+                .expect("recovery must refuse a damaged frame before an intact record"),
+        );
+        check(PersistenceLayer::new(config.clone()).await.err().unwrap());
+        assert_eq!(std::fs::read(&config.wal.path).unwrap(), bytes, "{damage}");
+    }
 }
 
 /// The newest snapshot's stream rooms come back at startup: every event with

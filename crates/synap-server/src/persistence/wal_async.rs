@@ -137,10 +137,10 @@ impl AsyncWAL {
     /// Before the file is opened for append it is scanned: every frame's length
     /// and checksum are verified, a torn tail is truncated to the last valid
     /// frame, interior corruption fails with
-    /// [`PersistenceError::WALInteriorCorruption`], a last record this server
-    /// cannot decode fails with [`PersistenceError::WALUnreadableRecord`], and
-    /// a header declaring a newer format fails with
-    /// [`PersistenceError::WALUnsupportedVersion`]. A
+    /// [`PersistenceError::WALInteriorCorruption`], a complete record this
+    /// server cannot decode fails with
+    /// [`PersistenceError::WALUnreadableRecord`], and a header declaring a
+    /// newer format fails with [`PersistenceError::WALUnsupportedVersion`]. A
     /// new file gets the current format header and a 1.3.x (headerless) file
     /// is upgraded in place (see [`wal_frame::prepare`]).
     pub async fn open_with_sink<S, F>(config: WALConfig, wrap: F) -> Result<Self>

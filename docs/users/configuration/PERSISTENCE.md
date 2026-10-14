@@ -250,24 +250,29 @@ payload`. On startup the WAL is scanned before anything is appended, and the
 first invalid frame (short header, length past the end of the file, checksum
 mismatch, or undecodable payload) is classified:
 
-- **Torn tail**: no complete, valid frame follows it, and it is a frame cut
-  short, a frame failing its checksum, or zero fill. This is what a crash in
-  the middle of an append leaves. The file is truncated to the end of the last
-  valid frame (logged as a warning with the byte counts) and startup
-  continues, so new writes never land after garbage. A MULTI/EXEC transaction
-  is one frame, so a torn transaction is discarded whole.
-- **Unreadable last record**: the frame is complete and matches its checksum,
-  but this release cannot decode the record, for example a record type a newer
-  Synap added. A crash does not leave one, so it is not truncated: the server
-  **refuses to start** and leaves the file unchanged, with an error such as
-  `WAL "./data/wal/synap.wal" ends in a complete record at byte 8192 that this
+- **Torn tail**: it is a frame cut short, a frame failing its checksum, or
+  zero fill, and no complete frame whose checksum matches follows it. This is
+  what a crash in the middle of an append leaves. The file is truncated to the
+  end of the last valid frame (logged as a warning with the byte counts) and
+  startup continues, so new writes never land after garbage. A MULTI/EXEC
+  transaction is one frame, so a torn transaction is discarded whole.
+- **Unreadable record**: the frame is complete and matches its checksum, but
+  this release cannot decode the record, for example a record type a newer
+  Synap added. A crash does not leave one, so it is never truncated, whether
+  it is the last frame or more follow it: the server **refuses to start** and
+  leaves the file unchanged, with an error such as
+  `WAL "./data/wal/synap.wal" holds a complete record at byte 8192 that this
   server cannot decode (...); ... a newer Synap release may have written it`.
   Run the release that wrote it, or restore the WAL from a backup.
-- **Interior corruption**: a valid frame follows it. Truncating would discard
-  acknowledged history, so the server **refuses to start** with an error such
-  as `WAL "./data/wal/synap.wal" is corrupted at byte 4096: checksum mismatch
-  ...; a valid frame follows at byte 4213`. Restore the WAL from a backup, or
-  inspect it and remove the damaged range, before restarting.
+- **Interior corruption**: it is a frame cut short, a frame failing its
+  checksum, or zero fill, and a complete frame whose checksum matches follows
+  it (even one holding a record this release cannot decode). Truncating would
+  discard acknowledged history, so the server **refuses to start** and leaves
+  the file unchanged, with an error such as
+  `WAL "./data/wal/synap.wal" is corrupted at byte 4096: checksum mismatch
+  ...; a complete frame with a matching checksum follows at byte 4213`.
+  Restore the WAL from a backup, or inspect it and remove the damaged range,
+  before restarting.
 
 A declared frame length larger than the rest of the file is rejected before
 any memory is allocated for it.

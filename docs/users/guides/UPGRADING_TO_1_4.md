@@ -118,7 +118,7 @@ What happens on the first 1.4.0 start with 1.3.x data:
    either the 1.3.x file (with any torn tail already cut) or the complete new
    one. The log says
    `upgraded from format version 1 (Synap 1.3.x, no header) to version 2`.
-   A WAL with interior corruption, or ending in a complete record this release
+   A WAL with interior corruption, or holding a complete record this release
    cannot decode, is left unchanged, and the server refuses to start (see
    below).
 2. Recovery loads the newest snapshot and replays the WAL after it. Files with
@@ -145,10 +145,11 @@ refuses to start and names the file:
 
 - a WAL whose header declares a newer format than 2 (the error names both
   versions), or whose header is damaged;
-- a WAL with interior corruption: a bad frame followed by valid ones (the error
-  gives the byte position). A torn tail with nothing valid after it, which a
-  crash in the middle of a write leaves, is still truncated automatically;
-- a WAL ending in a complete record whose checksum matches but which this
+- a WAL with interior corruption: a bad frame followed by complete ones,
+  whether or not this release can decode them (the error gives the byte
+  position). A torn tail with no complete frame after it, which a crash in the
+  middle of a write leaves, is still truncated automatically;
+- a WAL holding a complete record whose checksum matches but which this
   release cannot decode, such as one a newer release wrote (the error gives
   the byte position). A crash does not leave one, so it is kept, not
   truncated;

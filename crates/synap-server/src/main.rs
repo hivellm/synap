@@ -402,7 +402,7 @@ async fn main() -> Result<()> {
                 )
             }
             // Interior WAL corruption, a damaged header, a WAL written by a
-            // newer format or ending in a record this release cannot decode:
+            // newer format or holding a record this release cannot decode:
             // starting fresh would hide acknowledged history and append after
             // it. Refuse to start instead.
             Err(e) if e.refuses_startup() => {
