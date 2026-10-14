@@ -249,36 +249,80 @@ public sealed class RpcParityS2STests : IDisposable
         Assert.NotNull(response);
     }
 
-    // ── UnsupportedCommandException regression ──────────────────────────────
+    // ── Bitmap on the native transports ─────────────────────────────────────
 
     [S2SFact]
-    public async Task Rpc_Raises_UnsupportedCommandException_ForBitmap()
+    public async Task Bitmap_SetBitGetBit_Rpc()
+    {
+        if (!S2SEnabled) return;
+        using var client = RpcClient();
+        await BitmapRoundTrip(client);
+    }
+
+    [S2SFact]
+    public async Task Bitmap_SetBitGetBit_Resp3()
+    {
+        if (!S2SEnabled) return;
+        using var client = Resp3Client();
+        await BitmapRoundTrip(client);
+    }
+
+    // SETBIT, GETBIT and BITCOUNT have native commands, and the manager reads
+    // the same fields from them as from the HTTP payload.
+    private static async Task BitmapRoundTrip(SynapClient client)
+    {
+        var key = $"bm:{Uid()}";
+        Assert.Equal(0, await client.Bitmap.SetBitAsync(key, 7, 1));
+        Assert.Equal(1, await client.Bitmap.SetBitAsync(key, 7, 1));
+        Assert.Equal(1, await client.Bitmap.GetBitAsync(key, 7));
+        Assert.Equal(0, await client.Bitmap.GetBitAsync(key, 6));
+        Assert.Equal(1, await client.Bitmap.BitCountAsync(key));
+    }
+
+    // ── UnsupportedCommandException regression ──────────────────────────────
+    // An operation with no native mapping must raise on SynapRPC and RESP3,
+    // never fall back to HTTP silently. BITFIELD has no native command.
+
+    [S2SFact]
+    public async Task Rpc_Raises_UnsupportedCommandException_ForBitfield()
     {
         if (!S2SEnabled) return;
         using var client = RpcClient();
         await Assert.ThrowsAsync<UnsupportedCommandException>(() =>
-            client.SendCommandAsync("bitmap.setbit",
-                new Dictionary<string, object?> { ["key"] = "bm", ["offset"] = 7L, ["value"] = 1L }));
+            client.SendCommandAsync("bitmap.bitfield", BitfieldPayload()));
     }
 
     [S2SFact]
-    public async Task Resp3_Raises_UnsupportedCommandException_ForBitmap()
+    public async Task Resp3_Raises_UnsupportedCommandException_ForBitfield()
     {
         if (!S2SEnabled) return;
         using var client = Resp3Client();
         await Assert.ThrowsAsync<UnsupportedCommandException>(() =>
-            client.SendCommandAsync("bitmap.setbit",
-                new Dictionary<string, object?> { ["key"] = "bm", ["offset"] = 7L, ["value"] = 1L }));
+            client.SendCommandAsync("bitmap.bitfield", BitfieldPayload()));
     }
 
     [S2SFact]
-    public async Task Http_DoesNotRaise_UnsupportedCommandException_ForBitmap()
+    public async Task Http_Runs_Bitfield()
     {
         if (!S2SEnabled) return;
         using var client = HttpClient();
-        var ex = await Record.ExceptionAsync(() =>
-            client.SendCommandAsync("bitmap.setbit",
-                new Dictionary<string, object?> { ["key"] = $"bm:{Uid()}", ["offset"] = 7L, ["value"] = 1L }));
-        Assert.IsNotType<UnsupportedCommandException>(ex);
+        using var response = await client.SendCommandAsync("bitmap.bitfield", BitfieldPayload());
+        Assert.Equal(1, response.RootElement.GetProperty("results").GetArrayLength());
     }
+
+    private static Dictionary<string, object?> BitfieldPayload() => new()
+    {
+        ["key"] = $"bf:{Uid()}",
+        ["operations"] = new object?[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["operation"] = "SET",
+                ["offset"] = 0L,
+                ["width"] = 8L,
+                ["signed"] = false,
+                ["value"] = 5L,
+            },
+        },
+    };
 }
