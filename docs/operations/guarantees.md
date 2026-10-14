@@ -40,8 +40,11 @@ manager, and live stream publishes are neither logged nor sent to replicas.
 With `persistence.enabled: false` there is no WAL and no snapshot: every write
 is acknowledged once it is applied in memory (a replication master still
 forwards it to replicas). With `persistence.wal.enabled: false` the WAL is off
-but snapshots are still taken, so a crash loses everything written since the
-last snapshot.
+but snapshots are still taken, on the interval only (see
+[1.6](#16-snapshots)), so a crash loses everything written since the last
+snapshot. Snapshots need both `persistence.enabled` and `snapshot.enabled`,
+and a persistence layer that opened at startup (see
+[1.7](#17-startup-what-refuses-to-start-and-what-starts-empty)).
 
 Code: `persistence/layer.rs:532-548` (stream publish is a no-op for the WAL),
 `persistence/recovery.rs:135-247` (snapshot restore reads no stream section),
@@ -50,7 +53,9 @@ Code: `persistence/layer.rs:532-548` (stream publish is a no-op for the WAL),
 `auth/user.rs:133-145` and `auth/api_key.rs:179-185` (in-memory maps),
 `main.rs:793-823` (root user from config), `persistence/layer.rs:106-116`
 (WAL opened only when `persistence.enabled` and `wal.enabled`),
-`persistence/layer.rs:550-570` (snapshots need only `snapshot.enabled`).
+`persistence/layer.rs:550-552` (snapshots need both `persistence.enabled` and
+`snapshot.enabled`), `main.rs:706` (the snapshot task starts only when the
+persistence layer exists).
 
 ### 1.2 When a write is acknowledged
 
@@ -70,11 +75,30 @@ Consequences you can rely on:
   them.
 - A command that changes several keys or fields at once (MSET, HMSET, GEOADD
   and similar) is one WAL record.
-- Derived writes are recorded as their result: INCR, APPEND, SETRANGE,
-  HINCRBY, ZINCRBY record the value the key ends up with; pops record the
-  members removed.
-- A refused conditional write (NX/XX, an SREM that removed nothing) records
-  nothing.
+- Outside MULTI/EXEC, derived writes are recorded as their result: INCR,
+  APPEND, SETRANGE, HINCRBY, HINCRBYFLOAT and ZINCRBY record the value the key
+  or field ends up with, and SPOP, ZPOPMIN, ZPOPMAX, BZPOPMIN and BZPOPMAX
+  record the members removed. List pops are recorded by position, not by
+  value: LPOP, RPOP, BLPOP and BRPOP as "pop this many from this end",
+  RPOPLPUSH and BRPOPLPUSH as a move from the source to the destination. WAL
+  replay and replicas repeat the pop on their own copy of the list.
+- Inside MULTI/EXEC, INCR is recorded as its resulting value, but HINCRBY is
+  recorded as the increment, and LPOP and RPOP as positional pops of one
+  element.
+- Outside MULTI/EXEC, these writes record nothing when they changed nothing:
+  SET NX/XX and MSETNX that did not write, HSETNX on an existing field, DEL,
+  HDEL, SADD, SREM, ZREM, LREM and SMOVE that removed, added or moved nothing,
+  EXPIRE and PERSIST on a key they did not change, LPUSHX and RPUSHX on a
+  missing key, and a pop from an empty list, set or sorted set.
+- Other writes are recorded whenever they succeed, changed or not. In
+  particular ZADD is recorded with its NX/XX/GT/LT conditions also when they
+  refused it, and GEOADD records every member it was given with its NX/XX
+  conditions, so a refused conditional ZADD or GEOADD is still logged and
+  replicated; replay and replicas evaluate those conditions again. LTRIM,
+  PFADD, SETBIT and the `*STORE` commands are likewise recorded without
+  checking whether anything changed.
+- Inside MULTI/EXEC, every queued DEL, HDEL, SADD and SREM is recorded even when
+  it changed nothing; only an LPOP or RPOP that popped nothing is left out.
 
 Consequences that are not guarantees:
 
@@ -91,7 +115,22 @@ Code: `persistence/durable.rs:1-31` (the shared path and its rules),
 (queue under the stripes, then wait), `persistence/layer.rs:196-209`
 (replicate, then queue for the WAL), `persistence/layer.rs:245-251` (one
 record per multi-effect command), `persistence/wal_async.rs:368-389` (group of
-up to 1000).
+up to 1000), `persistence/durable.rs:186-319` and `:507-540` (INCR, APPEND,
+SETRANGE, HINCRBY recorded as results), `persistence/durable.rs:609-729`
+(list pops recorded by position: `ListPop`, `ListRpoplpush`),
+`persistence/durable.rs:863-881` and `:1031-1121` (SPOP and ZPOP* record the
+members removed), `persistence/durable.rs:136-158`, `:160-184`, `:227-238`,
+`:321-354`, `:475-506`, `:574-608`, `:678-689`, `:768-793`, `:824-862`,
+`:883-909` and `:996-1013` (writes that changed nothing record nothing),
+`persistence/durable.rs:961-981` and `:1244-1272` (ZADD and GEOADD recorded
+unconditionally), `persistence/durable.rs:756-766`, `:911-960`,
+`:1174-1243`, `:1279-1307` and `:1334-1350` (LTRIM, `*STORE`, PFADD, SETBIT
+recorded unconditionally),
+`persistence/apply.rs:430-450` (conditions evaluated again on replay),
+`synap-core/src/core/transaction.rs:538-653` (transaction records: DEL, HDEL,
+SADD, SREM pushed unconditionally, HINCRBY as its delta, pops only when
+non-empty), `persistence/layer.rs:303-317` (`HashIncrBy` and `ListPop` in a
+transaction record).
 
 ### 1.3 Per fsync mode
 
@@ -138,22 +177,38 @@ poisons the writer until the process restarts:
 
 - Every later write is still applied in memory, and still handed to
   replication on a master, and then answers the not-durable error described in
-  [section 2](#2-what-an-error-reply-means-for-in-memory-state).
+  [section 2](#2-what-an-error-reply-means-for-in-memory-state). Once the
+  writer is poisoned, those later records are not written to the file.
+- The records of the group that failed may already be in the file: a failed
+  fsync comes after their bytes were handed to the OS, and a failed flush may
+  have written part of them. Startup replays every whole record it finds, so
+  a write whose caller got the not-durable error can reappear after a restart.
+- No snapshot is taken while the writer is poisoned (a snapshot needs a WAL
+  mark and a WAL fsync, both refused).
 - `GET /health` answers `503` with `"status": "unhealthy"`, `"wal": "poisoned"`
   and the reason in `"wal_error"`, so a supervisor can restart the process.
 - Restarting is the only way out; startup rescans and repairs the file.
 
 Code: `persistence/wal_async.rs:207-213` (fail fast once poisoned),
-`persistence/wal_async.rs:461-541` (write, flush and fsync failures poison),
+`persistence/wal_async.rs:226-247` and `:278-285` (enqueue, mark and sync
+refused once poisoned), `persistence/wal_async.rs:461-541` (write, flush and
+fsync failures poison; the flush runs before the fsync),
+`persistence/recovery.rs:353-379` (every whole record at or after the cutoff
+is replayed), `persistence/layer.rs:603-623` (a snapshot takes a mark and
+syncs the WAL),
 `persistence/types.rs:46-52`, `server/handlers/mod.rs:227-264` (health).
 
 ### 1.6 Snapshots
 
 - **When.** A background task checks once a minute and takes a snapshot when
   `snapshot.interval_secs` (default 300) have passed or
-  `snapshot.operation_threshold` (default 10,000) records were logged since the
-  last one. A failed snapshot is only logged; the next one is taken when a
-  trigger fires again.
+  `snapshot.operation_threshold` (default 10,000) operations were logged since
+  the last one. The threshold counts operations, not WAL records: a command
+  with several effects (MSET, HMSET and similar) or a transaction is one record
+  but adds one per operation it holds. The counter only moves while a WAL
+  exists, so with `wal.enabled: false` only the interval triggers snapshots.
+  Snapshots need both `persistence.enabled` and `snapshot.enabled`. A failed
+  snapshot is only logged; the next one is taken when a trigger fires again.
 - **Consistent cut.** While a snapshot records its WAL cutoff and copies the
   stores, it holds every ordering stripe, so writers pause for the in-memory
   copy only. Each write is either in the snapshot or after its cutoff, never
@@ -177,7 +232,10 @@ Code: `persistence/wal_async.rs:207-213` (fail fast once poisoned),
 Back up the snapshot and WAL directories together: one is not complete without
 the other (see [Backup](../users/operations/BACKUP.md)).
 
-Code: `persistence/layer.rs:550-570` (trigger), `persistence/layer.rs:640-652`
+Code: `persistence/layer.rs:550-570` (trigger; both flags checked at 551),
+`persistence/layer.rs:200-208` (the counter moves only with a WAL, by the
+operation count), `persistence/layer.rs:215-235` (a multi-effect command or a
+transaction counts each operation), `persistence/layer.rs:640-652`
 (checked every 60 s), `persistence/layer.rs:573-636` (barrier, cutoff, WAL
 fsync), `persistence/types.rs:654-665` (defaults),
 `persistence/snapshot.rs:166-211` (temporary file, rename, directory fsync),
@@ -205,9 +263,18 @@ snapshot's cutoff lies past them, so later restarts do not replay them either. T
 failed ... starting fresh" warning as an incident and stop the server before
 it takes a snapshot.
 
-If the persistence layer itself cannot be opened for such a reason, the server
-logs a warning and runs **without a WAL**: writes are acknowledged without
-being logged, and `GET /health` reports `"wal": "disabled"`.
+If the persistence layer itself cannot be opened for such a reason (for
+example an I/O error opening the WAL), the server logs a warning and runs
+**without any persistence layer**, not just without a WAL:
+
+- writes are acknowledged once applied in memory, without being logged;
+- no snapshot is taken, because the snapshot task needs the layer, so nothing
+  written from then on survives a restart;
+- on a replication master no write is forwarded to replicas any more, because
+  the forwarding lives in that layer; the master still serves full syncs to
+  replicas that connect, so a replica sees new writes only through its next
+  full sync;
+- `GET /health` reports `"wal": "disabled"` with status `200`.
 
 Expiry is stored as an absolute deadline (Unix milliseconds) in snapshots and
 in the WAL. Keys whose deadline passed while the server was down are not
@@ -221,8 +288,11 @@ that grows with every write.
 Code: `persistence/types.rs:73-91` (`refuses_startup`), `main.rs:399-436`
 (refuse, else start empty), `persistence/types.rs:106-110` (a replay error
 becomes `RecoveryFailed`, which does not refuse), `persistence/recovery.rs:254-273`
-(replay stops at the first error), `main.rs:637-664` (no persistence layer on
-other errors), `persistence/recovery.rs:143-171` and
+(replay stops at the first error), `main.rs:637-664` and `main.rs:657-660`
+(no persistence layer on other errors), `main.rs:706` (snapshot task only
+with a layer), `persistence/layer.rs:181-185` and `:200-201` (replication
+fan-out lives in the layer), `server/handlers/mod.rs:252-255` (`"disabled"`
+without a layer), `persistence/recovery.rs:143-171` and
 `persistence/types.rs:510` (absolute expiry), `persistence/wal_frame.rs:244-256`
 (the only truncation is a torn tail), `persistence/types.rs:620-628`
 (`max_size_mb` is never read).
@@ -268,17 +338,29 @@ An error reply does **not** always mean nothing happened. The cases:
 
 | Reply | In memory | In the WAL | On replicas |
 |---|---|---|---|
-| Not-durable error on a write: "write applied in memory but could not be logged to the WAL, so it is not durable and is not rolled back" | applied, visible to readers | no; lost on this node at restart | already handed to replication (master) |
-| Not-durable error on EXEC: "transaction applied in memory but could not be logged to the WAL, so the commit is not durable and the effects are not rolled back" | every effect applied | no | already handed to replication (master) |
-| EXEC fails on one of its queued commands (for example INCR on a value that is not an integer); the reply is that command's error | the commands before it are applied; nothing after it | **nothing** from this transaction | **nothing** from this transaction |
+| Not-durable error on a write: "write applied in memory but could not be logged to the WAL, so it is not durable and is not rolled back" | applied, visible to readers | maybe: if the fsync or flush of its own group failed, its bytes may be in the file and the next startup replays them; if the writer was already poisoned or stopped by shutdown, it was not written | already handed to replication (master) |
+| Not-durable error on EXEC: "transaction applied in memory but could not be logged to the WAL, so the commit is not durable and the effects are not rolled back" | every effect applied | maybe, whole or not at all, as for a write | already handed to replication (master) |
+| EXEC fails on one of its queued commands (for example INCR on a value that is not an integer); the reply is that command's error | the commands before it are applied; nothing after it | **nothing** from this transaction, but the next snapshot copies memory, partial effects included | **nothing** from this transaction, but a replica's next full sync copies the master's memory, partial effects included |
 | `EXECABORT` (the transaction was aborted earlier, for example by a refused command) | nothing | nothing | nothing |
 | A script error part way through | earlier `redis.call` writes stay applied | those writes are recorded | those writes are replicated |
 | Authorization denial (HTTP 403, RESP3 `-NOPERM`, `NOPERM` text elsewhere) | nothing; checked before the command runs | nothing | nothing |
 | Rate limit (429), body too large (413), Hub 401/403/503 | nothing; refused before any handler | nothing | nothing |
 
 The third row is a real divergence: memory holds the partial transaction, while
-the WAL and the replicas hold none of it. After a restart, or on a replica, the
-partial effects are gone.
+the WAL and the replicas hold none of it. What happens next depends on what
+copies memory first:
+
+- If the process restarts before the next snapshot, the partial effects are
+  gone on this node.
+- A snapshot taken after the failed EXEC copies memory, so from then on the
+  partial effects survive restarts.
+- A full sync sent after the failed EXEC copies the master's memory, so the
+  replica that receives it gets the partial effects; replicas that do not
+  need a full sync keep lacking them.
+
+The first two rows are the reverse case: the caller was told the write is not
+durable, yet it may reappear after a restart (see
+[1.5](#15-wal-failures-poisoning)).
 
 How each transport reports these errors:
 
@@ -287,7 +369,14 @@ How each transport reports these errors:
   `"error"`, for command errors and authorization denials alike.
 - **RESP3**: an error reply (`-NOPERM` for denials).
 - **SynapRPC**: an error response carrying the message.
-- **MCP and UMICP**: a tool error.
+- **MCP**: a JSON-RPC error response, not a tool result with `isError`.
+  Authorization denials, a call with no identity and Hub confinement refusals
+  use the invalid-request error code with a `NOPERM` message; command
+  failures, not-durable errors included, use the internal-error code with the
+  message (for example `Set failed: ...`); missing or invalid arguments use
+  the invalid-params code.
+- **UMICP**: an error envelope whose capabilities carry `"status": "error"`
+  and the message in `"error"`.
 - **Queue WebSocket ACK/NACK frames**: no reply at all. A failed ACK or NACK,
   including a not-durable one, is only written to the server log.
 
@@ -297,8 +386,17 @@ Code: `persistence/layer.rs:858-874` (both messages),
 `synap-core/src/core/transaction.rs:509-560` (a failing command ends EXEC; the
 effects so far are already applied and their records are dropped),
 `synap-core/src/core/transaction.rs:424-429` (`EXECABORT`),
+`synap-core/src/core/transaction.rs:459` (the `?` that returns after earlier
+commands ran), `persistence/wal_async.rs:492-516` (bytes handed to the OS
+before the fsync that fails), `persistence/recovery.rs:353-379` (every whole
+record replayed), `persistence/layer.rs:603-610` (a snapshot copies memory),
+`replication/master.rs:362-376` (a full sync copies memory),
 `server/handlers/mod.rs:387-418` and `server/handlers/mod.rs:620-636`
 (envelope replies), `synap-core/src/core/error.rs:105-138` (HTTP statuses),
+`server/mcp_server.rs:36-42` and `server/mcp_handlers.rs:44-79` (MCP denials
+as invalid-request errors), `server/mcp_handlers.rs:208` (a command failure as
+an internal error), `server/umicp/handlers.rs:47-57` and `:121-140` (UMICP
+error envelope),
 `server/handlers/websocket.rs:224-245` (ACK/NACK errors only logged).
 
 ---
@@ -322,15 +420,31 @@ root user is not created at all; startup only logs a warning.
 Every command maps to `(resource, action)` pairs, named as the REST handlers
 name them: `kv:<key>`, `hash:<key>`, `list:<key>`, `set:<key>`,
 `sortedset:<key>` (geospatial keys too), `hyperloglog:<key>`, `bitmap:<key>`,
-`queue:<name>`, `stream:<room>`, `pubsub:<topic>`, `script:*` and `admin:*`.
-The same pairs apply on every transport, so a role grants the same access
+`queue:<name>`, `stream:<room>` (partitioned topics too; consumer groups are
+`stream:group:<id>`), `pubsub:<topic>`, `script:*` and `admin:*`, plus
+`cluster:info`, `cluster:nodes`, `cluster:slots` and `cluster:migration` for
+the REST cluster endpoints only. Apart from cluster administration, which REST
+checks on `cluster:*` and the native `CLUSTER` command on `admin:*` (below),
+the same pairs apply on every transport, so a role grants the same access
 everywhere.
 
 - Admin users pass every check. API keys are never admin.
 - Keyspace-wide commands (`KEYS`, `SCAN`, `DBSIZE` and their envelope forms)
-  need read on `kv:*`. Flushes, server introspection (`INFO`, the slow log, the
-  client list, `admin.config`), configuration, replication and cluster commands
-  are admin-only.
+  need read on `kv:*`.
+- Flushes, server introspection (`INFO`, the slow log, the client list,
+  `admin.config`), configuration and replication commands, and the native
+  `CLUSTER` command (RESP3, SynapRPC, scripts) need the `admin` action on
+  `admin:*`. Admin users have it; any other user or key has it only when a
+  role or the key grants `admin:*` (or `*`) with the `admin` or `all` action.
+  The built-in `readonly` role (`*` with `read`) does not.
+- The REST `/cluster/*` endpoints are **not** admin-only. Reading the cluster
+  info, nodes, slots and migration status needs `read` on `cluster:info`,
+  `cluster:nodes`, `cluster:slots` or `cluster:migration`, so the built-in
+  `readonly` role can read the cluster topology and migration status. Adding a
+  node needs `write` on `cluster:nodes`, removing one `delete` on it, assigning
+  slots `write` on `cluster:slots`, and starting or completing a migration
+  `write` on `cluster:migration`: a non-admin user or key granted those
+  permissions (for example `cluster:*`) can change the cluster.
 - A command with no policy is denied to every non-admin caller.
 - Subscribing to the internal `__watch@`, `__keyspace@` and `__keyevent@`
   channels, or to a wildcard that can match them, also needs the matching `kv`
@@ -379,7 +493,14 @@ modes), `config.rs:249-301` (defaults, root user), `main.rs:797-808`,
 a failure is only a warning), `auth/access.rs:1-21`
 (one policy), `auth/access.rs:155-212` (allow, deny, unknown command),
 `auth/access.rs:335-346` (internal channels), `auth/access.rs:375-395`
-(admin and keyspace-wide commands), `auth/middleware.rs:116-171` (API key from
+(admin and keyspace-wide commands), `auth/access.rs:261-263` (admin commands
+need `admin` on `admin:*`), `auth/permissions.rs:23-30` (which actions include
+`admin`), `auth/permissions.rs:62-66` (the `readonly` role),
+`auth/permissions.rs:294-311` (native `CLUSTER` is an admin command),
+`server/handlers/cluster.rs:11`, `:47`, `:87`, `:127`, `:174`, `:217`, `:261`,
+`:306`, `:341`, `:368` (REST cluster endpoints check `cluster:*` resources,
+not admin), `server/handlers/partition.rs:67-497` (partitioned topics and
+consumer groups as `stream:` resources), `auth/middleware.rs:116-171` (API key from
 header or query, never admin), `server/handlers/kv.rs:51-53` (a REST handler's
 check), `server/handlers/mod.rs:351-418` (envelope), `server/mcp_server.rs:22-44`
 and `server/mcp_handlers.rs:13-99` (MCP), `server/router.rs:688-849` (MCP
@@ -501,13 +622,30 @@ checked by this handler only).
 
 ### 5.3 Memory
 
-Keys evicted to stay under `kv_store.max_memory_mb` (only with an eviction
-policy configured; the default is `noeviction`) are removed from memory
-without a WAL record, so they come back after a restart and stay on replicas.
+KV keys are evicted to keep the memory budget (KV plus the other data types
+and brokers) under `kv_store.max_memory_mb` when `kv_store.eviction_policy`
+is anything but `noeviction`. The built-in default is `noeviction` (a write that does not fit fails), but the shipped
+`config/config.yml` sets `allkeys-lru` with `max_memory_mb: 4096`, so
+eviction is active in the shipped configuration.
 
-Code: `config.rs:404` (default policy); eviction lives in
-`synap-core/src/core/kv_store/store.rs`, which has no access to the
-persistence layer.
+An evicted key is removed from memory without a WAL record and without a
+replication record:
+
+- **After a restart** an evicted key comes back if no snapshot was taken
+  between the eviction and the restart (it is restored from the last snapshot
+  or from the WAL record that wrote it). A snapshot taken after the eviction copies memory without the key,
+  and the WAL records below its cutoff are not replayed, so from then on the
+  key stays gone.
+- **On replicas** an evicted key stays until the replica's next full sync,
+  which ships the master's memory without it.
+
+Code: `config.rs:404` (built-in policy), `config/config.yml:40` and
+`config/config.yml:51` (shipped size and policy);
+`synap-core/src/core/kv_store/store.rs:357-377` and `:466-488` (eviction), a
+module with no access to the persistence layer; `persistence/layer.rs:603-610`
+(a snapshot copies memory), `persistence/recovery.rs:353-379` (only records at
+or after the cutoff are replayed), `replication/master.rs:362-376` (a full
+sync copies memory).
 
 ---
 
@@ -516,7 +654,11 @@ persistence layer.
 ### 6.1 What replication guarantees
 
 - **Same records as the WAL.** Every write recorded on the shared path is
-  handed to replication, also when persistence is disabled on the master.
+  handed to replication, also when persistence is disabled on the master. The
+  one exception is a master whose persistence layer failed to open at startup
+  (see [1.7](#17-startup-what-refuses-to-start-and-what-starts-empty)): it
+  forwards no live write, and replicas see its writes only through a full
+  sync.
 - **Offset order.** Records get their offset and are queued for every replica
   under one lock, so replicas receive them in offset order.
 - **Full sync when history is missing.** A replica that asks for offset 0, for
@@ -579,7 +721,8 @@ record, so upgrade replicas before the master. A 1.4.0 replica still accepts a
 1.3.x master's full sync.
 
 Code: `persistence/layer.rs:180-209` and `main.rs:632-664` (records handed to
-replication, with or without a WAL), `replication/replication_log.rs:49-80`
+replication, with or without a WAL; no layer and so no forwarding when it
+fails to open, `main.rs:657-660`), `replication/replication_log.rs:49-80`
 (offset order), `replication/master.rs:123` (backlog size),
 `replication/master.rs:210-320` (handshake, full-sync rule, no
 authentication), `replication/master.rs:331-376` (full sync under the
