@@ -1,0 +1,324 @@
+{
+  "bitmaps": {
+    "flags": {
+      "bitcount": {
+        "count": 4,
+        "key": "flags"
+      },
+      "bits": {
+        "0": {
+          "key": "flags",
+          "offset": 0,
+          "value": 0
+        },
+        "1": {
+          "key": "flags",
+          "offset": 1,
+          "value": 1
+        },
+        "100": {
+          "key": "flags",
+          "offset": 100,
+          "value": 1
+        },
+        "200": {
+          "key": "flags",
+          "offset": 200,
+          "value": 1
+        },
+        "7": {
+          "key": "flags",
+          "offset": 7,
+          "value": 1
+        }
+      }
+    }
+  },
+  "captured_at_ms": 1791951442667,
+  "geo": {
+    "places": {
+      "coordinates": [
+        {
+          "lat": -23.550500571727753,
+          "lon": -46.63329899311066
+        },
+        {
+          "lat": 48.85660082101822,
+          "lon": 2.352200746536255
+        }
+      ],
+      "key": "places"
+    }
+  },
+  "hashes": {
+    "user:1": {
+      "count": 3,
+      "fields": {
+        "city": "London",
+        "email": "ada@example.com",
+        "name": "Ada"
+      }
+    }
+  },
+  "hyperloglogs": {
+    "visitors": {
+      "count": 6,
+      "key": "visitors"
+    }
+  },
+  "kv": {
+    "deleted": {
+      "get": null,
+      "ttl": {
+        "error": "Key not found: deleted"
+      }
+    },
+    "plain": {
+      "get": "value-b",
+      "ttl": {
+        "ttl": null
+      }
+    },
+    "tail-deleted": {
+      "get": null,
+      "ttl": {
+        "error": "Key not found: tail-deleted"
+      }
+    },
+    "tail-plain": {
+      "get": "after",
+      "ttl": {
+        "ttl": null
+      }
+    },
+    "ttl-long": {
+      "get": "lives",
+      "ttl": {
+        "ttl": 315359999
+      }
+    },
+    "ttl-short": {
+      "get": "expires",
+      "ttl": {
+        "ttl": 59
+      }
+    },
+    "ttl-tail": {
+      "get": "tail lives",
+      "ttl": {
+        "ttl": 315359999
+      }
+    }
+  },
+  "lists": {
+    "events": {
+      "key": "events",
+      "values": [
+        "b",
+        "c",
+        "d"
+      ]
+    }
+  },
+  "queue_list": {
+    "queues": [
+      "dead",
+      "jobs",
+      "late"
+    ]
+  },
+  "queues": {
+    "dead": {
+      "dead_lettered": [
+        "3b8cd68a-e167-4c6e-b71b-684477c9c483"
+      ],
+      "stats": {
+        "acked": 0,
+        "consumed": 1,
+        "consumers": 0,
+        "dead_lettered": 1,
+        "depth": 0,
+        "nacked": 1,
+        "published": 1
+      }
+    },
+    "jobs": {
+      "acked": [
+        "a4af326d-c008-4b73-a8ed-d91557a29ab0",
+        "4fe78b3d-b770-4738-bbb7-bc70e521b195"
+      ],
+      "in_flight_at_snapshot": [
+        "4fe78b3d-b770-4738-bbb7-bc70e521b195"
+      ],
+      "in_flight_at_stop": [
+        "04725c50-5d99-4e87-8ad3-612ee75bb39a"
+      ],
+      "published": {
+        "job-1": "4fe78b3d-b770-4738-bbb7-bc70e521b195",
+        "job-2": "a4af326d-c008-4b73-a8ed-d91557a29ab0",
+        "job-3": "70b74422-aa67-43bb-9ad4-5fd9b451e1bd",
+        "job-4": "dfdd241a-64fd-46a5-8bea-24ea213f53f4",
+        "job-5": "407d9bdb-38ab-4898-bd9d-3843683a7064",
+        "job-6": "04725c50-5d99-4e87-8ad3-612ee75bb39a"
+      },
+      "requeued_by_nack": [
+        "70b74422-aa67-43bb-9ad4-5fd9b451e1bd"
+      ],
+      "stats": {
+        "acked": 2,
+        "consumed": 4,
+        "consumers": 1,
+        "dead_lettered": 0,
+        "depth": 3,
+        "nacked": 1,
+        "published": 6
+      }
+    },
+    "late": {
+      "published": {
+        "late-1": "89eef1df-517a-4812-a8bd-01d9584c012a"
+      },
+      "stats": {
+        "acked": 0,
+        "consumed": 0,
+        "consumers": 0,
+        "dead_lettered": 0,
+        "depth": 1,
+        "nacked": 0,
+        "published": 1
+      }
+    }
+  },
+  "sets": {
+    "tags": {
+      "members": [
+        "x",
+        "z",
+        "w"
+      ]
+    }
+  },
+  "sorted_sets": {
+    "places": {
+      "key": "places",
+      "members": [
+        {
+          "member": "sao-paulo",
+          "score": 1662566362995371.0
+        },
+        {
+          "member": "paris",
+          "score": 3474191899078866.0
+        }
+      ]
+    },
+    "scores": {
+      "key": "scores",
+      "members": [
+        {
+          "member": "dave",
+          "score": 1.0
+        },
+        {
+          "member": "carol",
+          "score": 5.0
+        },
+        {
+          "member": "alice",
+          "score": 10.0
+        },
+        {
+          "member": "bob",
+          "score": 20.5
+        }
+      ]
+    }
+  },
+  "source": {
+    "dataset": "see generate_fixtures.py: drive_before_snapshot, POST /snapshot, drive_after_snapshot",
+    "exit_code_after_ctrl_c": 3221225786,
+    "health": {
+      "service": "synap",
+      "status": "healthy",
+      "version": "1.3.2"
+    },
+    "label": "v1.3.2",
+    "server_binary": "synap-server.exe",
+    "snapshot": "snapshot-v3-1791951442.bin"
+  },
+  "streams": {
+    "feed": {
+      "events": [
+        {
+          "data": [
+            123,
+            34,
+            110,
+            34,
+            58,
+            48,
+            125
+          ],
+          "event": "created",
+          "id": "bd81364a-f43a-4587-a152-9f1d7b02a926",
+          "metadata": {},
+          "offset": 0,
+          "room": "feed",
+          "timestamp": 1791951442
+        },
+        {
+          "data": [
+            123,
+            34,
+            110,
+            34,
+            58,
+            49,
+            125
+          ],
+          "event": "created",
+          "id": "1e94b80c-fc68-4b01-a786-8b6e55680609",
+          "metadata": {},
+          "offset": 1,
+          "room": "feed",
+          "timestamp": 1791951442
+        },
+        {
+          "data": [
+            123,
+            34,
+            110,
+            34,
+            58,
+            50,
+            125
+          ],
+          "event": "created",
+          "id": "d1409b88-3d80-4e9e-bbeb-615bb540c13a",
+          "metadata": {},
+          "offset": 2,
+          "room": "feed",
+          "timestamp": 1791951442
+        },
+        {
+          "data": [
+            123,
+            34,
+            110,
+            34,
+            58,
+            51,
+            125
+          ],
+          "event": "after-snapshot",
+          "id": "d9831dd6-40d8-4197-9a6d-ea07c8eb7eb8",
+          "metadata": {},
+          "offset": 3,
+          "room": "feed",
+          "timestamp": 1791951442
+        }
+      ],
+      "next_offset": 4
+    }
+  }
+}
