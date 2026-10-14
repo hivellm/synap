@@ -35,7 +35,7 @@ list of changes.
 | Scripts that call `synap-cli PING` | A failed ping now exits 1 ([details](#synap-cli-ping-exit-status)) |
 | The desktop GUI | The Configuration view is read-only and needs an admin ([details](#gui-configuration-view-is-read-only)) |
 | Queue consumers | Make sure redelivery after a restart is handled ([details](#queue-redelivery-after-a-restart)) |
-| Any client SDK | Upgrade it for correct `INCR`/`DECR` amounts ([details](#sdks)) |
+| TypeScript, C#, Python or PHP SDK | Upgrade TypeScript, C# and Python for correct `INCR`/`DECR` amounts; PHP needs a workaround ([details](#sdks)) |
 
 ## Before you upgrade
 
@@ -52,16 +52,34 @@ directory as one backup, taken at the same moment. A snapshot restored without
 the WAL written after it, or the other way round, does not give you the state
 the server had.
 
-- WAL file: `persistence.wal.path` (the shipped configurations use
-  `/data/wal/synap.wal`).
-- Snapshot directory: `persistence.snapshot.directory` (the shipped
-  configurations use `/data/snapshots`).
+- WAL file: `persistence.wal.path`.
+- Snapshot directory: `persistence.snapshot.directory`.
 
-On a host install, with the shipped paths:
+Where they are depends on the configuration file the server starts from:
+
+| Configuration | WAL file | Snapshot directory |
+|---|---|---|
+| `config/config.yml`, `config/config.docker.yml` (the Docker image), `config/config-master.yml`, `config/config-replica.yml` | `/data/wal/synap.wal` | `/data/snapshots` |
+| `config/config-cluster.yml` | `./data/wal/synap.wal` | `./data/snapshots` |
+| `config/config.development.yml`, `config/config.example.yml`, `config/config.production.yml`, or no configuration file | `./data/wal/synap.wal` | `./data/snapshots` |
+
+The files in the last row have no `persistence` section, so they get the same
+defaults as a server started without a configuration file: persistence on,
+with the relative paths shown. A relative path is resolved against the
+server's working directory.
+
+On a host install, stop the server and archive both paths from your
+configuration. For `/data` paths:
 
 ```bash
-systemctl stop synap
-tar czf synap-1.3-backup.tar.gz -C / data/wal data/snapshots
+systemctl stop synap   # or however you run the server
+tar czf synap-1.3-backup.tar.gz /data/wal/synap.wal /data/snapshots
+```
+
+For the default relative paths, run `tar` from the server's working directory:
+
+```bash
+tar czf synap-1.3-backup.tar.gz data/wal/synap.wal data/snapshots
 ```
 
 With the Docker image, whose data lives in the `/data` volume:
@@ -91,16 +109,26 @@ lost. Do not start 1.3.x on a data directory 1.4.0 has used.
 
 What happens on the first 1.4.0 start with 1.3.x data:
 
-1. Recovery loads the newest snapshot and replays the WAL after it. Files with
-   the old timestamp names load, ordered before the new sequence-numbered ones.
-2. Before the first new WAL record is written, the 1.3.x WAL is upgraded in
-   place: the header and the unchanged frames go to a temporary file
-   (`<wal path>.upgrade`), which is fsynced and renamed over the original. A
-   crash during the upgrade leaves either the untouched 1.3.x file or the
-   complete new one. The log says
+1. The WAL is opened and upgraded first, before any snapshot is read. If it
+   ends in a torn tail (a damaged last frame with nothing valid after it, which
+   a crash in the middle of a write leaves), that tail is cut off in place,
+   in the 1.3.x file itself. Then the header and the
+   unchanged frames go to a temporary file (`<wal path>.upgrade`), which is
+   fsynced and renamed over the original. A crash during the rewrite leaves
+   either the 1.3.x file (with any torn tail already cut) or the complete new
+   one. The log says
    `upgraded from format version 1 (Synap 1.3.x, no header) to version 2`.
+   A WAL with interior corruption is left unchanged, and the server refuses to
+   start (see below).
+2. Recovery loads the newest snapshot and replays the WAL after it. Files with
+   the old timestamp names load, ordered before the new sequence-numbered ones.
 3. The first snapshot 1.4.0 takes is v5. Older snapshot files stay until
    retention (`max_snapshots`) removes them.
+
+Because the WAL is rewritten before recovery reads the snapshots, it is already
+in format 2 even when recovery then refuses to start, for example on a damaged
+snapshot. 1.3.x cannot read it from that point on: going back means restoring
+the backup.
 
 Expiry on that first start: keys restored from a 1.3.x (v3) snapshot come back
 without expiry, as they did when 1.3.x restarted. A TTL recorded in the 1.3.x
@@ -130,13 +158,27 @@ snapshots from a backup, or keep the files for investigation.
 
 ### Writes fail when they cannot be made durable
 
-**What changed.** With persistence on, every transport now records each write
-in the WAL and sends it to replicas. 1.3.x skipped that for RESP3, SynapRPC,
-scripts, MCP and most data-type endpoints, so those writes were lost on
-restart. If the WAL cannot record a write, the client gets an error saying the
-write is applied in memory but not durable. A failed WAL write, flush or fsync fails every acknowledgement waiting
-on it and stops the WAL from accepting writes until the server restarts; while
-that lasts, `GET /health` answers 503 with `"wal": "poisoned"`.
+**What changed.** With persistence on, writes to strings, hashes, lists, sets,
+sorted sets, geospatial keys, HyperLogLogs, bitmaps and queues are now recorded
+in the WAL and sent to replicas, whichever transport makes them. 1.3.x recorded
+only part of them: committed transactions, some string writes (`SET`, `DEL`,
+`APPEND` and similar) made through REST, `/api/v1/command` and MCP, and queue
+publishes, ACKs and NACKs made through REST and `/api/v1/command`. Every other
+write stayed in memory: for example `EXPIRE` or `PERSIST` on any transport, a
+RESP3 or SynapRPC command outside a transaction, a script, or a hash, list, set
+or sorted-set write outside a transaction. Such a write never reached replicas,
+and a restart lost it unless a snapshot taken after it held it.
+
+Event streams, partitioned topics and consumer groups are unchanged and stay
+in memory: their writes are not recorded in the WAL and are not sent to
+replicas as they happen (a replica receives the master's stream events only in
+a full sync), and none of them is restored after a restart.
+
+If the WAL cannot record a write, the client gets an error saying the write is
+applied in memory but not durable. A failed WAL write, flush or fsync fails
+every acknowledgement waiting on it and stops the WAL from accepting writes
+until the server restarts; while that lasts, `GET /health` answers 503 with
+`"wal": "poisoned"`.
 
 **Who is affected.** Deployments whose WAL device fails or fills up, and
 health checks that probe `/health`.
@@ -226,8 +268,8 @@ the matching `kv` resource (`kv:*` for `__keyevent@` and for wildcards).
 - with `auth.require_auth: false`: a RESP3 or SynapRPC connection that never
   sends `AUTH` now holds no permissions, the same as an anonymous REST request,
   so it can run only commands that touch no data, such as `PING` and `AUTH`;
-- monitoring that reads `/info`, `/slowlog` or `/clients` with a non-admin
-  credential.
+- monitoring that reads `/slowlog` or `/clients` with a non-admin credential
+  (`/info` already needed admin in 1.3.x).
 
 With `auth.enabled: false` nothing changes: every transport stays
 unrestricted. Hub mode replaces local authentication; see [Hub mode](#hub-mode).
@@ -316,8 +358,12 @@ Plan for tenant traffic to be refused with 503 until hivellm/synap#230 is
 resolved: upgrading a Hub deployment stops its tenant traffic until then.
 
 1.3.x never isolated tenants: data written in Hub mode by 1.3.x sits under
-unscoped names that no 1.4.0 tenant can reach. Moving it under a tenant's
-`user_<id>:` prefix is a job for synap-migrate.
+unscoped names that no 1.4.0 tenant can reach, because every tenant name is
+scoped to `user_<id>:`. 1.4.0 does not move that data. With `hub.enabled:
+false`, the server serves it under its original names to local users and API
+keys, so an admin can copy what a tenant must keep to
+`user_<id>:<name>`, where `<id>` is the tenant's user ID as 32 hex digits
+without hyphens.
 
 ## Rate limiting is enforced
 
@@ -432,19 +478,36 @@ expected: the message has been or will be redelivered.
 
 ## SDKs
 
-**What changed.** Older SDKs sent a one-argument `INCR`/`DECR` over SynapRPC
-and RESP3, so an amount was ignored and the counter moved by 1. Over HTTP, the
-C# and PHP SDKs sent the amount as `delta` and the Python SDK as `kv.incrby`,
-which the HTTP API never read, with the same result. The 1.4.0 SDKs send
-`amount` on HTTP and `INCRBY`/`DECRBY` on SynapRPC and RESP3, so `INCR count
-10` adds 10 on every transport. `kv.incr` and `kv.decr` on `/api/v1/command`
-now answer an error for an `amount` that is not a 64-bit integer, instead of
-treating it as 1.
+**What changed.** In 1.3.x, the TypeScript, C# and Python SDKs each lost the
+amount of an increment or decrement on one kind of transport:
+
+| 1.3.x SDK | HTTP | SynapRPC and RESP3 |
+|---|---|---|
+| TypeScript | Correct | Sent a one-argument `INCR`/`DECR`: the counter moved by 1 |
+| C# | Sent the amount as `delta`, which the server does not read: the counter moved by 1 | Correct (`INCRBY`/`DECRBY`) |
+| Python | For an amount other than 1, sent `kv.incrby`/`kv.decrby`, which `/api/v1/command` does not know: the call failed and the counter did not change | Correct (`INCRBY`/`DECRBY`) |
+
+The 1.4.0 TypeScript, C# and Python SDKs send the amount as `amount` on HTTP
+and as `INCRBY`/`DECRBY` on SynapRPC and RESP3, so an increment by 10 adds 10
+on every transport. The Rust and Go SDKs' `incr` and `decr` take no amount and
+are not affected.
+
+The PHP SDK is not fixed in this release. Its `incr()` and `decr()` still send
+the amount as `delta` over HTTP and a one-argument `INCR`/`DECR` over SynapRPC
+and RESP3, so the counter moves by 1 on every transport.
+
+`kv.incr` and `kv.decr` on `/api/v1/command` now answer an error for an
+`amount` that is not a 64-bit integer, instead of treating it as 1.
 
 **Who is affected.** Applications that increment or decrement by more than 1
-through an older SDK.
+through the PHP SDK, or through a 1.3.x TypeScript, C# or Python SDK on the
+transport the table marks.
 
-**What to do.** Upgrade the SDKs together with the server.
+**What to do.** Upgrade the TypeScript, C# and Python SDKs together with the
+server. With the PHP SDK, send amounts other than 1 through `execute`: over
+HTTP, `$client->execute('kv.incr', $key, ['amount' => $n])` (or `kv.decr`);
+over SynapRPC and RESP3, `$client->execute('kv.incrby', $key, ['amount' =>
+$n])` (or `kv.decrby`).
 
 ## Related topics
 
