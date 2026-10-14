@@ -63,6 +63,19 @@ pub enum PersistenceError {
         supported: u32,
     },
 
+    /// The WAL ends in a complete frame whose checksum matches but whose
+    /// record does not decode. A crash does not leave one: it is a record this
+    /// server cannot read, such as a type a newer Synap added, so truncating
+    /// it as a torn tail would delete an acknowledged write.
+    #[error(
+        "WAL {path:?} ends in a complete record at byte {position} that this server cannot decode ({reason}); its checksum matches, so it is not a torn tail left by a crash: a newer Synap release may have written it. Run that release or restore a WAL backup; the file was not modified"
+    )]
+    WALUnreadableRecord {
+        path: PathBuf,
+        position: u64,
+        reason: String,
+    },
+
     /// The newest snapshot file(s) are damaged or unreadable and no older
     /// starting point is provably complete (the WAL no longer holds every
     /// record after it), so recovering would lose acknowledged writes.
@@ -73,17 +86,18 @@ pub enum PersistenceError {
 impl PersistenceError {
     /// Whether this error must stop the server from starting.
     ///
-    /// Interior corruption, a WAL written by a newer format and a damaged WAL
-    /// header all mean the WAL holds acknowledged history this process cannot
-    /// replay safely; so does a damaged snapshot recovery cannot safely fall
-    /// back from. Starting fresh would hide that history, append after it and
-    /// let the next snapshot and retention delete it, so startup must fail
-    /// instead.
+    /// Interior corruption, a WAL written by a newer format, a WAL ending in a
+    /// record this server cannot decode and a damaged WAL header all mean the
+    /// WAL holds acknowledged history this process cannot replay safely; so
+    /// does a damaged snapshot recovery cannot safely fall back from. Starting
+    /// fresh would hide that history, append after it and let the next
+    /// snapshot and retention delete it, so startup must fail instead.
     pub fn refuses_startup(&self) -> bool {
         matches!(
             self,
             PersistenceError::WALInteriorCorruption { .. }
                 | PersistenceError::WALUnsupportedVersion { .. }
+                | PersistenceError::WALUnreadableRecord { .. }
                 | PersistenceError::WALCorrupted { .. }
                 | PersistenceError::SnapshotCorrupted { .. }
                 | PersistenceError::SnapshotUnrecoverable(_)

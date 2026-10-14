@@ -148,7 +148,7 @@ Everything the server reads, through the server's own code:
   startup discards it; unlike startup, the migration does not truncate it.
   A complete record whose checksum matches but which this release cannot
   decode (a record type a newer release added) is not a torn tail: the run
-  fails instead of dropping it.
+  fails instead of dropping it, as server startup refuses it too.
 
 ### Older data directories
 

@@ -622,7 +622,11 @@ Time: 1-5 seconds
    the server reads fails startup naming both versions
 2. Scan the WAL: verify each frame's length (must fit in the file) and CRC32
 3. First invalid frame with no valid frame after it (torn tail):
-   truncate the file to the last valid frame before anything is appended
+   truncate the file to the last valid frame before anything is appended,
+   unless that frame is a complete record whose checksum matches but which
+   does not decode: then fail startup, naming the WAL, the record's byte
+   position and that a newer release may have written it, and leave the file
+   unchanged
 4. First invalid frame followed by a valid frame (interior corruption):
    fail startup with the byte position of the bad frame
 5. Write the header of a new file, or upgrade a 1.3.x file in place
@@ -643,7 +647,9 @@ scan also reports what the first invalid frame is (`TailKind`): cut short,
 failing its checksum, blank (zero fill reads as empty frames whose checksum
 matches), or a complete record whose checksum matches but which this release
 cannot decode, such as a record type a newer release added. A crash leaves
-only the first three; `synap-migrate` refuses the last instead of dropping it.
+only the first three, which startup truncates; startup
+(`PersistenceError::WALUnreadableRecord`) and `synap-migrate` both refuse the
+last instead of dropping an acknowledged write.
 
 ### Transaction Records
 

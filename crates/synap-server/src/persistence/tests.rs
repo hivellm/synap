@@ -443,23 +443,31 @@ async fn run_server_and_set(config: &types::PersistenceConfig, key: &str) -> KVS
     kv
 }
 
-/// Spec "Torn tail then new writes": for every torn-tail shape, the first
-/// restart truncates the tail and acknowledges a new write; the second restart
-/// recovers every frame before the torn one plus the new write.
-#[tokio::test]
-async fn torn_tail_then_new_writes_survive_two_restarts() {
-    let torn_frame = wal_frame::encode_frame(&types::WALEntry {
-        offset: 99,
+/// A complete frame for a SET of `key` at `offset`.
+fn set_frame(offset: u64, key: &str) -> Vec<u8> {
+    wal_frame::encode_frame(&types::WALEntry {
+        offset,
         timestamp: 0,
         operation: types::Operation::KVSet {
-            key: "torn".into(),
-            value: b"torn".to_vec(),
+            key: key.into(),
+            value: key.as_bytes().to_vec(),
             ttl: None,
         },
     })
-    .unwrap();
+    .unwrap()
+}
+
+/// Spec "Torn tail then new writes": for every torn-tail shape (cut short,
+/// failing its checksum, zero fill), the first restart truncates the tail and
+/// acknowledges a new write; the second restart recovers every frame before
+/// the torn one plus the new write.
+#[tokio::test]
+async fn torn_tail_then_new_writes_survive_two_restarts() {
+    let torn_frame = set_frame(99, "torn");
     let mut huge_length = (1u64 << 60).to_be_bytes().to_vec();
     huge_length.extend_from_slice(&[0x5A; 64]);
+    let mut bad_checksum = torn_frame.clone();
+    bad_checksum[8] ^= 0xFF;
     let shapes: Vec<(&str, Vec<u8>)> = vec![
         ("partial_length", torn_frame[..4].to_vec()),
         ("partial_checksum", torn_frame[..10].to_vec()),
@@ -468,6 +476,8 @@ async fn torn_tail_then_new_writes_survive_two_restarts() {
             torn_frame[..torn_frame.len() / 2].to_vec(),
         ),
         ("corrupt_huge_length", huge_length),
+        ("bad_checksum", bad_checksum),
+        ("zero_fill", vec![0u8; 4096]),
     ];
 
     for (shape, tail) in shapes {
@@ -545,6 +555,56 @@ async fn interior_corruption_fails_startup_with_the_byte_position() {
     let err = PersistenceLayer::new(config.clone()).await.err().unwrap();
     assert!(err.to_string().contains(&expected), "{err}");
     // Nothing was truncated or appended.
+    assert_eq!(std::fs::read(&config.wal.path).unwrap(), bytes);
+}
+
+/// Spec "Record of an unknown type at the end of the WAL": a last frame that
+/// is complete and matches its checksum but holds a record type this release
+/// does not know is not a crash's leftovers. Recovery and the WAL open refuse
+/// startup, naming the WAL, the frame's byte position and a newer release, and
+/// leave the file byte for byte as it was.
+#[tokio::test]
+async fn an_unreadable_last_record_refuses_startup_and_is_kept() {
+    let config = restart_config("restart_unreadable");
+    run_server_and_set(&config, "first").await;
+    let mut unknown = set_frame(2, "from-a-newer-release");
+    // Payload bytes 16..20 hold the operation variant tag (bincode legacy:
+    // offset u64, timestamp u64, then the tag as u32 LE); no variant has this
+    // number. Re-checksum so only the record type is unknown.
+    let payload = wal_frame::FRAME_HEADER_LEN as usize;
+    unknown[payload + 16..payload + 20].copy_from_slice(&1000u32.to_le_bytes());
+    let checksum = crc32fast::hash(&unknown[payload..]);
+    unknown[8..12].copy_from_slice(&checksum.to_be_bytes());
+    let mut bytes = std::fs::read(&config.wal.path).unwrap();
+    let position = bytes.len() as u64;
+    bytes.extend_from_slice(&unknown);
+    std::fs::write(&config.wal.path, &bytes).unwrap();
+
+    let path = config.wal.path.display().to_string().replace('\\', "\\\\");
+    let check = |err: types::PersistenceError| {
+        assert!(
+            matches!(
+                &err,
+                types::PersistenceError::WALUnreadableRecord { position: at, .. } if *at == position
+            ),
+            "{err:?}"
+        );
+        assert!(err.refuses_startup(), "{err}");
+        let message = err.to_string();
+        assert!(message.contains(&path), "{message}");
+        assert!(
+            message.contains(&format!("at byte {position}")),
+            "{message}"
+        );
+        assert!(message.contains("newer Synap release"), "{message}");
+    };
+    check(
+        recover(&config, KVConfig::default(), QueueConfig::default())
+            .await
+            .err()
+            .expect("recovery must refuse an unreadable last record"),
+    );
+    check(PersistenceLayer::new(config.clone()).await.err().unwrap());
     assert_eq!(std::fs::read(&config.wal.path).unwrap(), bytes);
 }
 

@@ -30,7 +30,8 @@
 //!   the end of the last valid frame, so new frames never land after garbage.
 //!   The scan reports what the first invalid bytes are ([`TailKind`]), which
 //!   tells a crash's leftovers from a complete record this release cannot
-//!   decode.
+//!   decode. A crash does not leave such a record, so [`repair`] keeps it and
+//!   fails with [`PersistenceError::WALUnreadableRecord`] instead.
 //! - **Interior corruption** — a valid frame follows it. Truncating would
 //!   discard acknowledged history, so the scan fails with
 //!   [`PersistenceError::WALInteriorCorruption`] carrying the byte position.
@@ -139,7 +140,8 @@ pub enum ScanEnd {
     Clean,
     /// The bytes from `valid_len` to `file_len` hold an incomplete or invalid
     /// frame with no valid frame after it. `kind` says what that first frame
-    /// is; [`repair`] removes the bytes whatever it is.
+    /// is; [`repair`] removes the bytes when a crash can leave them
+    /// ([`TailKind::is_torn`]) and refuses to otherwise.
     TornTail {
         valid_len: u64,
         file_len: u64,
@@ -281,17 +283,28 @@ pub fn scan(path: &Path, mut visit: impl FnMut(WALEntry)) -> Result<ScanReport> 
 }
 
 /// Scan the WAL at `path` and truncate a torn tail to the end of the last valid
-/// frame, so the next append starts on a frame boundary. Fails on interior
-/// corruption without modifying the file.
+/// frame, so the next append starts on a frame boundary. Fails without
+/// modifying the file on interior corruption, and with
+/// [`PersistenceError::WALUnreadableRecord`] when the tail starts with a
+/// complete record this release cannot decode ([`TailKind::Unreadable`]): a
+/// crash does not leave one, so truncating it would delete an acknowledged
+/// write.
 pub fn repair(path: &Path) -> Result<ScanReport> {
     let report = scan(path, |_| {})?;
     if let ScanEnd::TornTail {
         valid_len,
         file_len,
         reason,
-        ..
+        kind,
     } = &report.end
     {
+        if !kind.is_torn() {
+            return Err(PersistenceError::WALUnreadableRecord {
+                path: path.to_path_buf(),
+                position: *valid_len,
+                reason: reason.clone(),
+            });
+        }
         let file = OpenOptions::new().write(true).open(path)?;
         file.set_len(*valid_len)?;
         file.sync_all()?;
@@ -312,8 +325,9 @@ pub fn repair(path: &Path) -> Result<ScanReport> {
 ///
 /// The returned report describes the frames found by the scan; its
 /// [`ScanReport::format`] is the format on disk afterwards. Fails without
-/// modifying the file on interior corruption, a damaged header, or a format
-/// version newer than this server reads.
+/// modifying the file on interior corruption, a damaged header, a format
+/// version newer than this server reads, or a last record this server cannot
+/// decode.
 pub fn prepare(path: &Path) -> Result<ScanReport> {
     let mut report = repair(path)?;
     match report.format {
@@ -776,6 +790,17 @@ mod tests {
         }
     }
 
+    /// A complete frame whose checksum matches and whose record type this
+    /// release does not know, as a newer release would append one.
+    fn unknown_record_frame(offset: u64) -> Vec<u8> {
+        let mut frame = encode_frame(&entry(offset, "new")).unwrap();
+        let header = FRAME_HEADER_LEN as usize;
+        frame[header..][TAG_RANGE].copy_from_slice(&(MAX_OPERATION_TAG - 1).to_le_bytes());
+        let checksum = crc32fast::hash(&frame[header..]);
+        frame[8..12].copy_from_slice(&checksum.to_be_bytes());
+        frame
+    }
+
     /// A complete frame whose checksum matches but whose record type this
     /// release does not know (as a newer release would append one) ends the
     /// scan as an unreadable record, not as a crash's leftovers.
@@ -784,13 +809,8 @@ mod tests {
         let dir = fresh_dir("unknown_record");
         let path = dir.join("wal.log");
         let (valid, _) = frames(2);
-        let mut unknown = encode_frame(&entry(3, "new")).unwrap();
-        let header = FRAME_HEADER_LEN as usize;
-        unknown[header..][TAG_RANGE].copy_from_slice(&(MAX_OPERATION_TAG - 1).to_le_bytes());
-        let checksum = crc32fast::hash(&unknown[header..]);
-        unknown[8..12].copy_from_slice(&checksum.to_be_bytes());
         let mut bytes = valid.clone();
-        bytes.extend_from_slice(&unknown);
+        bytes.extend_from_slice(&unknown_record_frame(3));
         std::fs::write(&path, &bytes).unwrap();
 
         let (keys, report) = keys(&path);
@@ -809,6 +829,64 @@ mod tests {
                 assert!(reason.contains("undecodable payload"), "{reason}");
             }
             other => panic!("expected an unreadable tail, got {other:?}"),
+        }
+    }
+
+    /// `repair` and `prepare` refuse a WAL ending in a record this release
+    /// cannot decode, naming the file and the record's byte position, and
+    /// leave every byte in place: in a legacy or versioned file, and when a
+    /// crash cut the append after it short.
+    #[test]
+    fn an_unreadable_last_record_is_refused_and_kept() {
+        let (valid, _) = frames(2);
+        let mut legacy = valid.clone();
+        legacy.extend_from_slice(&unknown_record_frame(3));
+        let mut versioned_file = versioned(&valid);
+        versioned_file.extend_from_slice(&unknown_record_frame(3));
+        let mut torn_after = versioned_file.clone();
+        torn_after.extend_from_slice(&encode_frame(&entry(4, "torn")).unwrap()[..9]);
+        let cases = [
+            ("legacy", legacy, valid.len() as u64),
+            (
+                "versioned",
+                versioned_file,
+                FILE_HEADER_LEN + valid.len() as u64,
+            ),
+            (
+                "torn_after",
+                torn_after,
+                FILE_HEADER_LEN + valid.len() as u64,
+            ),
+        ];
+        for (name, bytes, position) in cases {
+            let dir = fresh_dir(&format!("unreadable_{name}"));
+            let path = dir.join("wal.log");
+            std::fs::write(&path, &bytes).unwrap();
+
+            for err in [repair(&path).unwrap_err(), prepare(&path).unwrap_err()] {
+                match &err {
+                    PersistenceError::WALUnreadableRecord {
+                        path: reported,
+                        position: at,
+                        reason,
+                    } => {
+                        assert_eq!(reported, &path, "{name}");
+                        assert_eq!(*at, position, "{name}");
+                        assert!(reason.contains("undecodable payload"), "{name}: {reason}");
+                    }
+                    other => panic!("{name}: expected an unreadable record, got {other:?}"),
+                }
+                assert!(err.refuses_startup(), "{name}");
+                let message = err.to_string();
+                assert!(message.contains("wal.log"), "{name}: {message}");
+                assert!(
+                    message.contains(&format!("at byte {position}")),
+                    "{name}: {message}"
+                );
+                assert!(message.contains("newer Synap release"), "{name}: {message}");
+            }
+            assert_eq!(std::fs::read(&path).unwrap(), bytes, "{name}");
+            assert!(!dir.join("wal.log.upgrade").exists(), "{name}");
         }
     }
 

@@ -401,9 +401,10 @@ async fn main() -> Result<()> {
                     offset,
                 )
             }
-            // Interior WAL corruption, a damaged header or a WAL written by a
-            // newer format: starting fresh would hide acknowledged history and
-            // append after it. Refuse to start instead.
+            // Interior WAL corruption, a damaged header, a WAL written by a
+            // newer format or ending in a record this release cannot decode:
+            // starting fresh would hide acknowledged history and append after
+            // it. Refuse to start instead.
             Err(e) if e.refuses_startup() => {
                 error!("Recovery failed: {}", e);
                 return Err(anyhow::anyhow!("refusing to start: {e}"));

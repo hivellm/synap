@@ -112,7 +112,10 @@ Synap automatically recovers on startup:
 4. Server ready
 
 If a corrupted frame is followed by valid ones, the server refuses to start
-and reports the byte position instead of discarding history. See
+and reports the byte position instead of discarding history. It also refuses
+to start, leaving the WAL unchanged, when the WAL ends in a complete record
+whose checksum matches but which this release cannot decode, such as one a
+newer release wrote. See
 [Torn Tails and Corruption](../configuration/PERSISTENCE.md#torn-tails-and-corruption).
 
 ### Recovery Time

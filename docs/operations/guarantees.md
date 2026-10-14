@@ -159,7 +159,7 @@ Code: `persistence/types.rs:630-641` (defaults), `persistence/types.rs:667-677`
 `persistence/wal_async.rs:452-457` (each group handed to the OS before its
 replies), `persistence/wal_async.rs:504-528` (when fsync runs),
 `persistence/layer.rs:615-623` (fsync before a snapshot),
-`persistence/wal_frame.rs:25-33` (torn tail).
+`persistence/wal_frame.rs:28-34` (torn tail).
 
 ### 1.4 Graceful shutdown
 
@@ -253,6 +253,10 @@ Startup **refuses** (the process exits with the error) when:
 
 - the WAL has interior corruption (a bad frame followed by valid ones), naming
   the byte position;
+- the WAL ends in a complete record whose checksum matches but which this
+  server cannot decode, for example one a newer release wrote, naming the WAL
+  and the byte position and leaving the file unchanged (a crash does not leave
+  such a record, so it is not truncated as a torn tail);
 - the WAL header is damaged or declares a newer format than this server reads;
 - the newest snapshot is damaged and no older starting point is provably
   complete, or a snapshot cannot be read.
@@ -288,7 +292,7 @@ The WAL is never truncated after a snapshot and never rotated; startup scans
 the whole file. `wal.max_size_mb` is not enforced. Plan disk space for a WAL
 that grows with every write.
 
-Code: `persistence/types.rs:73-91` (`refuses_startup`), `main.rs:399-436`
+Code: `persistence/types.rs:87-105` (`refuses_startup`), `main.rs:404-413`
 (refuse, else start empty), `persistence/types.rs:106-110` (a replay error
 becomes `RecoveryFailed`, which does not refuse), `persistence/recovery.rs:254-273`
 (replay stops at the first error), `main.rs:637-664` and `main.rs:657-660`
@@ -296,8 +300,9 @@ becomes `RecoveryFailed`, which does not refuse), `persistence/recovery.rs:254-2
 with a layer), `persistence/layer.rs:181-185` and `:200-201` (replication
 fan-out lives in the layer), `server/handlers/mod.rs:252-255` (`"disabled"`
 without a layer), `persistence/recovery.rs:143-171` and
-`persistence/types.rs:510` (absolute expiry), `persistence/wal_frame.rs:244-256`
-(the only truncation is a torn tail), `persistence/types.rs:620-628`
+`persistence/types.rs:510` (absolute expiry), `persistence/wal_frame.rs:301-318`
+(a record this server cannot decode refuses; the only truncation is a torn
+tail), `persistence/types.rs:620-628`
 (`max_size_mb` is never read).
 
 ### 1.8 Transactions, scripts and queues

@@ -250,11 +250,19 @@ payload`. On startup the WAL is scanned before anything is appended, and the
 first invalid frame (short header, length past the end of the file, checksum
 mismatch, or undecodable payload) is classified:
 
-- **Torn tail**: no complete, valid frame follows it. This is what a crash in
+- **Torn tail**: no complete, valid frame follows it, and it is a frame cut
+  short, a frame failing its checksum, or zero fill. This is what a crash in
   the middle of an append leaves. The file is truncated to the end of the last
   valid frame (logged as a warning with the byte counts) and startup
   continues, so new writes never land after garbage. A MULTI/EXEC transaction
   is one frame, so a torn transaction is discarded whole.
+- **Unreadable last record**: the frame is complete and matches its checksum,
+  but this release cannot decode the record, for example a record type a newer
+  Synap added. A crash does not leave one, so it is not truncated: the server
+  **refuses to start** and leaves the file unchanged, with an error such as
+  `WAL "./data/wal/synap.wal" ends in a complete record at byte 8192 that this
+  server cannot decode (...); ... a newer Synap release may have written it`.
+  Run the release that wrote it, or restore the WAL from a backup.
 - **Interior corruption**: a valid frame follows it. Truncating would discard
   acknowledged history, so the server **refuses to start** with an error such
   as `WAL "./data/wal/synap.wal" is corrupted at byte 4096: checksum mismatch
