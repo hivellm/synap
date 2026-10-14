@@ -1,5 +1,16 @@
 # Synap Deep Audit — Beyond the v1.0.0 Plan
 
+> **Historical analysis.** Dated 2026-07-08; committed in `75f4cff`
+> (Release/v1.0.0, #235, 2026-07-09) and first released in v1.0.0. Its
+> references are relative to the flat `synap-server/src/` layout that predates
+> `crates/`. The code has moved since: paths, line numbers and findings describe
+> that revision, not the current tree. Current behavior:
+> [1.4.0 guarantees](../../operations/guarantees.md). Current design:
+> [persistence](../../specs/PERSISTENCE.md),
+> [transports](../../protocol/transports.md),
+> [KV store internals](../../internals/kv-store.md) and the
+> [documentation index](../../INDEX.md).
+
 **Date:** 2026-07-08
 **Method:** direct source reading of `synap-server/src/**` with file:line evidence.
 **Scope:** correctness, durability, security and performance gaps that are NOT already

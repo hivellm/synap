@@ -1,5 +1,15 @@
 # Analysis: KV Watch/Observable — broadcast key updates to all listeners
 
+> **Historical analysis.** Written against `870b1d1` (Thunder adoption, #241,
+> 2026-07-19), first released in v1.2.0. Its phase numbers belong to that
+> release's task list. The code has moved since: paths, line numbers and
+> findings describe that revision, not the current tree. Current behavior:
+> [1.4.0 guarantees](../../operations/guarantees.md). Current design:
+> [persistence](../../specs/PERSISTENCE.md),
+> [transports](../../protocol/transports.md),
+> [KV store internals](../../internals/kv-store.md) and the
+> [documentation index](../../INDEX.md).
+
 **Slug:** `kv-watch-observable`
 **Date:** 2026-07-19
 **Status:** Approved — materialized into rulebook tasks
