@@ -379,6 +379,35 @@ public sealed class TransportTests
     }
 
     [Fact]
+    public void MapCommand_PubSubPublish_SendsTheServersPublishCommand()
+    {
+        // The server dispatches PUBLISH on both native transports; it has
+        // never had the PPUBLISH this mapper used to send.
+        var result = CommandMapper.MapCommand(
+            "pubsub.publish",
+            new Dictionary<string, object?> { ["topic"] = "news", ["payload"] = new { msg = "hi" } });
+        Assert.Equal("PUBLISH", result!.Value.Command);
+        Assert.Equal(new object?[] { "news", "{\"msg\":\"hi\"}" }, result.Value.Args);
+    }
+
+    [Theory]
+    [InlineData("pubsub.subscribe")]
+    [InlineData("pubsub.unsubscribe")]
+    [InlineData("pubsub.topics")]
+    [InlineData("pubsub.stats")]
+    public void MapCommand_PubSubCallsWithoutOneNativeName_AreNotMapped(string operation)
+    {
+        // Unmapped → UnsupportedCommandException on SynapRPC/RESP3, instead of
+        // a command name the server does not know.
+        var payload = new Dictionary<string, object?>
+        {
+            ["subscriber_id"] = "s1",
+            ["topics"] = new object?[] { "news" },
+        };
+        Assert.Null(CommandMapper.MapCommand(operation, payload));
+    }
+
+    [Fact]
     public void MapCommand_StreamPublish_MapsToSPUBLISH()
     {
         // stream.publish is now mapped to SPUBLISH.
@@ -466,6 +495,21 @@ public sealed class TransportTests
         Assert.Equal(true, result["aborted"]);
         Assert.Equal(false, result["success"]);
         Assert.False(result.ContainsKey("results"));
+    }
+
+    [Fact]
+    public void MapResponse_PubSubPublish_ReadsBothNativeReplies()
+    {
+        // SynapRPC replies a map, RESP3 the subscriber count alone.
+        var rpc = CommandMapper.MapResponse("pubsub.publish", new Dictionary<string, object?>
+        {
+            ["message_id"] = "m1",
+            ["subscribers_matched"] = 2L,
+        });
+        Assert.Equal(2L, rpc["subscribers_matched"]);
+        Assert.Equal("m1", rpc["message_id"]);
+
+        Assert.Equal(3L, CommandMapper.MapResponse("pubsub.publish", 3L)["subscribers_matched"]);
     }
 
     [Fact]

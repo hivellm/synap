@@ -233,11 +233,12 @@ internal static class CommandMapper
             "stream.list" => ("SLIST", Array.Empty<object?>()),
 
             // ---- Pub/Sub ----
-            "pubsub.publish" => BuildPPublish(payload),
-            "pubsub.subscribe" => BuildPSubscribe(payload),
-            "pubsub.unsubscribe" => BuildPUnsubscribe(payload),
-            "pubsub.topics" => ("PTOPICS", Array.Empty<object?>()),
-            "pubsub.stats" => ("PSTATS", Array.Empty<object?>()),
+            // Only PUBLISH maps. Subscriptions are HTTP-only here (ObserveAsync
+            // is the SynapRPC push path): a native SUBSCRIBE turns the request
+            // connection into a push connection. The topic list is TOPICS on
+            // SynapRPC but PUBSUB CHANNELS on RESP3, and the statistics exist on
+            // SynapRPC only, so neither has one native name to map to.
+            "pubsub.publish" => BuildPublish(payload),
 
             // ---- Transaction ----
             "transaction.multi" => payload.TryGetValue("client_id", out var tmid)
@@ -326,10 +327,11 @@ internal static class CommandMapper
             "stream.list" => new Dictionary<string, object?> { ["rooms"] = RawToList(raw) },
 
             // ---- Pub/Sub responses ----
-            "pubsub.publish" => new Dictionary<string, object?> { ["subscribers_matched"] = raw is long pm ? pm : Convert.ToInt64(raw ?? 0L, System.Globalization.CultureInfo.InvariantCulture) },
-            "pubsub.subscribe" or "pubsub.unsubscribe" => new Dictionary<string, object?> { ["success"] = true },
-            "pubsub.topics" => new Dictionary<string, object?> { ["topics"] = RawToList(raw) },
-            "pubsub.stats" => raw is Dictionary<string, object?> psd ? psd : new Dictionary<string, object?> { ["result"] = raw },
+            // SynapRPC replies {message_id, subscribers_matched}; RESP3 replies
+            // the subscriber count alone.
+            "pubsub.publish" => raw is Dictionary<string, object?> pd
+                ? pd
+                : new Dictionary<string, object?> { ["subscribers_matched"] = Convert.ToInt64(raw ?? 0L, System.Globalization.CultureInfo.InvariantCulture) },
 
             // ---- Transaction responses ----
             "transaction.multi" or "transaction.discard" or "transaction.watch" or "transaction.unwatch"
@@ -620,7 +622,7 @@ internal static class CommandMapper
 
     // ---- Pub/Sub helpers ----
 
-    private static (string, object?[])? BuildPPublish(Dictionary<string, object?> payload)
+    private static (string, object?[])? BuildPublish(Dictionary<string, object?> payload)
     {
         if (!payload.TryGetValue("topic", out var topic))
         {
@@ -628,33 +630,7 @@ internal static class CommandMapper
         }
 
         var msg = payload.TryGetValue("payload", out var p) ? p : null;
-        return ("PPUBLISH", [topic, System.Text.Json.JsonSerializer.Serialize(msg)]);
-    }
-
-    private static (string, object?[])? BuildPSubscribe(Dictionary<string, object?> payload)
-    {
-        if (!payload.TryGetValue("subscriber_id", out var sid))
-        {
-            return null;
-        }
-
-        var topics = payload.TryGetValue("topics", out var t) && t is object?[] arr
-            ? arr
-            : Array.Empty<object?>();
-        return ("PSUBSCRIBE", new object?[] { sid }.Concat(topics).ToArray());
-    }
-
-    private static (string, object?[])? BuildPUnsubscribe(Dictionary<string, object?> payload)
-    {
-        if (!payload.TryGetValue("subscriber_id", out var sid))
-        {
-            return null;
-        }
-
-        var topics = payload.TryGetValue("topics", out var t) && t is object?[] arr
-            ? arr
-            : Array.Empty<object?>();
-        return ("PUNSUBSCRIBE", new object?[] { sid }.Concat(topics).ToArray());
+        return ("PUBLISH", [topic, System.Text.Json.JsonSerializer.Serialize(msg)]);
     }
 
     // ---- Transaction helpers ----
