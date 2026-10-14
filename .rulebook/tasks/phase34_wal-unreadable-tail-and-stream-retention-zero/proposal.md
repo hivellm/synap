@@ -32,6 +32,12 @@ Two paths silently destroy data the server acknowledged.
   and that a newer Synap release may have written it. The tails a crash leaves
   (`Incomplete`, `ChecksumMismatch`, `Blank`) are still truncated and startup
   continues.
+- The scan's search for a frame after the first invalid one counts every
+  intact frame (complete, matching its checksum, long enough to hold a record),
+  decodable or not. A damaged frame followed by a record this release cannot
+  decode is therefore interior corruption, not a torn tail truncated together
+  with that record, for startup and `synap-migrate` alike; an `Unreadable`
+  record followed by intact frames fails with the same error as one at the end.
 - A new `PersistenceError::WALUnreadableRecord` carries that error and is one
   of the errors `refuses_startup` stops the server on.
 - `Room::compact` skips time-based retention when `retention_secs` is `0`. The
@@ -40,6 +46,10 @@ Two paths silently destroy data the server acknowledged.
 - When compaction removes events, the room's earliest offset and statistics
   follow, also when it removes every event, so the next publish is readable at
   its offset and a read below the earliest retained offset is out of range.
+  Compaction removes the oldest events while they are expired and stops at the
+  first that is not, so the offsets kept stay contiguous; an event stamped
+  later than the ones after it (the wall clock was stepped back) keeps them
+  until it expires itself, within the buffer caps.
 - Documentation of WAL startup checks and of stream retention matches the code.
 
 ## Impact
@@ -49,8 +59,8 @@ Two paths silently destroy data the server acknowledged.
   `crates/synap-server/src/persistence/types.rs`,
   `crates/synap-core/src/core/stream.rs`, their tests, and the persistence and
   stream documentation
-- Breaking change: NO. A data directory whose WAL ends in a record this release
-  cannot decode no longer starts (it lost that record before); every other WAL
-  starts as before. `retention_secs: 0` now behaves as documented.
+- Breaking change: NO. A data directory whose WAL holds a record this release
+  cannot decode no longer starts (it could lose that record before); every
+  other WAL starts as before. `retention_secs: 0` now behaves as documented.
 - User benefit: no acknowledged WAL record and no stream event kept "forever"
   is deleted silently at startup or by compaction.
