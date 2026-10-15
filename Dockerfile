@@ -106,6 +106,7 @@ COPY sdks/rust/src ./sdks/rust/src
 # file is missing — even for `--bins`. The tests are never built here.
 COPY crates/synap-server/tests ./crates/synap-server/tests
 COPY crates/synap-cli/tests ./crates/synap-cli/tests
+COPY crates/synap-migrate/tests ./crates/synap-migrate/tests
 COPY sdks/rust/tests ./sdks/rust/tests
 
 # Remove benchmark declarations from Cargo.toml for Docker build

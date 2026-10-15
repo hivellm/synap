@@ -5,6 +5,16 @@ All notable changes to Synap will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The Docker image builds again.** 1.4.0 declared `synap-migrate`'s
+  integration test as a `[[test]]` target, but the Dockerfile did not copy
+  `crates/synap-migrate/tests`, and cargo refuses to parse a manifest whose
+  test file is missing, even for `cargo build --bins`. The builder stage now
+  copies it; it is never compiled into the image.
+
 ## [1.4.0] - 2026-10-14
 
 A hardening release built from the 2026-10-12 next-release review
