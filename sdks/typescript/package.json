@@ -73,7 +73,7 @@
     "eslint": "^10.11.0",
     "msgpackr": "^2.1.0",
     "prettier": "^3.9.8",
-    "tsup": "^8.5.1",
+    "tsup": "^9.0.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.70.0",
     "typescript-next": "npm:typescript@^7.0.2",
